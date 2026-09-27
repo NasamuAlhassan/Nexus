@@ -96,7 +96,7 @@ android {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
-        // The sherpa-onnx static-link AAR ships x86 libonnxruntime.so; pick one if any dup arises.
+        // The sherpa-onnx static-link AAR ships x86 libonnxruntime.so, and so does onnxruntime-android (wake word).
         jniLibs { pickFirsts += "lib/x86/libonnxruntime.so" }
     }
     androidResources {
@@ -127,6 +127,9 @@ dependencies {
     // proven whisper-TINY per-language fine-tunes (Ghanaian English + Twi, tuned on the owner's command
     // register) fully offline — fast on the A20 (tiny, not base). Local AAR (not on Maven).
     implementation(files("libs/sherpa-onnx-static-link-onnxruntime-1.13.8.aar"))
+    // Wake word ("Hey Tɛkyerɛma"): openWakeWord mel + embedding features and our trained heads, run with
+    // ONNX Runtime. Same pairing with the sherpa AAR as the V2 app (the x86 pickFirst above covers the dup).
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Pure-logic unit tests (grounding, sanitization, provenance, policy, verification predicates).

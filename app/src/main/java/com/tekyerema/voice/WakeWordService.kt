@@ -1,5 +1,6 @@
 package com.tekyerema.voice
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,6 +8,9 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
@@ -19,31 +23,31 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import kotlin.math.sqrt
 
 /**
- * Hands-free WAKE WORD ("Tɛkyerɛma") — free, no account, fully on-device. It reuses the pieces the app
- * already ships: the Silero VAD + the bundled Gh-English tiny model. A foreground (microphone) service
- * listens continuously; each speech segment the VAD isolates is transcribed on-device (no cloud, no quota),
- * and if it matches the wake word we activate Tɛkyerɛma. The following instruction is then captured by the
- * normal voice pipeline (with the good online ASR), so the wake word itself is never sent to the model.
+ * Hands-free WAKE WORD ("Hey Tɛkyerɛma") — free, no account, fully on-device. A foreground (microphone)
+ * service streams the mic in 80 ms frames through [WakeScorer] (openWakeWord features + our heads trained on
+ * the owner's recordings) and [WakeGate] (3 consecutive hits, then a ~2 s refractory). On a fire we open the
+ * normal voice turn; the wake phrase itself is never transcribed or sent to the model — nothing is recorded,
+ * stored or logged except scores.
  *
- * Trade-off (owner's choice over Picovoice, which now needs a paid/company account): a dedicated hotword
- * engine would be lower-power and lower-latency; this is ~1-2 s slower and can occasionally mis-trigger, but
- * it needs no account, no extra model, and works with the custom word "Tɛkyerɛma" today.
- *
- * Coexistence: while a turn/confirmation/secure-input is active we pause listening (single mic owner), and
- * resume only when the assistant is idle again — so the wake word never restarts a task in flight.
+ * Coexistence: while a turn/confirmation/secure-input is active the mic is RELEASED (single mic owner) and
+ * reopened only when the assistant is idle again — so the wake word never restarts a task in flight.
  */
 class WakeWordService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loopJob: Job? = null
-    private var asr: SherpaAsr? = null
-    private val mic by lazy { MicCapture(appContext = applicationContext) }
     @Volatile private var handling = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -56,29 +60,135 @@ class WakeWordService : Service() {
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             Log.i(TAG, "[WAKE] microphone permission not granted — not arming"); stopSelf(); return START_NOT_STICKY
         }
-        val a = SherpaAsr(applicationContext)
-        if (!a.ready) { Log.i(TAG, "[WAKE] on-device model not ready — can't run the VAD wake word"); stopSelf(); return START_NOT_STICKY }
-        asr = a
         armLoop()
         return START_STICKY
     }
 
     private fun armLoop() {
         if (loopJob?.isActive == true) return
-        loopJob = scope.launch {
-            Log.i(TAG, "[WAKE] listening for 'Tɛkyerɛma' (on-device VAD + Gh-English tiny model)")
-            while (isActive) {
-                if (handling || VoiceEngine.isRunning) { delay(500); continue }   // pause while a turn owns the mic
-                val cap = try { mic.capture({}, {}) }
-                catch (c: CancellationException) { throw c }
-                catch (t: Throwable) { Log.w(TAG, "[WAKE] capture error: ${t.message}"); delay(800); continue }
-                if (cap is CaptureResult.Success) {
-                    val text = try { asr?.rawTranscript(cap.wav, Lang.GH_EN) } catch (_: Throwable) { null }
-                    if (text != null && matchesWake(text)) {
-                        Log.i(TAG, "[WAKE] wake word matched → activating (the wake word is NOT sent to the model)")
-                        onWake()
-                    }
+        loopJob = scope.launch(Dispatchers.IO) {
+            val scorer = WakeScorer(applicationContext)
+            if (!scorer.load()) { Log.w(TAG, "[WAKE] wake models failed to load (assets/wakeword/) — not arming"); stopSelf(); return@launch }
+            Log.i(TAG, "[WAKE] armed — say 'Hey Tɛkyerɛma'")
+            try { listen(scorer) } finally { scorer.close() }
+        }
+    }
+
+    @SuppressLint("MissingPermission")   // RECORD_AUDIO checked in onStartCommand
+    private suspend fun listen(scorer: WakeScorer) {
+        val gate = WakeGate()
+        val frame = FloatArray(WakeScorer.FRAME)
+        val minBuf = AudioRecord.getMinBufferSize(WakeScorer.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
+        var rec: AudioRecord? = null
+        fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null }
+        var hb = 0L; var top = 0f
+        try {
+            while (currentCoroutineContext().isActive) {
+                val now = System.currentTimeMillis()
+                if (now - hb >= 10_000) {                          // heartbeat: the tuning window into live scores
+                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]}")
+                    hb = now; top = 0f
                 }
+                if (handling || VoiceEngine.isRunning) { release(); delay(250); continue }   // a turn owns the mic
+                if (rec == null) {
+                    rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 8))
+                    if (rec == null) { delay(1000); continue }
+                    gate.reset(); scorer.reset()                     // fresh listen: no audio from before the pause
+                }
+                val got = rec!!.read(frame, 0, WakeScorer.FRAME, AudioRecord.READ_BLOCKING)
+                if (got < 0) {                                       // DEAD_OBJECT etc. are RETURNED, not thrown
+                    Log.w(TAG, "[WAKE] mic read error $got — reopening"); release(); delay(200); continue
+                }
+                if (got == 0) continue
+                var e = 0f
+                for (j in 0 until got) e += frame[j] * frame[j]
+                val rms = sqrt(e / got)
+                val scores = scorer.feed(if (got == frame.size) frame else frame.copyOf(got))
+                scores[WakeScorer.FIRE_HEAD]?.let { if (it > top) top = it }
+                val fired = gate.feed(rms, scores)
+                if (monitor) mon.frame(rms, scores, fired, scorer)
+                if (fired) {
+                    Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (hey=${"%.3f".format(scores[WakeScorer.FIRE_HEAD])}) → activating")
+                    release()                                        // hand the mic over before the turn opens it
+                    onWake()
+                }
+            }
+        } catch (c: CancellationException) { throw c }
+        catch (t: Throwable) { Log.w(TAG, "[WAKE] listen loop error: ${t.message}") }
+        finally { release() }
+    }
+
+    /** Plain MIC first — the source the V2 bars (RMS floor, raw-peak floor) were measured on; the scorer
+     *  peak-normalises, so no AGC is needed. VOICE_RECOGNITION only as a fallback. */
+    @SuppressLint("MissingPermission")
+    private fun openMic(bufSize: Int): AudioRecord? {
+        for (src in listOf(MediaRecorder.AudioSource.MIC, MediaRecorder.AudioSource.VOICE_RECOGNITION)) {
+            val r = try {
+                AudioRecord(src, WakeScorer.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, bufSize)
+            } catch (_: Throwable) { null } ?: continue
+            if (r.state == AudioRecord.STATE_INITIALIZED) {
+                try { r.startRecording(); return r } catch (_: Throwable) {}
+            }
+            try { r.release() } catch (_: Throwable) {}
+        }
+        Log.w(TAG, "[WAKE] could not open the microphone")
+        return null
+    }
+
+    // ---- Monitor mode ("what does it hear?") — debug only, OFF by default: --es wake_monitor 1|0 ----
+    private val mon = Monitor()
+
+    /**
+     * The wake model hears no WORDS — only "how much does this sound like Hey Tɛkyerɛma" (0–1). Monitor mode
+     * makes that visible: ~4×/s a `[WAKE-MON]` line (mic level, hey score, bare score), and for every
+     * CANDIDATE (hey ≥ [CANDIDATE]) or wake, the exact 2.7 s the heads scored is saved as a WAV and
+     * transcribed by the on-device Gh-English model → `[WAKE] heard: '…'`. Clips live in
+     * externalCacheDir/wake (adb-pullable, last [KEEP_CLIPS] kept). Never on unless the owner turns it on.
+     */
+    private inner class Monitor {
+        private var n = 0
+        private var inCandidate = false
+        private var best = 0f
+        private var bestBare = 0f
+        private var asr: SherpaAsr? = null
+        private val io = Dispatchers.IO.limitedParallelism(1)     // one clip at a time: shared ASR, ordered logs
+
+        fun frame(rms: Float, scores: Map<String, Float>, fired: Boolean, scorer: WakeScorer) {
+            val hey = scores[WakeScorer.FIRE_HEAD] ?: 0f
+            val bare = scores["tekyerema"] ?: 0f
+            if (++n % 3 == 0) {
+                val bar = "#".repeat((minOf(rms * 400f, 20f)).toInt())
+                Log.i(TAG, if (scores.isEmpty()) "[WAKE-MON] level ${"%.3f".format(rms)} $bar (quiet — not scored)"
+                    else "[WAKE-MON] level ${"%.3f".format(rms)} $bar hey=${"%.2f".format(hey)} bare=${"%.2f".format(bare)}")
+            }
+            if (hey >= CANDIDATE) { inCandidate = true; best = maxOf(best, hey); bestBare = maxOf(bestBare, bare) }
+            // Report when the candidate ends (score falls back) or fires — the buffer then holds the whole phrase.
+            if (fired || (inCandidate && hey < CANDIDATE)) {
+                report(scorer.snapshot(), best, bestBare, fired)
+                inCandidate = false; best = 0f; bestBare = 0f
+            }
+        }
+
+        private fun report(audio: FloatArray, hey: Float, bare: Float, fired: Boolean) {
+            scope.launch(io) {
+                val pcm = ByteArray(audio.size * 2)
+                for (i in audio.indices) {
+                    val v = (audio[i].coerceIn(-1f, 1f) * 32767f).toInt()
+                    pcm[2 * i] = (v and 0xFF).toByte(); pcm[2 * i + 1] = ((v shr 8) and 0xFF).toByte()
+                }
+                val wav = Wav.wrap(pcm, WakeScorer.SR)
+                val file = try {
+                    val dir = File(externalCacheDir ?: cacheDir, "wake").apply { mkdirs() }
+                    dir.listFiles()?.sortedBy { it.lastModified() }?.dropLast(KEEP_CLIPS - 1)?.forEach { it.delete() }
+                    File(dir, "wake_${SimpleDateFormat("HHmmss", Locale.US).format(Date())}_hey${(hey * 100).toInt()}_${if (fired) "FIRED" else "miss"}.wav")
+                        .apply { writeBytes(wav) }
+                } catch (t: Throwable) { null }
+                val words = try {
+                    val a = asr ?: SherpaAsr(applicationContext).also { asr = it }
+                    if (a.ready) a.rawTranscript(wav, Lang.GH_EN)?.trim()?.ifBlank { "(nothing)" } else "(on-device model not ready)"
+                } catch (t: Throwable) { "(transcribe failed: ${t.message})" }
+                Log.i(TAG, "[WAKE] heard: '$words'  hey=${"%.2f".format(hey)} bare=${"%.2f".format(bare)} " +
+                    "${if (fired) "→ FIRED" else "→ below bar ${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]}"}  clip=${file?.name}")
             }
         }
     }
@@ -90,7 +200,11 @@ class WakeWordService : Service() {
         scope.launch {
             try {
                 launchVoice()
-                delay(600)                                          // let the turn take the mic
+                // Wait for the turn to ACTUALLY start (not a fixed timer: a slow activity launch would let the
+                // wake mic reopen first and re-fire — V2 audit BUG 1), then for it to finish.
+                withTimeoutOrNull(8_000) {
+                    VoiceEngine.state.first { VoiceEngine.isRunning || it.state != VoiceState.IDLE }
+                }
                 withTimeoutOrNull(180_000) {
                     VoiceEngine.state.first { !VoiceEngine.isRunning && it.state == VoiceState.IDLE }
                 }
@@ -108,7 +222,7 @@ class WakeWordService : Service() {
     private fun startForegroundSafe() {
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle("Tɛkyerɛma")
-            .setContentText("Listening for the wake word")
+            .setContentText("Listening for \"Hey Tɛkyerɛma\"")
             .setSmallIcon(applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
             .setOngoing(true).setCategory(NotificationCompat.CATEGORY_SERVICE).setPriority(NotificationCompat.PRIORITY_MIN)
             .build()
@@ -128,45 +242,10 @@ class WakeWordService : Service() {
         private const val NOTIF_ID = 4202
         @Volatile private var running = false
         @Volatile private var instance: WakeWordService? = null
-
-        /** Forms the Gh-English tiny model actually produces for "Tɛkyerɛma" — observed on-device:
-         *  "Tɛkyerɛma" → "hit the drama"; "Hey Tɛkyerɛma" → "hey dear kwama". Keep adding real transcripts
-         *  from the `[ASR] sherpa-tiny(eng) … -> '…'` log. The tiny model is approximate, so this matches the
-         *  SOUND-ALIKE core, not the spelling. */
-        private val FORMS = listOf(
-            "tekyerema", "tɛkyerɛma", "kyerema", "kyerɛma", "cherema", "cherama", "chirema",
-            "kwama", "drama", "krama", "grama", "kwarma", "kraama", "chama", "tama", "kyerma", "tekyer"
-        )
-        private val FILLER = setOf("hey", "the", "a", "ok", "okay", "hi", "hello", "dear", "hit", "yo", "its", "it", "hey,", "so", "and", "um", "uh")
-
-        /** True when a SHORT on-device transcript sounds like the wake word. Strips leading filler ("hey",
-         *  "the", "dear", "hit"…) that the model tacks on, then matches the remaining core against [FORMS]
-         *  (exact/contains/edit-distance ≤ 2). Rejects anything longer than a few words, so ordinary commands
-         *  ("call Kwame", "what's the weather") don't trip it. Generous on purpose — tune [FORMS] from logs. */
-        fun matchesWake(raw: String): Boolean {
-            val words = raw.lowercase().replace(Regex("[^a-zɛɔ ]"), " ").trim()
-                .split(Regex("\\s+")).filter { it.isNotBlank() }
-            if (words.isEmpty() || words.size > 4) return false          // the wake word is short; a sentence isn't it
-            val core = words.filterNot { it in FILLER }
-            if (core.isEmpty()) return false
-            val joined = core.joinToString("")
-            if (joined.length < 4) return false
-            if (FORMS.any { joined == it || joined.contains(it) }) return true
-            return FORMS.any { editDistance(joined, it) <= 2 }
-        }
-
-        private fun editDistance(a: String, b: String): Int {
-            val dp = IntArray(b.length + 1) { it }
-            for (i in 1..a.length) {
-                var prev = dp[0]; dp[0] = i
-                for (j in 1..b.length) {
-                    val tmp = dp[j]
-                    dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
-                    prev = tmp
-                }
-            }
-            return dp[b.length]
-        }
+        /** Monitor mode (debug): stream scores + save/transcribe candidate clips. Runtime-only, never persisted. */
+        @Volatile var monitor = false
+        private const val CANDIDATE = 0.5f
+        private const val KEEP_CLIPS = 20
 
         fun ensureChannel(ctx: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return

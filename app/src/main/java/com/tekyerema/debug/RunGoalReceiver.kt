@@ -148,6 +148,12 @@ class RunGoalReceiver : BroadcastReceiver() {
             }
             return
         }
+        // Wake monitor: log live wake scores + save/transcribe every near-miss and wake. --es wake_monitor 1|0
+        intent.getStringExtra("wake_monitor")?.let { v ->
+            com.tekyerema.voice.WakeWordService.monitor = v == "1" || v.equals("true", true)
+            Log.i("Tekyerema", "[WAKE] monitor → ${com.tekyerema.voice.WakeWordService.monitor}")
+            return
+        }
         // Arm/disarm the on-device wake word at runtime. --es set_wake 1|0
         intent.getStringExtra("set_wake")?.let { v ->
             val s = com.tekyerema.settings.Settings(context.applicationContext)

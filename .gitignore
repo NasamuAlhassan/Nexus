@@ -20,6 +20,8 @@ local.properties
 
 # ---- large model / data binaries (kept on disk, out of git; this is a source-first checkpoint) ----
 *.onnx
+# Trained "Hey Tɛkyerɛma" wake models (~3 MB) ship with the app.
+!app/src/main/assets/wakeword/*.onnx
 *.safetensors
 *.parquet
 *.gguf

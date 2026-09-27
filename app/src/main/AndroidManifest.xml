@@ -71,7 +71,7 @@
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
-        <!-- Wake-word listening service (Picovoice Porcupine). Runs only when an AccessKey is configured. -->
+        <!-- Wake-word listening service ("Hey Tɛkyerɛma", on-device trained model). Runs only when enabled + mic granted. -->
         <service
             android:name=".voice.WakeWordService"
             android:exported="false"

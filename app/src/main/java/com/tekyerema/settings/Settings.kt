@@ -116,17 +116,13 @@ class Settings(context: Context) {
     val abenaBaseUrl: String get() = BuildConfig.DEFAULT_ABENA_URL.ifBlank { DEFAULT_ABENA_URL }
     val hasAbena: Boolean get() = abenaApiKey.isNotBlank()
 
-    // ---- Wake word (on-device: Silero VAD + bundled Gh-English tiny model; no account/key) ----
-    /** Owner toggle for hands-free wake-word activation. OFF by default (see the getter comment — the current
-     *  VAD+tiny-model wake word is too unreliable); when enabled the service still needs mic permission and the
-     *  bundled on-device model to be ready (checked at arm time). Tap-to-talk always works regardless. */
+    // ---- Wake word (on-device: trained "Hey Tɛkyerɛma" openWakeWord heads; no account/key) ----
+    /** Owner toggle for hands-free wake-word activation. ON by default now that a TRAINED model is wired
+     *  (WakeScorer); the service still needs mic permission and the bundled assets/wakeword models (checked at
+     *  arm time). Tap-to-talk always works regardless. Toggle at runtime with `--es set_wake 1|0`. */
     var wakeWordEnabled: Boolean
-        // Default OFF: the VAD+tiny-model wake word is too unreliable (the tiny model renders "Tɛkyerɛma"
-        // differently every time) and its always-on listening competes for the mic. Re-enable (--es set_wake 1)
-        // only once a properly TRAINED wake-word model (openWakeWord) is wired in. Tap-to-talk always works.
-        get() = prefs.getBoolean(KEY_WAKE, false)
+        get() = prefs.getBoolean(KEY_WAKE, true)
         set(v) = put { putBoolean(KEY_WAKE, v) }
-    /** Kept for the accessibility service's arm/disarm check — the wake word is on-device, so no key is needed. */
     val wakeWordActive: Boolean get() = wakeWordEnabled
 
     /** Ghanaian-English voice: akua_eng (female, default) or kwabena_eng (male). */

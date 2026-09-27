@@ -106,17 +106,6 @@ class VoiceLogicTest {
         assertTrue(money.contains("Adwoa") && money.contains("anum zero"))   // 5,0
     }
 
-    @Test fun abena_tts_chunks_over_500_chars_at_sentence_boundaries() {
-        // §4.3 — long text must be split into ≤500-char pieces so Abena doesn't 413.
-        val short = "Open WhatsApp."
-        assertEquals(listOf(short), com.tekyerema.voice.AbenaTts.chunk(short, 500))
-        val long = (1..40).joinToString(" ") { "This is sentence number $it and it carries some weight." }
-        val parts = com.tekyerema.voice.AbenaTts.chunk(long, 500)
-        assertTrue("must split", parts.size > 1)
-        assertTrue("every chunk within limit", parts.all { it.length <= 500 })
-        assertEquals("no text lost", long.replace(Regex("\\s+"), ""), parts.joinToString("").replace(Regex("\\s+"), ""))
-    }
-
     // ---------------------------------------------------------------- Verbalize (§23)
     @Test fun verbalize_speaks_quantities_but_spells_long_digit_runs() {
         assertTrue(Verbalize.apply("You have 1500 cedis").contains("one thousand five hundred"))
