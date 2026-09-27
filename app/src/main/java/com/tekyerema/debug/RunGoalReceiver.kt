@@ -163,6 +163,11 @@ class RunGoalReceiver : BroadcastReceiver() {
             Log.i("Tekyerema", "[WAKE] set_wake → enabled=${s.wakeWordEnabled}")
             return
         }
+        // Phase II eval harness: run the state-checked task suite. --es eval_suite core [--ei seed 42]
+        intent.getStringExtra("eval_suite")?.let { suite ->
+            com.tekyerema.eval.EvalRunner.run(context.applicationContext, suite, intent.getIntExtra("seed", 0))
+            return
+        }
         val goal = intent.getStringExtra("goal")?.trim().orEmpty()
         if (goal.isNotEmpty()) {
             AgentEngine.submitGoal(goal)
