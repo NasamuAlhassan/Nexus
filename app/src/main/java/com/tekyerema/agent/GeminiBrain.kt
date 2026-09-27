@@ -1,0 +1,97 @@
+package com.tekyerema.agent
+
+import com.tekyerema.settings.Settings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.TimeUnit
+
+/** Product planner: Gemini via the Generative Language REST API with function calling. */
+class GeminiBrain(private val settings: Settings) : AgentBrain {
+
+    private val client = OkHttpClient.Builder()
+        .callTimeout(45, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .build()
+
+    override suspend fun decide(ctx: BrainContext): AgentDecision = withContext(Dispatchers.IO) {
+        val apiKey = settings.geminiApiKey
+        if (apiKey.isBlank()) return@withContext AgentDecision.Fail("No Gemini API key configured.")
+        val url = "https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=$apiKey"
+
+        val request = Request.Builder()
+            .url(url)
+            .post(buildRequest(ctx).toString().toRequestBody("application/json".toMediaType()))
+            .build()
+
+        // Bounded 429 retry, mirroring OpenAiCompatBrain — a rate-limited PLANNING call is retried;
+        // the Android action itself (tool.execute()) only ever runs once this returns a decision,
+        // so retrying here can never cause a duplicate tap/call/message.
+        var rateAttempts = 0
+        var totalWaitMs = 0L                    // §4.5 — cap the TOTAL 429 wait at 60 s (was 6×30 s ≈ 180 s,
+        val maxWaitMs = 60_000L                  // which blew past the 180 s agent ceiling); then fail honestly.
+        while (true) {
+            val (code, text) = try {
+                client.newCall(request).execute().use { resp -> resp.code to resp.body?.string().orEmpty() }
+            } catch (t: Throwable) {
+                return@withContext AgentDecision.Fail("Gemini request failed: ${t.message}")
+            }
+            when {
+                code == 429 && rateAttempts < 6 && totalWaitMs < maxWaitMs -> {
+                    rateAttempts++
+                    val waitMs = minOf(((parseRetrySeconds(text) ?: 8).coerceIn(2, 30)) * 1000L, maxWaitMs - totalWaitMs)
+                    totalWaitMs += waitMs
+                    delay(waitMs)
+                }
+                !(code in 200..299) -> return@withContext AgentDecision.Fail("Gemini HTTP $code: ${text.take(200)}")
+                else -> return@withContext parseResponse(text)
+            }
+        }
+        @Suppress("UNREACHABLE_CODE")
+        AgentDecision.Fail("unreachable")
+    }
+
+    private fun buildRequest(ctx: BrainContext): JSONObject {
+        val system = JSONObject().put("parts", JSONArray().put(JSONObject().put("text", BrainPrompts.SYSTEM)))
+        val contents = JSONArray().put(
+            JSONObject().put("role", "user")
+                .put("parts", JSONArray().put(JSONObject().put("text", BrainPrompts.userText(ctx))))
+        )
+        val tools = JSONArray().put(JSONObject().put("functionDeclarations", ctx.geminiTools))
+        return JSONObject()
+            .put("systemInstruction", system)
+            .put("contents", contents)
+            .put("tools", tools)
+            .put("generationConfig", JSONObject().put("temperature", 0.2))
+    }
+
+    private fun parseResponse(text: String): AgentDecision {
+        val json = try { JSONObject(text) } catch (t: Throwable) { return AgentDecision.Fail("Unparseable Gemini response.") }
+        val content = json.optJSONArray("candidates")?.optJSONObject(0)?.optJSONObject("content")
+            ?: return AgentDecision.Fail("No content in Gemini response.")
+        val parts = content.optJSONArray("parts") ?: JSONArray()
+        val textBuf = StringBuilder()
+        for (i in 0 until parts.length()) {
+            val p = parts.optJSONObject(i) ?: continue
+            val fc = p.optJSONObject("functionCall")
+            if (fc != null) {
+                return AgentDecision.fromToolCall(fc.optString("name"), fc.optJSONObject("args") ?: JSONObject(), null)
+            }
+            p.optString("text").takeIf { it.isNotBlank() }?.let { textBuf.append(it) }
+        }
+        return AgentDecision.fromText(textBuf.toString())
+    }
+
+    /** Gemini 429 bodies carry `"retryDelay": "13s"` inside error.details[]. */
+    private fun parseRetrySeconds(body: String): Int? {
+        val m = Regex("\"retryDelay\"\\s*:\\s*\"([0-9]+(?:\\.[0-9]+)?)s\"").find(body) ?: return null
+        return m.groupValues[1].toDoubleOrNull()?.let { Math.ceil(it).toInt() + 1 }
+    }
+}

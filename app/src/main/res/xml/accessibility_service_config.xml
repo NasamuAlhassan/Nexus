@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Least-privilege capabilities for Phase 1: read window content, perform gestures,
+     take screenshots (vision fallback, later). isAccessibilityTool marks this as a
+     genuine assistive tool for blind/low-vision users (the policy basis for using
+     the Accessibility API to operate the UI). -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewTextChanged|typeNotificationStateChanged"
+    android:accessibilityFeedbackType="feedbackSpoken|feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagRequestAccessibilityButton"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/accessibility_service_description"
+    android:isAccessibilityTool="true"
+    android:notificationTimeout="100" />

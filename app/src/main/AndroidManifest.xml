@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Internet for the cloud agent brain (Gemini). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Phase 2 voice input: capture speech from the microphone (requested at runtime). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Tier-2 capabilities (requested at runtime). -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Alarm/timer accelerators (§1.4): without this SET_ALARM is denied and the tool must NOT claim success. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- §C.1 keep the voice session (mic + agent loop) alive while a task is in flight, so the assistant
+         doesn't silently die when the screen changes. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- Required on Android 14+ for the microphone-type foreground services (voice session + wake word). -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- §C.1 so a session isn't killed by Doze/battery optimisation; the user grants this in onboarding. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Draw the Tier-2 confirmation card OVER the app the agent is operating, so the user can
+         approve/decline without switching back to Tɛkyerɛma. Optional: degrades to the in-app
+         card if not granted. -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- Needed to resolve/launch other apps and read foreground package on Android 11+.
+         Sideload/dev only; a production build would use a scoped <queries> list instead. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
+
+    <application
+        android:name=".TekyeremaApp"
+        android:allowBackup="false"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Tekyerema">
+
+        <activity
+            android:name=".ui.MainActivity"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:theme="@style/Theme.Tekyerema">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- The arrive-on-top voice experience, launched by the accessibility trigger from any app.
+             Its own task (empty affinity, single instance, hidden from recents) so that finishing
+             it returns the user to whatever they were doing, never to our Home. -->
+        <activity
+            android:name=".ui.VoiceActivity"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Tekyerema.Voice" />
+
+        <!-- §C.1 Foreground service that pins the process during an active voice session. -->
+        <service
+            android:name=".voice.VoiceSessionService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- Wake-word listening service (Picovoice Porcupine). Runs only when an AccessKey is configured. -->
+        <service
+            android:name=".voice.WakeWordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- The control spine: reads the screen and performs actions. -->
+        <service
+            android:name=".accessibility.TekyeremaAccessibilityService"
+            android:exported="false"
+            android:label="@string/accessibility_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- RunGoalReceiver is declared ONLY in the DEBUG manifest (app/src/debug/AndroidManifest.xml),
+             exported there for ADB testing. Release builds contain NO such receiver (§1.18): any app
+             could otherwise broadcast an extra to approve a pending call/send. -->
+
+        <!-- Reliable read + Direct-Reply path for messaging notifications. -->
+        <service
+            android:name=".notifications.TekyeremaNotificationListener"
+            android:exported="false"
+            android:label="@string/notification_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+    </application>
+</manifest>

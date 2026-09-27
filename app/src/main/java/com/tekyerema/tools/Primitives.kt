@@ -1,0 +1,447 @@
+package com.tekyerema.tools
+
+import com.tekyerema.accessibility.AccessibilityController
+import com.tekyerema.accessibility.Box
+import com.tekyerema.accessibility.ElementSource
+import com.tekyerema.accessibility.Perception
+import com.tekyerema.accessibility.UiSnapshot
+import com.tekyerema.policy.CapabilityScope
+import com.tekyerema.policy.RiskTier
+import com.tekyerema.verifier.VerificationResult
+import com.tekyerema.verifier.Verify
+import kotlinx.coroutines.delay
+import org.json.JSONObject
+
+/*
+ * The universal interaction vocabulary (plan §7). These are the ONLY ways the model touches the
+ * device. None of them knows what app is in front. Each tries the lowest reliable mechanism
+ * level first: node action → gesture at the node's bounds → gesture at vision coordinates.
+ */
+
+private val TARGET_PARAMS = listOf(
+    ToolParam("element_id", "integer", "Id of an element from the CURRENT screen listing.", required = false),
+    ToolParam("label", "string", "Visible text/label of the item (used when no element_id; scrolls to reveal it if needed).", required = false),
+    ToolParam("x", "integer", "Only for a listed source=vision element: x inside its bounds.", required = false),
+    ToolParam("y", "integer", "Only for a listed source=vision element: y inside its bounds.", required = false)
+)
+
+val EXPECTS_PARAM = ToolParam(
+    "expects", "string",
+    "What you expect to observe if this works, e.g. 'element_present: Wi-Fi', 'new_element: I will call you', " +
+        "'field_empty: 3', 'foreground_is: settings', 'range_value: 50'. Not 'screen changes'.",
+    required = false
+)
+
+// §1.19 — spoken to a user who can't see the screen, so it names the problem and the fix plainly.
+private const val NO_SERVICE = "I can't see or control your screen yet — Tɛkyerɛma's accessibility service is off. Turn it on in Settings, under Accessibility."
+// §1.20 — a FLAG_SECURE window blocks screen reading; say that instead of implying the screen is empty.
+private const val SECURE_SCREEN = "This screen is protected — the app blocks screen reading, so I can't tell you what's on it."
+
+/** Resolve the target at execution time, scrolling to reveal a label if the engine's static pass missed it. */
+private suspend fun resolveForExecute(args: JSONObject, ctx: ToolContext, ctrl: AccessibilityController, allowScroll: Boolean): Pair<ResolvedTarget?, String?> {
+    ctx.resolvedTarget?.let { return it to null }
+    val target = TargetResolver.parse(args) ?: return null to "No target: give element_id, label, or (x,y) of a vision element."
+    val (outcome, _) = TargetResolver.resolve(target, ctrl, ctx.observedBefore, allowScroll)
+    return when (outcome) {
+        is ResolveOutcome.Found -> outcome.target to null
+        is ResolveOutcome.OnlyWeak -> null to (
+            "No clear match for ${TargetResolver.describe(target)} — it only appears inside longer, unrelated-looking text " +
+                "(${outcome.weakLabels.joinToString("; ") { "'${it.take(60)}${if (it.length > 60) "…" else ""}'" }}), not as its own item. " +
+                "Scroll further or use the app's own search rather than tapping it."
+            )
+        is ResolveOutcome.NotFound -> null to outcome.detail
+        is ResolveOutcome.Invalid -> null to outcome.detail
+    }
+}
+
+private fun weakVerify(before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+    val changed = Verify.screenChanged(before, after)
+    return VerificationResult(false, "screen changed=$changed (weak signal only)").let {
+        if (!result.success) VerificationResult(false, "action failed") else it
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+object TapTool : Tool {
+    override val name = "tap"
+    override val description = "Touch an item, by element_id (preferred), label, or x,y of a vision element."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = TARGET_PARAMS + EXPECTS_PARAM
+    override val grounded = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = true)
+        if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+        val nodeId = t.nodeId
+        return if (nodeId != null) {
+            val ok = ctrl.clickElement(nodeId)
+            ToolResult(ok, if (ok) "Tapped ${t.label?.let { "'$it'" } ?: "element $nodeId"} in ${ctx.observedBefore?.appPackage ?: "unknown"}." else "Could not tap element $nodeId.", channel = "node")
+        } else {
+            val ok = ctrl.tap(t.x, t.y)
+            ToolResult(ok, if (ok) "Tapped at (${t.x},${t.y})${t.label?.let { " on '$it'" } ?: ""} (vision)." else "Gesture at (${t.x},${t.y}) was cancelled.", channel = "vision")
+        }
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+
+    override fun confirmationPrompt(args: JSONObject) =
+        "Tap ${TargetResolver.parse(args)?.let { TargetResolver.describe(it) } ?: "this"}?"
+}
+
+object LongPressTool : Tool {
+    override val name = "long_press"
+    override val description = "Touch and hold an item (context menus, selection). Same targeting as tap."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = TARGET_PARAMS + ToolParam("duration_ms", "integer", "Hold time in ms (default 600).", required = false) + EXPECTS_PARAM
+    override val grounded = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = true)
+        if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+        val ms = (args.intOrNull("duration_ms") ?: 600).coerceIn(400, 5000).toLong()
+        val nodeId = t.nodeId
+        if (nodeId != null && ctrl.longClickElement(nodeId)) {
+            return ToolResult(true, "Long-pressed ${t.label?.let { "'$it'" } ?: "element $nodeId"} (node action).", channel = "node")
+        }
+        val b = nodeId?.let { ctrl.boundsOf(it) } ?: Box(t.x, t.y, t.x, t.y)
+        val ok = ctrl.tap(b.centerX.takeIf { !b.isEmpty() } ?: t.x, b.centerY.takeIf { !b.isEmpty() } ?: t.y, ms)
+        return ToolResult(ok, if (ok) "Long-pressed ${t.label?.let { "'$it'" } ?: "(${t.x},${t.y})"} for ${ms}ms (gesture)." else "Long-press gesture was cancelled.",
+            channel = if (t.how == "vision") "vision" else "gesture")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+
+    override fun confirmationPrompt(args: JSONObject) =
+        "Long-press ${TargetResolver.parse(args)?.let { TargetResolver.describe(it) } ?: "this"}?"
+}
+
+/** Start/end points for a directional stroke inside a region (default: the screen). */
+private fun strokeFor(direction: String, region: Box, fraction: Float): Pair<Pair<Int, Int>, Pair<Int, Int>>? {
+    val cx = region.centerX; val cy = region.centerY
+    val dx = (region.width * fraction / 2).toInt(); val dy = (region.height * fraction / 2).toInt()
+    return when (direction.lowercase()) {
+        "up" -> (cx to cy + dy) to (cx to cy - dy)          // finger moves up → content scrolls down/forward
+        "down" -> (cx to cy - dy) to (cx to cy + dy)
+        "left" -> (cx + dx to cy) to (cx - dx to cy)
+        "right" -> (cx - dx to cy) to (cx + dx to cy)
+        else -> null
+    }
+}
+
+object SwipeTool : Tool {
+    override val name = "swipe"
+    override val description = "One finger stroke up/down/left/right (paging, dismiss). Optional target; default whole screen."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = listOf(
+        ToolParam("direction", "string", "Direction the finger moves.", enumValues = listOf("up", "down", "left", "right"))
+    ) + TARGET_PARAMS + listOf(
+        ToolParam("distance", "string", "short | medium | long (default medium).", required = false),
+        ToolParam("duration_ms", "integer", "Stroke time in ms (default 300).", required = false)
+    ) + EXPECTS_PARAM
+    override val grounded = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val dir = args.str("direction") ?: return ToolResult(false, "No direction.")
+        val target = TargetResolver.parse(args)
+        val region: Box = if (target != null) {
+            val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
+            if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+            t.nodeId?.let { ctrl.boundsOf(it) } ?: t.element?.bounds ?: Box(t.x - 10, t.y - 10, t.x + 10, t.y + 10)
+        } else {
+            val (w, h) = ctrl.screenSize(); Box(0, (h * 0.15).toInt(), w, (h * 0.9).toInt())
+        }
+        val fraction = when (args.str("distance")?.lowercase()) { "short" -> 0.3f; "long" -> 0.9f; else -> 0.6f }
+        val (from, to) = strokeFor(dir, region, fraction) ?: return ToolResult(false, "Unknown direction '$dir'.")
+        val ms = (args.intOrNull("duration_ms") ?: 300).coerceIn(50, 5000).toLong()
+        val ok = ctrl.swipe(from.first, from.second, to.first, to.second, ms)
+        return ToolResult(ok, if (ok) "Swiped $dir from (${from.first},${from.second}) to (${to.first},${to.second})." else "Swipe gesture was cancelled.", channel = "gesture")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+
+    override fun confirmationPrompt(args: JSONObject) = "Swipe ${args.str("direction")} on ${TargetResolver.parse(args)?.let { TargetResolver.describe(it) } ?: "the screen"}?"
+}
+
+object DragTool : Tool {
+    override val name = "drag"
+    override val description = "Drag one item onto another without lifting. Start: element_id/label/x,y. End: to_element_id/to_label/to_x,to_y."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = TARGET_PARAMS + listOf(
+        ToolParam("to_element_id", "integer", "Id of the destination element.", required = false),
+        ToolParam("to_label", "string", "Label of the destination element.", required = false),
+        ToolParam("to_x", "integer", "Destination x (vision element bounds only).", required = false),
+        ToolParam("to_y", "integer", "Destination y (vision element bounds only).", required = false),
+        ToolParam("duration_ms", "integer", "Total drag time in ms (default 800).", required = false)
+    ) + EXPECTS_PARAM
+    override val grounded = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val (start, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
+        if (start == null) return ToolResult(false, err ?: "Could not resolve start target.")
+        val endArgs = JSONObject()
+        args.intOrNull("to_element_id")?.let { endArgs.put("element_id", it) }
+        args.str("to_label")?.let { endArgs.put("label", it) }
+        args.intOrNull("to_x")?.let { endArgs.put("x", it) }
+        args.intOrNull("to_y")?.let { endArgs.put("y", it) }
+        val endTarget = TargetResolver.parse(endArgs) ?: return ToolResult(false, "No destination: give to_element_id, to_label, or to_x/to_y.")
+        val end = when (val r = TargetResolver.resolveStatic(endTarget, ctx.observedBefore)) {
+            is ResolveOutcome.Found -> r.target
+            is ResolveOutcome.OnlyWeak -> return ToolResult(false, "Destination ${TargetResolver.describe(endTarget)} is ambiguous (only weak matches).")
+            is ResolveOutcome.NotFound -> return ToolResult(false, r.detail)
+            is ResolveOutcome.Invalid -> return ToolResult(false, r.detail)
+        }
+        val ms = (args.intOrNull("duration_ms") ?: 800).coerceIn(200, 20000).toLong()
+        val ok = ctrl.drag(listOf(start.x to start.y, end.x to end.y), ms)
+        return ToolResult(ok, if (ok) "Dragged ${start.label?.let { "'$it'" } ?: "(${start.x},${start.y})"} to ${end.label?.let { "'$it'" } ?: "(${end.x},${end.y})"}." else "Drag gesture was cancelled.", channel = "gesture")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+
+    override fun confirmationPrompt(args: JSONObject) = "Drag ${TargetResolver.parse(args)?.let { TargetResolver.describe(it) } ?: "this"}?"
+}
+
+object PinchTool : Tool {
+    override val name = "pinch"
+    override val description = "Pinch to zoom in/out, centred on a target or screen centre."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = listOf(
+        ToolParam("direction", "string", "Zoom direction.", enumValues = listOf("in", "out"))
+    ) + TARGET_PARAMS + EXPECTS_PARAM
+    override val grounded = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val zoomIn = (args.str("direction") ?: "in").equals("in", true)
+        val (w, h) = ctrl.screenSize()
+        var cx = w / 2; var cy = h / 2
+        if (TargetResolver.parse(args) != null) {
+            val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
+            if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+            val b = t.nodeId?.let { ctrl.boundsOf(it) } ?: t.element?.bounds
+            if (b != null && !b.isEmpty()) { cx = b.centerX; cy = b.centerY } else { cx = t.x; cy = t.y }
+        }
+        val small = (minOf(w, h) * 0.12).toInt().coerceAtLeast(20)
+        val big = (minOf(w, h) * 0.5).toInt().coerceAtLeast(small + 20)
+        val ok = if (zoomIn) ctrl.pinch(cx, cy, small, big) else ctrl.pinch(cx, cy, big, small)
+        return ToolResult(ok, if (ok) "Pinched ${if (zoomIn) "in (zoom in)" else "out (zoom out)"} at ($cx,$cy)." else "Pinch gesture was cancelled.", channel = "gesture")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+}
+
+object ScrollTool : Tool {
+    override val name = "scroll"
+    override val description = "Reveal off-screen content; direction = content to reveal (down = see below). Optional target."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = listOf(
+        ToolParam("direction", "string", "Which way to scroll.", enumValues = listOf("up", "down", "left", "right"))
+    ) + TARGET_PARAMS + EXPECTS_PARAM
+    override val grounded = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val direction = args.str("direction") ?: "down"
+        val target = TargetResolver.parse(args)
+        var region: Box? = null
+        var nodeId: Int? = null
+        if (target != null) {
+            val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
+            if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+            nodeId = t.nodeId; region = t.nodeId?.let { ctrl.boundsOf(it) } ?: t.element?.bounds
+        } else {
+            val snap = ctx.observedBefore ?: ctrl.buildSnapshot()
+            val s = snap.elements.firstOrNull { it.scrollable }
+            nodeId = s?.id; region = s?.bounds
+        }
+        // Level 1: node scroll action (self or scrollable ancestor).
+        if (nodeId != null && ctrl.scrollElement(nodeId, direction)) {
+            return ToolResult(true, "Scrolled $direction (node action).", channel = "node")
+        }
+        // Level 2: generic swipe gesture over the region — covers Canvas/WebView/custom views that
+        // expose no scroll action. The finger moves opposite to the content direction.
+        val (w, h) = ctrl.screenSize()
+        val reg = region?.takeIf { !it.isEmpty() } ?: Box(0, (h * 0.2).toInt(), w, (h * 0.85).toInt())
+        val finger = when (direction.lowercase()) { "down" -> "up"; "up" -> "down"; "left" -> "right"; "right" -> "left"; else -> "up" }
+        val (from, to) = strokeFor(finger, reg, 0.6f) ?: return ToolResult(false, "Unknown direction '$direction'.")
+        val ok = ctrl.swipe(from.first, from.second, to.first, to.second, 350)
+        return ToolResult(ok, if (ok) "Scrolled $direction (gesture fallback; no scrollable node responded)." else "Could not scroll.", channel = "gesture")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+}
+
+object TypeTool : Tool {
+    override val name = "type"
+    override val description = "Type into an editable field (element_id/label). submit=true also presses Enter/Search. Never for passwords/PINs."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = TARGET_PARAMS + listOf(
+        ToolParam("text", "string", "The text to enter."),
+        ToolParam("submit", "boolean", "Also submit (press Enter/Search/Send) after typing.", required = false)
+    ) + EXPECTS_PARAM
+    override val grounded = true
+    override val verifiesOutcome = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val text = args.str("text").orEmpty()
+        val submit = args.boolOrDefault("submit", false)
+        val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
+        if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+        val nodeId = t.nodeId ?: return ToolResult(false, "Typing needs an editable tree element, not a vision target.")
+        if (t.element?.editable != true) return ToolResult(false, "Element $nodeId is not editable.")
+        val ok = ctrl.setText(nodeId, text, submit)
+        return ToolResult(ok, if (ok) "Entered text into element $nodeId${if (submit) " and submitted" else ""}." else "Could not set text on element $nodeId.", channel = "node")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        if (!result.success) return VerificationResult(false, "action failed")
+        val text = args.str("text").orEmpty()
+        val submit = args.boolOrDefault("submit", false)
+        val present = Verify.textPresent(after, text)
+        return if (!submit) VerificationResult(present, "field contains text=$present")
+        else VerificationResult(false, "submitted; text visible afterwards=$present — whether the submit had its effect is not independently confirmable from this alone")
+    }
+
+    override fun confirmationPrompt(args: JSONObject) =
+        "Type \"${args.str("text")}\" into ${TargetResolver.parse(args)?.let { TargetResolver.describe(it) } ?: "the field"}${if (args.boolOrDefault("submit", false)) " and submit" else ""}?"
+}
+
+object SetRangeTool : Tool {
+    override val name = "set_range"
+    override val description = "Set an adjustable/range control to a value within its min/max."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = TARGET_PARAMS + ToolParam("value", "integer", "Target value within the element's range.") + EXPECTS_PARAM
+    override val grounded = true
+    override val verifiesOutcome = true
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val value = args.optDoubleOrNull("value") ?: return ToolResult(false, "No value provided.")
+        val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
+        if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+        val nodeId = t.nodeId ?: return ToolResult(false, "Range control must be a tree element.")
+        val ok = ctrl.setRangeValue(nodeId, value.toFloat())
+        return ToolResult(ok, if (ok) "Set element $nodeId to $value." else "Could not adjust element $nodeId (it may not be a range control).", channel = "node")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        val target = args.optDoubleOrNull("value")
+        val id = ctx.resolvedTarget?.nodeId ?: args.intOrNull("element_id")
+        val actual = (id?.let { after?.element(it) } ?: after?.elements?.firstOrNull { it.range != null })?.range?.current
+        val close = actual != null && target != null && kotlin.math.abs(actual - target) <= 3.0
+        return VerificationResult(result.success && close, "range now=$actual, target=$target")
+    }
+}
+
+object KeyEventTool : Tool {
+    override val name = "key_event"
+    override val description = "Press a system key: back/home/recents/volume_up/volume_down/volume_mute."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val params = listOf(
+        ToolParam("key", "string", "The key.", enumValues = listOf("back", "home", "recents", "volume_up", "volume_down", "volume_mute"))
+    ) + EXPECTS_PARAM
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        val key = args.str("key")?.lowercase() ?: return ToolResult(false, "No key.")
+        val ok = when (key) {
+            "back", "home", "recents" -> ctrl.globalAction(key)
+            "volume_up", "volume_down", "volume_mute" -> ctrl.adjustVolume(key)
+            else -> return ToolResult(false, "Unknown key '$key'.")
+        }
+        return ToolResult(ok, if (ok) "Pressed $key." else "$key failed.", channel = "system")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        weakVerify(before, after, result)
+}
+
+object ReadStateTool : Tool {
+    override val name = "read_state"
+    override val description = "You are ALREADY given the current screen every step, so you rarely need this — re-reading an unchanged screen just wastes a step. Use it ONLY with vision=true to read custom/canvas/web content the accessibility tree misses (on-device screenshot + OCR)."
+    override val scope = CapabilityScope.PERCEIVE
+    override val riskTier = RiskTier.TIER0
+    override val params = listOf(
+        ToolParam("vision", "boolean", "Also read the screen visually (screenshot + on-device OCR).", required = false),
+        ToolParam("reason", "string", "Why vision is needed (logged).", required = false)
+    )
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        if (!ctrl.ready) return ToolResult(false, NO_SERVICE)   // §1.19 — service attached but not yet ready
+        val vision = args.boolOrDefault("vision", false)
+        val snap = Perception.observe(ctrl, vision, args.str("reason"))
+        val data = JSONObject().put("vision", vision).put("route", snap.perception.source)
+        // §1.20 — a protected (FLAG_SECURE) screen with nothing readable must not be reported as "empty".
+        if (snap.secureWindow && snap.actionableCount == 0)
+            return ToolResult(true, SECURE_SCREEN, data = data.put("secure", true), channel = "none")
+        return ToolResult(true, snap.summarize(), data = data, channel = "none")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        VerificationResult(result.success, "observation")
+}
+
+object WaitTool : Tool {
+    override val name = "wait"
+    override val description = "Wait a few seconds for the screen or an app to finish loading."
+    override val scope = CapabilityScope.PERCEIVE
+    override val riskTier = RiskTier.TIER0
+    override val params = listOf(ToolParam("seconds", "integer", "Seconds to wait (1-5).", required = false))
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val secs = (args.intOrNull("seconds") ?: 1).coerceIn(1, 5)
+        delay(secs * 1000L)
+        return ToolResult(true, "Waited ${secs}s.", channel = "none")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        VerificationResult(true, "waited")
+}
+
+/**
+ * Not an action: a DECISION the engine intercepts. The model uses it to stop honestly when the
+ * environment (not a missing tool) prevents the goal. Reason classes are structural (plan §15),
+ * never capability names.
+ */
+object CannotDoTool : Tool {
+    override val name = "cannot_do"
+    override val description = "Report the goal cannot be completed (environment blocker), with reason_class + what you observed."
+    override val scope = CapabilityScope.PERCEIVE
+    override val riskTier = RiskTier.TIER0
+    override val params = listOf(
+        ToolParam("reason_class", "string", "Why.", enumValues = CANNOT_DO_CLASSES),
+        ToolParam("detail", "string", "Specifically what was tried and what blocks it.")
+    )
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult =
+        ToolResult(true, "cannot_do", channel = "none")
+}
+
+val CANNOT_DO_CLASSES = listOf(
+    "no_accessible_ui", "permission_missing", "app_blocks_automation", "authentication_required",
+    "device_restriction", "network_unavailable", "resource_unavailable", "repeated_failure", "unsafe_or_uncertain"
+)
+
+/** Convenience for the engine: is this element from the tree with a live node? */
+internal val UiSnapshot.hasTree: Boolean get() = elements.any { it.source == ElementSource.TREE }

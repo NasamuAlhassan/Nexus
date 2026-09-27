@@ -1,0 +1,49 @@
+# ---- Android / Gradle / IDE ----
+*.iml
+.gradle/
+/local.properties
+local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+/app/build/
+*.apk
+.tools/khaya_key.txt
+
+# ---- secrets / keys ----
+.tools/*key*.txt
+*.keystore
+*.jks
+
+# ---- large model / data binaries (kept on disk, out of git; this is a source-first checkpoint) ----
+*.onnx
+*.safetensors
+*.parquet
+*.gguf
+*.pt
+*.ckpt
+*.zip
+*.tflite
+app/src/main/assets/models/
+
+# ---- heavy data / experiment output (regenerable) ----
+audit/tmp/
+audit/unseen/
+overnight/twi-v2-onnx-hybrid/
+/_ku/
+/_ui/
+/_*.png
+momo_dryrun.log
+
+# ---- python training envs / caches ----
+**/venv/
+**/__pycache__/
+*.pyc
+.cache/
+**/.ipynb_checkpoints/
+
+# ---- kaggle / task scratch ----
+**/tasks/*.output

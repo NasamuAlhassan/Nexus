@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base app theme. UI is Jetpack Compose; this only needs to be a valid no-action-bar base
+         with the brand ink background so nothing flashes white before Compose draws. -->
+    <style name="Theme.Tekyerema" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/ink</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- The arrive-on-top voice screen: translucent so the app underneath dims rather than
+         disappears, and no window animation — Compose fades the presence in itself. -->
+    <style name="Theme.Tekyerema.Voice">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>

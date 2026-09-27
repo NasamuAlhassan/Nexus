@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG-ONLY manifest (§1.18). The ADB test receiver lives here so it is present + exported ONLY in
+  debuggable builds. Release builds merge WITHOUT it, so no external app can broadcast approvals
+  or drive goals. RunGoalReceiver's code is additionally guarded by BuildConfig.DEBUG.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- DEBUG-ONLY: allow plain HTTP so the on-laptop brain relay (http://…/v1) is reachable. Release
+         builds merge WITHOUT this manifest, so they stay cleartext-blocked (relay is a dev tool only). -->
+    <application android:usesCleartextTraffic="true">
+        <receiver
+            android:name=".debug.RunGoalReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.tekyerema.RUN_GOAL" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

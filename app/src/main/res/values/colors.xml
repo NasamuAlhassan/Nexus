@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ink">#FF080C1A</color>
+    <color name="cyan">#FF38BDF8</color>
+    <!-- Adaptive launcher-icon background: sampled from the Logo.jpg dark backdrop so the scaled art blends seamlessly. -->
+    <color name="ic_launcher_background">#FF01060F</color>
+</resources>

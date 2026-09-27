@@ -1,0 +1,248 @@
+package com.tekyerema
+
+import com.tekyerema.agent.AgentBrain
+import com.tekyerema.agent.AgentDecision
+import com.tekyerema.agent.BrainContext
+import com.tekyerema.agent.LocalBrain
+import com.tekyerema.agent.OfflineCapability
+import com.tekyerema.agent.RoutingBrain
+import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+/** Directive §49 brain tests: on-device reasoning, tool selection, offline capability boundary, hybrid routing. */
+class BrainLogicTest {
+
+    private fun ctx(goal: String, screen: JSONObject = JSONObject(), history: List<String> = emptyList()) =
+        BrainContext(goal, screen, history, JSONArray(), JSONArray())
+
+    private fun decide(brain: AgentBrain, goal: String, screen: JSONObject = JSONObject()) =
+        runBlocking { brain.decide(ctx(goal, screen)) }
+
+    private fun screenWith(vararg labels: String): JSONObject {
+        val arr = JSONArray()
+        labels.forEachIndexed { i, l -> arr.put(JSONObject().put("id", i).put("role", "Button").put("label", l)) }
+        return JSONObject().put("app", "Settings").put("elements", arr)
+    }
+
+    private fun tool(d: AgentDecision): AgentDecision.CallTool {
+        assertTrue("expected CallTool, got $d", d is AgentDecision.CallTool); return d as AgentDecision.CallTool
+    }
+
+    // ---- LocalBrain: natural language → structured tool call (fast path) ----
+    @Test fun local_launches_app() {
+        val t = tool(decide(LocalBrain(), "open WhatsApp"))
+        assertEquals("open_app", t.name); assertEquals("WhatsApp", t.args.getString("app"))
+    }
+
+    @Test fun local_open_app_still_works_for_multiword_names() {
+        // Guard against over-eager compound detection (§1.9): genuine multi-word app names still open.
+        assertEquals("open_app", tool(decide(LocalBrain(), "open Play Store")).name)
+        assertEquals("Google Play Music", tool(decide(LocalBrain(), "open Google Play Music")).args.getString("app"))
+    }
+
+    @Test fun local_defers_compound_open_requests() {
+        // §1.9 — the fast path does ONE action; a compound must go to the planner, not mis-open one app
+        // (the audit's "open whatsapp and send prince a message" → opened Messages).
+        assertTrue(decide(LocalBrain(), "open whatsapp and send prince a message") is AgentDecision.CannotDo)
+        // even without a conjunction, an embedded messaging verb marks a second instruction
+        assertTrue(decide(LocalBrain(), "open whatsapp send prince a message") is AgentDecision.CannotDo)
+    }
+
+    @Test fun local_screen_read_is_honest_when_service_off() {
+        // §1.19 — "no perception" (accessibility service off) must not be reported as an empty screen.
+        val off = JSONObject().put("app", "unknown").put("perception", JSONObject().put("source", "none"))
+        val b = LocalBrain()
+        val d = runBlocking {
+            b.decide(ctx("what's on my screen", off))        // step 1 → read_state
+            b.decide(ctx("what's on my screen", off))        // step 2 → summarize
+        }
+        assertTrue(d is AgentDecision.Done)
+        assertTrue((d as AgentDecision.Done).summary.contains("accessibility service is off"))
+    }
+
+    @Test fun local_screen_read_is_honest_on_protected_screen() {
+        // §1.20 — a FLAG_SECURE screen blocks reading; say so instead of implying it's empty.
+        val secure = JSONObject().put("app", "com.bank").put("secureWindow", true)
+            .put("perception", JSONObject().put("source", "tree"))
+        val b = LocalBrain()
+        val d = runBlocking {
+            b.decide(ctx("what's on my screen", secure))
+            b.decide(ctx("what's on my screen", secure))
+        }
+        assertTrue((d as AgentDecision.Done).summary.contains("protected"))
+    }
+
+    @Test fun local_verb_need_not_be_sentence_initial() {
+        // §6.2 — "Bagyo frɛ 0552093690" (a Twi vocative before the verb) must still resolve to a call.
+        val c = tool(decide(LocalBrain(), "Bagyo frɛ 0552093690"))
+        assertEquals("make_call", c.name); assertEquals("0552093690", c.args.getString("number"))
+    }
+
+    @Test fun local_reads_notifications_and_speaks_the_result() {
+        // §6.1/§6.6 — "Kenkan me nkra" (read my messages) → read_notifications, NOT a launcher screen-read.
+        val b = LocalBrain()
+        val d1 = tool(decide(b, "Kenkan me nkra"))
+        assertEquals("read_notifications", d1.name)
+        // step 2 speaks the tool's actual result lifted from history (not a canned line)
+        val d2 = runBlocking { b.decide(ctx("Kenkan me nkra",
+            history = listOf("read_notifications({}) → success [native]; verified=true (read 2); You have 2: from Ama; from Kofi"))) }
+        assertTrue(d2 is AgentDecision.Done)
+        assertEquals("You have 2: from Ama; from Kofi", (d2 as AgentDecision.Done).summary)
+    }
+
+    @Test fun local_find_contact_uses_search_accelerator() {
+        // §6.1 — "find prince in my contacts" → search_contacts with the bare name.
+        val c = tool(decide(LocalBrain(), "find prince in my contacts"))
+        assertEquals("search_contacts", c.name); assertEquals("prince", c.args.getString("query"))
+    }
+
+    @Test fun local_twi_timer_is_language_aware() {
+        // §6.7 — Twi numerals + a Twi minute unit must produce a timer (was hardcoded Gh-EN → silently failed).
+        val t = tool(decide(LocalBrain(), "hyɛ bere anum simma"))   // "set a timer, five minutes"
+        assertEquals("set_timer", t.name); assertEquals(300, t.args.getInt("seconds"))
+    }
+
+    @Test fun local_play_music_and_settings_toggle() {
+        // §A.2 — generic local music
+        assertEquals("play_music", tool(decide(LocalBrain(), "play my music")).name)
+        // §A.2 — settings toggles open the setting screen (Android 11 can't flip directly)
+        val w = tool(decide(LocalBrain(), "turn on wifi")); assertEquals("open_setting", w.name); assertEquals("wifi", w.args.getString("target"))
+        val d = tool(decide(LocalBrain(), "turn off mobile data")); assertEquals("mobile_data", d.args.getString("target"))
+    }
+
+    @Test fun local_mobile_money_send_and_airtime() {
+        // §A.2 — send money: amount + recipient, opens the MoMo menu (user does PIN)
+        val s = tool(decide(LocalBrain(), "send 50 cedis to Ama"))
+        assertEquals("mobile_money", s.name)
+        assertEquals("send_money", s.args.getString("_kind"))
+        assertEquals("50", s.args.getString("_amount"))
+        assertEquals("Ama", s.args.getString("_recipient"))
+        // buy airtime with an amount
+        val a = tool(decide(LocalBrain(), "buy airtime of 5 cedis"))
+        assertEquals("mobile_money", a.name); assertEquals("buy_airtime", a.args.getString("_kind")); assertEquals("5", a.args.getString("_amount"))
+    }
+
+    @Test fun mobile_money_helper_parses_and_maps() {
+        val MM = com.tekyerema.tools.GhanaMobileMoney
+        assertEquals("50", MM.parseAmount("send 50 cedis to Ama"))
+        assertEquals("2.50", MM.parseAmount("buy 2.50 airtime"))
+        assertEquals("*170#", MM.rootUssd("MTN GH"))
+        assertEquals("*110#", MM.rootUssd("AirtelTigo"))
+        assertNull(MM.rootUssd("SomeUnknownCarrier"))
+    }
+
+    @Test fun local_calls_contact_and_number() {
+        val c = tool(decide(LocalBrain(), "call Prince")); assertEquals("make_call", c.name); assertEquals("Prince", c.args.getString("contact"))
+        val n = tool(decide(LocalBrain(), "call 0552093690")); assertEquals("0552093690", n.args.getString("number"))
+    }
+
+    @Test fun local_navigation_keys() {
+        assertEquals("back", tool(decide(LocalBrain(), "go back")).args.getString("key"))
+        assertEquals("home", tool(decide(LocalBrain(), "home")).args.getString("key"))
+        assertEquals("down", tool(decide(LocalBrain(), "scroll down")).args.getString("direction"))
+    }
+
+    @Test fun local_alarm_timer_volume() {
+        val a = tool(decide(LocalBrain(), "set an alarm for 6 am tomorrow"))
+        assertEquals("set_alarm", a.name); assertEquals(6, a.args.getInt("hour")); assertEquals(0, a.args.getInt("minute"))
+        val pm = tool(decide(LocalBrain(), "set an alarm for 9:30 pm")); assertEquals(21, pm.args.getInt("hour")); assertEquals(30, pm.args.getInt("minute"))
+        assertEquals(300, tool(decide(LocalBrain(), "set a timer for 5 minutes")).args.getInt("seconds"))
+        assertEquals("volume_up", tool(decide(LocalBrain(), "turn the volume up")).name)
+        assertEquals(30, tool(decide(LocalBrain(), "set volume to 30")).args.getInt("level"))
+        assertEquals(0, tool(decide(LocalBrain(), "mute")).args.getInt("level"))
+    }
+
+    @Test fun local_read_screen_then_summarize() = runBlocking {
+        val b = LocalBrain()
+        val d1 = b.decide(ctx("what's on my screen", screenWith("Wi-Fi", "Bluetooth")))
+        assertEquals("read_state", tool(d1).name)
+        val d2 = b.decide(ctx("what's on my screen", screenWith("Wi-Fi", "Bluetooth")))
+        assertTrue(d2 is AgentDecision.Done)
+        assertTrue((d2 as AgentDecision.Done).summary.contains("Wi-Fi"))
+    }
+
+    @Test fun local_online_only_is_network_gated() {
+        val d = decide(LocalBrain(), "search the web for the weather in Accra")
+        assertTrue(d is AgentDecision.CannotDo)
+        assertEquals(LocalBrain.NETWORK, (d as AgentDecision.CannotDo).reasonClass)
+    }
+
+    @Test fun local_defers_unknown_and_multistep() {
+        assertEquals(LocalBrain.DEFER, (decide(LocalBrain(), "reconcile my quarterly ledgers") as AgentDecision.CannotDo).reasonClass)
+        assertEquals(LocalBrain.DEFER, (decide(LocalBrain(), "open WhatsApp and then message Prince") as AgentDecision.CannotDo).reasonClass)
+    }
+
+    @Test fun local_twi_basic_verbs() {
+        assertEquals("open_app", tool(decide(LocalBrain(), "bue WhatsApp")).name)
+        assertEquals("make_call", tool(decide(LocalBrain(), "frɛ Prince")).name)
+    }
+
+    @Test fun local_tap_requires_label_on_screen() {
+        assertEquals("tap", tool(decide(LocalBrain(), "tap Settings", screenWith("Settings", "Search"))).name)
+        // label absent → defer rather than tap a nonexistent element
+        val d = decide(LocalBrain(), "tap Nonexistent", screenWith("Settings"))
+        assertEquals(LocalBrain.DEFER, (d as AgentDecision.CannotDo).reasonClass)
+    }
+
+    // ---- OfflineCapability boundary ----
+    @Test fun capability_boundary() {
+        assertTrue(OfflineCapability.needsInternet("search the internet for MTN share price"))
+        assertTrue(OfflineCapability.needsInternet("what is the weather in Kumasi"))
+        assertTrue(!OfflineCapability.needsInternet("what's on my screen"))
+        assertTrue(!OfflineCapability.needsInternet("open WhatsApp"))
+        assertTrue(!OfflineCapability.needsInternet("call Prince"))
+    }
+
+    // ---- RoutingBrain: hybrid local/cloud ----
+    private class FakeBrain(private val d: AgentDecision) : AgentBrain {
+        var calls = 0
+        override suspend fun decide(ctx: BrainContext): AgentDecision { calls++; return d }
+    }
+
+    @Test fun router_uses_local_fast_path_without_cloud() {
+        val cloud = FakeBrain(AgentDecision.Fail("should not be called"))
+        val r = RoutingBrain(LocalBrain(), cloud) { true }
+        assertEquals("open_app", tool(decide(r, "open Settings")).name)
+        assertEquals(0, cloud.calls)   // local handled it; cloud never touched
+    }
+
+    @Test fun router_escalates_to_cloud_when_online_and_sticky() = runBlocking {
+        val cloud = FakeBrain(AgentDecision.Done("cloud handled"))
+        val r = RoutingBrain(LocalBrain(), cloud) { true }
+        val d1 = r.decide(ctx("reconcile my quarterly ledgers"))   // local defers → cloud
+        assertTrue(d1 is AgentDecision.Done)
+        val d2 = r.decide(ctx("open WhatsApp"))                     // sticky: stays on cloud
+        assertTrue(d2 is AgentDecision.Done)
+        assertEquals(2, cloud.calls)
+    }
+
+    @Test fun router_offline_refuses_network_intent() {
+        val cloud = FakeBrain(AgentDecision.Done("nope"))
+        val r = RoutingBrain(LocalBrain(), cloud) { false }         // offline
+        val d = decide(r, "search the web for the news")
+        assertTrue(d is AgentDecision.CannotDo)
+        assertEquals("network_unavailable", (d as AgentDecision.CannotDo).reasonClass)
+    }
+
+    @Test fun router_offline_defer_is_honest_cannotdo_not_false_success() {
+        // §1.2: an offline request the operator can't ground is a FAILURE, not a completion. It must be
+        // CannotDo (→ status CANNOT_DO), never Done (which would be spoken as success for work not done).
+        // The detail still nudges the user by naming what IS possible offline (§1.3, from real intents).
+        val r = RoutingBrain(LocalBrain(), cloud = null) { false }
+        val d = decide(r, "reconcile my quarterly ledgers")
+        assertTrue("offline-unknown must not read as success", d is AgentDecision.CannotDo)
+        d as AgentDecision.CannotDo
+        assertEquals("offline_unknown_command", d.reasonClass)
+        assertTrue("nudge should list a real offline capability", d.detail.contains("open apps"))
+    }
+
+    @Test fun malformed_tool_shaped_text_is_flagged() {
+        assertTrue(AgentDecision.fromText("tap(label=\"Send\")") is AgentDecision.Malformed)
+        assertTrue(AgentDecision.fromText("The screen shows the home launcher.") is AgentDecision.Done)
+    }
+}

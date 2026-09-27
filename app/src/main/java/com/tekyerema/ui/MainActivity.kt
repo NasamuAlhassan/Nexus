@@ -1,0 +1,82 @@
+package com.tekyerema.ui
+
+import android.graphics.Color
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import com.tekyerema.agent.AgentEngine
+import com.tekyerema.settings.Settings
+import com.tekyerema.ui.components.QuietNav
+import com.tekyerema.ui.components.Section
+import com.tekyerema.ui.history.HistoryScreen
+import com.tekyerema.ui.home.HomeContent
+import com.tekyerema.ui.onboarding.PermissionsScreen
+import com.tekyerema.ui.settings.SettingsScreen
+import com.tekyerema.ui.theme.TekyeremaTheme
+import com.tekyerema.ui.theme.pageBackground
+
+/** The app: first launch shows one permissions page, then Home / History / Settings. */
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
+            navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
+        )
+        super.onCreate(savedInstanceState)
+        setContent { TekyeremaTheme { App() } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        AgentEngine.refreshReadiness()
+    }
+}
+
+@Composable
+private fun App() {
+    val context = LocalContext.current
+    val settings = remember { Settings(context) }
+    var onboarded by remember { mutableStateOf(settings.onboardingDone) }
+
+    Box(Modifier.fillMaxSize().pageBackground().systemBarsPadding().imePadding()) {
+        if (!onboarded) {
+            PermissionsScreen(onDone = { settings.onboardingDone = true; onboarded = true })
+        } else {
+            Shell(settings)
+        }
+    }
+}
+
+@Composable
+private fun Shell(settings: Settings) {
+    var section by rememberSaveable { mutableStateOf(Section.HOME) }
+    BackHandler(enabled = section != Section.HOME) { section = Section.HOME }
+
+    Column(Modifier.fillMaxSize()) {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (section) {
+                Section.HOME -> HomeContent(settings)
+                Section.HISTORY -> HistoryScreen()
+                Section.SETTINGS -> SettingsScreen(settings)
+            }
+        }
+        QuietNav(current = section, onSelect = { section = it })
+    }
+}
