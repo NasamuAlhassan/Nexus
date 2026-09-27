@@ -13,7 +13,10 @@ data class BrainContext(
     /** Prior CONVERSATION turns (older→newer), each "User: …" / "Tɛkyerɛma: …". Lets the brain resolve
      *  references ("him", "it"), corrections ("actually…"), and follow-ups ("what did Kwame send?") across
      *  utterances. Additive + optional: brains that ignore it (LocalBrain) behave exactly as before. */
-    val conversation: List<String> = emptyList()
+    val conversation: List<String> = emptyList(),
+    /** Compact structured PROGRESS (current app/screen, known entities, recent problems) from [TaskMemory],
+     *  so the brain needn't reconstruct task state from the flat history. Additive + optional. */
+    val progress: String = ""
 )
 
 sealed class AgentDecision {

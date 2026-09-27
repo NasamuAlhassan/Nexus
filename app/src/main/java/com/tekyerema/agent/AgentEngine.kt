@@ -252,6 +252,7 @@ object AgentEngine {
         var lastResultKey: String? = null
         var repeatCount = 0                      // REL-P2-1: consecutive identical (call,result) steps → break the no-progress loop
         var noProgressStreak = 0                 // REL-P2 stall: consecutive mutating steps that neither verified nor changed the screen
+        val taskMemory = TaskMemory()            // Phase II P0: compact structured progress state injected into the prompt
         var visionNext = false                  // the model asked for vision via read_state; carry it into the next observation
         var usedRead = false                    // §C.3 — did the run read the screen? (grounds a screen-derived answer)
         // Mobile-Money / USSD: the user approves the transfer (recipient + amount) ONCE; after that we must
@@ -290,10 +291,11 @@ object AgentEngine {
                     (if (before.strippedHiddenText > 0) " strippedHidden=${before.strippedHiddenText}" else "") +
                     (if (before.secureWindow) " secureWindow=true" else ""))
                 stats = stats.copy(steps = step, perceptionRoutes = bump(stats.perceptionRoutes, before.perception.source))
+                taskMemory.noteScreen(before.appPackage, before.screenTitle)   // Phase II P0: track current app/screen
                 setStatus(AgentStatus.THINKING)
 
                 val t0 = SystemClock.uptimeMillis()
-                val decision = brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo))
+                val decision = brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo, progress = taskMemory.render()))
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
 
                 when (decision) {
@@ -529,6 +531,13 @@ object AgentEngine {
                         val result = ActionQueue.run { tool.execute(decision.args, toolCtx) }
                         stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, result.channel))
                         log(LogEntry.Kind.ACTION, "${decision.name} → ${if (result.success) "ok" else "failed"} [${result.channel}]: ${result.message}")
+                        // Phase II P0: remember durable entities the goal named so they survive step-to-step.
+                        if (result.success) when (decision.name) {
+                            "momo_send" -> { taskMemory.noteEntity("number", decision.args.str("number")); taskMemory.noteEntity("amount", decision.args.str("amount")) }
+                            "mobile_money" -> { taskMemory.noteEntity("recipient", decision.args.str("_recipient")); taskMemory.noteEntity("number", decision.args.str("_number")); taskMemory.noteEntity("amount", decision.args.str("_amount")) }
+                            "make_call" -> { taskMemory.noteEntity("calling", decision.args.str("contact") ?: decision.args.str("number")) }
+                            "reply_to_notification" -> taskMemory.noteEntity("replying to", decision.args.str("sender"))
+                        }
                         if (decision.name == "read_state" && result.data?.optBoolean("vision") == true) visionNext = true
 
                         // ---- observe again, verify the CLAIM against a fresh observation ----
@@ -627,6 +636,8 @@ object AgentEngine {
                         val recovery = Recovery.hint(decision.name, recKind)
                         if (recovery.isNotEmpty()) log(LogEntry.Kind.INFO, "recovery:${recovery}")
 
+                        if (!result.success || (mutating && !vr.verified))
+                            taskMemory.noteFailure("${decision.name} ${if (!result.success) "failed" else "didn't verify"}: ${(if (!result.success) result.message else vr.detail).take(70)}")
                         history.add(
                             "${decision.name}(${shortArgs(decision.args)}) → ${if (result.success) "success" else "fail"} [${result.channel}]; " +
                                 "verified=${vr.verified} (${vr.detail.take(100)}); ${result.message.take(140)}${recovery}"
