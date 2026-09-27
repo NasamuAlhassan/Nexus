@@ -31,7 +31,7 @@ class RunGoalReceiver : BroadcastReceiver() {
         intent.getStringExtra("ping")?.let {
             AgentEngine.refreshReadiness()
             val s = AgentEngine.state.value
-            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status}")
+            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()}")
             return
         }
         // Deterministic infrastructure scenario, zero LLM cost — see TestBrain.
@@ -163,9 +163,11 @@ class RunGoalReceiver : BroadcastReceiver() {
             Log.i("Tekyerema", "[WAKE] set_wake → enabled=${s.wakeWordEnabled}")
             return
         }
-        // Phase II eval harness: run the state-checked task suite. --es eval_suite core [--ei seed 42]
+        // Phase II eval harness: run the state-checked task suite.
+        //   --es eval_suite core [--es eval_route voice|agent] [--ei seed 42]
         intent.getStringExtra("eval_suite")?.let { suite ->
-            com.tekyerema.eval.EvalRunner.run(context.applicationContext, suite, intent.getIntExtra("seed", 0))
+            com.tekyerema.eval.EvalRunner.run(context.applicationContext, suite, intent.getIntExtra("seed", 0),
+                intent.getStringExtra("eval_route") ?: "voice")
             return
         }
         val goal = intent.getStringExtra("goal")?.trim().orEmpty()
