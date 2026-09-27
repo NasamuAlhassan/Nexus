@@ -14,6 +14,10 @@ import org.json.JSONObject
  * the launcher icon; a launcher Intent is exact and policy-preferred. Resolves by user-meaningful
  * name — no package-specific task logic.
  */
+/** "the Zorblax app" → "Zorblax": how to say a requested app's name back to the user. */
+internal fun spokenAppName(query: String): String =
+    query.trim().replace(Regex("(?i)^(the|my)\\s+"), "").replace(Regex("(?i)\\s+(app|application)$"), "").ifBlank { query.trim() }
+
 object OpenAppTool : Tool {
     override val name = "open_app"
     override val description = "Bring an installed app to the foreground by its name (e.g. 'Messages', 'Settings', 'Chrome')."
@@ -32,7 +36,7 @@ object OpenAppTool : Tool {
                 return ToolResult(false, "I found more than one app close to '$query': " +
                     m.options.joinToString(", ") { it.label } + ". Which one?", needsDisambiguation = true)
             AppResolver.Match.None ->
-                return ToolResult(false, "Could not find an installed app matching '$query'.")
+                return ToolResult(false, "I couldn't find an app called ${spokenAppName(query)} on this phone.")
         }
         val intent = AppResolver.launchIntent(ctx.appContext, app.packageName)
             ?: return ToolResult(false, "No launch intent for ${app.label}.")

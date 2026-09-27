@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -164,6 +165,31 @@ class BrainLogicTest {
         val d2 = b.decide(ctx("what's on my screen", screenWith("Wi-Fi", "Bluetooth")))
         assertTrue(d2 is AgentDecision.Done)
         assertTrue((d2 as AgentDecision.Done).summary.contains("Wi-Fi"))
+    }
+
+    @Test fun local_read_screen_speaks_app_name_not_package() = runBlocking {
+        val home = screenWith("At a glance").put("app", "com.google.android.apps.nexuslauncher").put("appName", "the home screen")
+        val b = LocalBrain()
+        b.decide(ctx("what's on my screen", home))
+        val s = (b.decide(ctx("what's on my screen", home)) as AgentDecision.Done).summary
+        assertTrue(s, s.startsWith("You're on the home screen."))
+        assertFalse(s, s.contains("nexuslauncher"))
+        // No human name known → say nothing about where, rather than read out a package id.
+        val raw = screenWith("OK").put("app", "com.example.thing")
+        val b2 = LocalBrain(); b2.decide(ctx("what's on my screen", raw))
+        val s2 = (b2.decide(ctx("what's on my screen", raw)) as AgentDecision.Done).summary
+        assertFalse(s2, s2.contains("com.example"))
+    }
+
+    @Test fun local_failed_single_action_is_cannot_do_not_done() = runBlocking {
+        val b = LocalBrain()
+        assertEquals("open_app", tool(b.decide(ctx("open the Zorblax app"))).name)
+        val d = b.decide(ctx("open the Zorblax app", history = listOf(
+            "open_app({\"app\":\"Zorblax app\"}) → fail [none]; verified=false (no outcome); I couldn't find an app called Zorblax on this phone.")))
+        assertTrue("expected CannotDo, got $d", d is AgentDecision.CannotDo)
+        d as AgentDecision.CannotDo
+        assertEquals(LocalBrain.ACTION_FAILED, d.reasonClass)   // not DEFER/NETWORK → RoutingBrain won't escalate
+        assertEquals("I couldn't find an app called Zorblax on this phone.", d.detail)
     }
 
     @Test fun local_online_only_is_network_gated() {

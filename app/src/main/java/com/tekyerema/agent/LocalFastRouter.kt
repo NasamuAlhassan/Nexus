@@ -233,15 +233,24 @@ class LocalFastRouter(
     }
 
     // ---------------------------------------------------------------- open app (existing resolver)
-    private fun openApp(query: String): FastOutcome? {
+    private suspend fun openApp(query: String): FastOutcome? {
         val match = AppResolver.resolveDetailed(appContext, query)
         val app = (match as? AppResolver.Match.One)?.app ?: return null   // ambiguous/none → let the agent ask
         val launch = AppResolver.launchIntent(appContext, app.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?: return null
-        return try {
-            appContext.startActivity(launch)
-            action("OPEN_APP", "${app.label} is open.")
-        } catch (t: Throwable) { null }
+        try { appContext.startActivity(launch) } catch (t: Throwable) { return null }
+        // Say "is open" only once the app is actually in front. Without the accessibility service we can't
+        // see the foreground, so announce the attempt instead of claiming the result. If it never comes up,
+        // fall through: the agent observes the real screen and either finishes the job or says why not.
+        val c = controller() ?: return action("OPEN_APP", "Opening ${app.label}.")
+        // Up to ~6 s: a cold start of a heavy app (Chrome, a bank app) on a low-end phone routinely takes 3–5 s,
+        // and a slow launch is not a failure. Polling is cheap — foregroundPackage() reads event-tracked state.
+        val (ok, fg) = com.tekyerema.verifier.Verify.pollForegroundContains(c, app.packageName, attempts = 24, intervalMs = 250L)
+        if (!ok) {
+            Log.i(TAG, "[LOCAL_FAST_PATH] OPEN_APP ${app.packageName} not in front (fg=$fg) → agent")
+            return null
+        }
+        return action("OPEN_APP", "${app.label} is open.")
     }
 
     /** An information QUERY answer — spoken on the normal (Twi-capable) voice. */

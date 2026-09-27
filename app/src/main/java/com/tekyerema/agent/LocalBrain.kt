@@ -165,7 +165,10 @@ class LocalBrain : AgentBrain {
      */
     private fun finishLine(ctx: BrainContext): AgentDecision {
         val last = ctx.history.lastOrNull().orEmpty()
-        return if (last.contains("→ fail")) speakToolResult(ctx) else AgentDecision.Done(doneLine)
+        if (!last.contains("→ fail")) return AgentDecision.Done(doneLine)
+        // The one action this intent needed FAILED — that is an honest "can't", not a completion (reporting it as
+        // Done made the engine say "<failure> — but I could not confirm it").
+        return AgentDecision.CannotDo(ACTION_FAILED, (speakToolResult(ctx) as AgentDecision.Done).summary)
     }
 
     private fun speakToolResult(ctx: BrainContext): AgentDecision {
@@ -199,7 +202,14 @@ class LocalBrain : AgentBrain {
                 i++
             }
         }
-        val where = if (!app.isNullOrBlank()) "You're in $app. " else ""
+        // Speak the app's name, never its package id ("You're in com.google.android.apps.nexuslauncher").
+        val name = screen.optString("appName").takeIf { it.isNotBlank() }
+        val where = when {
+            name != null && name.startsWith("the ") -> "You're on $name. "
+            name != null -> "You're in $name. "
+            !app.isNullOrBlank() && app != "unknown" && !app.contains('.') -> "You're in $app. "
+            else -> ""
+        }
         val what = if (labels.isEmpty()) "I don't see any labelled items." else "I can see: ${labels.joinToString(", ")}."
         return AgentDecision.Done(where + what)
     }
@@ -346,6 +356,8 @@ class LocalBrain : AgentBrain {
         /** Router-only reason classes (never surfaced verbatim to the user). */
         const val DEFER = "defer_local"
         const val NETWORK = "network_unavailable"
+        /** The single tool this local intent needed failed. Not escalatable: the cloud would retry the same op. */
+        const val ACTION_FAILED = "action_failed"
 
         /** §1.3: the offline capability line spoken on an unmatched offline goal is generated HERE, from the
          *  intents decide() actually handles — so we never advertise a capability (e.g. "check notifications")

@@ -372,9 +372,32 @@ object KeyEventTool : Tool {
         return ToolResult(ok, if (ok) "Pressed $key." else "$key failed.", channel = "system")
     }
 
-    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
-        weakVerify(before, after, result)
+    // Authoritative for "home" (a checkable SYSTEM goal state). back/recents/volume keep the weak screen-diff
+    // signal (always unverified), so this never weakens anything — OutcomeVerifier only ADDS a confirmed outcome.
+    override val verifiesOutcome = true
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        if (!result.success) return VerificationResult(false, "action failed")
+        if (args.str("key")?.lowercase() == "home") {
+            // GOAL-STATE check, not a screen-diff proxy: the device's default launcher is in front. Correct even when
+            // the user was ALREADY on the home screen (nothing changes) — the old weak check read that as a failure
+            // (found by the on-device eval: go_home → COMPLETED_UNVERIFIED).
+            val launcher = defaultLauncherPackage(ctx.appContext) ?: "launcher"
+            val (ok, fg) = Verify.pollForegroundContains(ctx.controller, launcher, attempts = 5, intervalMs = 250L)
+            return if (ok) VerificationResult(true, "home screen is in front ($fg)")
+            else VerificationResult(false, "expected the home screen ($launcher); foreground is ${fg ?: "unknown"}")
+        }
+        return weakVerify(before, after, result)
+    }
 }
+
+/** The device's default home app (launcher), resolved from the system — no hardcoded OEM launcher names. */
+private fun defaultLauncherPackage(ctx: android.content.Context): String? = try {
+    ctx.packageManager.resolveActivity(
+        android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME),
+        android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+    )?.activityInfo?.packageName?.takeIf { it != "android" }   // "android" = the chooser (no default launcher set)
+} catch (_: Throwable) { null }
 
 object ReadStateTool : Tool {
     override val name = "read_state"

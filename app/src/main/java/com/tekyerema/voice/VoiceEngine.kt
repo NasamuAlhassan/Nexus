@@ -65,7 +65,7 @@ object VoiceEngine {
         scope.launch(Dispatchers.Default) { try { sherpa.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
-            "online ASR: Gh-EN=${if (settings.hasOnlineAsr) settings.asrOnlineModel else "off"} (Twi = on-device only) | " +
+            "online ASR: OFF (Phase II — on-device only; HCI Lab API plugs into onlineFor) | " +
             "TTS: system engine | cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         controller = VoiceController(
             // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our

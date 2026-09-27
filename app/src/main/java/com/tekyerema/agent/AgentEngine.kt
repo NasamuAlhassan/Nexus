@@ -335,7 +335,9 @@ object AgentEngine {
                         finish(AgentStatus.COMPLETED_UNVERIFIED, stats); return
                     }
                     is AgentDecision.CannotDo -> {
-                        log(LogEntry.Kind.RESULT, "CANNOT DO [${decision.reasonClass}]: ${decision.detail}")
+                        // RESULT is what gets SPOKEN — the reason class is for developers, not the user's ears.
+                        log(LogEntry.Kind.INFO, "CANNOT DO [${decision.reasonClass}]")
+                        log(LogEntry.Kind.RESULT, decision.detail)
                         pushConvo("Tɛkyerɛma: ${decision.detail}")
                         finish(AgentStatus.CANNOT_DO, stats); return
                     }

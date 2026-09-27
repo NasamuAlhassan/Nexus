@@ -81,7 +81,10 @@ data class UiSnapshot(
     /** True when the active window declared FLAG_SECURE (screenshot blocked; tree still readable). */
     val secureWindow: Boolean = false,
     /** Elements in the tree that carried hidden-channel text stripped by Sanitize. Logged, not shown. */
-    val strippedHiddenText: Int = 0
+    val strippedHiddenText: Int = 0,
+    /** What a person calls [appPackage]: the launcher label ("Settings"), or "the home screen" for the
+     *  launcher. Spoken to the user instead of a package id; null when unknown. */
+    val appName: String? = null
 ) {
     fun element(id: Int): UiElement? = elements.firstOrNull { it.id == id }
 
@@ -130,6 +133,7 @@ data class UiSnapshot(
         val truncated = ordered.size > maxElements
         return JSONObject()
             .put("app", appPackage ?: "unknown")
+            .apply { if (!appName.isNullOrBlank()) put("appName", appName) }
             .apply { if (!screenTitle.isNullOrBlank()) put("screen", screenTitle) }
             .put("elementCount", elements.size)
             .put("perception", JSONObject().put("source", perception.source).put("reason", perception.reason))

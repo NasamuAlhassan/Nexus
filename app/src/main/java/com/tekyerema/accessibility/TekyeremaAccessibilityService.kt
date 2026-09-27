@@ -82,7 +82,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         triggerJob?.cancel()
         triggerJob = triggerScope.launch {
             settings.changes.collect {
-                if (settings.floatingTrigger) { TriggerBubble.show(this@TekyeremaAccessibilityService); refreshTriggerVisibility(); TriggerBubble.setVisible(!ourAppInFront) }
+                if (settings.floatingTrigger) { TriggerBubble.show(this@TekyeremaAccessibilityService); foregroundPackage()?.let { refreshTriggerVisibility(it) }; TriggerBubble.setVisible(!ourAppInFront) }
                 else TriggerBubble.hide(this@TekyeremaAccessibilityService)
                 // Hands-free wake word: arm/disarm live with the setting + AccessKey. No-op when not configured.
                 if (settings.wakeWordActive) com.tekyerema.voice.WakeWordService.start(this@TekyeremaAccessibilityService)
@@ -97,12 +97,22 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // Decided from the window that actually has focus, so our own overlay windows, the
         // keyboard, the shade and permission dialogs (which all report window-state changes
         // too) can't flip it the wrong way.
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) refreshTriggerVisibility()
+        if (com.tekyerema.BuildConfig.DEBUG && (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED))
+            android.util.Log.d("TkyWin", "type=${event.eventType} pkg=${event.packageName} cls=${event.className} ch=${event.contentChangeTypes} wch=${if (Build.VERSION.SDK_INT >= 28) event.windowChanges else -1}")
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            val cls = event.className?.toString()
+            if (pkg != null && cls != null && isActivity(pkg, cls)) {
+                fgActivityPkg = pkg
+                refreshTriggerVisibility(pkg)
+            }
+        }
     }
 
-    /** The trigger is hidden exactly while a Tɛkyerɛma activity owns the active window. */
-    private fun refreshTriggerVisibility() {
-        val active = try { rootInActiveWindow?.packageName?.toString() } catch (_: Throwable) { null } ?: return
+    /** The trigger is hidden exactly while a Tɛkyerɛma activity owns the screen. [active] = the package of the
+     *  activity that just came to front (overlays, keyboard and shade never get here — see [isActivity]). */
+    private fun refreshTriggerVisibility(active: String) {
         // Remember the last REAL app in front (not ourselves, not the system shade/keyguard) so a handoff can
         // return the user to what they were actually looking at (e.g. Messages) instead of slamming HOME.
         if (active != packageName && active != "com.android.systemui") priorApp = active
@@ -122,8 +132,22 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         return super.onUnbind(intent)
     }
 
+    /** The package of the activity in front, tracked from window-state events (see [onAccessibilityEvent]).
+     *  Falls back to the live root only before the first event. Never call [getRootInActiveWindow] just to
+     *  learn the package: it is a synchronous binder round-trip INTO the foreground app, and while that app is
+     *  cold-starting it blocks until the app's UI thread answers — seconds, on the caller's thread (often ours). */
     override fun foregroundPackage(): String? =
-        try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null }
+        fgActivityPkg ?: try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null }
+
+    @Volatile private var fgActivityPkg: String? = null
+    private val activityClassCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    /** True when [cls] is a real Activity of [pkg] — i.e. this window-state event is an app screen coming to
+     *  front, not an overlay, dialog pane, keyboard or the notification shade. PackageManager only (system
+     *  server), cached; never touches the foreground app. */
+    private fun isActivity(pkg: String, cls: String): Boolean = activityClassCache.getOrPut("$pkg/$cls") {
+        try { packageManager.getActivityInfo(android.content.ComponentName(pkg, cls), 0); true } catch (_: Throwable) { false }
+    }
 
     override fun priorForegroundPackage(): String? = priorApp
 
@@ -221,16 +245,32 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         }
         val window = try { root.window } catch (t: Throwable) { null }
         val title = try { window?.title?.toString() } catch (t: Throwable) { null }
+        val pkg = root.packageName?.toString()
         return UiSnapshot(
-            appPackage = root.packageName?.toString(),
+            appPackage = pkg,
             screenTitle = title,
             elements = elements,
             timestampMs = System.currentTimeMillis(),
             perception = PerceptionRoute("tree", "tree traversal"),
             secureWindow = lastScreenshotSecure,
-            strippedHiddenText = stripped
+            strippedHiddenText = stripped,
+            appName = pkg?.let { appNameOf(it) }
         )
     }
+
+    private val appNames = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Human name for a package, cached (label lookups hit PackageManager). The default launcher is
+     *  "the home screen" — nobody calls it "Pixel Launcher" or com.google.android.apps.nexuslauncher. */
+    private fun appNameOf(pkg: String): String? = appNames[pkg] ?: try {
+        val home = packageManager.resolveActivity(
+            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME),
+            android.content.pm.PackageManager.MATCH_DEFAULT_ONLY
+        )?.activityInfo?.packageName
+        val name = if (pkg == home) "the home screen"
+            else packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+        name.takeIf { it.isNotBlank() && it != pkg }?.also { appNames[pkg] = it }
+    } catch (_: Throwable) { null }
 
     private fun rawLabelOf(n: AccessibilityNodeInfo): String? {
         n.text?.toString()?.takeIf { it.isNotBlank() }?.let { return it }
