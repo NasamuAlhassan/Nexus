@@ -251,6 +251,7 @@ object AgentEngine {
         var lastCallKey: String? = null         // for unnecessary-action detection
         var lastResultKey: String? = null
         var repeatCount = 0                      // REL-P2-1: consecutive identical (call,result) steps → break the no-progress loop
+        var noProgressStreak = 0                 // REL-P2 stall: consecutive mutating steps that neither verified nor changed the screen
         var visionNext = false                  // the model asked for vision via read_state; carry it into the next observation
         var usedRead = false                    // §C.3 — did the run read the screen? (grounds a screen-derived answer)
         // Mobile-Money / USSD: the user approves the transfer (recipient + amount) ONCE; after that we must
@@ -535,6 +536,7 @@ object AgentEngine {
                         // Everything else is observed again, on the same route the decision used, and the
                         // claim is re-checked over a short window — a launched app or a sent message can
                         // take a moment to appear, and a single instant snapshot is a race (round 9 finding).
+                        var afterSig: String? = null   // REL-P2 stall: post-action screen signature (null on PERCEIVE/secure → not counted)
                         val vr: com.tekyerema.verifier.VerificationResult
                         if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE) {
                             vr = tool.verify(decision.args, toolCtx, before, before, result)
@@ -563,6 +565,7 @@ object AgentEngine {
                                     v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
                                     polls++
                                 }
+                                afterSig = after.signature()   // REL-P2 stall: capture the post-action screen signature
                                 vr = if (TargetSemantics.isCredentialScreen(after))
                                     com.tekyerema.verifier.VerificationResult(true, "reached a secure-input screen — verification suspended, screen not observed")
                                 else if (polls > 0) v.copy(detail = v.detail + " (after ${polls} re-observation${if (polls > 1) "s" else ""})") else v
@@ -578,6 +581,24 @@ object AgentEngine {
                             mutatingCount++
                             if (vr.verified) mutatingVerified++
                             lastMutatingVerified = vr.verified
+                        }
+
+                        // ---- REL-P2 no-progress STALL detection (research §4c) — generalizes the exact-repeat guard:
+                        // a mutating action that ran but neither VERIFIED nor CHANGED the screen (identical signature)
+                        // is making no progress, even when the model varies its action each step (a dead Compose/WebView
+                        // control). Conservative — requires BOTH signals so a state-only change (checkbox) or a verified
+                        // step never false-aborts. Nudge at 3; soft-abort (honest CANNOT_DO) at 5, well before MAX_STEPS.
+                        if (mutating) {
+                            val stalled = result.success && !vr.verified && afterSig != null && afterSig == before.signature()
+                            if (stalled) noProgressStreak++ else noProgressStreak = 0
+                            if (noProgressStreak == 3) history.add(
+                                "The screen has NOT changed across the last 3 actions and none verified — you are stuck. Stop repeating; " +
+                                "try a fundamentally different route (scroll, the app's own search, Back, a different control), or call cannot_do.")
+                            if (noProgressStreak >= 5) {
+                                log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled mutating steps) — stopping honestly.")
+                                pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
+                                finish(AgentStatus.CANNOT_DO, stats); return
+                            }
                         }
 
                         // ---- unnecessary-action detection: same call, same result as the previous step ----
