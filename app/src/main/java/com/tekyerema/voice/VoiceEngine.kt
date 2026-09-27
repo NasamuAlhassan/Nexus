@@ -79,16 +79,10 @@ object VoiceEngine {
                 // Language-aware online routing, network folded in (offline ⇒ null ⇒ on-device, no hang):
                 //  Twi   → Khaya (natural-Twi ASR) when a key is set;
                 //  Gh-EN → the strong whisper endpoint when configured.
-                onlineFor = { lang ->
-                    // Online ASR: Gh-English → Groq Whisper (fast). Twi has no online provider now (on-device
-                    // only) until the UG HCI Lab ASR API is wired into this seam. Offline ⇒ null ⇒ on-device.
-                    if (!com.tekyerema.core.NetworkMonitor.isOnline() || !settings.hasOnlineAsr) null
-                    else {
-                        val effective = lang ?: settings.sessionLanguage
-                        if (effective == Lang.TWI) null
-                        else GroqWhisperAsr(baseUrl = { settings.asrOnlineBaseUrl }, apiKey = { settings.asrOnlineKey }, model = settings.asrOnlineModel)
-                    }
-                },
+                // Phase II language cleanup: NO cloud ASR in the active runtime (Groq Whisper, Khaya and Abena
+                // all removed). English and Twi both transcribe ON-DEVICE via sherpa; the UG HCI Lab ASR API
+                // will later slot into this `onlineFor` seam as the online provider. null everywhere ⇒ on-device.
+                onlineFor = { null },
                 forceLanguage = { settings.forcedLanguage },
                 sessionLanguage = { settings.sessionLanguage }
             ),
