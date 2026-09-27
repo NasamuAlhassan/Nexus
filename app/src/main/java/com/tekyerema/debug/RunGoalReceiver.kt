@@ -159,11 +159,6 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         val goal = intent.getStringExtra("goal")?.trim().orEmpty()
         if (goal.isNotEmpty()) {
-            // An ADB goal keeps the LIVE voice on by default now (so a diagnostic goal can't silence Abena
-            // for a real turn, as it did during a live demo). Pass --es use_live_api 0 ONLY for an automated
-            // battery where you want to spare Abena's quota; anything else leaves the primary voice live.
-            com.tekyerema.voice.AbenaBudget.liveAllowed = intent.getStringExtra("use_live_api") != "0"
-            Log.i("Tekyerema", "[ABENA] goal path: liveAllowed=${com.tekyerema.voice.AbenaBudget.liveAllowed}")
             AgentEngine.submitGoal(goal)
         }
     }

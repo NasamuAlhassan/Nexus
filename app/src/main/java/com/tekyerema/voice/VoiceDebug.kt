@@ -202,20 +202,10 @@ object VoiceDebug {
         scope.launch { try { tts.logVoices() } finally { tts.shutdown() } }
     }
 
-    /** `--es tts_test "<text>" [--es lang gh_en|twi]` — mirrors production: Abena (Gh-English/Twi) → Khaya → system. */
+    /** `--es tts_test "<text>" [--es lang gh_en|twi]` — speaks via the phone's system TTS engine (the Abena/
+     *  Khaya cloud voices were removed 2026-09-27; the UG HCI Lab TTS API drops into RoutingTts later). */
     fun ttsTest(ctx: Context, text: String, lang: String?) {
-        val settings = Settings(ctx)
-        AbenaBudget.liveAllowed = true   // an explicit single test call, not a battery
-        val mt = KhayaTranslate(baseUrl = { settings.khayaBaseUrl }, apiKey = { settings.khayaApiKey })
-        val khaya = KhayaTts(ctx, baseUrl = { settings.khayaBaseUrl }, apiKey = { settings.khayaApiKey })
-        val chain = FallbackTts(listOf(khaya, AbenaTts(ctx, settings)))   // mirror production: Khaya → Abena
-        val tts = RoutingTts(
-            english = AndroidTts(ctx),
-            twi = chain,
-            enToTw = { text -> if (settings.hasKhaya) mt.toTwi(text) else null },
-            ghEnglish = chain,
-            isOnline = { (settings.hasAbena || settings.hasKhaya) && com.tekyerema.core.NetworkMonitor.isOnline() }
-        )
+        val tts = AndroidTts(ctx)
         val language = lang?.takeIf { it == Lang.TWI } ?: Lang.GH_EN
         scope.launch {
             val spoke = try { tts.speak(text, language) }

@@ -49,41 +49,24 @@ object VoiceEngine {
         mic = MicCapture(appContext = app)
         answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
         systemTts = AndroidTts(app)
-        // English → the phone's own engine (offline-capable); Twi → a REAL Twi voice via Khaya (Ghana NLP)
-        // when a key is set, so Twi sessions are answered in Twi. If Khaya is unset/offline/fails,
-        // RoutingTts falls back to the system engine (never silent, §28).
-        // English→Twi localizer so a Twi session is answered in Twi (confirmations, errors, cloud results),
-        // not just successful LocalBrain lines. App-authored Twi strings pass through untranslated.
-        val khayaMt = KhayaTranslate(baseUrl = { settings.khayaBaseUrl }, apiKey = { settings.khayaApiKey })
-        val khayaTts = KhayaTts(app, baseUrl = { settings.khayaBaseUrl }, apiKey = { settings.khayaApiKey })
-        // §3.2 PRIMARY voice = Abena (Ghanaian-accented English akua_eng/kwabena_eng + Twi), Khaya as first
-        // fallback, the system engine as the last resort. One instance handles both languages + caches fixed
-        // strings to disk (§2.1). Reused for Twi and English.
-        val abenaTts = AbenaTts(app, settings)
-        val voiceChain = FallbackTts(listOf(abenaTts, khayaTts))   // Abena (primary) → Khaya (fallback) → (system)
+        // Voice output = the phone's own TTS engine (offline-capable, never silent). The Ghanaian-accented
+        // cloud voices (Abena/Mobobi + Khaya/Ghana NLP) and Khaya English→Twi MT were removed 2026-09-27; the
+        // UG HCI Lab TTS API drops into this same RoutingTts seam later. Until then everything uses the system
+        // engine, and a Twi reply is spoken from its text (no MT) rather than in a dedicated Twi voice.
         val tts = RoutingTts(
-            english = systemTts,                                    // final fallback (neutral, offline-capable)
-            twi = voiceChain,                                       // Twi: Abena → Khaya → (system)
-            // §4.4 don't attempt MT offline; translate English→Twi so the Twi voice speaks Twi words.
-            enToTw = { text -> if (settings.hasKhaya && com.tekyerema.core.NetworkMonitor.isOnline()) khayaMt.toTwi(text) else null },
-            // English: Abena (Ghanaian-accented) → Khaya → system. Both give a Ghanaian accent.
-            ghEnglish = voiceChain,
-            isOnline = { (settings.hasAbena || settings.hasKhaya) && com.tekyerema.core.NetworkMonitor.isOnline() }
+            english = systemTts,
+            twi = systemTts,
+            enToTw = { null },                 // no on-device MT; a Twi voice + MT slot in with the HCI Lab API
+            ghEnglish = systemTts,
+            isOnline = { false }
         )
         val sherpa = SherpaAsr(app)
         // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
         scope.launch(Dispatchers.Default) { try { sherpa.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
-        // §4.1 Abena's first call to a voice takes 10–15 s (model load), ~1 s after. Pre-warm the two demo
-        // voices off the critical path and CACHE the greeting, so the demo doesn't open with silence and the
-        // warm-up is spent only once. Cache-first + budget-gated, so it won't drain quota on every launch.
-        if (settings.hasAbena) scope.launch(Dispatchers.Default) {
-            try { abenaTts.speak("Akwaaba.", Lang.TWI); abenaTts.speak("Welcome.", Lang.GH_EN) } catch (_: Throwable) {}
-        }
-        // Startup diagnostics (§B.2/B.3): print exactly which ASR/TTS stack is wired so it's verifiable live.
+        // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
-            "ASR: Twi=${if (settings.hasKhaya) "Khaya" else "OFF"}→Abena, Gh-EN=${if (settings.hasOnlineAsr) settings.asrOnlineModel else "?"}→Abena (Khaya=Twi-only) | " +
-            "TTS: ${if (settings.hasAbena) "Abena(${settings.abenaEnglishVoice}+abena_twi_high)" else ""}→${if (settings.hasKhaya) "Khaya" else ""}→system | " +
-            "cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
+            "online ASR: Gh-EN=${if (settings.hasOnlineAsr) settings.asrOnlineModel else "off"} (Twi = on-device only) | " +
+            "TTS: system engine | cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         controller = VoiceController(
             // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our
             // tekyerema-ghen-tiny) via sherpa-onnx are the OFFLINE path — Twi always stays on-device. For
@@ -97,22 +80,13 @@ object VoiceEngine {
                 //  Twi   → Khaya (natural-Twi ASR) when a key is set;
                 //  Gh-EN → the strong whisper endpoint when configured.
                 onlineFor = { lang ->
-                    if (!com.tekyerema.core.NetworkMonitor.isOnline()) null
+                    // Online ASR: Gh-English → Groq Whisper (fast). Twi has no online provider now (on-device
+                    // only) until the UG HCI Lab ASR API is wired into this seam. Offline ⇒ null ⇒ on-device.
+                    if (!com.tekyerema.core.NetworkMonitor.isOnline() || !settings.hasOnlineAsr) null
                     else {
-                        // KHAYA is the primary language layer where it can be (Twi ASR + all TTS); ABENA is the
-                        // fallback. Khaya's ASR is Twi-ONLY, so English speech-to-text stays on Groq Whisper
-                        // (fast) → Abena. Twi ASR → Khaya → Abena. AUTO keeps Abena first (only it transcribes
-                        // mixed Twi+English). English audio must never be sent to the Twi-only Khaya ASR.
-                        val abena = if (settings.hasAbena) AbenaAsr(app, settings) else null
-                        val khaya = if (settings.hasKhaya) KhayaAsr(baseUrl = { settings.khayaBaseUrl }, apiKey = { settings.khayaApiKey }) else null
-                        val groq = if (settings.hasOnlineAsr) GroqWhisperAsr(baseUrl = { settings.asrOnlineBaseUrl }, apiKey = { settings.asrOnlineKey }, model = settings.asrOnlineModel) else null
-                        val effective = lang ?: if (settings.sessionLanguage == Lang.TWI) Lang.TWI else null
-                        val chain = when (effective) {
-                            Lang.TWI -> listOfNotNull(khaya, abena)          // Twi: Khaya (primary) → Abena
-                            Lang.GH_EN -> listOfNotNull(groq, abena)         // Gh-English: Groq (fast; Khaya can't do En) → Abena
-                            else -> if (abena != null) listOfNotNull(abena, khaya, groq) else emptyList()
-                        }
-                        when { chain.isEmpty() -> null; chain.size == 1 -> chain[0]; else -> FallbackAsr(chain) }
+                        val effective = lang ?: settings.sessionLanguage
+                        if (effective == Lang.TWI) null
+                        else GroqWhisperAsr(baseUrl = { settings.asrOnlineBaseUrl }, apiKey = { settings.asrOnlineKey }, model = settings.asrOnlineModel)
                     }
                 },
                 forceLanguage = { settings.forcedLanguage },

@@ -172,7 +172,6 @@ class VoiceController(
         val t = text.trim()
         if (t.isEmpty() || isRunning) return false
         followUpChain = 0
-        AbenaBudget.liveAllowed = true   // a real user turn always allows the primary voice (a prior ADB test may have disabled it)
         val language = forceLanguage() ?: sessionLanguage()
         job = scope.launch { runTurn(Transcript(raw = t, canonical = t, language = language, reason = "typed"), InputSource.TYPED) }
         return true
@@ -342,7 +341,6 @@ class VoiceController(
 
     private suspend fun runOnce(quiet: Boolean = false) {
         try {
-            AbenaBudget.liveAllowed = true   // a real voice turn always allows the primary voice (undo any ADB-test disable)
             if (!hasMicPermission()) {
                 if (quiet) { idle(""); return }
                 fail(VoiceStage.MIC, "Microphone permission is off.", "I need microphone permission to hear you."); return

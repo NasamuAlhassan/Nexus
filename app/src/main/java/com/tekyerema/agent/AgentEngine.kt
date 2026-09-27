@@ -215,13 +215,10 @@ object AgentEngine {
             val cloud: AgentBrain? = when (cloudChain.size) {
                 0 -> null; 1 -> cloudChain[0]; else -> FallbackBrain(cloudChain)
             }
-            // Twi→English rewrite before the cloud operator (it can't plan from Twi). Only when a Khaya
-            // key is set; best-effort (null ⇒ goal unchanged). LocalBrain still answers command-Twi in Twi.
-            val twiToEn: (suspend (String) -> String?)? =
-                if (set.hasKhaya) {
-                    val mt = com.tekyerema.voice.KhayaTranslate(baseUrl = { set.khayaBaseUrl }, apiKey = { set.khayaApiKey })
-                    ({ goal: String -> mt.toEnglish(goal) })
-                } else null
+            // Twi→English rewrite before the cloud operator was provided by Khaya MT, removed 2026-09-27.
+            // Until the HCI Lab MT is wired into this seam there is no cloud Twi→English rewrite (null ⇒ goal
+            // unchanged); LocalBrain still answers command-Twi in Twi, and English planning is unaffected.
+            val twiToEn: (suspend (String) -> String?)? = null
             RoutingBrain(LocalBrain(), cloud, twiToEn, cloudFirst = { set.brainCloudFirst }) { com.tekyerema.core.NetworkMonitor.isOnline() }
         }
         val cloudName = buildList {
