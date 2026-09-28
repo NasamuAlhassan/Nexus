@@ -21,6 +21,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.tekyerema.agent.AgentEngine
 import com.tekyerema.settings.Settings
 import com.tekyerema.ui.components.QuietNav
@@ -31,6 +34,7 @@ import com.tekyerema.ui.onboarding.PermissionsScreen
 import com.tekyerema.ui.settings.SettingsScreen
 import com.tekyerema.ui.theme.TekyeremaTheme
 import com.tekyerema.ui.theme.pageBackground
+import kotlinx.coroutines.launch
 
 /** The app: first launch shows one permissions page, then Home / History / Settings. */
 class MainActivity : ComponentActivity() {
@@ -41,7 +45,15 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         setContent { TekyeremaTheme { App() } }
+        // A task that operates the phone started from here: get out of its way (to the app underneath, or home) and
+        // keep working in the background — the reply is spoken, the notification shows the status (OwnUi).
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) { OwnUi.stepAside.collect { moveTaskToBack(true) } }
+        }
     }
+
+    override fun onStart() { super.onStart(); OwnUi.onShown() }
+    override fun onStop() { OwnUi.onHidden(); super.onStop() }
 
     override fun onResume() {
         super.onResume()

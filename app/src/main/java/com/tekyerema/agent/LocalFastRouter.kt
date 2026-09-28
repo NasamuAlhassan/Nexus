@@ -45,6 +45,8 @@ class LocalFastRouter(
             return null
         }
         val t0 = SystemClock.uptimeMillis()
+        // A command that acts on the app in front must not act on OUR screen: step it aside first (StepAside).
+        if (StepAside.enabled() && StepAside.forFast(intent)) com.tekyerema.ui.OwnUi.leave()
         // J-13: snapshot what this command could change, so "undo" can put it back (not for the memory/audit commands).
         val reversible = intent !in NOT_UNDOABLE && intent !is FastIntent.WhatDidYouDo && intent !is FastIntent.Forget
         val before = if (reversible) try { com.tekyerema.audit.DeviceState.capture(appContext) } catch (_: Throwable) { null } else null
@@ -799,13 +801,9 @@ class LocalFastRouter(
         val app = (match as? AppResolver.Match.One)?.app ?: return null   // ambiguous/none → let the agent ask
         val launch = AppResolver.launchIntent(appContext, app.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?: return null
-        var prevFg = controller()?.foregroundPackage()
-        // Our own voice screen in front would keep the app BEHIND it: close it first (the reply is still spoken).
-        if (prevFg == appContext.packageName) {
-            com.tekyerema.ui.VoiceActivity.requestClose()
-            kotlinx.coroutines.delay(350)
-            prevFg = controller()?.foregroundPackage()
-        }
+        // Our own screen in front would keep the app BEHIND it: it steps aside first (the reply is still spoken).
+        com.tekyerema.ui.OwnUi.leave()
+        val prevFg = controller()?.foregroundPackage()
         try { appContext.startActivity(launch) } catch (t: Throwable) { return null }
         // Say "is open" only once the app is actually in front. Without the accessibility service we can't
         // see the foreground, so announce the attempt instead of claiming the result. If it never comes up,

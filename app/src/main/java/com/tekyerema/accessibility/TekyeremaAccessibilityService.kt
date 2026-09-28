@@ -168,6 +168,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null } ?: foregroundPackage()
 
     @Volatile private var fgActivityPkg: String? = null
+
+    /** Our own screen just went away (OwnUi). The app under the translucent voice screen never sends a window-state
+     *  event, so "ours" would linger here as the foreground; forget it and read the live windows next time. */
+    fun forgetOwnForeground() { if (fgActivityPkg == packageName) fgActivityPkg = null }
     private val activityClassCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /** True when [cls] is a real Activity of [pkg] — i.e. this window-state event is an app screen coming to

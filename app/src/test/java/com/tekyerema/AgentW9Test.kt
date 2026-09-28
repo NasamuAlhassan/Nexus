@@ -174,4 +174,15 @@ class AgentW9Test {
         val dead = com.tekyerema.agent.Recovery.hint("call_log", com.tekyerema.agent.Recovery.Kind.DEAD_END)
         assertTrue("a missing permission is the user's to grant", dead.contains("never open Settings"))
     }
+
+    /** Owner: "immediately I finish the prompt, it should just close the app and start thinking". */
+    @Test fun commands_on_the_app_in_front_step_our_screen_aside_answers_do_not() {
+        val sa = com.tekyerema.agent.StepAside
+        for (i in listOf(FastIntent.Back, FastIntent.Home, FastIntent.ScrollDown, FastIntent.Screenshot, FastIntent.OpenApp("whatsapp"),
+                FastIntent.Magnify("in"), FastIntent.WhatChanged))
+            assertTrue(i.name, sa.forFast(i))
+        for (i in listOf(FastIntent.Time, FastIntent.Battery, FastIntent.VolumeUp, FastIntent.FlashlightOn, FastIntent.WifiQuery,
+                FastIntent.CallHistory(missedOnly = false)))
+            assertFalse(i.name, sa.forFast(i))
+    }
 }

@@ -1444,37 +1444,28 @@ object AgentEngine {
      * up. Keyed only on our own package; no per-app logic (plan §1.22).
      */
     private suspend fun ensureOffOwnUi(ctxApp: Context) {
-        repeat(4) {
-            if (controller?.foregroundPackage() != ctxApp.packageName) return
-            controller?.globalAction("back")
-            controller?.waitForSettle(1000)
-            if (controller?.foregroundPackage() != ctxApp.packageName) {
-                log(LogEntry.Kind.INFO, "Dismissed Tɛkyerɛma's own screen to reveal the app underneath before operating.")
+        val own = com.tekyerema.ui.OwnUi
+        val pkg = ctxApp.packageName
+        // Our request screens step aside themselves and report when they're gone (OwnUi). The old check read the
+        // event-derived foreground, which the translucent voice screen never updates for the app under it — so it
+        // pressed Back and Home up to eight times into the user's app while believing we were still in front.
+        if (own.isShowing) {
+            if (own.leave()) {
+                controller?.waitForSettle(600)
+                log(LogEntry.Kind.INFO, "Tɛkyerɛma's screen stepped aside; working on the app underneath.")
                 return
             }
-            // Still on our own screen — bring a real app forward. The app the user was last on is most likely
-            // what they mean ("read my screen" while in Messages → Messages); fall back to HOME.
-            val prior = controller?.priorForegroundPackage()?.takeIf { it != ctxApp.packageName }
-            val relaunched = prior?.let { pkg ->
-                try {
-                    ctxApp.packageManager.getLaunchIntentForPackage(pkg)
-                        ?.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                        ?.also { ctxApp.startActivity(it) } != null
-                } catch (t: Throwable) { false }
-            } ?: false
-            if (relaunched) {
-                controller?.waitForSettle(1500)
-                if (controller?.foregroundPackage() != ctxApp.packageName) {
-                    log(LogEntry.Kind.INFO, "Returned to the app you were on ($prior) before operating.")
-                    return
-                }
-            } else {
-                controller?.globalAction("home")
-                controller?.waitForSettle(1200)
+        } else if (controller?.foregroundPackage() != pkg || controller?.activeWindowPackage() != pkg) return
+        // Another of our screens, or one that didn't leave: one Back, then Home — each checked, never a loop.
+        for (action in listOf("back", "home")) {
+            controller?.globalAction(action)
+            kotlinx.coroutines.delay(700)
+            if (!own.isShowing && controller?.activeWindowPackage() != pkg) {
+                log(LogEntry.Kind.INFO, "Left Tɛkyerɛma's own screen ($action) before operating.")
+                return
             }
         }
-        if (controller?.foregroundPackage() == ctxApp.packageName)
-            log(LogEntry.Kind.INFO, "Still on Tɛkyerɛma's own screen after retries — close it and try again if the next step is refused.")
+        log(LogEntry.Kind.INFO, "Still on Tɛkyerɛma's own screen — close it and try again if the next step is refused.")
     }
 
     /**
