@@ -43,7 +43,7 @@ class LocalFastRouter(
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
         val intent = FastIntentClassifier.classify(text) ?: run {
-            Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${text.take(60)}'")
+            Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
         }
         val t0 = SystemClock.uptimeMillis()

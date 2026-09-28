@@ -1343,8 +1343,10 @@ object AgentEngine {
      */
     private suspend fun awaitSecureInput(reason: String = "momo_pin"): Boolean {
         drain(secureChannel)
+        // J-15: while the user types the secret, no speech reaches logcat or a cloud recogniser (see Privacy.secureStep).
+        com.tekyerema.core.Privacy.secureStep = true
         _state.update { it.copy(status = AgentStatus.SECURE_INPUT, handoffReason = reason) }
-        val done = secureChannel.receive()
+        val done = try { secureChannel.receive() } finally { com.tekyerema.core.Privacy.secureStep = false }
         _state.update { it.copy(handoffReason = null) }
         if (done) setStatus(AgentStatus.THINKING)
         return done

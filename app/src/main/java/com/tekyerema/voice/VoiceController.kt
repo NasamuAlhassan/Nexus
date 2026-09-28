@@ -382,7 +382,7 @@ class VoiceController(
                         val tr = try { asr.transcribe(cap.wav, sessionLanguage(), forceLanguage()) }
                         catch (c: CancellationException) { throw c } catch (_: Exception) { null }
                         val heard = tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() }
-                        Log.i("Tekyerema", "[VOICE] confirmation heard='${tr?.raw}' → ${Confirmation.interpret(heard)}")
+                        Log.i("Tekyerema", "[VOICE] confirmation heard='${com.tekyerema.core.Privacy.content(tr?.raw)}' → ${Confirmation.interpret(heard)}")   // J-15
                         // §8/§9/§13/§14 — a coherent reply that isn't yes/no ("send it to Kofi instead",
                         // "make it shorter", "actually call Ama") is a CORRECTION, not a decline. Hand the
                         // words to the brain, which re-plans against the pending proposal; the run continues

@@ -20,6 +20,25 @@ object Privacy {
     /** Full text in logcat? Debug builds yes (development); release builds only with an explicit config opt-in. */
     fun logContent(): Boolean = com.tekyerema.BuildConfig.DEBUG || AppConfig.bool("privacy.logcatContent", false)
 
+    /**
+     * Secure Input Mode is running: the user is typing a PIN / password / one-time code and the agent is blind. Set by
+     * the engine for exactly that window. While it is set nothing the user says reaches logcat — not even in a debug
+     * build — and speech is recognised on the phone only: the microphone is open just to hear "done", but a screen
+     * reader may be speaking the digits being typed (a USSD PIN box is often not a password field), or the user may
+     * murmur them. A hard boundary in code, not config.
+     */
+    @Volatile var secureStep: Boolean = false
+
+    /**
+     * [text] as it may appear in a log line: the words when content logging is allowed and no secure step is running,
+     * otherwise only their length. Use for anything a person said, typed, or saw on screen (J-15).
+     */
+    fun content(text: String?, logAllowed: Boolean = logContent(), secure: Boolean = secureStep): String = when {
+        text == null -> "null"
+        logAllowed && !secure -> text
+        else -> "(${text.length} chars)"
+    }
+
     /** Redact trace files? Release builds always; debug builds when config asks (default: keep detail for development). */
     fun redactTraces(): Boolean = !com.tekyerema.BuildConfig.DEBUG || AppConfig.bool("privacy.retention.redactTraces", false)
 
