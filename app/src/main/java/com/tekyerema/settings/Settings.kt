@@ -52,7 +52,13 @@ class Settings(context: Context) {
      *  default reasoning behavior for gpt-oss models — set via local.properties' GROQ_REASONING_EFFORT
      *  for endpoints/models where it helps (e.g. a local "thinking" model that's otherwise too slow). */
     val groqReasoningEffort: String
-        get() = BuildConfig.DEFAULT_GROQ_REASONING_EFFORT
+        get() = prefs.getString(KEY_REASONING_OVERRIDE, null)?.takeIf { it.isNotBlank() }
+            ?: BuildConfig.DEFAULT_GROQ_REASONING_EFFORT
+
+    /** DEBUG A/B only (RunGoalReceiver `--es reasoning low|medium|high|default`): overrides the build default. */
+    var reasoningEffortOverride: String?
+        get() = prefs.getString(KEY_REASONING_OVERRIDE, null)
+        set(v) { prefs.edit().putString(KEY_REASONING_OVERRIDE, v?.trim()?.ifBlank { null }).apply() }
 
     val hasGroqKey: Boolean get() = groqApiKey.isNotBlank()
 
@@ -211,6 +217,7 @@ class Settings(context: Context) {
         private const val KEY_GROQ_MODEL = "groq_model"
         private const val KEY_GROQ_URL = "groq_base_url"
         private const val KEY_CLOUD_FIRST = "brain_cloud_first"
+        private const val KEY_REASONING_OVERRIDE = "debug_reasoning_effort"
         private const val KEY_LANG = "session_language"
         const val DEFAULT_MODEL = "gemini-3.6-flash"
         const val DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b"

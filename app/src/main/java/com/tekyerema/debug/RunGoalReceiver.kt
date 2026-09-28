@@ -7,6 +7,7 @@ import android.util.Log
 import com.tekyerema.BuildConfig
 import com.tekyerema.agent.AgentEngine
 import com.tekyerema.agent.TestScenario
+import kotlinx.coroutines.launch
 
 /**
  * DEBUG ONLY. Lets a developer trigger a goal over ADB, e.g.:
@@ -94,6 +95,30 @@ class RunGoalReceiver : BroadcastReceiver() {
             com.tekyerema.voice.VoiceDebug.setBrain(context.applicationContext, url, intent.getStringExtra("model"))
             return
         }
+        // Log what the agent's perception sees on the current screen (DEBUG only — may include on-screen text).
+        //   --es dump_screen 1
+        intent.getStringExtra("dump_screen")?.let {
+            val pending = goAsync()
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                try {
+                    val snap = AgentEngine.currentController()?.buildSnapshot()
+                    Log.i("Tekyerema", "[SCREEN] app=${snap?.appPackage} name=${snap?.appName} title=${snap?.screenTitle} n=${snap?.elements?.size}")
+                    snap?.elements?.forEach { e ->
+                        Log.i("Tekyerema", "[SCREEN] #${e.id} ${e.role} '${e.label?.take(50)}'" +
+                            (if (e.editable) " EDITABLE hint='${e.hint}' id=${e.viewId?.substringAfter(":id/")}" else "") +
+                            (if (e.clickable) " click" else "") + (if (e.focused) " focused" else ""))
+                    }
+                } finally { pending.finish() }
+            }
+            return
+        }
+        // A/B the cloud model's reasoning effort without a rebuild.  --es reasoning low|medium|high|default
+        intent.getStringExtra("reasoning")?.let { v ->
+            val s = com.tekyerema.settings.Settings(context.applicationContext)
+            s.reasoningEffortOverride = if (v.equals("default", true)) null else v.lowercase()
+            Log.i("Tekyerema", "[BRAIN] reasoning_effort → ${s.groqReasoningEffort.ifBlank { "(provider default)" }}")
+            return
+        }
         // Route every request to the cloud brain, without changing the URL.  --es cloud_first 1|0
         intent.getStringExtra("cloud_first")?.let { v ->
             com.tekyerema.voice.VoiceDebug.setCloudFirst(context.applicationContext, v == "1" || v.equals("true", true))
@@ -167,7 +192,8 @@ class RunGoalReceiver : BroadcastReceiver() {
         //   --es eval_suite core [--es eval_route voice|agent] [--ei seed 42]
         intent.getStringExtra("eval_suite")?.let { suite ->
             com.tekyerema.eval.EvalRunner.run(context.applicationContext, suite, intent.getIntExtra("seed", 0),
-                intent.getStringExtra("eval_route") ?: "voice")
+                intent.getStringExtra("eval_route") ?: "voice",
+                intent.getStringExtra("eval_only")?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }?.toSet().orEmpty())
             return
         }
         val goal = intent.getStringExtra("goal")?.trim().orEmpty()
