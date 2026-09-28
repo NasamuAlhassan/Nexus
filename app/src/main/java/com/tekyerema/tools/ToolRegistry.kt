@@ -3,10 +3,20 @@ package com.tekyerema.tools
 import org.json.JSONArray
 import org.json.JSONObject
 
-class ToolRegistry(val all: List<Tool>) {
-    private val byName = all.associateBy { it.name }
+/**
+ * The model-facing tool set. [installed] is every tool compiled into the app; [all] is the subset usable right now:
+ * a tool whose feature flag is off or whose API gate the device doesn't meet (X-02/X-10, see [ToolManifest]) is
+ * hidden from the model and refused by [get]. Computed per call so a config override takes effect immediately.
+ */
+class ToolRegistry(
+    val installed: List<Tool>,
+    private val available: (Tool) -> Boolean = { ToolManifest.isAvailable(it) }
+) {
+    private val byName = installed.associateBy { it.name }
 
-    fun get(name: String): Tool? = byName[name]
+    val all: List<Tool> get() = installed.filter(available)
+
+    fun get(name: String): Tool? = byName[name]?.takeIf(available)
 
     /** Gemini-style functionDeclarations describing every tool to the model. */
     fun functionDeclarations(): JSONArray {

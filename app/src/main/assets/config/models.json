@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "groq": {"baseUrl": "https://api.groq.com/openai/v1"},
+    "gemini": {"baseUrl": "https://generativelanguage.googleapis.com/v1beta"}
+  },
+  "models": {
+    "planner": {
+      "provider": "groq",
+      "model": "openai/gpt-oss-120b",
+      "fallbacks": ["openai/gpt-oss-20b"],
+      "temperature": 0.2,
+      "requestTokens": 4800,
+      "timeouts": {"connectSec": 8, "callSec": 35}
+    },
+    "gemini": {
+      "provider": "gemini",
+      "model": "gemini-3.6-flash",
+      "temperature": 0.2,
+      "timeouts": {"connectSec": 15, "callSec": 45},
+      "maxRateLimitWaitMs": 60000
+    }
+  }
+}

@@ -1,5 +1,6 @@
 package com.tekyerema.agent
 
+import com.tekyerema.core.config.AppConfig
 import com.tekyerema.settings.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -16,18 +17,21 @@ import java.util.concurrent.TimeUnit
 class GeminiBrain(private val settings: Settings) : AgentBrain {
 
     private val client = OkHttpClient.Builder()
-        .callTimeout(45, TimeUnit.SECONDS)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(45, TimeUnit.SECONDS)
+        .callTimeout(AppConfig.long("models.gemini.timeouts.callSec", 45), TimeUnit.SECONDS)
+        .connectTimeout(AppConfig.long("models.gemini.timeouts.connectSec", 15), TimeUnit.SECONDS)
+        .readTimeout(AppConfig.long("models.gemini.timeouts.callSec", 45), TimeUnit.SECONDS)
         .build()
 
     override suspend fun decide(ctx: BrainContext): AgentDecision = withContext(Dispatchers.IO) {
         val apiKey = settings.geminiApiKey
         if (apiKey.isBlank()) return@withContext AgentDecision.Fail("No Gemini API key configured.")
-        val url = "https://generativelanguage.googleapis.com/v1beta/models/${settings.model}:generateContent?key=$apiKey"
+        // The key travels in a header, never the URL (URLs end up in proxy and error logs).
+        val base = AppConfig.string("providers.gemini.baseUrl", "https://generativelanguage.googleapis.com/v1beta").trimEnd('/')
+        val url = "$base/models/${settings.model}:generateContent"
 
         val request = Request.Builder()
             .url(url)
+            .header("x-goog-api-key", apiKey)
             .post(buildRequest(ctx).toString().toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -35,8 +39,10 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
         // the Android action itself (tool.execute()) only ever runs once this returns a decision,
         // so retrying here can never cause a duplicate tap/call/message.
         var rateAttempts = 0
-        var totalWaitMs = 0L                    // §4.5 — cap the TOTAL 429 wait at 60 s (was 6×30 s ≈ 180 s,
-        val maxWaitMs = 60_000L                  // which blew past the 180 s agent ceiling); then fail honestly.
+        // §4.5 — cap the TOTAL 429 wait (default 60 s; was 6×30 s ≈ 180 s, which blew past the 180 s agent
+        // ceiling); then fail honestly.
+        var totalWaitMs = 0L
+        val maxWaitMs = AppConfig.long("models.gemini.maxRateLimitWaitMs", 60_000L)
         while (true) {
             val (code, text) = try {
                 client.newCall(request).execute().use { resp -> resp.code to resp.body?.string().orEmpty() }
@@ -69,7 +75,7 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
             .put("systemInstruction", system)
             .put("contents", contents)
             .put("tools", tools)
-            .put("generationConfig", JSONObject().put("temperature", 0.2))
+            .put("generationConfig", JSONObject().put("temperature", AppConfig.double("models.gemini.temperature", 0.2)))
     }
 
     private fun parseResponse(text: String): AgentDecision {

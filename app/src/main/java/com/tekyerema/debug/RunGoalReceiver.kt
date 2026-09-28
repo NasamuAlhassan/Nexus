@@ -29,6 +29,26 @@ class RunGoalReceiver : BroadcastReceiver() {
             } catch (t: Throwable) { Log.i("Tekyerema", "[TRACE] error ${t.message}") }
             return
         }
+        // X-13/N-12: config overrides and capability state, zero LLM cost.
+        //   adb ... --es set_config '{"flags":{"E-08":{"enabled":false}}}'   |   --es set_config off
+        //   adb ... --es dump_config models.planner          (any dotted path; "1" dumps the whole tree)
+        //   adb ... --es dump_capabilities 1
+        intent.getStringExtra("set_config")?.let { json ->
+            com.tekyerema.core.config.AppConfig.setOverrides(context.applicationContext, json.takeUnless { it.trim() == "off" })
+            Log.i("Tekyerema", "[CONFIG] overrides ${if (json.trim() == "off") "cleared" else "set"}")
+            return
+        }
+        intent.getStringExtra("dump_config")?.let { path ->
+            val node = if (path == "1") com.tekyerema.core.config.AppConfig.snapshot() else com.tekyerema.core.config.AppConfig.node(path)
+            Log.i("Tekyerema", "[CONFIG] $path = ${node?.toString()?.take(3500)}")
+            return
+        }
+        intent.getStringExtra("dump_capabilities")?.let {
+            com.tekyerema.core.config.CapabilityRegistry.describe(context.applicationContext).forEach { Log.i("Tekyerema", "[CAPS] $it") }
+            val reg = com.tekyerema.tools.ToolRegistry(com.tekyerema.tools.defaultTools())
+            reg.installed.forEach { t -> Log.i("Tekyerema", "[TOOLS] ${t.name}: ${com.tekyerema.tools.ToolManifest.blocker(t) ?: "available"} tier=${com.tekyerema.policy.PolicyConfig.effectiveTier(t)}") }
+            return
+        }
         intent.getStringExtra("ping")?.let {
             AgentEngine.refreshReadiness()
             val s = AgentEngine.state.value

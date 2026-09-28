@@ -1,5 +1,6 @@
 package com.tekyerema.agent
 
+import com.tekyerema.core.config.AppConfig
 import com.tekyerema.settings.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -25,9 +26,9 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
     // The on-device LocalBrain handles simple goals ("open whatsapp") with NO network at all, so the cloud
     // is only for genuinely complex requests; 35 s is ample for those and fails fast otherwise.
     private val client = OkHttpClient.Builder()
-        .callTimeout(35, TimeUnit.SECONDS)
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(35, TimeUnit.SECONDS)
+        .callTimeout(AppConfig.long("models.planner.timeouts.callSec", 35), TimeUnit.SECONDS)
+        .connectTimeout(AppConfig.long("models.planner.timeouts.connectSec", 8), TimeUnit.SECONDS)
+        .readTimeout(AppConfig.long("models.planner.timeouts.callSec", 35), TimeUnit.SECONDS)
         .build()
 
     /** Groq limits are per MODEL per organization: when the primary model's DAILY quota is gone on every key, the
@@ -35,7 +36,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
      *  on every key while gpt-oss-20b answered fresh). The free Gemini tier is only 20 requests/day, so this is the
      *  fallback that actually carries a multi-step task. */
     override suspend fun decide(ctx: BrainContext): AgentDecision {
-        val models = (listOf(settings.groqModel) + FALLBACK_MODELS).distinct()
+        val models = (listOf(settings.groqModel) + AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS)).distinct()
         var last: AgentDecision = AgentDecision.Fail("no model configured")
         for ((i, model) in models.withIndex()) {
             last = decideWith(model, ctx)
@@ -96,7 +97,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                 .put("messages", messages)
                 .put("tools", ctx.openAiTools)
                 .put("tool_choice", "auto")
-                .put("temperature", 0.2)
+                .put("temperature", AppConfig.double("models.planner.temperature", 0.2))
             if (settings.groqReasoningEffort.isNotBlank()) body.put("reasoning_effort", settings.groqReasoningEffort)
 
             val request = Request.Builder()
@@ -211,7 +212,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
          *  next step doesn't fire a request that would 429. Sized to the ACTUAL step cost after the prompt
          *  trim (~4.4k typical); the old 6000 padded ~1.5k over reality and cooled each key ~18s instead of
          *  ~7s between steps. A too-low value only risks an occasional 429, which the 4-key rotation absorbs. */
-        private const val ONE_REQUEST_TOKENS = 4800
+        private val ONE_REQUEST_TOKENS get() = AppConfig.int("models.planner.requestTokens", 4800)
 
         /** Tried in order after the configured model when its daily quota is exhausted on every key. */
         private val FALLBACK_MODELS = listOf("openai/gpt-oss-20b")

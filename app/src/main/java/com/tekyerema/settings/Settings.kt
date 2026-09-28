@@ -17,7 +17,7 @@ class Settings(context: Context) {
         set(v) { prefs.edit().putString(KEY_API, v.trim()).apply() }
 
     var model: String
-        get() = prefs.getString(KEY_MODEL, DEFAULT_MODEL) ?: DEFAULT_MODEL
+        get() = prefs.getString(KEY_MODEL, null) ?: com.tekyerema.core.config.AppConfig.string("models.gemini.model", DEFAULT_MODEL)
         set(v) { prefs.edit().putString(KEY_MODEL, v.trim()).apply() }
 
     val hasKey: Boolean get() = geminiApiKey.isNotBlank()
@@ -37,14 +37,14 @@ class Settings(context: Context) {
 
     var groqModel: String
         get() = prefs.getString(KEY_GROQ_MODEL, null)
-            ?: BuildConfig.DEFAULT_GROQ_MODEL.ifBlank { DEFAULT_GROQ_MODEL }
+            ?: BuildConfig.DEFAULT_GROQ_MODEL.ifBlank { com.tekyerema.core.config.AppConfig.string("models.planner.model", DEFAULT_GROQ_MODEL) }
         set(v) { prefs.edit().putString(KEY_GROQ_MODEL, v.trim()).apply() }
 
     /** Base URL for the OpenAI-compatible brain slot. Defaults to Groq's cloud endpoint, but
      *  local.properties' GROQ_BASE_URL can repoint this at any OpenAI-compatible server —
      *  including a local Ollama instance (e.g. http://<lan-ip>:11434/v1) — with no code change. */
     var groqBaseUrl: String
-        get() = prefs.getString(KEY_GROQ_URL, null)?.ifBlank { null } ?: BuildConfig.DEFAULT_GROQ_BASE_URL.ifBlank { DEFAULT_GROQ_URL }
+        get() = prefs.getString(KEY_GROQ_URL, null)?.ifBlank { null } ?: BuildConfig.DEFAULT_GROQ_BASE_URL.ifBlank { com.tekyerema.core.config.AppConfig.string("providers.groq.baseUrl", DEFAULT_GROQ_URL) }
         set(v) = put { putString(KEY_GROQ_URL, v.trim()) }
 
     /** Optional `reasoning_effort` sent to the OpenAI-compatible endpoint (e.g. "none"/"low"/
