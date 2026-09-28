@@ -143,7 +143,7 @@ object VoiceEngine {
         // The reply panel follows the task: whenever it waits on the user (a confirmation, a question, the secure step)
         // a panel over any app shows what it's waiting for, with buttons that fit (PromptSurface).
         scope.launch(Dispatchers.Main) {
-            AgentEngine.state.map { PromptSurface.of(it.status, it.pendingConfirmation, it.pendingQuestion) }
+            AgentEngine.state.map { PromptSurface.of(it.status, it.pendingConfirmation, it.pendingQuestion, it.confirmationSeq) }
                 .distinctUntilChanged()
                 .collect { p -> if (p == null) com.tekyerema.ui.OverlayConfirm.hidePrompt(app) else com.tekyerema.ui.OverlayConfirm.showPrompt(app, p) }
         }

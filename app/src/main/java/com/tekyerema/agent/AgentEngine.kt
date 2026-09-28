@@ -262,6 +262,8 @@ object AgentEngine {
     private val paused = kotlinx.coroutines.flow.MutableStateFlow(false)
     private val steerQueue = java.util.concurrent.ConcurrentLinkedQueue<String>()
     @Volatile private var answerChannel: Channel<String?> = Channel(Channel.CONFLATED)
+    /** J-02: numbers each confirmation (see [confirm]); never reused within the process. */
+    @Volatile private var confirmSeq = 0L
 
     val isBusy: Boolean get() = currentJob?.isActive == true
 
@@ -310,10 +312,15 @@ object AgentEngine {
     }
 
     /** A yes/no counts only for a confirmation that is waiting NOW. The channel is conflated: a stray "yes" (a Yes
-     *  button left on screen, a late tap) used to sit in it and silently approve the NEXT confirmation. */
-    fun confirm(approved: Boolean) {
-        if (_state.value.status != AgentStatus.WAITING_CONFIRMATION) {
-            log(LogEntry.Kind.INFO, "Ignored a ${if (approved) "yes" else "no"}: nothing is waiting for confirmation.")
+     *  button left on screen, a late tap) used to sit in it and silently approve the NEXT confirmation.
+     *  @param forSeq the confirmation the user was answering ([AgentUiState.confirmationSeq] of the prompt they saw or
+     *  heard). A yes to an earlier one is refused (J-02, [com.tekyerema.policy.ConfirmGate]); null only for the ADB hook. */
+    fun confirm(approved: Boolean, forSeq: Long? = null) {
+        val st = _state.value
+        val waiting = st.status == AgentStatus.WAITING_CONFIRMATION
+        if (!com.tekyerema.policy.ConfirmGate.accepts(approved, waiting, st.confirmationSeq, forSeq)) {
+            log(LogEntry.Kind.INFO, if (!waiting) "Ignored a ${if (approved) "yes" else "no"}: nothing is waiting for confirmation."
+                else "Ignored a yes given to an earlier question — this one still needs its own answer.")
             return
         }
         confirmChannel.trySend(if (approved) ConfirmReply.Approve else ConfirmReply.Decline)
@@ -880,7 +887,9 @@ object AgentEngine {
                                 log(LogEntry.Kind.CONFIRM, prompt)
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
                                 drain(confirmChannel)   // only a reply to THIS prompt counts
-                                _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = prompt, pendingConfirmationTwi = promptTwi) }
+                                val seq = ++confirmSeq   // J-02: every surface's yes must name this number
+                                _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = prompt,
+                                    pendingConfirmationTwi = promptTwi, confirmationSeq = seq) }
                                 // The reply panel (Yes / No over whatever app is in front) follows this state — VoiceEngine
                                 // shows it. It must be GONE before the approved action runs, or the tap lands on the panel.
                                 val reply = confirmChannel.receive()

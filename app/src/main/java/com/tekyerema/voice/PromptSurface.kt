@@ -11,12 +11,14 @@ import com.tekyerema.agent.AgentStatus
 object PromptSurface {
     enum class Kind { CONFIRM, QUESTION, SECURE }
 
-    data class Prompt(val kind: Kind, val text: String)
+    /** [seq] = which confirmation a CONFIRM panel is for (J-02): its Yes approves that one only, and a new confirmation
+     *  with the same words is still a new panel. */
+    data class Prompt(val kind: Kind, val text: String, val seq: Long = 0L)
 
     /** No text, no panel: the engine clears the prompt a moment before it leaves the waiting status (the reply was
      *  given), and a panel re-shown in that gap would sit over the app while the approved action runs. */
-    fun of(status: AgentStatus, confirmation: String?, question: String?): Prompt? = when (status) {
-        AgentStatus.WAITING_CONFIRMATION -> confirmation?.takeIf { it.isNotBlank() }?.let { Prompt(Kind.CONFIRM, it) }
+    fun of(status: AgentStatus, confirmation: String?, question: String?, seq: Long = 0L): Prompt? = when (status) {
+        AgentStatus.WAITING_CONFIRMATION -> confirmation?.takeIf { it.isNotBlank() }?.let { Prompt(Kind.CONFIRM, it, seq) }
         AgentStatus.ASKING -> question?.takeIf { it.isNotBlank() }?.let { Prompt(Kind.QUESTION, it) }
         AgentStatus.SECURE_INPUT -> Prompt(Kind.SECURE, "Secure step — enter it yourself. Tɛkyerɛma isn't looking.")
         else -> null
