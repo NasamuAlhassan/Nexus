@@ -497,6 +497,9 @@ object ReadScreenTool : Tool {
             com.tekyerema.agent.ScreenReadCursor.next(key)?.let { return ToolResult(true, it, channel = "none") }
         val snap = Perception.observe(ctrl, false, "read the screen")
         if (private(snap)) { com.tekyerema.agent.ScreenReadCursor.clear(); return ToolResult(true, PRIVATE, channel = "none") }
+        // J-11 again on what was actually observed: the raw read above can fail (null) or the app in front can change.
+        if (com.tekyerema.policy.ScreenPrivacy.isDenied(snap.appPackage))
+            return ToolResult(true, "That app is on your do-not-read list, so I won't read it.", channel = "none")
         if (snap.secureWindow && snap.elements.none { !it.label.isNullOrBlank() })
             return ToolResult(true, SECURE_SCREEN, JSONObject().put("secure", true), channel = "none")
         val parts = com.tekyerema.agent.ScreenReadout.compose(snap)
