@@ -12,7 +12,10 @@ import com.tekyerema.core.config.AppConfig
  *  - an IRREVERSIBLE retry: a consequential action (send, call, pay…) that failed or didn't verify may still have
  *    happened. It is not tried again until the task has checked (any read of the screen, messages or call log).
  *  - ESCALATION to the user after `executor.recovery.maxConsecutiveFailures` failed steps in a row (default 3), at most
- *    `executor.recovery.maxEscalations` times per task (default 1).
+ *    `executor.recovery.maxEscalations` times per task (default 1). The streak counts only real stuckness — a failed tool,
+ *    an action that changed nothing, an unmet claim with nothing new on screen; a step that moved on to new content and a
+ *    read hold it (see [Progress.nextFailStreak]). On the A20e, two scrolls toward "About phone" used to count as failures
+ *    and the user was asked "keep trying or stop?" in the middle of a task that was going fine.
  */
 class LoopGuard(
     private val cycleNudge: Int = AppConfig.int("executor.loopGuard.cycleNudge", 2).coerceAtLeast(2),

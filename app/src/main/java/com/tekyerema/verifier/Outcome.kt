@@ -33,14 +33,29 @@ sealed class Expectation {
 }
 
 object Expects {
+    private const val QUOTES = "\"'“”‘’`"
+
+    /** The model often quotes the label ("element_present: 'About phone'"); a quote is never part of what's on screen. */
+    internal fun unquote(s: String): String {
+        var t = s.trim()
+        while (t.length >= 2 && t.first() in QUOTES && t.last() in QUOTES) t = t.substring(1, t.length - 1).trim()
+        return t
+    }
+
+    /** The same claim in plain words — seen on the A20e: "element containing 'Open'", which parsed as nothing and
+     *  left a real, checkable claim unverified. Only presence phrasing; anything else stays Unparsed (vacuous). */
+    private val NATURAL_PRESENT = Regex("(?i)^(?:an? |the )?(?:element|item|row|button|text|label|option|entry)s? " +
+        "(?:containing|contains|with (?:the )?(?:text|label)|labell?ed|named|called|saying|that says|reading):? (.+)$")
+
     fun parse(raw: String?): Expectation? {
         val s = raw?.trim().orEmpty()
         if (s.isEmpty()) return null
+        NATURAL_PRESENT.find(s)?.let { m -> unquote(m.groupValues[1]).takeIf { it.isNotEmpty() }?.let { return Expectation.ElementPresent(it) } }
         val idx = s.indexOf(':')
         val key = (if (idx < 0) s else s.substring(0, idx)).trim().lowercase().replace(' ', '_').replace('-', '_')
-        val arg = if (idx < 0) "" else s.substring(idx + 1).trim()
+        val arg = if (idx < 0) "" else unquote(s.substring(idx + 1))
         return when (key) {
-            "element_present", "present", "visible" ->
+            "element_present", "present", "visible", "text", "shows", "screen_shows", "contains", "label" ->
                 arg.takeIf { it.isNotEmpty() }?.let { Expectation.ElementPresent(it) } ?: Expectation.Unparsed(s)
             "element_absent", "absent", "gone" ->
                 arg.takeIf { it.isNotEmpty() }?.let { Expectation.ElementAbsent(it) } ?: Expectation.Unparsed(s)
@@ -50,7 +65,7 @@ object Expects {
             "field_filled", "field_nonempty", "field_not_empty" -> Expectation.FieldFilled(arg.toIntOrNull())
             "field_contains" -> {
                 val parts = arg.split('|', limit = 2).map { it.trim() }
-                if (parts.size == 2) Expectation.FieldContains(parts[0].toIntOrNull(), parts[1])
+                if (parts.size == 2) Expectation.FieldContains(parts[0].toIntOrNull(), unquote(parts[1]))
                 else Expectation.FieldContains(null, arg)
             }
             "range_value", "range", "value" -> {

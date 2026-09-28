@@ -36,10 +36,13 @@ class RoutingBrain(
 ) : AgentBrain {
 
     companion object {
-        /** C-17: the engine's history line for the previous step reports a failure, a rejection or an unverified result. */
+        /** C-17: the engine's history line for the previous step reports a failure, a rejection or an unverified result.
+         *  A "partial" step (moved on, claim not met yet — G-21) is a deviation too: the local rules' routine expected
+         *  that claim, so the rest of the task goes to the planner that can explore. */
         fun deviated(history: List<String>): Boolean {
             val last = history.lastOrNull() ?: return false
-            return last.contains("verified=false") || Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
+            return last.contains("verified=false") || last.contains("verified=partial") ||
+                Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
         }
     }
 
