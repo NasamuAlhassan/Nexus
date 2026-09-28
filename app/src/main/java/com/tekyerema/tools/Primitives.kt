@@ -262,7 +262,16 @@ object ScrollTool : Tool {
         var nodeId: Int? = null
         if (target != null) {
             val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
-            if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
+            if (t == null) {
+                // G-21: a label that isn't on screen is where the model wants to GET TO ("scroll down to About phone" —
+                // A20e trace), not the list to scroll: search the list for it (to its end and back, TargetResolver).
+                if (target is Target.ByLabel && ctx.resolvedTarget == null) {
+                    val (found, _) = TargetResolver.resolve(target, ctrl, ctx.observedBefore, allowScroll = true)
+                    if (found is ResolveOutcome.Found) return ToolResult(true, "Scrolled until '${target.label.take(60)}' was on screen.", channel = "node")
+                    if (found is ResolveOutcome.NotFound) return ToolResult(false, found.detail)
+                }
+                return ToolResult(false, err ?: "Could not resolve target.")
+            }
             nodeId = t.nodeId; region = t.nodeId?.let { ctrl.boundsOf(it) } ?: t.element?.bounds
         } else {
             val snap = ctx.observedBefore ?: ctrl.buildSnapshot()
@@ -306,7 +315,12 @@ object TypeTool : Tool {
         val (t, err) = resolveForExecute(args, ctx, ctrl, allowScroll = false)
         if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
         val nodeId = t.nodeId ?: return ToolResult(false, "Typing needs an editable tree element, not a vision target.")
-        if (t.element?.editable != true) return ToolResult(false, "Element $nodeId is not editable.")
+        // Many search bars are a BUTTON that opens the real text field (Play Store, Settings, the launcher). "Element 51
+        // is not editable" alone sent the model tapping other things on the A20e (3 traces, 2026-09-28); say what to do.
+        // Deliberately not tapped here: the field that opens was never seen by the policy gate (password/PIN check).
+        if (t.element?.editable != true) return ToolResult(false, "Element $nodeId" +
+            (t.element?.label?.takeIf { it.isNotBlank() }?.let { " ('${it.take(40)}')" } ?: "") + " is not a text field" +
+            (if (t.element?.clickable == true) " — it's a button: tap it first, then type into the text field that opens." else "."))
         var ok = ctrl.setText(nodeId, text, submit)
         var how = "node"
         // G-05: some fields (custom editors, some web inputs) reject ACTION_SET_TEXT; paste the text instead.

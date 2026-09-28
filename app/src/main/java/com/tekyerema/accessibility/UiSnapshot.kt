@@ -126,18 +126,16 @@ data class UiSnapshot(
             // Mark only vision elements (they need x,y grounding); "tree" is the default, so omit it — this
             // JSON is sent for up to 45 elements on every step, so per-element bytes dominate the request.
             if (e.source == ElementSource.VISION) o.put("source", "vision")
+            // Only STATE flags. What an element can DO is in `actions` below (tap = clickable, long_press, type = editable,
+            // scroll = scrollable, set_range = adjustable); sending both cost ~20 characters per control on every step,
+            // under a free tier capped in tokens per minute. Readers of this JSON take either (LocalBrain.describeScreen).
             val flags = ArrayList<String>()
-            if (e.editable) flags.add("editable")
-            if (e.clickable) flags.add("clickable")
-            if (e.longClickable) flags.add("long_pressable")
-            if (e.scrollable) flags.add("scrollable")
             if (e.checkable) flags.add("checkable")
             if (e.checked) flags.add("checked")
             if (e.selected) flags.add("selected")
             if (!e.enabled) flags.add("disabled")
             if (e.focused) flags.add("focused")
             if (e.password) flags.add("password")
-            if (e.range != null) flags.add("adjustable")
             if (e.heading) flags.add("heading")   // F-14
             if (e.link) flags.add("link")         // F-14
             if (flags.isNotEmpty()) o.put("flags", JSONArray(flags))
@@ -161,7 +159,11 @@ data class UiSnapshot(
             .put("snap", snapshotId)                                                            // F-03
             .apply { if (focus != null) put("focus", focus) }                                   // F-03 input focus
             .put("elementCount", elements.size)
-            .put("perception", JSONObject().put("source", perception.source).put("reason", perception.reason))
+            // The routine "tree exposed N actionable elements" tells the model nothing the listing doesn't; a vision look
+            // or a failed one ("vision fallback failed: rate limited") does, so only those carry a reason.
+            .put("perception", JSONObject().put("source", perception.source).apply {
+                if (perception.source != "tree" || !perception.reason.startsWith("tree exposed")) put("reason", perception.reason)
+            })
             .apply { if (secureWindow) put("secureWindow", true) }
             .apply { if (windowType != null) put("window", windowType) }                       // F-13
             .apply { if (announcements.isNotEmpty()) put("announced", JSONArray(announcements)) }  // F-17

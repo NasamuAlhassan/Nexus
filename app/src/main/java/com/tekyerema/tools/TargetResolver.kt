@@ -82,12 +82,18 @@ object TargetResolver {
      * Executor-time resolution. For labels not visible in the current snapshot, scrolls the first
      * scrollable region to reveal more (bounded), re-observing after each scroll — the retained
      * Phase 1 scroll-to-reveal behaviour, now shared by every label-targeting primitive.
+     *
+     * G-21: it stops at the END of the list (the screen stopped moving) instead of scrolling a fixed 7 times with a
+     * settle wait each — at the bottom of One UI Settings that was ~10 s of dead scrolls — and then looks back UP, since
+     * an earlier step may have left the list scrolled past the item. A miss then means "not in this list", which the
+     * reply says, so the planner stops scrolling it.
      */
     suspend fun resolve(target: Target, ctrl: AccessibilityController, snapshot: UiSnapshot?, allowScroll: Boolean): Pair<ResolveOutcome, UiSnapshot?> {
         var snap = snapshot
         val first = resolveStatic(target, snap)
         if (first !is ResolveOutcome.NotFound || target !is Target.ByLabel || !allowScroll) return first to snap
-        repeat(7) {
+        val plan = ScrollSearch(MAX_SEARCH_SCROLLS)
+        while (true) {
             snap = ctrl.buildSnapshot()
             when (val r = resolveStatic(target, snap)) {
                 is ResolveOutcome.Found, is ResolveOutcome.OnlyWeak -> return r to snap
@@ -95,10 +101,43 @@ object TargetResolver {
             }
             val scrollable = snap?.elements?.firstOrNull { it.scrollable }?.id
                 ?: return ResolveOutcome.NotFound("couldn't find '${target.label}' and nothing is scrollable") to snap
-            ctrl.scrollElement(scrollable, "down")
+            val direction = plan.next(snap?.signature()) ?: break
+            if (!ctrl.scrollElement(scrollable, direction)) { plan.blocked(); continue }
             ctrl.waitForSettle(1500)
         }
-        return ResolveOutcome.NotFound("couldn't find an item labelled '${target.label}' after scrolling") to snap
+        return ResolveOutcome.NotFound("couldn't find an item labelled '${target.label}' anywhere in this list (scrolled to its end" +
+            (if (plan.reversed) " and back up" else "") + ") — it isn't here; try the app's own search or another screen") to snap
+    }
+
+    private const val MAX_SEARCH_SCROLLS = 12
+
+    /**
+     * Which way to scroll next while searching a list, or null when it's done: down until the list stops moving (or the
+     * scroll action is refused), then up until it stops again, [max] scrolls in all. Pure, so it is unit-tested.
+     */
+    internal class ScrollSearch(private val max: Int) {
+        var reversed = false; private set
+        private var dir = "down"
+        private var lastSig: String? = null
+        private var used = 0
+        private var done = false
+
+        /** [sig] is the screen now; null = unknown (never counts as "stopped moving"). */
+        fun next(sig: String?): String? {
+            if (done || used >= max) return null
+            if (sig != null && sig == lastSig && !turn()) return null
+            lastSig = sig
+            used++
+            return dir
+        }
+
+        /** The scroll action itself was refused (already at that end). */
+        fun blocked() { used--; lastSig = null; if (!turn()) done = true }
+
+        private fun turn(): Boolean {
+            if (reversed) { done = true; return false }
+            reversed = true; dir = "up"; return true
+        }
     }
 
     /**
