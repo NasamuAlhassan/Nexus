@@ -132,6 +132,9 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             // SEC-P1-4: the request body carries the full screen snapshot (private messages, contacts, notif
             // text). Log it ONLY in debug builds — never in the shared/release APK.
             if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-REQ] ${body.toString().take(4000)}")
+            // D-02: the request log is cut before the tool list, so name the tools this step offered (names only).
+            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-TOOLS] " + (0 until ctx.openAiTools.length())
+                .joinToString(",") { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() })
             var remaining: Int? = null; var limitTok: Int? = null; var resetMs: Long? = null; var retryMs: Long? = null
             // Cancellable: stopping the task aborts this request instead of waiting for the model to answer.
             val (code, text) = try {
