@@ -10,6 +10,7 @@ sealed class FastIntent(val name: String) {
     object Day : FastIntent("DAY")
     object Battery : FastIntent("BATTERY")
     object Storage : FastIntent("STORAGE")
+    object DeviceInfo : FastIntent("DEVICE_INFO")
     object VolumeUp : FastIntent("VOLUME_UP")
     object VolumeDown : FastIntent("VOLUME_DOWN")
     object VolumeMute : FastIntent("VOLUME_MUTE")
@@ -151,6 +152,7 @@ object FastIntentClassifier {
             RE_DATE.containsMatchIn(g) -> FastIntent.Date
             RE_BATTERY.containsMatchIn(g) -> FastIntent.Battery
             RE_STORAGE.containsMatchIn(g) && !RE_STORAGE_ACTION.containsMatchIn(g) -> FastIntent.Storage
+            RE_DEVICE_INFO.containsMatchIn(g) -> FastIntent.DeviceInfo
 
             RE_VOL_QUERY.containsMatchIn(g) -> FastIntent.VolumeQuery
             RE_UNMUTE.containsMatchIn(g) -> FastIntent.VolumeUnmute
@@ -301,6 +303,10 @@ object FastIntentClassifier {
     // ("free up space", "clear storage", "open storage settings"), which goes to the agent.
     private val RE_STORAGE = Regex("\\b(how\\s+much|what'?s|what\\s+is|check|remaining|left|enough|available)\\b.*\\b(storage|space)\\b|" +
         "\\b(storage|space)\\b.*\\b(left|remaining|available|do\\s+i\\s+have|is\\s+free)\\b")
+    // "which Android version is this phone?" — the phone knows; on One UI the answer is three screens deep in Settings
+    // (About phone › Software information), where the agent got stuck on the A20e.
+    private val RE_DEVICE_INFO = Regex("\\b(?:android|software|os|one ui) version\\b|\\bwhich android\\b|\\bwhat android\\b|" +
+        "\\bwhat (?:phone|model) (?:is this|am i using|do i have)\\b|\\b(?:my|this) phone(?:'s)? model\\b|\\bwhat model is (?:this|my) phone\\b")
     private val RE_STORAGE_ACTION = Regex("\\b(free\\s+up|clear|clean|delete|remove|open|settings|manage|make)\\b")
     private val RE_BATTERY = Regex("\\bbattery\\b|\\bhow\\s+much\\s+(?:charge|power)\\b")
 

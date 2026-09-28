@@ -236,4 +236,11 @@ class FastIntentClassifierTest {
         for (s in listOf("Can you tell me who I called last", "Who did I call last?", "my last call"))
             assertEquals(s, FastIntent.CallHistory(missedOnly = false), c(s))
     }
+
+    /** The A20e got stuck three screens deep in One UI Settings looking for this; the phone knows it. */
+    @Test fun android_version_is_answered_by_the_phone() {
+        for (s in listOf("Which Android version is this phone?", "what android version do I have", "What phone is this?", "what's my phone model"))
+            assertEquals(s, FastIntent.DeviceInfo, c(s))
+        assertNull("a compound request stays with the agent", c("open Settings and tell me which Android version this phone has"))
+    }
 }

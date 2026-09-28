@@ -72,6 +72,7 @@ class LocalFastRouter(
         FastIntent.Day -> handled(intent, dayText())
         FastIntent.Battery -> handled(intent, batteryText())
         FastIntent.Storage -> handled(intent, storageText())
+        FastIntent.DeviceInfo -> handled(intent, deviceText())
 
         FastIntent.VolumeUp -> stepVolume(raise = true)
         FastIntent.VolumeDown -> stepVolume(raise = false)
@@ -521,6 +522,14 @@ class LocalFastRouter(
         "Today is " + SimpleDateFormat("EEEE", Locale.getDefault()).format(Date()) + "."
 
     /** Free / total internal storage, straight from the filesystem (what Settings › Storage shows). */
+    /** The phone's make, model and Android version, straight from the system (no Settings trip). */
+    private fun deviceText(): String {
+        val maker = android.os.Build.MANUFACTURER.orEmpty().replaceFirstChar { it.uppercase() }
+        val model = android.os.Build.MODEL.orEmpty()
+        val phone = listOf(maker, model).filter { it.isNotBlank() }.distinct().joinToString(" ").ifBlank { "This phone" }
+        return "This is a $phone, running Android ${android.os.Build.VERSION.RELEASE}."
+    }
+
     private fun storageText(): String {
         val stat = try { android.os.StatFs(android.os.Environment.getDataDirectory().path) } catch (_: Throwable) { null }
             ?: return "I couldn't read your storage right now."
