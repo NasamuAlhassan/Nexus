@@ -72,6 +72,15 @@ class AgentW9Test {
         assertEquals("", com.tekyerema.voice.SelfEcho.resumeFrom("banana", reply))
     }
 
+    @Test fun a_misheard_app_name_suggests_the_closest_installed_apps() {
+        val installed = listOf("YouTube", "Play Store", "Galaxy Store", "Video Player", "Game Launcher", "Calculator")
+        val close = com.tekyerema.tools.closestNames("product video game", installed)
+        assertTrue(close.toString(), "Video Player" in close && "Game Launcher" in close)
+        assertFalse("Calculator" in close)
+        assertTrue(com.tekyerema.tools.closestNames("zzz", installed).isEmpty())
+        assertTrue("letter-pair noise is not a suggestion", com.tekyerema.tools.closestNames("zorblax", installed).isEmpty())
+    }
+
     @Test fun undoing_a_new_schedule_says_it_was_removed() {
         assertEquals("Okay, I removed the new schedule.",
             com.tekyerema.audit.DeviceState.spoken(listOf(com.tekyerema.audit.Inverse.RemoveSchedule("s1")), emptyList()))

@@ -18,6 +18,25 @@ import org.json.JSONObject
 internal fun spokenAppName(query: String): String =
     query.trim().replace(Regex("(?i)^(the|my)\\s+"), "").replace(Regex("(?i)\\s+(app|application)$"), "").ifBlank { query.trim() }
 
+/** Up to three installed app names closest to a name that wasn't found (shared words or letters), for "did you mean…". */
+internal fun closestApps(context: android.content.Context, query: String): List<String> =
+    closestNames(spokenAppName(query), try { AppResolver.launchable(context).map { it.label } } catch (_: Throwable) { emptyList() })
+
+/** Pure (unit-tested): rank [labels] by shared words, then shared character bigrams, with [query]. */
+internal fun closestNames(query: String, labels: List<String>, max: Int = 3): List<String> {
+    fun norm(s: String) = s.lowercase().filter { it.isLetterOrDigit() || it == ' ' }
+    val q = norm(query)
+    val qWords = q.split(' ').filter { it.length >= 3 }.toSet()
+    val qBigrams = q.replace(" ", "").windowed(2).toSet()
+    return labels.distinct().map { l ->
+        val n = norm(l)
+        val words = n.split(' ').count { it.length >= 3 && (it in qWords || qWords.any { w -> w.startsWith(it) || it.startsWith(w) }) }
+        val bigrams = n.replace(" ", "").windowed(2).toSet()
+        val overlap = if (bigrams.isEmpty() || qBigrams.isEmpty()) 0.0 else (bigrams intersect qBigrams).size.toDouble() / minOf(bigrams.size, qBigrams.size)
+        l to (words * 2 + overlap)
+    }.filter { it.second >= 0.6 }.sortedByDescending { it.second }.take(max).map { it.first }   // 0.5 let "zorblax" → "Galaxy Store"
+}
+
 object OpenAppTool : Tool {
     override val name = "open_app"
     override val description = "Bring an installed app to the foreground by its name (e.g. 'Messages', 'Settings', 'Chrome')."
@@ -35,8 +54,16 @@ object OpenAppTool : Tool {
             is AppResolver.Match.Ambiguous ->  // §1.10 — near-tie, don't guess which app the user meant
                 return ToolResult(false, "I found more than one app close to '$query': " +
                     m.options.joinToString(", ") { it.label } + ". Which one?", needsDisambiguation = true)
-            AppResolver.Match.None ->
-                return ToolResult(false, "I couldn't find an app called ${spokenAppName(query)} on this phone.")
+            AppResolver.Match.None -> {
+                // Seen on the A20e: a misheard name ("product video game") sent the agent into the Galaxy Store and its
+                // Samsung-account sign-in. An app that isn't installed is a question for the user, not a store trip.
+                val close = closestApps(ctx.appContext, query)
+                return ToolResult(false, "I couldn't find an app called ${spokenAppName(query)} on this phone. " +
+                    "It isn't installed, or the name was misheard. Ask the user which app they meant (ask_user)" +
+                    (if (close.isNotEmpty()) " — closest installed: ${close.joinToString(", ")}" else "") +
+                    ". Do NOT open an app store, sign in or install anything unless the user asked to install an app.",
+                    recoverable = false)
+            }
         }
         val intent = AppResolver.launchIntent(ctx.appContext, app.packageName)
             ?: return ToolResult(false, "No launch intent for ${app.label}.")

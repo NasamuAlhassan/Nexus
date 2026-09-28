@@ -50,6 +50,9 @@ class WakeWordService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var loopJob: Job? = null
     @Volatile private var handling = false
+    /** C-12: an interjection (a wake heard while a task works) is opening the answer mic. Separate from [handling],
+     *  which belongs to the turn the first wake started and must not be cleared by the interjection. */
+    @Volatile private var interjecting = false
 
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() { super.onCreate(); instance = this }
@@ -96,7 +99,9 @@ class WakeWordService : Service() {
                 }
                 // A turn owns the mic — except while a task is working with the mic free, when the wake word keeps
                 // listening so the user can interject ("Hey Tɛkyerɛma… pause / what are you doing / send it to Kofi").
-                if (handling || (VoiceEngine.isRunning && !VoiceEngine.canInterject)) { release(); delay(250); continue }
+                // (`handling` stays true for the whole wake-started turn, so it must not block this — seen on the A20e:
+                // the mic was released for an entire task and "Hey Tɛkyerɛma, stop" could not be heard.)
+                if (interjecting || ((handling || VoiceEngine.isRunning) && !VoiceEngine.canInterject)) { release(); delay(250); continue }
                 if (rec == null) {
                     // ~2.5 s of buffering (32 frames): a slow scoring frame is absorbed instead of dropping audio.
                     rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 32))
@@ -203,16 +208,17 @@ class WakeWordService : Service() {
 
     /** A wake match: hand the mic to a voice turn, then resume wake listening only once it's fully done. */
     private fun onWake() {
-        if (handling) return
         if (VoiceEngine.isRunning) {
             // C-12: a task is working — this wake is an interjection, heard on the answer mic while the task runs on.
-            if (!VoiceEngine.canInterject) return
-            handling = true
+            // Checked BEFORE [handling]: a task started by an earlier wake keeps `handling` set until it ends.
+            if (!VoiceEngine.canInterject || interjecting) return
+            interjecting = true
             scope.launch {
-                try { withContext(Dispatchers.Main) { VoiceEngine.start() }; delay(1_500) } finally { handling = false }
+                try { withContext(Dispatchers.Main) { VoiceEngine.start() }; delay(1_500) } finally { interjecting = false }
             }
             return
         }
+        if (handling) return
         handling = true
         scope.launch {
             try {

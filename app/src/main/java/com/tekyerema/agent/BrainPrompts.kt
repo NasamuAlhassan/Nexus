@@ -22,7 +22,8 @@ object BrainPrompts {
         "the app's own search, or read_state with vision=true. A device toggle (Wi-Fi, Bluetooth, Do Not Disturb, auto-rotate, flashlight…) is fastest " +
         "from key_event quick_settings → tap its tile; verify with 'checked: <tile>'. A relative request ('bigger', 'a bit brighter') is ONE step, not the " +
         "extreme — only go to max/min when asked.\n\n" +
-        "EFFICIENT (steps are limited): use open_app for a NAMED app (don't hunt icons); never read_state twice on an unchanged screen; if a contact isn't found, " +
+        "EFFICIENT (steps are limited): use open_app for a NAMED app (don't hunt icons) — if it isn't installed the name was " +
+        "probably misheard: ask the user, never go to an app store or sign in unless they asked to install;never read_state twice on an unchanged screen; if a contact isn't found, " +
         "ASK for the number (call ask_user — it waits for the answer and the task continues); an accelerator (open_app, search_contacts, make_call, set_alarm, set_timer, run_ussd, read_notifications, reply_to_notification, " +
         "mobile_money) is ONE sub-step — after it keep going until the goal is truly done, and if it finds nothing fall back to the app's own UI.\n\n" +
         "MOBILE MONEY (send money): gather number + amount + reference FIRST (ask if any is missing). With all three, call `momo_send` — ONE call walks *170# and " +
