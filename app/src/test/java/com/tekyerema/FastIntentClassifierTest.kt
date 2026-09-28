@@ -251,4 +251,18 @@ class FastIntentClassifierTest {
         assertEquals(FastIntent.VolumeUp, c("ma volume no so"))
         assertNull("\"na\" still joins two commands", c("bue whatsapp na frɛ kofi"))
     }
+
+    /** Device suite: "what is 15 times 12" took 38.7 s through the cloud; a sum needs no model and works offline. */
+    @Test fun simple_sums_are_answered_on_the_phone() {
+        fun ans(s: String) = (c(s) as? FastIntent.Calculate)?.answer
+        assertEquals("15 times 12 is 180.", ans("What is 15 times 12?"))
+        assertEquals("5 times 11 is 55.", ans("What is 5 times 11?"))
+        assertEquals("250 divided by 5 is 50.", ans("250 divided by 5"))
+        assertEquals("10 divided by 3 is 3.3333.", ans("what's 10 / 3"))
+        assertEquals("20 percent of 150 is 30.", ans("what is 20 percent of 150"))
+        assertEquals("7.5 plus 2.5 is 10.", ans("calculate 7.5 + 2.5"))
+        assertEquals("You can't divide by zero.", ans("5 divided by 0"))
+        assertNull("a rate question goes to the web", ans("how much is 5 dollars in cedis"))
+        assertNull(ans("take my medicine 2 times a day"))
+    }
 }

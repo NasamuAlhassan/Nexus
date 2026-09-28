@@ -42,6 +42,8 @@ sealed class FastIntent(val name: String) {
     object LockScreen : FastIntent("LOCK_SCREEN")
     object Notifications : FastIntent("NOTIFICATIONS")
     data class OpenApp(val query: String) : FastIntent("OPEN_APP")
+    /** A simple sum answered on the phone ([LocalMath]); [answer] is the spoken result. */
+    data class Calculate(val answer: String) : FastIntent("CALCULATE")
     // ---- W4 deterministic phone actions (E-02, E-05, E-06, E-09, E-12, E-13, E-14, E-18, E-21, E-22, E-28, E-29) ----
     object AnswerCall : FastIntent("ANSWER_CALL")
     object EndCall : FastIntent("END_CALL")
@@ -145,6 +147,7 @@ object FastIntentClassifier {
             // FIRST: an explicit "turn on/off / enable X" naming a Quick Settings tile — before the topic regexes,
             // or "enable battery saver" is read as a battery-LEVEL question.
             quickToggle(g) != null -> quickToggle(g)
+            LocalMath.answer(g) != null -> FastIntent.Calculate(LocalMath.answer(g)!!)
             // E-09 ringer mode before the volume rules ("silent mode" is the ringer, not muting the media volume).
             ringerMode(g) != null -> FastIntent.Ringer(ringerMode(g)!!)
             RE_TIME.containsMatchIn(g) -> FastIntent.Time
