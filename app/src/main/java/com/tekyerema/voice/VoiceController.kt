@@ -119,8 +119,9 @@ class VoiceController(
     private var askJob: Job? = null
     /** C-12: a turn taken WHILE a task runs (stop / pause / continue / status / a correction). */
     private var interjectJob: Job? = null
-    /** Set when the user declined by voice, so the turn's closing line isn't spoken twice. */
-    @Volatile private var declinedByVoice = false
+    /** Set when the stop was already acknowledged aloud (a spoken "no", a "stop" interjection), so the turn's closing
+     *  "Stopped." isn't said twice. Reset for every new task: it used to linger and silence a later, real "Stopped.". */
+    @Volatile private var stopAlreadySaid = false
     /** Consecutive auto follow-up listens in the current exchange, capped so mic noise can't loop forever.
      *  Reset whenever the user deliberately starts a turn (mic tap / typed). */
     private var followUpChain = 0
@@ -178,7 +179,7 @@ class VoiceController(
                         if (confirmJob?.isActive != true && prompt != lastPrompt) {
                             lastPrompt = prompt
                             val twi = st.pendingConfirmationTwi          // §A.1 structured Twi variant, or null
-                            confirmJob = observerScope.launch { confirmByVoice(prompt, twi) }
+                            confirmJob = launchOnAnswerMic { confirmByVoice(prompt, twi) }
                         }
                     }
                     // Secure Input Mode: the agent went blind for the MoMo PIN. Speak the secure instruction
@@ -186,14 +187,14 @@ class VoiceController(
                     AgentStatus.SECURE_INPUT -> {
                         lastPrompt = null
                         if (confirmJob?.isActive == true) confirmJob?.cancel()
-                        if (secureJob?.isActive != true) secureJob = observerScope.launch { secureInputByVoice() }
+                        if (secureJob?.isActive != true) secureJob = launchOnAnswerMic { secureInputByVoice() }
                     }
                     // C-13: the task asked a question — say it, listen for the answer, hand it back to the run.
                     AgentStatus.ASKING -> {
                         val q = st.pendingQuestion
                         if (q != null && q != lastQuestion && askJob?.isActive != true) {
                             lastQuestion = q
-                            askJob = observerScope.launch { askByVoice(q) }
+                            askJob = launchOnAnswerMic { askByVoice(q) }
                         }
                     }
                     else -> {
@@ -204,6 +205,10 @@ class VoiceController(
                         if (askJob?.isActive == true) askJob?.cancel()   // the prompt panel follows the agent's state
                         if (_state.value.confirmPhase != ConfirmPhase.NONE)
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
+                        // A question or secure step answered while no voice turn is waiting on the task (a trigger, or
+                        // the panel's buttons) left the screen showing "Asking for your answer" for the rest of the task
+                        // — and the wake word waiting for an idle that never came.
+                        if (_state.value.state == VoiceState.CONFIRMATION_REQUIRED && job?.isActive != true) idle("")
                     }
                 }
             }
@@ -221,27 +226,62 @@ class VoiceController(
     fun interject() {
         if (!agent.busy) { start(); return }
         if (interjectJob?.isActive == true || askJob?.isActive == true || confirmJob?.isActive == true || secureJob?.isActive == true) return
+        interjectionHeard = false
         interjectJob = observerScope.launch {
-            val lang = forceLanguage() ?: sessionLanguage()
-            if (!hasMicPermission()) return@launch
-            val cap = answerMic.captureWith(VadStrategy.QUICK, onListening = { cues.listening() },
-                onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
-            val wav = (cap as? CaptureResult.Success)?.wav ?: return@launch
-            cues.captured()
-            val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
-            if (text.isBlank()) return@launch
-            val line = applyInterjection(text, lang == Lang.TWI)
-            try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            try {
+                // A "One moment please" or a check-in spoken now would be captured as the user's words.
+                fillers?.stop()
+                val lang = forceLanguage() ?: sessionLanguage()
+                if (!hasMicPermission()) return@launch
+                val cap = answerMic.captureWith(VadStrategy.QUICK, onListening = { cues.listening() },
+                    onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
+                val wav = (cap as? CaptureResult.Success)?.wav ?: return@launch
+                interjectionHeard = true
+                cues.captured()
+                val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
+                if (text.isBlank()) return@launch
+                val line = applyInterjection(text, lang == Lang.TWI)
+                try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            } finally {
+                // speechDetected used to stay true for the rest of the task after an interjection (the voice screen then
+                // refused to close: "mid-sentence").
+                _state.update { it.copy(speechDetected = false) }
+            }
+        }
+    }
+
+    /** The interjection listening now has already heard the user (it is transcribing or answering): let it finish. */
+    @Volatile private var interjectionHeard = false
+
+    /**
+     * The answer microphone has one user at a time. A prompt (confirmation, question, secure step) takes it from an
+     * interjection that is still only listening, and waits until that capture — or a prompt being cancelled — has let go
+     * of the recorder: they used to open two AudioRecords on the same Silero state, and the interjection could take the
+     * confirmation's question (our own voice) as the user's words. An interjection that already HEARD the user finishes
+     * first, so what they said isn't lost (it becomes a revision of the proposal, see [applyInterjection]).
+     */
+    private fun launchOnAnswerMic(block: suspend () -> Unit): Job {
+        val interjection = interjectJob?.takeIf { !it.isCompleted }
+        if (interjection != null && !interjectionHeard) interjection.cancel()
+        val leaving = listOfNotNull(interjection) + listOfNotNull(confirmJob, askJob, secureJob).filter { it.isCancelled && !it.isCompleted }
+        return observerScope.launch {
+            leaving.forEach { it.join() }
+            block()
         }
     }
 
     /** C-12: act on words said (or typed) while a task runs, and return the line that tells the user what happened. */
     private fun applyInterjection(text: String, twi: Boolean): String = when (ControlVerbs.classify(text)) {
-        ControlVerbs.Verb.STOP -> { agent.stop(); if (twi) "Magyae." else "Stopped." }
+        // The turn's own "Stopped." would follow this one — say it once.
+        ControlVerbs.Verb.STOP -> { stopAlreadySaid = true; agent.stop(); if (twi) "Magyae." else "Stopped." }
         ControlVerbs.Verb.PAUSE -> { agent.pause(); if (twi) "Matwɛn. Ka kɔ so na mɛtoa so." else "Paused. Say continue when you're ready." }
         ControlVerbs.Verb.RESUME -> { agent.resume(); if (twi) "Yoo, mɛtoa so." else "Carrying on." }
         ControlVerbs.Verb.STATUS -> agent.statusLine()
-        ControlVerbs.Verb.STEER -> { agent.steer(text); if (twi) "Yoo, mɛsesa." else "Got it, I'll change that." }
+        // A correction that lands while the task waits for an OK is a revision of THAT proposal (re-planned and confirmed
+        // again), never a steer queued behind it — a "yes" to the old proposal would otherwise run first.
+        ControlVerbs.Verb.STEER -> if (agent.state.value.status == AgentStatus.WAITING_CONFIRMATION) {
+            agent.revise(text); if (twi) "Yoo, ma mensesa." else "Okay, let me change that."
+        } else { agent.steer(text); if (twi) "Yoo, mɛsesa." else "Got it, I'll change that." }
     }
 
     /**
@@ -282,12 +322,11 @@ class VoiceController(
      *  Tɛkyerɛma). A confirmation still needs an explicit yes — silence or an unclear answer declines, as before. */
     fun respond() {
         val st = agent.state.value
-        interjectJob?.cancel()
         when (st.status) {
-            AgentStatus.ASKING -> st.pendingQuestion?.let { q -> if (askJob?.isActive != true) askJob = observerScope.launch { askByVoice(q) } }
+            AgentStatus.ASKING -> st.pendingQuestion?.let { q -> if (askJob?.isActive != true) askJob = launchOnAnswerMic { askByVoice(q) } }
             AgentStatus.WAITING_CONFIRMATION -> if (confirmJob?.isActive != true)
-                confirmJob = observerScope.launch { confirmByVoice(st.pendingConfirmation ?: "Should I go ahead?", st.pendingConfirmationTwi) }
-            AgentStatus.SECURE_INPUT -> if (secureJob?.isActive != true) secureJob = observerScope.launch { secureInputByVoice() }
+                confirmJob = launchOnAnswerMic { confirmByVoice(st.pendingConfirmation ?: "Should I go ahead?", st.pendingConfirmationTwi) }
+            AgentStatus.SECURE_INPUT -> if (secureJob?.isActive != true) secureJob = launchOnAnswerMic { secureInputByVoice() }
             else -> {}
         }
     }
@@ -367,6 +406,7 @@ class VoiceController(
                 interjectJob?.cancel()
                 cues.captured()
                 val line = applyInterjection(t, language == Lang.TWI)
+                interjectionHeard = true   // a prompt arriving now lets this line finish before it asks
                 if (speakAloud()) interjectJob = observerScope.launch {
                     try { tts.speak(Verbalize.apply(line), language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                 }
@@ -412,7 +452,7 @@ class VoiceController(
                     Confirmation.Answer.YES -> if (t.split(Regex("\\s+")).size > 2)
                         TypedResult(route, accepted = false, notice = "Something is waiting for your OK. Type yes or no — or use the buttons")
                     else { confirmJob?.cancel(); cues.captured(); agent.confirm(true); TypedResult(route, accepted = true) }
-                    Confirmation.Answer.NO -> { confirmJob?.cancel(); declinedByVoice = true; cues.captured(); agent.confirm(false); TypedResult(route, accepted = true) }
+                    Confirmation.Answer.NO -> { confirmJob?.cancel(); cues.captured(); agent.confirm(false); TypedResult(route, accepted = true) }
                     // No speech here: the voice confirmation may be listening, and our own words must never be its answer.
                     else -> TypedResult(route, accepted = false, notice = "Type yes or no — or use the buttons")
                 }
@@ -469,7 +509,7 @@ class VoiceController(
      */
     private suspend fun confirmByVoice(prompt: String, promptTwi: String? = null) {
         if (!voiceConfirmation() || !speakAloud()) return
-        declinedByVoice = false
+        stopAlreadySaid = false
         cues.needsOk()
         val lang = forceLanguage() ?: sessionLanguage()
         // §A.1 — in a Twi session, ask the confirmation in TWI when we have a structured Twi rendering
@@ -527,7 +567,7 @@ class VoiceController(
                         return
                     }
                     Confirmation.Answer.NO -> {
-                        declinedByVoice = true
+                        stopAlreadySaid = true
                         agent.confirm(false)
                         _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                         try { tts.speak(if (lang == Lang.TWI) "Yoo, merenyɛ." else "Okay, I won't.", lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
@@ -549,7 +589,7 @@ class VoiceController(
                 }
             }
             // Two unclear answers: the safe default is to do nothing, and to say so.
-            declinedByVoice = true
+            stopAlreadySaid = true
             agent.confirm(false)
             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
             try { tts.speak(Confirmation.DECLINED_UNCLEAR, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
@@ -873,6 +913,7 @@ class VoiceController(
             idle("")
             return null
         }
+        stopAlreadySaid = false
         agent.submitGoal(goal)
         set(VoiceState.EXECUTING, "Working on it…")
         // Instant, offline "thinking" backchannel while the brain works: a blind user gets nothing from the
@@ -968,7 +1009,8 @@ class VoiceController(
             val st = agent.state.value
             if (st.goal != goal) return
             val working = st.status == AgentStatus.THINKING || st.status == AgentStatus.ACTING
-            if (working && _state.value.state == VoiceState.EXECUTING) {
+            // Never while the user is interjecting: the answer mic would take "Still working on it." as their words.
+            if (working && _state.value.state == VoiceState.EXECUTING && interjectJob?.isActive != true) {
                 fillers?.stop()
                 val lang = forceLanguage() ?: sessionLanguage()
                 val twi = lang == Lang.TWI
@@ -995,7 +1037,7 @@ class VoiceController(
             AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it."
             AgentStatus.CANNOT_DO -> text ?: "I can't do that."
             AgentStatus.FAILED -> text ?: "That didn't work."
-            AgentStatus.STOPPED -> if (declinedByVoice) "" else "Stopped."   // a voice "no" was already acknowledged
+            AgentStatus.STOPPED -> if (stopAlreadySaid) "" else "Stopped."   // a voice "no" was already acknowledged
             else -> text ?: "Done."
         }
     }
