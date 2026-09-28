@@ -23,7 +23,9 @@ object Provenance {
     /** Argument keys whose values are payloads that leave the device or change state. Targeting
      *  keys (element_id, label, x, y, app, direction…) are deliberately excluded: a target label is
      *  screen-derived by definition, and its risk is handled by TargetSemantics, not here. */
-    val payloadKeys = setOf("text", "message", "number", "contact", "code", "query",
+    // "question": ask_app types it into another company's AI app (ChatGPT, Gemini…) — a question built from screen or
+    // message text must be confirmed like any other payload that leaves the phone; the user's own words go straight.
+    val payloadKeys = setOf("text", "message", "number", "contact", "code", "query", "question",
         "amount", "reference", "_amount", "_number", "_recipient")
     private const val MIN_LEN = 4
 

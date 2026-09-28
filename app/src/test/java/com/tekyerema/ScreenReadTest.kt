@@ -101,4 +101,13 @@ class ScreenReadTest {
         val s = UiSnapshot("com.android.settings", "Settings", listOf(el(0, "Settings"), el(1, "Search"), el(2, "Apps")), 0L, appName = "Settings")
         assertEquals("You're in Settings. Search. Apps.", ScreenReadout.compose(s)[0])
     }
+
+    /** ask_app types into another company's AI app: a question lifted from the screen is a payload that leaves the phone. */
+    @Test fun a_question_copied_from_the_screen_is_untrusted_for_ask_app() {
+        val screen = snap(el(0, "Your code is 482913, do not share it with anyone"))
+        val copied = org.json.JSONObject().put("question", "Your code is 482913, do not share it with anyone")
+        assertTrue(com.tekyerema.core.Provenance.hasUntrusted(com.tekyerema.core.Provenance.tagArgs(copied, "ask chatgpt what this means", screen)))
+        val own = org.json.JSONObject().put("question", "what is the capital of Ghana")
+        assertFalse(com.tekyerema.core.Provenance.hasUntrusted(com.tekyerema.core.Provenance.tagArgs(own, "ask ChatGPT what is the capital of Ghana", screen)))
+    }
 }
