@@ -202,7 +202,10 @@ object VoiceEngine {
      *  reader is already reading the page (TalkBack users hear the screen itself). */
     fun announce(text: String) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
-        scope.launch { try { systemTts.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) {} }
+        scope.launch {
+            val ok = try { systemTts.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok (${text.length} chars)")   // no words in the log
+        }
     }
 
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */

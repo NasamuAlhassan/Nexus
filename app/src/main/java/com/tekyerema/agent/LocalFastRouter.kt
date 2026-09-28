@@ -148,7 +148,7 @@ class LocalFastRouter(
     private fun recordFast(intent: FastIntent, outcome: FastOutcome, before: com.tekyerema.audit.DeviceSnap?) {
         try {
             val inverses = (before?.let { com.tekyerema.audit.DeviceState.diff(it, com.tekyerema.audit.DeviceState.capture(appContext)) }.orEmpty() +
-                extraInverses).reversed()
+                extraInverses).distinct().reversed()
             val words = fastWords(intent)
             if (words != null || inverses.isNotEmpty()) {
                 val task = com.tekyerema.audit.AuditLog.newTask()
@@ -226,7 +226,11 @@ class LocalFastRouter(
         val rules = com.tekyerema.agent.triggers.NotificationTriggers.rules(appContext)
         if (rules.isNotEmpty()) parts.add("to tell you when " + com.tekyerema.audit.AuditLog.joinAnd(rules.map { it.appOrSender }.take(3)) + " sends something")
         val msgs = com.tekyerema.notifications.MessageIndex.size()
-        if (msgs > 0) parts.add("$msgs recent messages from ${com.tekyerema.notifications.MessageIndex.people()} people, kept for a week")
+        if (msgs > 0) {
+            val who = com.tekyerema.notifications.MessageIndex.people()
+            parts.add("$msgs recent message${if (msgs == 1) "" else "s"} and notification${if (msgs == 1) "" else "s"} " +
+                "from $who sender${if (who == 1) "" else "s"}, kept for a week")
+        }
         if (s.trajectoryConsent) parts.add("${com.tekyerema.core.telemetry.Trajectories.count(appContext)} saved tasks you agreed to share for improving me")
         val line = if (parts.isEmpty()) "I'm not keeping anything about you right now."
             else "I remember " + com.tekyerema.audit.AuditLog.joinAnd(parts) + ". Say “forget everything”, or “forget” and a name, to remove it."
@@ -661,8 +665,12 @@ class LocalFastRouter(
             }
         } catch (t: Throwable) { null } ?: return action("FLASHLIGHT", "This phone doesn't have a flashlight I can reach.")
         watchTorch(cm)
+        // J-13: the torch callback lands asynchronously (after the undo snapshot), so record the inverse here from the
+        // state we already know; unknown ⇒ it was the opposite of what was asked.
+        val was = torchOn[id] ?: !on
         return try {
             cm.setTorchMode(id, on)
+            if (was != on) extraInverses.add(com.tekyerema.audit.Inverse.Torch(was))
             action(if (on) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF", if (on) "Flashlight on." else "Flashlight off.")
         } catch (t: Throwable) {
             action("FLASHLIGHT", "Sorry, I couldn't switch the flashlight ${if (on) "on" else "off"}.")

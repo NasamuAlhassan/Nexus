@@ -631,6 +631,16 @@ class VoiceController(
                 set(VoiceState.TRANSCRIBING, "Transcribing…")
                 val next = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+                // Seen on the A20e: the echo canceller let our OWN voice through. That is never a new request —
+                // finish the reply from the sentence it was cut in, and don't start a turn from our own words.
+                if (next != null && SelfEcho.isEcho(next.canonical, outcome.spoken)) {
+                    Log.i("Tekyerema", "[VOICE] barge-in ignored: the mic heard our own reply")
+                    SelfEcho.resumeFrom(next.canonical, outcome.spoken).takeIf { it.isNotBlank() && speakAloud() }?.let { rest ->
+                        set(VoiceState.SPEAKING, rest)
+                        try { tts.speak(Verbalize.apply(rest), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                    }
+                    idle(""); return
+                }
                 if (next != null && !next.isBlank) { runTurn(next, InputSource.ASR); return }
                 idle("")
             }

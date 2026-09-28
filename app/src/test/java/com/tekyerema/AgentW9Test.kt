@@ -61,6 +61,24 @@ class AgentW9Test {
     }
 
     // ---------------------------------------------------------------- audit fixes
+    // ---------------------------------------------------------------- device-run fixes (A20e, 2026-09-28)
+    @Test fun the_phone_hearing_its_own_reply_is_not_a_request() {
+        val reply = "The cedi is trading at about GH₵ 11.55 per US dollar today. It was 11.40 last week."
+        assertTrue(com.tekyerema.voice.SelfEcho.isEcho("trading at about", reply))
+        assertTrue("nothing word-like", com.tekyerema.voice.SelfEcho.isEcho("", reply))
+        assertFalse(com.tekyerema.voice.SelfEcho.isEcho("stop, call Kofi instead", reply))
+        assertEquals("from the start of the cut sentence to the end", reply, com.tekyerema.voice.SelfEcho.resumeFrom("trading at about", reply))
+        assertEquals("It was 11.40 last week.", com.tekyerema.voice.SelfEcho.resumeFrom("was 11.40", reply))
+        assertEquals("", com.tekyerema.voice.SelfEcho.resumeFrom("banana", reply))
+    }
+
+    @Test fun undoing_a_new_schedule_says_it_was_removed() {
+        assertEquals("Okay, I removed the new schedule.",
+            com.tekyerema.audit.DeviceState.spoken(listOf(com.tekyerema.audit.Inverse.RemoveSchedule("s1")), emptyList()))
+        assertEquals("Okay, I put back the flashlight and removed the new message alert.",
+            com.tekyerema.audit.DeviceState.spoken(listOf(com.tekyerema.audit.Inverse.Torch(false), com.tekyerema.audit.Inverse.RemoveRule("r")), emptyList()))
+    }
+
     @Test fun position_words_become_reading_order() {
         assertEquals("Tap the button just before it.", com.tekyerema.voice.SpeechLint.apply("Tap the button above."))
         assertEquals("Open the link just after it.", com.tekyerema.voice.SpeechLint.apply("Open the link below."))

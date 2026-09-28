@@ -328,6 +328,8 @@ internal object J {
         if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }
 }
 
+private val SEARCH_ENGINE_HOSTS = listOf("exa.ai")
+
 /** Ordered, de-duplicated http(s) sources, capped. */
 internal class SourceList(private val max: Int = 5) {
     private val out = LinkedHashMap<String, Source>()
@@ -336,6 +338,9 @@ internal class SourceList(private val max: Int = 5) {
     fun add(title: String?, url: String?) {
         val u = url?.trim()?.trimEnd('.', ',', ';', ':').orEmpty()
         if (!u.startsWith("http://", ignoreCase = true) && !u.startsWith("https://", ignoreCase = true)) return
+        // The search engine's own result pages (Groq's browser search runs on exa.ai) are plumbing, not a source.
+        val host = try { java.net.URI(u).host?.lowercase()?.removePrefix("www.") } catch (_: Throwable) { null }
+        if (host != null && SEARCH_ENGINE_HOSTS.any { host == it || host.endsWith(".$it") }) return
         if (out.size >= max || out.containsKey(u)) return
         out[u] = Source(title?.trim().orEmpty(), u)
     }

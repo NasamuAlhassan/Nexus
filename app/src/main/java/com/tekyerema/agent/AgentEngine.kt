@@ -480,7 +480,10 @@ object AgentEngine {
                         "amount or message will be confirmed again); if they want to stop, call cannot_do.")
                     pushConvo("User: $extra")
                 }
-                val directStep = direct && step == 1
+                // I-01: a direct question stays screen-free while the model only searches the web (seen on the A20e: the
+                // step after a web_search read and uploaded the screen for nothing). Asking to read the screen, or
+                // loading other tools, ends it — the normal loop (with its credential check) takes over.
+                val directStep = direct && usedTools.all { it == "web_search" } && discoveredTools.isEmpty()
                 // A vision look (asked for by the model, or switched to by the loop guard) inspects the raw tree first and
                 // never screenshots a credential screen — the same rule as the verify path (observeForVerify).
                 var before = if (directStep) UiSnapshot(null, null, emptyList(), System.currentTimeMillis(),
@@ -701,7 +704,7 @@ object AgentEngine {
                         if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE) usedRead = true   // §C.3
                         log(LogEntry.Kind.PLAN, "Step $step: ${decision.name}(${shortArgs(decision.args)})" +
                             (decision.expects?.let { " expects[$it]" } ?: "") + (decision.rationale?.let { " $it" } ?: ""))
-                        if (Expects.isVacuous(expectation) && tool.scope != com.tekyerema.policy.CapabilityScope.PERCEIVE)
+                        if (Expects.isVacuous(expectation) && mutating)
                             stats = stats.copy(vacuousExpects = stats.vacuousExpects + 1)
 
                         // ---- target resolution (static, side-effect free) — before the gate ----

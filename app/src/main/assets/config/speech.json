@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "speech": {
+    "bargeIn": {
+      "enabled": false,
+      "minChars": 60,
+      "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself. Turn on per device after checking; SelfEcho still guards against it."
+    }
+  }
+}

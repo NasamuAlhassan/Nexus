@@ -138,10 +138,16 @@ object DeviceState {
             is Inverse.RemoveRule -> "the new message alert"
             is Inverse.Irreversible -> i.what
         }
-        val back = done.map(::word).distinct()
+        fun isRemoval(i: Inverse) = i is Inverse.RemoveSchedule || i is Inverse.RemoveRule
+        val back = done.filterNot(::isRemoval).map(::word).distinct()
+        val removed = done.filter(::isRemoval).map(::word).distinct()
         val cant = failed.map(::word).distinct()
+        val did = buildList {
+            if (back.isNotEmpty()) add("put back " + AuditLog.joinAnd(back))
+            if (removed.isNotEmpty()) add("removed " + AuditLog.joinAnd(removed))
+        }
         return buildList {
-            if (back.isNotEmpty()) add("Okay, I put back " + AuditLog.joinAnd(back) + ".")
+            if (did.isNotEmpty()) add("Okay, I " + did.joinToString(" and ") + ".")
             if (cant.isNotEmpty()) add("I can't undo " + AuditLog.joinAnd(cant) + ".")
         }.joinToString(" ").ifBlank { "There's nothing I can undo." }
     }
