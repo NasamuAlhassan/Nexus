@@ -43,7 +43,10 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
         val maxWaitMs = AppConfig.long("models.gemini.maxRateLimitWaitMs", 60_000L)
         while (true) {
             val (code, text) = try {
-                com.tekyerema.core.Http.execute(client.newCall(request)).let { (c, body, _) -> c to body }   // cancellable
+                // N-15: a hard deadline on top of OkHttp's — its callTimeout can't interrupt a thread stuck in DNS.
+                (Hedge.within(AppConfig.long("models.gemini.timeouts.callSec", 45) * 1000L) {
+                    com.tekyerema.core.Http.execute(client.newCall(request))   // cancellable
+                } ?: throw java.io.InterruptedIOException("timeout")).let { (c, body, _) -> c to body }
             } catch (ce: kotlinx.coroutines.CancellationException) { throw ce
             } catch (t: Throwable) {
                 com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini", null)

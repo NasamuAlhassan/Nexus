@@ -24,7 +24,9 @@ import kotlinx.coroutines.delay
 class FallbackBrain(
     private val brains: List<AgentBrain>,
     private val networkRetryDelayMs: Long = 1500L,
-    private val retryWithinMs: Long = com.tekyerema.core.config.AppConfig.long("models.planner.networkRetryWithinMs", 10_000L)
+    private val retryWithinMs: Long = com.tekyerema.core.config.AppConfig.long("models.planner.networkRetryWithinMs", 10_000L),
+    /** N-15 hedge: ask the next brain in parallel once the current one has been silent this long (0 = strictly one after another). */
+    private val hedgeAfterMs: Long = com.tekyerema.core.config.AppConfig.long("models.planner.fallbackHedgeMs", 16_000L)
 ) : AgentBrain {
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         val t0 = System.currentTimeMillis()
@@ -43,17 +45,39 @@ class FallbackBrain(
         return second
     }
 
+    /**
+     * N-15 hedge: the next provider no longer waits for the previous one's full timeout. Brain #1 still goes first; if it
+     * hasn't decided after [hedgeAfterMs] (a normal step takes 1–2 s), brain #2 is asked IN PARALLEL and the first real
+     * decision wins — the slower one is cancelled. A20e, 2026-09-28: Groq hung 35 s on every step while Gemini, asked
+     * only afterwards, answered in 4 s; hedged, such a step costs ~20 s instead of ~40 s. A quick Fail still moves on at
+     * once, exactly as before. The free Gemini tier (20 requests/day) is only touched when the first brain is this slow.
+     */
     private suspend fun chain(ctx: BrainContext): AgentDecision {
-        val fails = ArrayList<AgentDecision.Fail>()
-        for ((i, b) in brains.withIndex()) {
-            val d = b.decide(ctx)
-            if (d !is AgentDecision.Fail) return d
-            fails.add(d)
-            if (i < brains.lastIndex)
-                Log.w("Tekyerema", "[BRAIN] cloud #${i + 1}/${brains.size} failed (${d.reason.take(80)}) → trying next")
+        if (brains.isEmpty()) return AgentDecision.Fail("no cloud brain configured")
+        val finished = BooleanArray(brains.size)
+        val attempts = brains.mapIndexed { i, b ->
+            suspend {
+                if (i > 0 && !finished[i - 1])
+                    Log.w("Tekyerema", "[BRAIN] cloud #$i/${brains.size} hasn't answered in ${hedgeAfterMs / 1000}s → asking cloud #${i + 1} in parallel")
+                val d = try { b.decide(ctx) }
+                    catch (ce: kotlinx.coroutines.CancellationException) { throw ce }
+                    catch (t: Throwable) { AgentDecision.Fail("brain error: ${t.message}") }
+                finished[i] = true
+                if (d is AgentDecision.Fail && i < brains.lastIndex)
+                    Log.w("Tekyerema", "[BRAIN] cloud #${i + 1}/${brains.size} failed (${d.reason.take(80)}) → trying next")
+                d
+            }
+        }
+        val hedge = if (hedgeAfterMs > 0) hedgeAfterMs else Long.MAX_VALUE / 4
+        val out = Hedge.race(attempts, hedge) { it !is AgentDecision.Fail }
+        out.winner?.let {
+            if (out.winnerIndex > 0 && out.results.take(out.winnerIndex).any { r -> r == null })
+                Log.w("Tekyerema", "[BRAIN] cloud #${out.winnerIndex + 1} answered first — the slower brain was cancelled")
+            return it
         }
         // Report the most informative failure: a later provider's quota 429 (the free Gemini tier is 20 requests/day)
         // must not mask a different, real problem upstream.
+        val fails = out.results.filterIsInstance<AgentDecision.Fail>()
         return fails.firstOrNull { !RATE_LIMIT.containsMatchIn(it.reason) } ?: fails.lastOrNull()
             ?: AgentDecision.Fail("no cloud brain configured")
     }

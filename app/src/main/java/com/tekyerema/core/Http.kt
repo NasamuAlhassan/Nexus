@@ -21,6 +21,10 @@ object Http {
         OkHttpClient.Builder()
             .connectionPool(ConnectionPool(5, 5, TimeUnit.MINUTES))
             .retryOnConnectionFailure(true)
+            // N-15 hedge: an HTTP/2 connection a Wi-Fi/NAT silently dropped otherwise stays "healthy" in the pool and hangs
+            // every later call to its full timeout (A20e, 2026-09-28: seven Groq timeouts in a row, Gemini fine). A PING
+            // every 15 s keeps the NAT mapping alive and fails a dead connection instead of reusing it. 0 = off.
+            .pingInterval(com.tekyerema.core.config.AppConfig.long("net.http.pingSec", 15L), TimeUnit.SECONDS)
             .build()
     }
 

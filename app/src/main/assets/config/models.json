@@ -20,6 +20,9 @@
       "requestTokens": 4800,
       "timeouts": {"connectSec": 8, "callSec": 35},
       "networkRetryWithinMs": 10000,
+      "hedgeAfterMs": 8000,
+      "fallbackHedgeMs": 16000,
+      "_hedgeNote": "N-15 hedge: a Groq call still unanswered after hedgeAfterMs (x1.75 at high effort) is also sent on a fresh connection with the next key; the next provider (Gemini) is asked in parallel after fallbackHedgeMs. First answer wins, the other is cancelled. 0 = off. A normal step takes 1-2 s.",
       "_networkRetryNote": "The cloud chain retries once after a network failure only if that failure came within this many ms (a blip); a slower one means a stalled connection and the user is told at once."
     },
     "guard": {
