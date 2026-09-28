@@ -151,7 +151,9 @@ fun interface SpeechTransport {
 
 /** The pure core: placeholders, request building, response parsing, error classification. */
 object HttpSpeech {
-    private val PLACEHOLDER = Regex("\\$\\{([A-Za-z0-9_.]+)}")
+    // The "}" is escaped: Android's ICU regex rejects a bare one (the whole speech-client layer failed to start on the
+    // A20e, while Java — the unit tests — accepted it). AndroidRegexCompatTest now checks every literal for this.
+    private val PLACEHOLDER = Regex("\\$\\{([A-Za-z0-9_.]+)\\}")
 
     /** Replace `${NAME}` from [secrets]; null when any placeholder has no (non-blank) value. */
     fun resolve(template: String, secrets: Map<String, String>): String? {

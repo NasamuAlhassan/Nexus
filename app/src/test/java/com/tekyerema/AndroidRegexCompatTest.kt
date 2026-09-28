@@ -29,4 +29,55 @@ class AndroidRegexCompatTest {
         }.toList()
         assertTrue(hits.joinToString("\n"), hits.isEmpty())
     }
+
+    /**
+     * Java accepts a bare "}" as a literal; ICU throws PatternSyntaxException. `\$\{([A-Za-z0-9_.]+)}` in HttpSpeech
+     * killed the whole speech-client layer on the A20e (2026-09-28) at class init. Every one-line `Regex("…")` literal
+     * is decoded and a "}" that doesn't close a `{n,m}` quantifier or a `\p{…}` property must be escaped.
+     */
+    @Test fun no_bare_closing_brace_in_regex_literals() {
+        val root = listOf(File("src/main/java"), File("app/src/main/java")).firstOrNull { it.isDirectory }
+            ?: error("source root not found from ${File(".").absolutePath}")
+        val hits = root.walk().filter { it.isFile && it.extension == "kt" }.flatMap { f ->
+            f.readLines().mapIndexedNotNull { i, line ->
+                Regex("Regex\\(\"").findAll(line.substringBefore("//")).mapNotNull { m -> literalAt(line, m.range.last + 1) }
+                    .firstOrNull { bareClosingBrace(it) }?.let { "${f.name}:${i + 1}: $it" }
+            }
+        }.toList()
+        assertTrue("escape these as \\\\}:\n" + hits.joinToString("\n"), hits.isEmpty())
+    }
+
+    /** The Kotlin string literal starting at [start] (just after the opening quote), decoded; null for templates. */
+    private fun literalAt(line: String, start: Int): String? {
+        val sb = StringBuilder(); var i = start
+        while (i < line.length) {
+            val c = line[i]
+            if (c == '"') return sb.toString()
+            if (c == '$' && i + 1 < line.length && (line[i + 1] == '{' || line[i + 1].isLetter())) return null   // a template
+            if (c == '\\' && i + 1 < line.length) { sb.append(when (val n = line[i + 1]) { 'n' -> '\n'; 't' -> '\t'; else -> n }); i += 2; continue }
+            sb.append(c); i++
+        }
+        return null
+    }
+
+    private fun bareClosingBrace(re: String): Boolean {
+        var i = 0; var inClass = false
+        while (i < re.length) {
+            val c = re[i]
+            when {
+                c == '\\' && i + 1 < re.length -> {
+                    // \p{L}, \P{…}, \x{…}, \N{…}: skip to their own closing brace
+                    if (re[i + 1] in "pPxN" && i + 2 < re.length && re[i + 2] == '{') { val e = re.indexOf('}', i + 3); if (e < 0) return true; i = e + 1 }
+                    else i += 2
+                    continue
+                }
+                inClass -> if (c == ']') inClass = false
+                c == '[' -> inClass = true
+                c == '{' -> { val q = Regex("\\{\\d+(,\\d*)?\\}").find(re, i)?.takeIf { it.range.first == i }; if (q != null) { i = q.range.last + 1; continue } }
+                c == '}' -> return true
+            }
+            i++
+        }
+        return false
+    }
 }

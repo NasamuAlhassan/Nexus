@@ -103,7 +103,7 @@ object LanguageLayer {
             build(AppConfig.obj("providers.speech.clients"), secrets(), OkHttpSpeechTransport, { MediaAudioSink(app) },
                 ledger = QuotaLedger(PrefsStore(app)))
         } catch (t: Throwable) {
-            Log.w(TAG, "[LANG] language layer failed to build — on-device only: ${t.message}"); Registries.EMPTY
+            Log.w(TAG, "[LANG] language layer failed to build — on-device only: ${t.javaClass.simpleName}: ${t.message}", t); Registries.EMPTY
         }
         Log.i(TAG, "[LANG] speech clients: ${r.summary()}")
         return r
