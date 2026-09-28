@@ -18,7 +18,9 @@
       "chain": ["groq", "gemini"],
       "temperature": 0.2,
       "requestTokens": 4800,
-      "timeouts": {"connectSec": 8, "callSec": 35}
+      "timeouts": {"connectSec": 8, "callSec": 35},
+      "networkRetryWithinMs": 10000,
+      "_networkRetryNote": "The cloud chain retries once after a network failure only if that failure came within this many ms (a blip); a slower one means a stalled connection and the user is told at once."
     },
     "guard": {
       "provider": "groq",

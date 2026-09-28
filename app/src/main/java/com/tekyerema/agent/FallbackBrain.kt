@@ -14,15 +14,27 @@ import kotlinx.coroutines.delay
  * mobile-data hiccup takes out all providers at once), the chain waits [networkRetryDelayMs] and tries once
  * more before giving up; seen on-device, a single DNS failure otherwise ended a task that was one step from
  * done. If the retry also fails, the user hears the real reason ([NETWORK_LOST]) rather than "That didn't work."
+ *
+ * Only a QUICK failure is a blip worth retrying. A chain that failed slowly (every provider ran into its timeout)
+ * means the connection is stalled, and a second round just doubles the silence: on the A20e (2026-09-28, a campus
+ * Wi-Fi dropping connections) Groq timed out at 35 s, Gemini failed 16 s later, the retry did the same, and the
+ * user heard "Still working on it" for 2 min 40 s before the error. Past [retryWithinMs] the user is told at once.
  * Pure of Android beyond logging; the wrapped brains own their own I/O.
  */
 class FallbackBrain(
     private val brains: List<AgentBrain>,
-    private val networkRetryDelayMs: Long = 1500L
+    private val networkRetryDelayMs: Long = 1500L,
+    private val retryWithinMs: Long = com.tekyerema.core.config.AppConfig.long("models.planner.networkRetryWithinMs", 10_000L)
 ) : AgentBrain {
     override suspend fun decide(ctx: BrainContext): AgentDecision {
+        val t0 = System.currentTimeMillis()
         val first = chain(ctx)
         if (first !is AgentDecision.Fail || !isNetworkError(first.reason)) return first
+        val tookMs = System.currentTimeMillis() - t0
+        if (tookMs > retryWithinMs) {
+            Log.w("Tekyerema", "[BRAIN] every cloud brain failed on the network after ${tookMs / 1000}s — not retrying a stalled connection")
+            return AgentDecision.CannotDo(NETWORK_LOST, "The internet connection is too slow right now, so I couldn't finish that. Please try again.")
+        }
         Log.w("Tekyerema", "[BRAIN] every cloud brain hit a network error — retrying once in ${networkRetryDelayMs}ms")
         delay(networkRetryDelayMs)
         val second = chain(ctx)

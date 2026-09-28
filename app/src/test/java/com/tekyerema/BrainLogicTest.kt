@@ -272,6 +272,19 @@ class BrainLogicTest {
         assertEquals(1, quota.calls)   // not a network error → no retry
     }
 
+    /** A20e on a stalled Wi-Fi: every provider timed out, the retry timed out again — 2 min 40 s of "still working". */
+    @Test fun fallback_does_not_retry_a_stalled_connection() = runBlocking {
+        val timeout = AgentDecision.Fail("LLM request failed: timeout")
+        val slow = object : AgentBrain {
+            var calls = 0
+            override suspend fun decide(ctx: BrainContext): AgentDecision { calls++; kotlinx.coroutines.delay(60); return timeout }
+        }
+        val d = com.tekyerema.agent.FallbackBrain(listOf(slow), networkRetryDelayMs = 1, retryWithinMs = 20).decide(ctx("x"))
+        assertEquals(1, slow.calls)
+        assertEquals(com.tekyerema.agent.FallbackBrain.NETWORK_LOST, (d as AgentDecision.CannotDo).reasonClass)
+        assertTrue(d.detail.contains("internet"))
+    }
+
     @Test fun app_mention_finds_the_app_a_compound_goal_is_about() {
         fun c(g: String) = com.tekyerema.agent.AppMention.candidates(g)
         assertEquals("chrome", c("search chrome for jollof rice").first())
