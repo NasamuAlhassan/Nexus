@@ -38,6 +38,8 @@ sealed class FastIntent(val name: String) {
     object LockScreen : FastIntent("LOCK_SCREEN")
     object Notifications : FastIntent("NOTIFICATIONS")
     data class OpenApp(val query: String) : FastIntent("OPEN_APP")
+    /** Flip a Quick Settings tile ([QuickTiles]) to [on]. */
+    data class QuickToggle(val key: String, val on: Boolean) : FastIntent("TOGGLE_${key.uppercase()}")
 }
 
 /**
@@ -59,6 +61,9 @@ object FastIntentClassifier {
         if (RE_MULTISTEP.containsMatchIn(g)) return null
 
         return when {
+            // FIRST: an explicit "turn on/off / enable X" naming a Quick Settings tile — before the topic regexes,
+            // or "enable battery saver" is read as a battery-LEVEL question.
+            quickToggle(g) != null -> quickToggle(g)
             RE_TIME.containsMatchIn(g) -> FastIntent.Time
             RE_DAY.containsMatchIn(g) -> FastIntent.Day
             RE_DATE.containsMatchIn(g) -> FastIntent.Date
@@ -101,6 +106,23 @@ object FastIntentClassifier {
             else -> openApp(g)
         }
     }
+
+    /** "turn on do not disturb", "switch auto-rotate off", "enable battery saver" → a Quick Settings tile. */
+    private fun quickToggle(g: String): FastIntent.QuickToggle? {
+        for (re in RE_TOGGLE) {
+            val m = re.find(g) ?: continue
+            val (verb, phrase) = if (m.groupValues[1] in ONOFF_WORDS) m.groupValues[1] to m.groupValues[2] else m.groupValues[2] to m.groupValues[1]
+            val tile = QuickTiles.forPhrase(phrase) ?: continue
+            return FastIntent.QuickToggle(tile.key, on = verb in setOf("on", "enable", "activate"))
+        }
+        return null
+    }
+    private val ONOFF_WORDS = setOf("on", "off", "enable", "disable", "activate", "deactivate")
+    private val RE_TOGGLE = listOf(
+        Regex("^(?:please\\s+)?(?:turn|switch|put)\\s+(on|off)\\s+(.+)$"),              // turn on X
+        Regex("^(?:please\\s+)?(?:turn|switch|put)\\s+(.+?)\\s+(on|off)$"),             // turn X off
+        Regex("^(?:please\\s+)?(enable|disable|activate|deactivate)\\s+(.+)$")           // enable X
+    )
 
     private fun openApp(g: String): FastIntent? {
         val app = RE_OPEN.find(g)?.groupValues?.last()?.trim() ?: return null

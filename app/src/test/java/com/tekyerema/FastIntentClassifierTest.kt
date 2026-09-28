@@ -36,6 +36,33 @@ class FastIntentClassifierTest {
             assertEquals(s, FastIntent.Battery, c(s))
     }
 
+    @Test fun quick_settings_toggles() {
+        assertEquals(FastIntent.QuickToggle("dnd", true), c("Turn on Do Not Disturb."))
+        assertEquals(FastIntent.QuickToggle("dnd", false), c("turn off do not disturb"))
+        assertEquals(FastIntent.QuickToggle("rotate", true), c("Turn on auto-rotate"))
+        assertEquals(FastIntent.QuickToggle("rotate", false), c("switch auto rotate off"))
+        assertEquals(FastIntent.QuickToggle("airplane", true), c("Turn on airplane mode"))
+        assertEquals(FastIntent.QuickToggle("battery_saver", true), c("Enable battery saver"))
+        assertEquals(FastIntent.QuickToggle("dark", false), c("disable dark mode"))
+        assertEquals(FastIntent.QuickToggle("location", true), c("please turn on location"))
+        // Not a tile: a feature inside an app, or compound → the agent.
+        for (s in listOf("turn on location sharing in WhatsApp", "turn on notifications for Telegram",
+            "turn on do not disturb and open WhatsApp"))
+            assertTrue(s, c(s) !is FastIntent.QuickToggle)
+    }
+
+    @Test fun quick_tile_is_found_by_name_and_must_be_checkable() {
+        val t = com.tekyerema.agent.QuickTiles.byKey("dnd")!!
+        fun el(id: Int, label: String, checkable: Boolean, checked: Boolean = false) = com.tekyerema.accessibility.UiElement(
+            id, "Switch", label, com.tekyerema.accessibility.Box(0, 0, 10, 10), checkable = checkable, checked = checked, clickable = true)
+        fun snap(vararg e: com.tekyerema.accessibility.UiElement) = com.tekyerema.accessibility.UiSnapshot(
+            "com.android.systemui", null, e.toList(), 0L)
+        // the real emulator tile: label carries the state
+        assertEquals(3, com.tekyerema.agent.QuickTiles.find(snap(el(1, "Internet, AndroidWifi", true),
+            el(2, "Do Not Disturb settings", false), el(3, "Do Not Disturb, Off", true)), t)?.id)
+        assertNull(com.tekyerema.agent.QuickTiles.find(snap(el(2, "Do Not Disturb settings", false)), t))
+    }
+
     @Test fun storage_question_is_fast_but_storage_actions_are_not() {
         for (s in listOf("How much storage space is left on my phone?", "How much storage do I have?", "Check my storage.",
             "Do I have enough space?", "What's my storage?", "How much space is left?"))

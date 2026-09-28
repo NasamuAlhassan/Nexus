@@ -97,6 +97,7 @@ class LocalFastRouter(
         FastIntent.ScrollDown -> scroll(down = true)
 
         is FastIntent.OpenApp -> openApp(intent.query)
+        is FastIntent.QuickToggle -> quickToggle(intent)
     }
 
     // ---------------------------------------------------------------- info queries
@@ -212,13 +213,74 @@ class LocalFastRouter(
     } catch (t: Throwable) { null }
 
     @Suppress("DEPRECATION")
-    private fun toggleBluetooth(on: Boolean): FastOutcome? {
+    private suspend fun toggleBluetooth(on: Boolean): FastOutcome? {
         val a = BluetoothAdapter.getDefaultAdapter() ?: return null
         return try {
             val ok = if (on) a.enable() else a.disable()
             if (ok) action(if (on) "BLUETOOTH_ON" else "BLUETOOTH_OFF", "Turning Bluetooth ${if (on) "on" else "off"}.")
-            else null   // OS refused → fall through to the agent (never fake success)
-        } catch (t: Throwable) { null }
+            else quickToggle(FastIntent.QuickToggle("bluetooth", on))   // Android 13+ refuses apps → its Quick Settings tile
+        } catch (t: Throwable) { quickToggle(FastIntent.QuickToggle("bluetooth", on)) }
+    }
+
+    // ---------------------------------------------------------------- Quick Settings tiles (no LLM)
+    /**
+     * Pull down Quick Settings → find the tile by name ([QuickTiles]) → tap → VERIFY its checked state → close the
+     * shade. "Already on" is only said when the tile really was. Anything unexpected (tile not on this phone's
+     * panel, a tap that opens a dialog instead of flipping) returns null and the agent continues FROM THE CURRENT
+     * SCREEN — never a claimed success that didn't happen.
+     */
+    private suspend fun quickToggle(t: FastIntent.QuickToggle): FastOutcome? {
+        val tile = QuickTiles.byKey(t.key) ?: return null
+        val c = controller() ?: return null
+        val before = c.activeWindowPackage()
+        if (!c.globalAction("quick_settings")) return null
+        val t0 = SystemClock.uptimeMillis()
+        // Wait (cheaply) until the shade IS the active window — reading earlier just re-reads the old app — then let
+        // it finish animating: a snapshot mid-animation blocks on System UI's busy UI thread (4–5 s on the emulator).
+        var waited = 0
+        while (c.activeWindowPackage() == before && waited < 12) { kotlinx.coroutines.delay(200); waited++ }
+        c.waitForSettle(1500)
+        suspend fun look(tries: Int): com.tekyerema.accessibility.UiElement? {
+            repeat(tries) { i ->
+                if (i > 0) { kotlinx.coroutines.delay(150); c.waitForSettle(1000) }
+                val s0 = SystemClock.uptimeMillis()
+                val snap = c.buildSnapshot()
+                val hit = QuickTiles.find(snap, tile)
+                Log.d(TAG, "[QS] look#$i snapshot=${SystemClock.uptimeMillis() - s0}ms n=${snap.elements.size} " +
+                    "app=${snap.appPackage} hit=${hit?.label} at=${SystemClock.uptimeMillis() - t0}ms")
+                if (hit != null) return hit
+                // the panel is fully drawn (its tiles are there) and this one isn't among them → stop re-reading
+                if (snap.appPackage != before && snap.elements.count { it.checkable } >= 3) return null
+            }
+            return null
+        }
+        var el = look(6)
+        if (el == null) {
+            // not on the first page: swipe the tile grid left once (QS pages scroll horizontally)
+            val tiles = c.buildSnapshot().elements.filter { it.checkable }
+            if (tiles.isNotEmpty()) {
+                val y = (tiles.minOf { it.bounds.top } + tiles.maxOf { it.bounds.bottom }) / 2
+                val (w, _) = c.screenSize()
+                c.swipe((w * 0.85).toInt(), y, (w * 0.15).toInt(), y, 250)
+                kotlinx.coroutines.delay(200); c.waitForSettle(1500)
+                el = look(4)
+            }
+        }
+        val found = el ?: run { c.globalAction("back"); return null }   // this phone's panel has no such tile → agent
+        val state = if (t.on) "on" else "off"
+        if (found.checked == t.on) {
+            c.globalAction("back")
+            return action(t.name, "${tile.spoken} is already $state.")
+        }
+        if (!c.clickElement(found.id)) return null
+        var ok = false
+        repeat(8) { if (!ok) { kotlinx.coroutines.delay(150); c.waitForSettle(1000); ok = QuickTiles.find(c.buildSnapshot(), tile)?.checked == t.on } }
+        if (!ok) {
+            Log.i(TAG, "[LOCAL_FAST_PATH] ${tile.key} tile didn't flip (dialog?) → agent continues from this screen")
+            return null
+        }
+        c.globalAction("back")
+        return action(t.name, "${tile.spoken} is $state.")
     }
 
     // ---------------------------------------------------------------- media transport keys
