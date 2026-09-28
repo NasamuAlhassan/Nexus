@@ -31,6 +31,7 @@ object VoiceEngine {
     private var initialized = false
     /** Kept for QA auditioning of the "thinking" filler clips over ADB (`--es play_fillers twi|en`). */
     @Volatile private var fillerPlayer: FillerPlayer? = null
+    @Volatile private var sherpa: SherpaAsr? = null
 
     /** DEBUG QA: play every filler clip of a language in order so the owner can vet the audio. */
     fun auditionFillers(language: String) { fillerPlayer?.audition(language) }
@@ -46,7 +47,7 @@ object VoiceEngine {
         initialized = true
         settings = Settings(app)
         // §P0 — build the mics with app context so the Silero VAD model (assets/vad/silero_vad.onnx) loads.
-        mic = MicCapture(appContext = app)
+        mic = MicCapture(appContext = app, defaultStrategy = { VadStrategy.named(settings.vadStrategy) })   // B-03
         answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
         systemTts = AndroidTts(app)
         // Voice output = the phone's own TTS engine (offline-capable, never silent). The Ghanaian-accented
@@ -60,7 +61,7 @@ object VoiceEngine {
             ghEnglish = systemTts,
             isOnline = { false }
         )
-        val sherpa = SherpaAsr(app)
+        val sherpa = SherpaAsr(app).also { this.sherpa = it }
         // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
         scope.launch(Dispatchers.Default) { try { sherpa.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
@@ -107,7 +108,14 @@ object VoiceEngine {
             // LOCAL FAST PATH: deterministic device ops (time/battery/volume/open-app/back…) before the LLM.
             fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() },
             // Fast-path ACTION confirmations speak on the offline system engine so they're instant on any network.
-            systemVoice = systemTts
+            systemVoice = systemTts,
+            // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
+            // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
+            bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
+            bargeInEnabled = {
+                com.tekyerema.core.config.FeatureFlags.isEnabled("B-07") &&
+                    com.tekyerema.core.config.AppConfig.bool("speech.bargeIn.enabled", true)
+            }
         )
         scope.launch { combine(mic.level, answerMic.level) { a, b -> maxOf(a, b) }.collect { _level.value = it } }
         HistoryStore.init(app)
@@ -117,8 +125,9 @@ object VoiceEngine {
         scope.launch {
             var wasActive = false
             AgentEngine.state.collect { st ->
+                // SECURE_INPUT counts as active: a task paused at a PIN is still running (it used to lose its history row).
                 val active = st.status == AgentStatus.THINKING || st.status == AgentStatus.ACTING ||
-                    st.status == AgentStatus.WAITING_CONFIRMATION
+                    st.status == AgentStatus.WAITING_CONFIRMATION || st.status == AgentStatus.SECURE_INPUT
                 val terminal = st.status == AgentStatus.COMPLETED || st.status == AgentStatus.COMPLETED_UNVERIFIED ||
                     st.status == AgentStatus.CANNOT_DO || st.status == AgentStatus.FAILED || st.status == AgentStatus.STOPPED
                 if (wasActive && terminal) st.goal?.let {
@@ -131,13 +140,40 @@ object VoiceEngine {
                         else -> com.tekyerema.history.Outcome.FAILED
                     }
                     HistoryStore.record(it, outcome)
+                    // K-04: the outcome stays in the shade briefly (auto-clears) for a task finished while away.
+                    st.log.lastOrNull { e -> e.kind == com.tekyerema.agent.LogEntry.Kind.RESULT }?.text?.let { r ->
+                        VoiceSessionService.postResult(app, if (st.status == AgentStatus.COMPLETED_UNVERIFIED) "$r (not confirmed)" else r)
+                    }
                 }
                 // §C.1 — pin the process with a foreground service WHILE a task is active, release it when the
                 // session ends, so the mic/agent don't die if the screen changes mid-task.
-                if (active) VoiceSessionService.start(app) else if (terminal) VoiceSessionService.stop(app)
+                if (active) {
+                    VoiceSessionService.start(app)
+                    VoiceSessionService.update(app, notificationLine(st))   // K-04: live status
+                } else if (terminal) VoiceSessionService.stop(app)
                 wasActive = active
             }
         }
+    }
+
+    /** K-04: one plain line for the ongoing notification — never tool names or element ids. */
+    private fun notificationLine(st: com.tekyerema.agent.AgentUiState): String = when (st.status) {
+        AgentStatus.WAITING_CONFIRMATION -> "Waiting for your OK: " + (st.pendingConfirmation ?: "confirm the next step").take(120)
+        AgentStatus.SECURE_INPUT -> "Secure step — finish it on the phone yourself, then say \"done\"."
+        else -> {
+            val step = st.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.PLAN }?.text
+                ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
+            if (step != null) "Working on it — step $step." else "Working on your request."
+        }
+    }
+
+    /** N-08: under memory pressure, drop the on-device ASR models when no voice turn is using them (they reload on
+     *  the next request, from the files dir). Called from TekyeremaApp.onTrimMemory. */
+    fun onTrimMemory(level: Int) {
+        if (!initialized) return
+        val pressing = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW &&
+            level != android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
+        if (pressing && !controller.isRunning) sherpa?.let { s -> scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
     }
 
     private fun applyVoiceSettings() {

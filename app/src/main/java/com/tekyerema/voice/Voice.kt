@@ -55,6 +55,9 @@ interface AsrProvider {
 /** Captures one microphone utterance (mic + VAD). Abstracted so the controller is unit-testable. */
 interface Recorder {
     suspend fun capture(onListening: () -> Unit = {}, onSpeechStart: () -> Unit = {}): CaptureResult
+    /** B-02/B-03/B-09: capture with a specific silence strategy (a continuation, patient listening). */
+    suspend fun captureWith(strategy: VadStrategy, onListening: () -> Unit = {}, onSpeechStart: () -> Unit = {}): CaptureResult =
+        capture(onListening, onSpeechStart)
 }
 
 /** Speak text through the phone speaker. Implementations own their own runtime (Android TTS, etc.). */

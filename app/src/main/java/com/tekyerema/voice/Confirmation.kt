@@ -9,7 +9,8 @@ package com.tekyerema.voice
  * unrelated is UNCLEAR, and the controller asks again once before declining. Pure Kotlin.
  */
 object Confirmation {
-    enum class Answer { YES, NO, UNCLEAR }
+    /** HOLD (B-09): "wait" / "hold on" alone — the user needs a moment; the question stays pending. */
+    enum class Answer { YES, NO, UNCLEAR, HOLD }
 
     /** "Call Prince?" → "You want me to call Prince. Should I go ahead?" */
     fun question(prompt: String): String {
@@ -37,8 +38,15 @@ object Confirmation {
     )
     private val NO = setOf(
         "no", "nope", "nah", "don't", "dont", "do not", "stop", "cancel", "never mind", "nevermind", "not now",
-        "wait", "hold on", "negative", "leave it", "forget it", "abort", "no thanks", "not yet",
+        "negative", "leave it", "forget it", "abort", "no thanks", "not yet",
         "daabi", "dabi", "gyae", "mma", "ɛnyɛ", "enye", "twa mu", "nnyɛ"
+    )
+
+    // B-09: a reply that is ONLY a request for time. Twi: twɛn (kakra) = wait (a little).
+    private val HOLD = setOf(
+        "wait", "hold on", "hold up", "one moment", "just a moment", "a moment", "one second", "just a second",
+        "give me a second", "give me a moment", "give me a minute", "wait a moment", "wait a minute", "wait please",
+        "twɛn", "twen", "twɛn kakra", "twen kakra"
     )
 
     // Correction markers: a reply carrying one is a change of plan even if it also happens to contain
@@ -106,10 +114,14 @@ object Confirmation {
         for (i in 0 until tokens.size - 1) grams.add(tokens[i] + " " + tokens[i + 1])
         val yes = grams.any { it in YES }
         val no = grams.any { it in NO }
+        val hold = norm.removeSuffix(" please").trim().let { it in HOLD || (it.startsWith("wait ") && tokens.size <= 3) }
+        val holdWord = grams.any { it in HOLD }   // "yes… wait" must never count as a yes
         return when {
             yes && no -> Answer.UNCLEAR
+            no -> Answer.NO                  // "no, wait" is still a no
+            yes && holdWord -> Answer.UNCLEAR
             yes -> Answer.YES
-            no -> Answer.NO
+            hold -> Answer.HOLD
             else -> Answer.UNCLEAR
         }
     }

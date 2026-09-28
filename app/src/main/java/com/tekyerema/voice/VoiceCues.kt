@@ -20,9 +20,14 @@ import kotlin.math.sin
 interface VoiceCues {
     fun listening() {}
     fun captured() {}
+    /** K-03: only for a VERIFIED completion. */
     fun done() {}
+    /** K-03: the agent finished but couldn't confirm the outcome — never the "done" sound. */
+    fun unverified() {}
     fun needsOk() {}
     fun error() {}
+    /** K-02: a soft "still working" tick during a long task. */
+    fun progress() {}
 }
 
 /** Synthesized earcons (no audio assets) plus a light haptic, each individually switchable. */
@@ -37,23 +42,39 @@ class AndroidVoiceCues(
         else @Suppress("DEPRECATION") app.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
     } catch (_: Throwable) { null }
 
-    override fun listening() { haptic(strong = false); inBackground { play(listOf(659.3 to 70, 880.0 to 90), gain = 0.22) } }
-    override fun captured() { haptic(strong = false); inBackground { play(listOf(880.0 to 55), gain = 0.16) } }
-    override fun done() { haptic(strong = true); inBackground { play(listOf(880.0 to 70, 659.3 to 110), gain = 0.22) } }
-    override fun needsOk() { haptic(strong = true); inBackground { play(listOf(587.3 to 90, 0.0 to 40, 587.3 to 90), gain = 0.2) } }
-    override fun error() { haptic(strong = true); inBackground { play(listOf(330.0 to 110, 0.0 to 50, 294.0 to 140), gain = 0.18) } }
+    // B-14: one earcon AND one haptic pattern per state, so the vocabulary is learnable by sound or by touch alone.
+    // Tones are `ux.earcons.<cue>` ([[hz, ms], …]) and haptics `ux.haptics.<cue>` ([off, on, off, on …] ms) in config.
+    override fun listening() = cue("listening", listOf(659.3 to 70, 880.0 to 90), 0.22, longArrayOf(0, 12))
+    override fun captured() = cue("captured", listOf(880.0 to 55), 0.16, longArrayOf(0, 10))
+    override fun done() = cue("done", listOf(880.0 to 70, 659.3 to 110), 0.22, longArrayOf(0, 35))
+    override fun unverified() = cue("unverified", listOf(740.0 to 90, 740.0 to 90), 0.16, longArrayOf(0, 20, 120, 20))
+    override fun needsOk() = cue("needsOk", listOf(587.3 to 90, 0.0 to 40, 587.3 to 90), 0.2, longArrayOf(0, 30, 90, 30))
+    override fun error() = cue("error", listOf(330.0 to 110, 0.0 to 50, 294.0 to 140), 0.18, longArrayOf(0, 60, 80, 60, 80, 60))
+    override fun progress() = cue("progress", listOf(523.3 to 40), 0.1, longArrayOf(0, 8))
+
+    private fun cue(name: String, tones: List<Pair<Double, Int>>, gain: Double, pattern: LongArray) {
+        haptic(configPattern(name) ?: pattern)
+        val notes = configTones(name) ?: tones
+        inBackground { play(notes, gain) }
+    }
+
+    private fun configTones(name: String): List<Pair<Double, Int>>? {
+        val a = com.tekyerema.core.config.AppConfig.node("ux.earcons.$name") as? org.json.JSONArray ?: return null
+        return (0 until a.length()).mapNotNull { i -> a.optJSONArray(i)?.let { it.optDouble(0) to it.optInt(1) } }.takeIf { it.isNotEmpty() }
+    }
+
+    private fun configPattern(name: String): LongArray? {
+        val a = com.tekyerema.core.config.AppConfig.node("ux.haptics.$name") as? org.json.JSONArray ?: return null
+        return LongArray(a.length()) { a.optLong(it) }.takeIf { it.size >= 2 }
+    }
 
     private fun inBackground(block: () -> Unit) { if (soundsOn()) Thread(block, "tk-earcon").start() }
 
-    private fun haptic(strong: Boolean) {
+    /** Needs android.permission.VIBRATE (declared since B-14 — without it every vibrate() threw and was swallowed). */
+    private fun haptic(pattern: LongArray) {
         if (!hapticsOn()) return
         val v = vibrator ?: return
-        try {
-            val effect = if (Build.VERSION.SDK_INT >= 29)
-                VibrationEffect.createPredefined(if (strong) VibrationEffect.EFFECT_CLICK else VibrationEffect.EFFECT_TICK)
-            else VibrationEffect.createOneShot(if (strong) 30 else 15, VibrationEffect.DEFAULT_AMPLITUDE)
-            v.vibrate(effect)
-        } catch (_: Throwable) {}
+        try { v.vibrate(VibrationEffect.createWaveform(pattern, -1)) } catch (_: Throwable) {}
     }
 
     /** Sine notes (Hz to ms; 0 Hz = rest) with a soft attack/release, played synchronously. */

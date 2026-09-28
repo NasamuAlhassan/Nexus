@@ -177,6 +177,11 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_RATE, 1)
         set(v) = put { putInt(KEY_RATE, v.coerceIn(0, 2)) }
 
+    /** B-03: how long Tɛkyerɛma waits through pauses — "quick" | "normal" | "patient" (default from config). */
+    var vadStrategy: String
+        get() = prefs.getString("vad_strategy", null) ?: com.tekyerema.core.config.AppConfig.string("speech.vad.strategy", "normal")
+        set(v) = put { putString("vad_strategy", v.trim().lowercase()) }
+
     var haptics: Boolean
         get() = prefs.getBoolean(KEY_HAPTICS, true)
         set(v) = put { putBoolean(KEY_HAPTICS, v) }

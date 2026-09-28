@@ -437,4 +437,12 @@ class LocalFastRouter(
  * true for deterministic ACTIONS (volume, back, flashlight…) so their confirm can't be delayed by the online
  * Twi voice; false for information QUERIES (time, battery…) whose answer stays on the normal Twi voice.
  */
-data class FastOutcome(val intent: String, val spoken: String, val systemVoice: Boolean = false)
+data class FastOutcome(
+    val intent: String,
+    val spoken: String,
+    val systemVoice: Boolean = false,
+    /** K-03: false when the line reports a failure ("Sorry, I couldn't…") — the error cue plays, not "done". */
+    val ok: Boolean = !FAILURE_LINE.containsMatchIn(spoken)
+)
+
+private val FAILURE_LINE = Regex("(?i)^(sorry\\b|i couldn't|i can't|i could not|i cannot|this phone (doesn't|does not|has no))")

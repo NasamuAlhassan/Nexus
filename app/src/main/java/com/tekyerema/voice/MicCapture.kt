@@ -32,12 +32,21 @@ class MicCapture(
     private val noSpeechTimeoutMs: Int = 8000,
     /** The caller's listening tone plays right after [Recorder.capture]'s onListening; frames in
      *  this window are kept (pre-roll) but not shown to the VAD, so the tone can't trigger it. */
-    private val vadGuardMs: Int = 400
+    private val vadGuardMs: Int = 400,
+    /** The listening tone itself: frames in this window are dropped entirely (never pre-roll), so the beep is
+     *  never handed to the recognizer (B-14). */
+    private val toneGuardMs: Int = 250,
+    /** B-03: this mic's silence strategy when a capture doesn't name one (null = constructor timings). */
+    private val defaultStrategy: (() -> VadStrategy)? = null,
+    /** B-07: the barge-in mic listens WHILE our own voice plays — prefer the echo-cancelled voice-call source and
+     *  attach AcousticEchoCanceler/NoiseSuppressor, require a longer onset, and leave audio focus alone. */
+    private val echoCancelled: Boolean = false,
+    private val onsetMs: Int = 40
 ) : Recorder {
     private val vad = EnergyVad(sampleRate = sampleRate)
     // §P0 — prefer Silero (neural) VAD; it handles the A20's low-SNR raw mic where an energy threshold can't.
     // Falls back to the energy VAD if the model can't load (or no context).
-    private val silero: SileroVad? = appContext?.let { runCatching { SileroVad(it, sampleRate) }.getOrNull()?.takeIf { s -> s.ready } }
+    private val silero: SileroVad? = appContext?.let { runCatching { SileroVad(it, sampleRate, startFrames = (onsetMs / 20).coerceAtLeast(2)) }.getOrNull()?.takeIf { s -> s.ready } }
     private val vadName = if (silero != null) "silero" else "energy"
     private fun segReset() { if (silero != null) silero.reset() else vad.reset() }
     private fun segProcess(f: ShortArray): EnergyVad.Event = silero?.process(f) ?: vad.process(f)
@@ -56,11 +65,24 @@ class MicCapture(
         _level.value = if (norm > prev) prev + (norm - prev) * 0.6f else prev + (norm - prev) * 0.25f
     }
 
+    override suspend fun capture(onListening: () -> Unit, onSpeechStart: () -> Unit): CaptureResult =
+        captureInternal(null, onListening, onSpeechStart)
+
+    override suspend fun captureWith(strategy: VadStrategy, onListening: () -> Unit, onSpeechStart: () -> Unit): CaptureResult =
+        captureInternal(strategy, onListening, onSpeechStart)
+
+    private val focus = if (echoCancelled) null else appContext?.let { AudioFocus(it) }
+
     @SuppressLint("MissingPermission")   // caller MUST ensure RECORD_AUDIO is granted first
-    override suspend fun capture(
+    private suspend fun captureInternal(
+        strategy: VadStrategy?,
         onListening: () -> Unit,
         onSpeechStart: () -> Unit
     ): CaptureResult = withContext(Dispatchers.IO) {
+        // B-03: the silence strategy for this capture — explicit, else this mic's default, else the constructor values.
+        val strat = strategy ?: defaultStrategy?.invoke()
+        silero?.configure(strat?.hangoverMs ?: VadStrategy.NORMAL.hangoverMs, strat?.maxUtteranceMs ?: VadStrategy.NORMAL.maxUtteranceMs)
+        val noSpeechMs = strat?.noSpeechMs ?: noSpeechTimeoutMs
         val minBuf = AudioRecord.getMinBufferSize(
             sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
@@ -73,6 +95,7 @@ class MicCapture(
         // Samsung-processed live mic does not). UNPROCESSED (API 24+, when the device advertises it)
         // bypasses that; else plain MIC; VOICE_RECOGNITION only as a last resort.
         val sources = buildList {
+            if (echoCancelled) add(MediaRecorder.AudioSource.VOICE_COMMUNICATION)   // B-07: platform echo cancellation
             if (android.os.Build.VERSION.SDK_INT >= 24) add(MediaRecorder.AudioSource.UNPROCESSED)
             add(MediaRecorder.AudioSource.MIC)
             add(MediaRecorder.AudioSource.VOICE_RECOGNITION)
@@ -90,7 +113,12 @@ class MicCapture(
         // ~6000 the model trained on, so the VAD won't fire and the model sees near-silence. Apply our own
         // gain to bring raw speech to GOLD-like level (clean + normal), the one condition that matches
         // training. VOICE_RECOGNITION is already AGC'd → no extra gain.
-        val micGain = if (usedSource == MediaRecorder.AudioSource.VOICE_RECOGNITION) 1f else 12f
+        val micGain = if (usedSource == MediaRecorder.AudioSource.VOICE_RECOGNITION || usedSource == MediaRecorder.AudioSource.VOICE_COMMUNICATION) 1f else 12f
+        // B-07: on the barge-in mic, also attach the device's echo canceller / noise suppressor when it has them.
+        val effects = if (echoCancelled) listOfNotNull(
+            runCatching { if (android.media.audiofx.AcousticEchoCanceler.isAvailable()) android.media.audiofx.AcousticEchoCanceler.create(recorder.audioSessionId)?.apply { enabled = true } else null }.getOrNull(),
+            runCatching { if (android.media.audiofx.NoiseSuppressor.isAvailable()) android.media.audiofx.NoiseSuppressor.create(recorder.audioSessionId)?.apply { enabled = true } else null }.getOrNull()
+        ) else emptyList()
         Log.i("Tekyerema", "[VOICE] mic source=${sourceName(usedSource)} ($usedSource) uiGain=${micGain}x vad=$vadName (VAD sees RAW)")   // §3.8/§P0
 
         segReset()
@@ -100,16 +128,18 @@ class MicCapture(
         val speech = ByteArrayOutputStream()
         var started = false
         var idleFrames = 0
-        val idleLimit = (noSpeechTimeoutMs / (frame * 1000.0 / sampleRate)).toInt()
+        val idleLimit = (noSpeechMs / (frame * 1000.0 / sampleRate)).toInt()
         // Capture diagnostics so a "didn't hear anything" is explainable from the log alone.
         var frames = 0; var maxRms = 0.0; var sumRms = 0.0
         var endReason = "?"                                       // §3.3
         val captureStart = android.os.SystemClock.uptimeMillis()  // §3.11
         val guardFrames = (vadGuardMs / (frame * 1000.0 / sampleRate)).toInt()
+        val toneFrames = (toneGuardMs / (frame * 1000.0 / sampleRate)).toInt()
         fun stats() = "vad=$vadName frames=$frames maxRms=${"%.0f".format(maxRms)} avgRms=${"%.0f".format(if (frames == 0) 0.0 else sumRms / frames)} " +
             (if (silero == null) "noiseFloor=${"%.0f".format(vad.currentNoiseFloor)} startThresh=${"%.0f".format(vad.currentStartThreshold)}" else "neural")
 
         try {
+            focus?.acquire(AudioFocus.Kind.LISTEN)   // B-15: pause media so the recognizer hears the user
             recorder.startRecording()
             onListening()
             val buf = ShortArray(frame)
@@ -130,7 +160,8 @@ class MicCapture(
                 publishLevel(vf)                                  // UI level: the gained copy reads more responsively
                 val rms = EnergyVad.rms(f); frames++; sumRms += rms; if (rms > maxRms) maxRms = rms   // §3.1 diagnostics on RAW
                 if (firstRms.size < 25) { firstRms.add(rms.toInt()); if (firstRms.size == 25) Log.i("Tekyerema", "[VOICE] first-frames rawRMS=$firstRms") }
-                if (frames <= guardFrames) {          // listening-tone window: keep the audio, skip the VAD
+                if (frames <= toneFrames) continue    // B-14: the tone itself never reaches the pre-roll / recognizer
+                if (frames <= guardFrames) {          // just after the tone: keep the audio, skip the VAD
                     if (preRoll.size >= preRollFrames && preRoll.isNotEmpty()) preRoll.removeFirst()
                     if (preRollFrames > 0) preRoll.addLast(f)
                     continue
@@ -141,7 +172,7 @@ class MicCapture(
                             if (preRoll.size >= preRollFrames && preRoll.isNotEmpty()) preRoll.removeFirst()
                             if (preRollFrames > 0) preRoll.addLast(f)
                             if (++idleFrames >= idleLimit) {
-                                Log.i("Tekyerema", "[VOICE] end=NO_SPEECH in ${noSpeechTimeoutMs}ms: ${stats()}")   // §3.3
+                                Log.i("Tekyerema", "[VOICE] end=NO_SPEECH in ${noSpeechMs}ms (${strat?.name ?: "default"}): ${stats()}")   // §3.3
                                 return@withContext CaptureResult.NoSpeech
                             }
                         }
@@ -166,7 +197,9 @@ class MicCapture(
             return@withContext CaptureResult.Error("capture failed: ${t.message}")
         } finally {
             try { recorder.stop() } catch (_: Throwable) {}
+            effects.forEach { try { it.release() } catch (_: Throwable) {} }
             recorder.release()
+            focus?.release()
             _level.value = 0f
         }
 
@@ -219,6 +252,7 @@ class MicCapture(
         MediaRecorder.AudioSource.UNPROCESSED -> "UNPROCESSED"
         MediaRecorder.AudioSource.MIC -> "MIC"
         MediaRecorder.AudioSource.VOICE_RECOGNITION -> "VOICE_RECOGNITION"
+        MediaRecorder.AudioSource.VOICE_COMMUNICATION -> "VOICE_COMMUNICATION"
         else -> "src$src"
     }
 

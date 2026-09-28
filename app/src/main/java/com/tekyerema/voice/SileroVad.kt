@@ -27,9 +27,15 @@ class SileroVad(
     maxUtteranceMs: Int = 15000
 ) {
     private val frameMs = frameSamples * 1000.0 / sampleRate
-    private val hangoverFrames = (hangoverMs / frameMs).toInt().coerceAtLeast(1)
+    private var hangoverFrames = (hangoverMs / frameMs).toInt().coerceAtLeast(1)
     private val minSpeechFrames = (minSpeechMs / frameMs).toInt().coerceAtLeast(1)
-    private val maxFrames = (maxUtteranceMs / frameMs).toInt().coerceAtLeast(1)
+    private var maxFrames = (maxUtteranceMs / frameMs).toInt().coerceAtLeast(1)
+
+    /** B-03: apply a [VadStrategy]'s end-of-turn silence and utterance cap before a capture. */
+    fun configure(hangoverMs: Int, maxUtteranceMs: Int) {
+        hangoverFrames = (hangoverMs / frameMs).toInt().coerceAtLeast(1)
+        maxFrames = (maxUtteranceMs / frameMs).toInt().coerceAtLeast(1)
+    }
     private val startFramesN = startFrames
 
     private var vad: Vad? = null
@@ -50,7 +56,7 @@ class SileroVad(
                     minSilenceDuration = 0.3f,
                     minSpeechDuration = 0.20f,
                     windowSize = 512,
-                    maxSpeechDuration = maxUtteranceMs / 1000f
+                    maxSpeechDuration = maxOf(maxUtteranceMs, 30_000) / 1000f   // our own cap (configure) ends turns
                 ),
                 sampleRate = sampleRate,
                 numThreads = 1,

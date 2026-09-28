@@ -9,6 +9,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -82,7 +83,10 @@ class VoiceController(
     private val fastRouter: com.tekyerema.agent.LocalFastRouter? = null,
     /** Offline system TTS, used ONLY to voice fast-path ACTION confirmations ("volume up") instantly so a slow
      *  online Twi voice can never delay them. Null → action confirmations use the normal [tts] chain. */
-    private val systemVoice: TtsProvider? = null
+    private val systemVoice: TtsProvider? = null,
+    /** B-07: echo-cancelled mic that listens while a reply plays (null = no barge-in, e.g. tests). */
+    private val bargeMic: Recorder? = null,
+    private val bargeInEnabled: () -> Boolean = { false }
 ) {
     private val _state = MutableStateFlow(VoiceUiState(language = sessionLanguage()))
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()
@@ -224,7 +228,11 @@ class VoiceController(
         val askLang = if (useTwi) Lang.TWI else Lang.GH_EN
         try {
             var spokenQuestion = if (useTwi) promptTwi!! else Confirmation.question(prompt)
-            repeat(2) { attempt ->
+            // B-09: "wait"/"hold on" keeps the question pending and listens patiently; it isn't an attempt (≤3 holds).
+            var attempt = 0
+            var holds = 0
+            var patient = false
+            while (attempt < 2) {
                 _state.update { it.copy(confirmPhase = ConfirmPhase.ASKING, speechDetected = false) }
                 // English confirmations are spoken in English; a Twi session with a structured Twi line is
                 // spoken in Twi (§A.1). The ANSWER may be in either language.
@@ -232,10 +240,9 @@ class VoiceController(
                 if (!hasMicPermission()) { _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }; return }
 
                 _state.update { it.copy(confirmPhase = ConfirmPhase.LISTENING, partialHint = prompt) }
-                val cap = answerMic.capture(
-                    onListening = { cues.listening() },
-                    onSpeechStart = { _state.update { it.copy(speechDetected = true) } }
-                )
+                val onSpeech = { _state.update { it.copy(speechDetected = true) } }
+                val cap = if (patient) answerMic.captureWith(VadStrategy.PATIENT, onListening = { cues.listening() }, onSpeechStart = onSpeech)
+                    else answerMic.capture(onListening = { cues.listening() }, onSpeechStart = onSpeech)
                 val answer = when (cap) {
                     is CaptureResult.Success -> {
                         cues.captured()
@@ -274,8 +281,19 @@ class VoiceController(
                         try { tts.speak(if (lang == Lang.TWI) "Yoo, merenyɛ." else "Okay, I won't.", lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         return
                     }
-                    Confirmation.Answer.UNCLEAR -> if (attempt == 0)
-                        spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT  // §A.1 Twi repeat
+                    Confirmation.Answer.HOLD -> if (++holds <= 3) {
+                        patient = true
+                        spokenQuestion = if (lang == Lang.TWI) "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
+                            else "Okay, take your time. Say yes or no when you're ready."
+                    } else {
+                        if (attempt == 0) spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT
+                        attempt++
+                    }
+                    Confirmation.Answer.UNCLEAR -> {
+                        if (attempt == 0)
+                            spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT  // §A.1 Twi repeat
+                        attempt++
+                    }
                 }
             }
             // Two unclear answers: the safe default is to do nothing, and to say so.
@@ -337,6 +355,21 @@ class VoiceController(
         }
     }
 
+    /** One more capture + transcription with [strategy] (a continuation or a patient wait); null when nothing usable
+     *  was said. Cancellation propagates. */
+    private suspend fun listenMore(strategy: VadStrategy): Transcript? {
+        val cap = mic.captureWith(strategy, onListening = { cues.listening() },
+            onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
+        val wav = (cap as? CaptureResult.Success)?.wav ?: run {
+            if (cap is CaptureResult.Cancelled) throw CancellationException("cancelled while listening")
+            return null
+        }
+        cues.captured()
+        val t = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()) }
+            catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+        return t?.takeUnless { it.isBlank }
+    }
+
     private fun secureInstruction(reason: String?, twi: Boolean): String {
         if (twi) return if (reason == null || reason == "momo_pin")
             "Yei yɛ ahotoso adeyɛ. Fa wo MoMo PIN no hyɛ wo fɔn no mu ankasa. Merenhwɛ screen no. Sɛ wowie a, ka sɛ 'awie'."
@@ -378,11 +411,26 @@ class VoiceController(
             set(VoiceState.CAPTURED, "Got it")
             cues.captured()
             set(VoiceState.TRANSCRIBING, "Transcribing…")
-            val tr = try {
+            var tr = try {
                 asr.transcribe(wav, sessionLanguage(), forceLanguage())
             } catch (c: CancellationException) { throw c
             } catch (e: Exception) { fail(VoiceStage.ASR, e.message ?: "ASR failed", "Sorry, I couldn't understand that. Please try again."); return }
             if (tr.isBlank) { fail(VoiceStage.ASR, "Empty transcript", "Sorry, I didn't catch that. Please try again."); return }
+            // B-09: "wait" / "hold on" on its own → the user needs a moment: listen patiently for the real request.
+            var holds = 0
+            while (TurnDetector.isHold(tr.canonical) && holds++ < 2) {
+                say(if ((forceLanguage() ?: sessionLanguage()) == Lang.TWI) "Yoo, twɛn." else "Okay, take your time.")
+                set(VoiceState.LISTENING, ack)
+                val more = listenMore(VadStrategy.PATIENT) ?: run { idle(""); return }
+                tr = more
+            }
+            // B-02: a request that stops mid-phrase ("call my…") was a pause, not the end — listen a little longer
+            // and join the parts, instead of acting on half a request.
+            if (TurnDetector.looksUnfinished(tr.canonical)) {
+                set(VoiceState.LISTENING, ack)
+                listenMore(VadStrategy.CONTINUE)?.let { tr = TurnDetector.join(tr, it) }
+                set(VoiceState.TRANSCRIBING, "Transcribing…")
+            }
             Log.i("Tekyerema", "[VOICE] raw='${tr.raw}' canonical='${tr.canonical}' lang=${tr.language} " +
                 "ASR=${tr.backend}${if (tr.fallbackUsed) "(fallback)" else ""} (${tr.reason})")
 
@@ -419,7 +467,7 @@ class VoiceController(
             // no reasoning, no screen read, no app launch merely to answer (never open Clock to tell the time).
             // Returns null for anything it can't confidently handle → the agent path below runs unchanged.
             fastRouter?.tryHandle(tr.canonical, tr.language)?.let { fast ->
-                cues.done()
+                if (fast.ok) cues.done() else cues.error()   // K-03: a failure line never plays the "done" sound
                 set(VoiceState.SPEAKING, fast.spoken)
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
@@ -438,17 +486,31 @@ class VoiceController(
 
             val outcome = runAgent(tr.canonical) ?: return   // null: already set fail/cancel
             when (outcome.status) {
-                AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED -> cues.done()
+                AgentStatus.COMPLETED -> cues.done()
+                AgentStatus.COMPLETED_UNVERIFIED -> cues.unverified()   // K-03: never the "done" sound without evidence
                 AgentStatus.FAILED, AgentStatus.CANNOT_DO -> cues.error()
                 else -> {}
             }
 
             set(VoiceState.SPEAKING, outcome.spoken)
-            val spoke = if (!speakAloud() || outcome.spoken.isBlank()) false else try { tts.speak(Verbalize.apply(outcome.spoken), tr.language) }
-            catch (c: CancellationException) { throw c } catch (e: Exception) { false }
+            var interruption: ByteArray? = null
+            val spoke = if (!speakAloud() || outcome.spoken.isBlank()) false else try {
+                val (ok, barged) = speakInterruptible(Verbalize.apply(outcome.spoken), tr.language)
+                interruption = barged
+                ok || barged != null
+            } catch (c: CancellationException) { throw c } catch (e: Exception) { false }
             _state.update {
                 it.copy(state = VoiceState.IDLE, spoken = outcome.spoken,
                     partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
+            }
+            // B-07: the user spoke over the reply — what they said is the next turn.
+            interruption?.let { wav ->
+                Log.i("Tekyerema", "[VOICE] barge-in: reply interrupted — handling what the user said")
+                set(VoiceState.TRANSCRIBING, "Transcribing…")
+                val next = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()) }
+                    catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+                if (next != null && !next.isBlank) { runTurn(next, InputSource.ASR); return }
+                idle("")
             }
             // Conversational tail (§7/§32): when the agent's spoken reply is a QUESTION (e.g. "I need
             // Prince's phone number. Can you give me their number?"), re-open the mic RIGHT HERE, in this same
@@ -476,6 +538,28 @@ class VoiceController(
         }
     }
 
+    /**
+     * B-07 — speak [text] while an echo-cancelled mic listens; if the user starts talking the reply stops and their
+     * words are returned as the next utterance. Only for replies long enough to be worth interrupting, never for a
+     * confirmation read-back (an early "yes" must not count). Returns (spoke fully, interrupting audio or null).
+     */
+    private suspend fun speakInterruptible(text: String, lang: String): Pair<Boolean, ByteArray?> {
+        val cfg = com.tekyerema.core.config.AppConfig
+        val barge = bargeMic
+        if (barge == null || !bargeInEnabled() || !hasMicPermission() || text.length < cfg.int("speech.bargeIn.minChars", 60))
+            return tts.speak(text, lang) to null
+        return kotlinx.coroutines.coroutineScope {
+            val interrupted = java.util.concurrent.atomic.AtomicBoolean(false)
+            val listen = async {
+                barge.captureWith(VadStrategy.NORMAL, onListening = {}, onSpeechStart = { interrupted.set(true); tts.stop() })
+            }
+            val ok = try { tts.speak(text, lang) } catch (c: CancellationException) { listen.cancel(); throw c }
+            if (!interrupted.get()) { listen.cancel(); return@coroutineScope ok to null }
+            val cap = listen.await()
+            false to (cap as? CaptureResult.Success)?.wav
+        }
+    }
+
     /** Speak a short outcome (when replies are read aloud), then rest. Never throws. */
     private suspend fun say(text: String) {
         if (!speakAloud()) return
@@ -499,6 +583,7 @@ class VoiceController(
             AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED,
             AgentStatus.CANNOT_DO, AgentStatus.FAILED, AgentStatus.STOPPED
         )
+        val progressJob = if (speakAloud()) observerScope.launch { progressLoop(goal) } else null   // K-02
         val finalState: AgentUiState? = try {
             awaitAgent(goal, terminal) { st ->
                 when (st.status) {
@@ -518,6 +603,7 @@ class VoiceController(
         } finally {
             // Always stop the backchannel once the wait ends — success, timeout, OR cancellation — so it can
             // never overlap the spoken outcome (which runTurn speaks right after this returns).
+            progressJob?.cancel()
             fillers?.stop()
         }
         if (finalState == null) {
@@ -564,6 +650,34 @@ class VoiceController(
             watcher.cancel(); clock.cancel()
             result
         }
+
+    /**
+     * K-02 — a blind user gets nothing from the thinking animation, and the two opening fillers end after a few
+     * seconds. Past that, speak a short progress line every `ux.progress.intervalMs` while the agent is working
+     * (never while it asks or waits on the user), with the step number, up to `ux.progress.maxLines` times.
+     */
+    private suspend fun progressLoop(goal: String) {
+        val cfg = com.tekyerema.core.config.AppConfig
+        kotlinx.coroutines.delay(cfg.long("ux.progress.firstAfterMs", 10_000L))
+        val interval = cfg.long("ux.progress.intervalMs", 12_000L)
+        var lines = 0
+        while (lines < cfg.int("ux.progress.maxLines", 8)) {
+            val st = agent.state.value
+            if (st.goal != goal) return
+            val working = st.status == AgentStatus.THINKING || st.status == AgentStatus.ACTING
+            if (working && _state.value.state == VoiceState.EXECUTING) {
+                fillers?.stop()
+                val step = st.log.lastOrNull { it.kind == LogEntry.Kind.PLAN }?.text
+                    ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
+                val lang = forceLanguage() ?: sessionLanguage()
+                val line = if (lang == Lang.TWI) "Mereyɛ ho adwuma da." else if (step != null) "Still working on it — step $step." else "Still working on it."
+                cues.progress()
+                try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                lines++
+            }
+            kotlinx.coroutines.delay(interval)
+        }
+    }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
     private fun spokenFor(status: AgentStatus, resultText: String?): String = when (status) {

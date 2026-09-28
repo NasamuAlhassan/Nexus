@@ -12,9 +12,16 @@ class TekyeremaApp : Application() {
         // X-02: versioned JSON config (assets/config) + local overrides — loaded before anything reads a tunable.
         com.tekyerema.core.config.AppConfig.load(this)
         com.tekyerema.core.config.Registrations.registerAll()   // X-01: capability registry (flags, API gates, checks)
+        com.tekyerema.core.DeviceProfile.init(this)             // N-08: RAM class → how many models stay resident
         NetworkMonitor.init(this)   // online/offline detection for hybrid routing (§32)
         ModelManager.init(this)     // §Part D — single model store; first-run download is the delivery path
         AgentEngine.init(this)
         VoiceEngine.init(this)
+    }
+
+    /** N-08: release on-device models under memory pressure instead of being killed for them. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        VoiceEngine.onTrimMemory(level)
     }
 }

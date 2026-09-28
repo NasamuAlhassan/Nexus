@@ -69,20 +69,41 @@ class AndroidTts(context: Context) : TtsProvider {
             Log.i("Tekyerema", "[TTS] no voice for '$language'; not speaking (honest gap)")
             return false
         }
-        return suspendCancellableCoroutine { cont ->
-            val id = "tk-" + System.nanoTime()
-            engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) { if (cont.isActive) cont.resume(true) }
-                @Deprecated("deprecated in API 21")
-                override fun onError(utteranceId: String?) { if (cont.isActive) cont.resume(false) }
-                override fun onError(utteranceId: String?, errorCode: Int) { if (cont.isActive) cont.resume(false) }
-            })
-            val rc = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, id)
-            if (rc != TextToSpeech.SUCCESS && cont.isActive) cont.resume(false)
-            cont.invokeOnCancellation { engine.stop() }
+        // B-15/K-07: our stream (accessibility when TalkBack drives the phone) + may-duck focus for the duration.
+        try { engine.setAudioAttributes(focus.attributes(AudioFocus.Kind.SPEAK)) } catch (_: Throwable) {}
+        focus.acquire(AudioFocus.Kind.SPEAK)
+        val chunks = SpeechChunks.split(text, com.tekyerema.core.config.AppConfig.int("speech.tts.chunkChars", 180))
+        val t0 = android.os.SystemClock.uptimeMillis()
+        try {
+            return suspendCancellableCoroutine { cont ->
+                // B-06: queue every chunk now (the engine pipelines synthesis) and finish on the LAST one's onDone.
+                val ids = chunks.indices.map { "tk-" + System.nanoTime() + "-" + it }
+                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {
+                        if (utteranceId == ids.first()) lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0   // Q-01
+                    }
+                    override fun onDone(utteranceId: String?) { if (utteranceId == ids.last() && cont.isActive) cont.resume(true) }
+                    // Flushed by a newer utterance or stop(): end this one instead of leaving the caller suspended.
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) { if (cont.isActive) cont.resume(false) }
+                    @Deprecated("deprecated in API 21")
+                    override fun onError(utteranceId: String?) { if (cont.isActive) cont.resume(false) }
+                    override fun onError(utteranceId: String?, errorCode: Int) { if (cont.isActive) cont.resume(false) }
+                })
+                for ((i, c) in chunks.withIndex()) {
+                    val rc = engine.speak(c, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, ids[i])
+                    if (rc != TextToSpeech.SUCCESS) { if (cont.isActive) cont.resume(false); break }
+                }
+                cont.invokeOnCancellation { engine.stop() }
+            }
+        } finally {
+            focus.release()
         }
     }
+
+    private val focus = AudioFocus(context)
+
+    /** Q-01: time from speak() to the first audible chunk of the last utterance (ms), or -1. */
+    @Volatile var lastFirstAudioMs: Long = -1; private set
 
     /** 1.0 = the engine's normal pace; the Voice settings page offers slow/normal/fast. */
     fun setRate(rate: Float) { try { engine.setSpeechRate(rate.coerceIn(0.5f, 2.0f)) } catch (_: Throwable) {} }

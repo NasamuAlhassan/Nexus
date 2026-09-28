@@ -8,6 +8,10 @@ import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
@@ -35,7 +39,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     // more than MAX_RESIDENT are ever loaded. LinkedHashMap(accessOrder) gives us the LRU ordering for free.
     private val cache = object : LinkedHashMap<String, OfflineRecognizer>(2, 0.75f, true) {
         override fun removeEldestEntry(eldest: Map.Entry<String, OfflineRecognizer>): Boolean {
-            val evict = size > MAX_RESIDENT
+            val evict = size > com.tekyerema.core.DeviceProfile.maxResidentAsrModels()   // N-08: 1 on a 2.8 GB phone
             if (evict) { try { eldest.value.release() } catch (_: Throwable) {}; Log.i("Tekyerema", "[ASR] LRU-evicted recognizer (${eldest.key})") }
             return evict
         }
@@ -127,9 +131,27 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
 
     /** §2.4 — preload the SESSION language off the critical path so the first request isn't slow. On the
      *  4 GB+ target the other language also stays resident (MAX_RESIDENT=2, §2.5), so a switch is instant. */
-    suspend fun warm(sessionLanguage: String? = null) { if (ready) rec(langKey(sessionLanguage)) }
+    suspend fun warm(sessionLanguage: String? = null) {
+        if (ready) withContext(Dispatchers.Default) { lock.withLock { rec(langKey(sessionLanguage)) } }
+    }
 
-    override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? {
+    /** N-08: model load and decode are seconds of CPU work — never on the caller's (often the main) thread. The
+     *  recognizer cache isn't thread-safe, so warm-up and decodes are serialised. */
+    private val lock = Mutex()
+
+    override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? =
+        withContext(Dispatchers.Default) { lock.withLock { decodeLocked(wav, forceLanguage) } }
+
+    /** Drop every loaded recognizer (N-08 low-memory: onTrimMemory). They reload on the next request. */
+    suspend fun releaseAll() = withContext(Dispatchers.Default) {
+        lock.withLock {
+            cache.values.forEach { try { it.release() } catch (_: Throwable) {} }
+            cache.clear()
+            Log.i("Tekyerema", "[ASR] released all recognizers (low memory)")
+        }
+    }
+
+    private fun decodeLocked(wav: ByteArray, forceLanguage: String?): String? {
         val lang = langKey(forceLanguage)
         val r = rec(lang) ?: return null
         val (raw, sr) = readWav(wav) ?: return null

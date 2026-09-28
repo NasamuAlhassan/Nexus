@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- B-14: haptic cues (install-time; without it every vibration silently failed). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Alarm/timer accelerators (§1.4): without this SET_ALARM is denied and the tool must NOT claim success. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- §C.1 keep the voice session (mic + agent loop) alive while a task is in flight, so the assistant
