@@ -459,6 +459,54 @@ object ReadStateTool : Tool {
         VerificationResult(result.success, "observation")
 }
 
+/**
+ * Reads the screen to the user word for word, a few sentences at a time ([com.tekyerema.agent.ScreenReadout]) —
+ * on the phone, no internet (the tree, or on-device OCR when the tree is empty). `continue` gives the next part of the
+ * same screen. Same privacy rules as [ReadStateTool]: a PIN / password / code / robot-check screen is never read, not
+ * even OCR'd; an app on the user's deny list is never read.
+ */
+object ReadScreenTool : Tool {
+    override val name = "read_screen"
+    override val description = "Read the text on the screen to the user word for word, in reading order, a few sentences at a time " +
+        "(continue=true for the next part)."
+    override val scope = CapabilityScope.PERCEIVE
+    override val riskTier = RiskTier.TIER0
+    override val params = listOf(ToolParam("continue", "boolean", "The next part of the same reading.", required = false))
+
+    const val PRIVATE = "This is a private screen — a PIN, password or code — so I won't read it."
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
+        if (!ctrl.ready) return ToolResult(false, NO_SERVICE)
+        fun private(s: UiSnapshot) = com.tekyerema.policy.TargetSemantics.isCredentialScreen(s) ||
+            com.tekyerema.policy.TargetSemantics.isHumanCheckScreen(s)
+        // The raw tree first: a credential screen is never screenshotted or OCR'd.
+        val raw = try { ctrl.buildSnapshot() } catch (_: Throwable) { null }
+        if (raw != null && private(raw)) {
+            com.tekyerema.agent.ScreenReadCursor.clear()
+            return ToolResult(true, PRIVATE, JSONObject().put("secure", true), channel = "none")
+        }
+        val pkg = raw?.appPackage
+        if (pkg != null && pkg in com.tekyerema.policy.PolicyConfig.denyApps())
+            return ToolResult(true, "That app is on your do-not-read list, so I won't read it.", channel = "none")
+        val key = raw?.let { com.tekyerema.agent.ScreenReadCursor.keyOf(it) }
+        if (args.boolOrDefault("continue", false) && key != null)
+            com.tekyerema.agent.ScreenReadCursor.next(key)?.let { return ToolResult(true, it, channel = "none") }
+        val snap = Perception.observe(ctrl, false, "read the screen")
+        if (private(snap)) { com.tekyerema.agent.ScreenReadCursor.clear(); return ToolResult(true, PRIVATE, channel = "none") }
+        if (snap.secureWindow && snap.elements.none { !it.label.isNullOrBlank() })
+            return ToolResult(true, SECURE_SCREEN, JSONObject().put("secure", true), channel = "none")
+        val parts = com.tekyerema.agent.ScreenReadout.compose(snap)
+        // K-15: "what changed?" compares against what was just read.
+        com.tekyerema.agent.ScreenMemory.remember(snap.appPackage, snap.elements.mapNotNull { e -> e.label?.takeIf { it.isNotBlank() } })
+        return ToolResult(true, com.tekyerema.agent.ScreenReadCursor.start(parts, key ?: com.tekyerema.agent.ScreenReadCursor.keyOf(snap)),
+            JSONObject().put("parts", parts.size).put("route", snap.perception.source), channel = "none")
+    }
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
+        VerificationResult(result.success, "observation")
+}
+
 object WaitTool : Tool {
     override val name = "wait"
     override val description = "Wait a few seconds for the screen or an app to finish loading."

@@ -41,6 +41,7 @@ object OfflineCapability {
     fun needsInternet(goal: String): Boolean {
         val g = goal.trim()
         if (g.isEmpty()) return false
+        if (ScreenReadIntent.isRead(g) || ScreenReadIntent.isContinue(g)) return false   // reading the screen is on the phone
         if (LOCAL_OVERRIDE.any { it.containsMatchIn(g) }) return false
         return ONLINE_ONLY.any { it.containsMatchIn(g) }
     }

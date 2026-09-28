@@ -23,6 +23,7 @@ object DirectAnswer {
     fun isKnowledgeQuestion(goal: String): Boolean {
         val g = goal.trim().lowercase()
         if (g.isEmpty() || !QUESTION.containsMatchIn(g)) return false
+        if (ScreenReadIntent.isRead(g)) return false   // "what does it say?" is about the screen, not general knowledge
         // "tell me a joke": the opener's "me" is the listener, not the user's own things.
         val body = g.replaceFirst(Regex("^(?:please\\s+)?tell me\\s+"), "")
         val words = body.split(Regex("[^\\p{L}\\p{N}'-]+")).filter { it.isNotBlank() }.toSet()

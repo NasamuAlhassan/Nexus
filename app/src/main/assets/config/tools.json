@@ -2,6 +2,7 @@
   "schema_version": 1,
   "tools": {
     "read_state": {"feature": "F-01", "idempotent": true},
+    "read_screen": {"feature": "F-01", "idempotent": true, "untrusted_output": true},
     "wait": {"feature": "G-10", "idempotent": true},
     "tap": {"feature": "G-01", "callers": ["planner", "local"]},
     "long_press": {"feature": "G-02", "callers": ["planner", "local"]},

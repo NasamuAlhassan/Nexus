@@ -55,6 +55,14 @@ class LocalBrain : AgentBrain {
         // --- L-04 emergency: before the network gate (a call and an SMS need no internet). The engine confirms. ---
         if (RE_EMERGENCY.containsMatchIn(g)) { pendingResultSpeak = true; return call("emergency", JSONObject(), "emergency") }
 
+        // --- read the screen word for word: no internet needed (the tree, or on-device OCR). "continue" goes on. ---
+        //     Before the network gate — "what does it say" is question-shaped — and before notifications, so
+        //     "read this message" reads the message that is open. ---
+        if (ScreenReadIntent.isRead(raw) || (ScreenReadIntent.isContinue(raw) && ScreenReadCursor.pending)) {
+            pendingResultSpeak = true
+            return call("read_screen", JSONObject().put("continue", ScreenReadIntent.isContinue(raw)), "read the screen")
+        }
+
         if (OfflineCapability.needsInternet(raw)) return network(raw)
 
         // --- compound / multi-step requests → let the cloud operator plan them (fast path is single-action) ---
@@ -197,7 +205,11 @@ class LocalBrain : AgentBrain {
         val last = ctx.history.lastOrNull().orEmpty()
         // Strip the planner-only recovery hint the engine appends to a missed accelerator (Recovery.hint) —
         // it must never be spoken to the user (same class as the §1.7 UNVERIFIED-prefix leak).
-        val msg = (if ("); " in last) last.substringAfterLast("); ") else last.substringAfterLast("; "))
+        // The message starts after the verify detail's ")" — split at the FIRST "); " after "verified=", so a screen
+        // reading that itself contains "); " is spoken whole.
+        val v = last.indexOf("verified=")
+        val cut = if (v >= 0) last.indexOf("); ", v) else -1
+        val msg = (if (cut >= 0) last.substring(cut + 3) else if ("); " in last) last.substringAfterLast("); ") else last.substringAfterLast("; "))
             .substringBefore(" — the '")
             .removePrefix(AgentEngine.UNTRUSTED_MARK)   // J-07 planner-only marker, never spoken
             .trim()
@@ -400,7 +412,7 @@ class LocalBrain : AgentBrain {
          *  that no local intent provides. Keep in sync with decide(). */
         fun offlineCapabilities(): String =
             "open apps, make calls, go back or to the home screen, scroll, change the volume, " +
-            "set an alarm or timer, and tell you what's on your screen"
+            "set an alarm or timer, and read your screen to you"
 
         // English + minimal Twi verb coverage. Twi: bue=open, frɛ=call, kenkan=read, san (kɔ)=back.
         // Natural-phrasing coverage (§A.3): fuzzy/paraphrase alternations, EN + Ghanaian-English + Twi,
@@ -426,7 +438,7 @@ class LocalBrain : AgentBrain {
         // §P2.4 named track: "play <track>". The last group is the track query.
         private val RE_PLAY_TRACK = Regex("^\\s*$LEADIN(?:play|bɔ)\\s+(?:me\\s+|some\\s+)?(.+)$", RegexOption.IGNORE_CASE)
         private val RE_ON_APP = Regex("\\bon\\s+(youtube|yutu\\S*|spotify|boomplay|audiomack|tiktok|instagram|soundcloud|apple\\s+music)\\b", RegexOption.IGNORE_CASE)
-        private val RE_READ_SCREEN = Regex("\\b(what('?s| is| am i)\\b.*\\b(screen|looking at|showing|open)|on\\s+(my|the)\\s+screen|read (the|my) screen|describe (the|my) screen|what do you see|kenkan)\\b", RegexOption.IGNORE_CASE)
+        private val RE_READ_SCREEN = Regex("\\b(what('?s| is| am i)\\b.*\\b(screen|looking at|showing|open)|on\\s+(my|the)\\s+screen|read (the|my) screen|describe (the|my) screen|what do you see|kenkan|(which|what) app am i (in|on|using))\\b", RegexOption.IGNORE_CASE)
         private val RE_GREET = Regex("^\\s*(hi|hello|hey|good (morning|afternoon|evening)|thanks|thank you|akwaaba|medaase)\\s*[.!]*\\s*$", RegexOption.IGNORE_CASE)
         // Compound requests → the local fast path only does ONE action, so hand these to the cloud planner
         // (§1.9). Bare "and"/Twi "na"/"then"/";" all count — the earlier regex missed a plain "and", so

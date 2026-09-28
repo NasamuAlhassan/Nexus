@@ -314,7 +314,7 @@ object FastIntentClassifier {
     private val RE_TORCH_OFF = Regex("\\b(?:flashlight|torch|flash\\s*light)\\b[^.]*\\boff\\b|\\boff\\b[^.]*\\b(?:flashlight|torch|flash\\s*light)\\b")
     // ---- W6 camera / screen / magnification / emergency ----
     // Camera phrases name a physical object or the camera, so "read my screen" never opens the camera.
-    private val RE_CAMERA_TEXT = Regex("\\bwhat does (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|page|medicine|book) say\\b|" +
+    private val RE_CAMERA_TEXT = Regex("\\bwhat does (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book) say\\b|" +
         "\\bread (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book)\\b|" +
         "\\bread (?:it |this |the text )?(?:with|using) the camera\\b|^scan (?:this|it)$")
     private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")

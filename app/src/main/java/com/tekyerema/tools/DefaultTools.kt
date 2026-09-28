@@ -8,6 +8,7 @@ package com.tekyerema.tools
 fun defaultTools(): List<Tool> = listOf(
     // Perception
     ReadStateTool,
+    ReadScreenTool,       // F-01: the screen read out word for word, offline
     WaitTool,
     // Universal interaction primitives — the ONLY way the operator touches the screen
     TapTool,

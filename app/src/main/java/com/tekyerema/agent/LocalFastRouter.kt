@@ -40,6 +40,8 @@ class LocalFastRouter(
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
+        // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
+        if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
         val intent = FastIntentClassifier.classify(text) ?: run {
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${text.take(60)}'")
             return null
@@ -254,6 +256,7 @@ class LocalFastRouter(
                 com.tekyerema.notifications.MessageIndex.clear()
                 com.tekyerema.core.telemetry.Trajectories.clear(appContext)
                 ScreenMemory.clear()
+                ScreenReadCursor.clear()
                 "Okay, I've forgotten our conversations and the messages I was keeping. Your settings, schedules and emergency contact stay — change them in Settings."
             }
         }
