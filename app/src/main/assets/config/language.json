@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "providers": {
+    "speech": {
+      "_clientsNote": "Language layer (B-18/X-05, docs/agent/LANGUAGE_LAYER.md). REST clients by id; every one ships DISABLED with ${PLACEHOLDER} endpoints and keys that resolve from local.properties SPEECH_* entries (never committed). To turn one on: put its SPEECH_* values in local.properties, set enabled=true, then list its id under providers.speech.asr.online.<lang> / tts.<role> (models.json) or mt.<direction> (below). A client that is disabled, missing a key or not https is never built, so routing falls through to the on-device engines.",
+      "clients": {
+        "hcilab_asr": {
+          "_note": "UG HCI Lab (University of Ghana) speech recognition — REQUIRED for Twi once the lab issues access. The request/response shape here is a PLACEHOLDER (multipart file + language field, JSON {\"text\"}); copy the real field names from the lab's API docs. local.properties: SPEECH_HCILAB_ASR_URL, SPEECH_HCILAB_KEY.",
+          "kind": "asr",
+          "enabled": false,
+          "quotaGroup": "hcilab",
+          "endpoint": "${SPEECH_HCILAB_ASR_URL}",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_HCILAB_KEY}"},
+          "languages": {"twi": "twi"},
+          "fixedLanguage": "twi",
+          "request": {"body": "multipart", "audioField": "file", "fileName": "speech.wav", "audioMime": "audio/wav", "language": "body", "languageField": "language"},
+          "response": {"kind": "json", "path": "text"},
+          "timeouts": {"connectMs": 5000, "callMs": 15000}
+        },
+        "hcilab_tts": {
+          "_note": "UG HCI Lab Twi voice. PLACEHOLDER shape: JSON {\"text\", \"language\"} in, audio bytes out. local.properties: SPEECH_HCILAB_TTS_URL, SPEECH_HCILAB_KEY.",
+          "kind": "tts",
+          "enabled": false,
+          "quotaGroup": "hcilab",
+          "endpoint": "${SPEECH_HCILAB_TTS_URL}",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_HCILAB_KEY}"},
+          "languages": {"twi": "twi"},
+          "request": {"body": "json", "textField": "text", "language": "body", "languageField": "language", "fields": {}},
+          "response": {"kind": "audio"},
+          "timeouts": {"connectMs": 5000, "callMs": 20000},
+          "cacheEntries": 48
+        },
+        "hcilab_mt": {
+          "_note": "UG HCI Lab translation, if offered. PLACEHOLDER shape: JSON {\"text\", \"source\", \"target\"} in, JSON {\"translation\"} out. local.properties: SPEECH_HCILAB_MT_URL, SPEECH_HCILAB_KEY.",
+          "kind": "mt",
+          "enabled": false,
+          "quotaGroup": "hcilab",
+          "endpoint": "${SPEECH_HCILAB_MT_URL}",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_HCILAB_KEY}"},
+          "languages": {"gh_en": "en", "twi": "twi"},
+          "request": {"body": "json", "textField": "text", "language": "body", "fromField": "source", "toField": "target"},
+          "response": {"kind": "json", "path": "translation"},
+          "timeouts": {"connectMs": 5000, "callMs": 12000},
+          "cacheEntries": 256
+        },
+        "openai_asr": {
+          "_note": "Any OpenAI-compatible /audio/transcriptions server, e.g. a hosted Ghanaian-English Whisper tune. Ghanaian English ONLY (Whisper has no Twi token) — list it under asr.online.gh_en, never twi or auto. Reuses the existing local.properties slots ASR_ONLINE_URL (…/v1), ASR_ONLINE_KEY, ASR_ONLINE_MODEL.",
+          "kind": "asr",
+          "enabled": false,
+          "endpoint": "${ASR_ONLINE_URL}/audio/transcriptions",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${ASR_ONLINE_KEY}"},
+          "languages": {"gh_en": "en"},
+          "fixedLanguage": "gh_en",
+          "request": {"body": "multipart", "audioField": "file", "fileName": "speech.wav", "audioMime": "audio/wav", "language": "body", "languageField": "language", "fields": {"model": "${ASR_ONLINE_MODEL}", "response_format": "json"}},
+          "response": {"kind": "json", "path": "text"},
+          "timeouts": {"connectMs": 5000, "callMs": 15000}
+        }
+      },
+      "mt": {
+        "_note": "Translator ids per direction, tried in order. enToTwi localizes English replies for a Twi speaker (ReplyLocalizer: never text with numbers/money, names must survive, else the original is spoken). twiToEn is exposed for the agent (LanguageLayer.translator) but not wired into the loop.",
+        "enToTwi": [],
+        "twiToEn": [],
+        "localizeReplies": true,
+        "maxChars": 400
+      }
+    }
+  },
+  "speech": {
+    "language": {
+      "_note": "B-05 LanguageSession: replies follow the language of the user's last turn while the conversation is live (conversationTtlSec); the persisted habitual language (the low-signal fallback after a pause) changes only after habitualSwitchTurns turns in a row in the other language.",
+      "conversationTtlSec": 300,
+      "habitualSwitchTurns": 2
+    }
+  }
+}

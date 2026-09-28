@@ -38,12 +38,14 @@ object VoiceEngine {
     /** DEBUG QA: play every filler clip of a language in order so the owner can vet the audio. */
     fun auditionFillers(language: String) { fillerPlayer?.audition(language) }
 
-    /** B-18: online ASR clients by config id. Empty until the UG HCI Lab ASR client exists. */
-    private val asrRegistry: Map<String, AsrProvider> = emptyMap()
+    /** B-18: online ASR clients by config id, built by the language layer from `providers.speech.clients` + local.properties.
+     *  Empty with the shipped config (every client disabled) ⇒ on-device only, exactly as before. */
+    @Volatile private var asrRegistry: Map<String, AsrProvider> = emptyMap()
 
-    /** The configured online ASR for [lang] while online, else null (⇒ on-device). */
-    fun onlineAsrFor(lang: String?): AsrProvider? =
-        if (!com.tekyerema.core.NetworkMonitor.isOnline()) null else SpeechProviders.onlineAsr(lang, asrRegistry)
+    /** The configured online ASR for [lang] while online, else null (⇒ on-device). Never at a PIN/secure screen: the
+     *  Secure Input boundary keeps that audio on the phone. Providers resting after a quota/network failure are skipped. */
+    fun onlineAsrFor(lang: String?): AsrProvider? = com.tekyerema.language.LanguageLayer.onlineAsr(lang, asrRegistry,
+        cloudAllowed = com.tekyerema.core.NetworkMonitor.isOnline() && AgentEngine.state.value.status != AgentStatus.SECURE_INPUT)
 
     /** Live microphone level 0..1 — drives the living voice visual while listening (either mic). */
     val level: StateFlow<Float> get() = _level
@@ -64,25 +66,35 @@ object VoiceEngine {
         answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
         systemTts = AndroidTts(app)
         // B-18: which voice fills each role comes from config (providers.speech.tts.*), always ending in the phone's
-        // own engine so the assistant is never silent. The Khaya/Abena clients are gone (2026-09-28); the UG HCI Lab
-        // TTS client registers its id in ttsRegistry when it exists. Until then everything is the system engine, and
-        // a Twi reply is spoken from its text (no MT).
-        val ttsRegistry = mapOf("system" to systemTts)
+        // own engine so the assistant is never silent. The language layer builds the network clients (UG HCI Lab or
+        // any REST API) from config + local.properties; with the shipped config there are none, so everything is the
+        // system engine and a Twi reply is spoken from its text (no MT). The system voice is wrapped so Twi letters
+        // (ɛ/ɔ) are read as plain vowels instead of being spelled out; English text passes through unchanged.
+        val layer = com.tekyerema.language.LanguageLayer.build(app)
+        asrRegistry = layer.asr
+        val systemVoice = com.tekyerema.language.PlainLatinVoice(systemTts)
+        val ttsRegistry = layer.tts + ("system" to systemVoice)
+        val isOnline = { com.tekyerema.core.NetworkMonitor.isOnline() }
+        val localizer = com.tekyerema.language.ReplyLocalizer(
+            com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline))
         val tts = RoutingTts(
-            english = SpeechProviders.tts("english", ttsRegistry, systemTts),
-            twi = SpeechProviders.tts("twi", ttsRegistry, systemTts),
-            enToTw = { null },                 // no on-device MT; MT slots in with the HCI Lab API
+            english = SpeechProviders.tts("english", ttsRegistry, systemVoice),
+            twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
+            enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
             ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
                 .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
-            isOnline = { com.tekyerema.core.NetworkMonitor.isOnline() }
+            isOnline = isOnline
         )
+        // B-05: reply in the language the user last spoke; the persisted habitual language only moves after a streak.
+        val language = com.tekyerema.language.LanguageSession(
+            loadHabitual = { settings.sessionLanguage }, saveHabitual = { settings.sessionLanguage = it })
         val sherpa = SherpaAsr(app).also { this.sherpa = it }
         // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
         scope.launch(Dispatchers.Default) { try { sherpa.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
-            "online ASR: OFF (Phase II — on-device only; HCI Lab API plugs into onlineFor) | " +
-            "TTS: system engine | cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
+            "language layer: ${layer.summary()} | " +
+            "cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
         controller = VoiceController(
             // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our
@@ -95,15 +107,15 @@ object VoiceEngine {
                 onDevice = sherpa,
                 // Language-aware online routing, network folded in (offline ⇒ null ⇒ on-device, no hang). B-18: the
                 // provider per language comes from config (providers.speech.asr.online.<lang>); the UG HCI Lab ASR
-                // client registers in asrRegistry. None is registered yet, so English and Twi both transcribe
-                // ON-DEVICE via sherpa.
+                // client is built into asrRegistry by the language layer. None is enabled in the shipped config, so
+                // English and Twi both transcribe ON-DEVICE via sherpa.
                 onlineFor = { lang -> onlineAsrFor(lang) },
                 forceLanguage = { settings.forcedLanguage },
-                sessionLanguage = { settings.sessionLanguage }
+                sessionLanguage = { language.current() }
             ),
             tts = tts,
-            sessionLanguage = { settings.sessionLanguage },
-            onLanguageResolved = { settings.sessionLanguage = it },
+            sessionLanguage = { language.current() },
+            onLanguageResolved = { language.onTurn(it) },
             scope = scope,
             hasMicPermission = {
                 ContextCompat.checkSelfPermission(app, android.Manifest.permission.RECORD_AUDIO) ==

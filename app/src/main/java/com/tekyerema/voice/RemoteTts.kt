@@ -29,8 +29,12 @@ class RoutingTts(
         val text = rawText.replace(Regex("[*_`#]+"), "").replace(Regex("[ \\t]+"), " ").trim()
         if (language == Lang.TWI) {
             // Localize English response text to Twi so the Twi VOICE speaks Twi WORDS (not English read by
-            // a Twi voice). Already-Twi text (e.g. LocalBrain "Mabue no.") is left as-is by enToTw.
-            val twiText = enToTw?.invoke(text)?.takeIf { it.isNotBlank() } ?: text
+            // a Twi voice). Already-Twi text (e.g. LocalBrain "Mabue no.") is left as-is by enToTw. The language
+            // layer's localizer also refuses anything with a quantity or a name it can't keep (ReplyLocalizer).
+            val localized = try { enToTw?.invoke(text)?.takeIf { it.isNotBlank() } }
+                catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
+            // X-06: the Twi voice gets the standard spelling (look-alike ɛ/ɔ mapped, tone marks dropped).
+            val twiText = com.tekyerema.language.TwiText.canonical(localized ?: text)
             if (twi.speak(twiText, language)) { Log.i("Tekyerema", "[TTS] spoke Twi via ${twi.name}"); return true }
             Log.w("Tekyerema", "[TTS] Twi voice (${twi.name}) unavailable → English system-engine fallback (${english.name}) (§28)")
             return english.speak(text, Lang.GH_EN)   // fallback: ORIGINAL English text, English voice — never silent
