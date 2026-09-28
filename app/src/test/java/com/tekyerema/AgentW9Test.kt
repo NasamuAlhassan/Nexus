@@ -60,6 +60,31 @@ class AgentW9Test {
         assertEquals("fallback-model", ModelRoles.model("nonexistent-role", "fallback-model"))
     }
 
+    // ---------------------------------------------------------------- audit fixes
+    @Test fun position_words_become_reading_order() {
+        assertEquals("Tap the button just before it.", com.tekyerema.voice.SpeechLint.apply("Tap the button above."))
+        assertEquals("Open the link just after it.", com.tekyerema.voice.SpeechLint.apply("Open the link below."))
+        assertEquals("Tap the icon.", com.tekyerema.voice.SpeechLint.apply("Tap the icon on the right."))
+    }
+
+    @Test fun the_main_list_is_the_largest_scrollable() {
+        val carousel = UiElement(1, "HorizontalScrollView", null, Box(0, 0, 1080, 200), scrollable = true)
+        val list = UiElement(2, "RecyclerView", null, Box(0, 200, 1080, 2200), scrollable = true)
+        val snap = UiSnapshot("com.x", null, listOf(carousel, list), 1L)
+        assertEquals(2, com.tekyerema.tools.mainScrollable(snap)?.id)
+        assertNull(com.tekyerema.tools.mainScrollable(UiSnapshot("com.x", null, emptyList(), 1L)))
+    }
+
+    @Test fun worked_examples_reach_the_tool_schema() {
+        try {
+            com.tekyerema.core.config.AppConfig.loadFrom(listOf("tools.json" to
+                """{"tools":{"send_sms":{"feature":"E-03","examples":[{"contact":"Ama","message":"On my way."}]}}}"""))
+            val reg = com.tekyerema.tools.ToolRegistry(listOf(com.tekyerema.tools.SendSmsTool)) { true }
+            val d = reg.functionDeclarations().getJSONObject(0).getString("description")
+            assertTrue(d, d.contains("Example: {\"contact\":\"Ama\""))
+        } finally { com.tekyerema.core.config.AppConfig.loadFrom(emptyList()) }
+    }
+
     @Test fun rule_files_add_phrasings_without_code() {
         val rules = RouterRules.parse(JSONArray("""[
             {"locale":"en","pattern":"^how much charge do i have$","intent":"BATTERY"},

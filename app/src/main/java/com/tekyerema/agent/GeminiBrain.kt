@@ -43,7 +43,8 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
         val maxWaitMs = AppConfig.long("models.gemini.maxRateLimitWaitMs", 60_000L)
         while (true) {
             val (code, text) = try {
-                client.newCall(request).execute().use { resp -> resp.code to resp.body?.string().orEmpty() }
+                com.tekyerema.core.Http.execute(client.newCall(request)).let { (c, body, _) -> c to body }   // cancellable
+            } catch (ce: kotlinx.coroutines.CancellationException) { throw ce
             } catch (t: Throwable) {
                 com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini", null)
                 return@withContext AgentDecision.Fail("Gemini request failed: ${t.message}")

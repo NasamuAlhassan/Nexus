@@ -30,6 +30,26 @@ object Http {
         .callTimeout(callSec, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * Run [call] without blocking a thread, and CANCEL it when the coroutine is cancelled — a "stop" (or a barge-in)
+     * aborts the request in flight instead of waiting out a 35-second model call. Returns (HTTP code, body text,
+     * response headers); throws IOException on a network failure.
+     */
+    suspend fun execute(call: Call): Triple<Int, String, okhttp3.Headers> =
+        kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            cont.invokeOnCancellation { try { call.cancel() } catch (_: Throwable) {} }
+            call.enqueue(object : Callback {
+                override fun onFailure(call: Call, e: IOException) {
+                    if (cont.isActive) cont.resumeWith(Result.failure(e))
+                }
+                override fun onResponse(call: Call, response: Response) {
+                    val r = try { response.use { Result.success(Triple(it.code, it.body?.string().orEmpty(), it.headers)) } }
+                        catch (e: IOException) { Result.failure(e) }
+                    if (cont.isActive) cont.resumeWith(r)
+                }
+            })
+        }
+
     @Volatile private var lastPrewarmMs = 0L
 
     /** Open (or refresh) a pooled connection to [url]'s host without waiting for the answer. Debounced. */

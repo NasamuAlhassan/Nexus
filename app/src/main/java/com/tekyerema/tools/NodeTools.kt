@@ -10,6 +10,10 @@ import com.tekyerema.verifier.VerificationResult
 import kotlinx.coroutines.delay
 import org.json.JSONObject
 
+/** The page's main scrolling region: the LARGEST scrollable element, not the first (often a small carousel or tab strip). */
+internal fun mainScrollable(snap: UiSnapshot): com.tekyerema.accessibility.UiElement? =
+    snap.elements.filter { it.scrollable }.maxByOrNull { it.bounds.width.toLong() * it.bounds.height }
+
 /**
  * G-01 / G-02 / G-03 — semantic node actions beyond tap: expand/collapse a row, select, dismiss a sheet, copy or
  * paste in a field, bring an off-screen item into view, page a pager, or run an action the app itself defines on the
@@ -85,7 +89,7 @@ object ScrollToFindTool : Tool {
             val sig = snap.signature()
             if (sig == lastSig) return ToolResult(false, "'$label' isn't in this list — it ended after $i scroll${if (i == 1) "" else "s"}.", channel = "node")
             lastSig = sig
-            val scrollable = snap.elements.firstOrNull { it.scrollable } ?: return ToolResult(false, "'$label' isn't on this screen and nothing scrolls.")
+            val scrollable = mainScrollable(snap) ?: return ToolResult(false, "'$label' isn't on this screen and nothing scrolls.")
             ctrl.scrollElement(scrollable.id, dir)
             ctrl.waitForSettle(1200)
             snap = ctrl.buildSnapshot()
@@ -155,7 +159,7 @@ object ReadAllTool : Tool {
             val sig = snap.signature()
             if (sig == lastSig) break
             lastSig = sig
-            val scrollable = snap.elements.firstOrNull { it.scrollable } ?: break
+            val scrollable = mainScrollable(snap) ?: break
             if (!ctrl.scrollElement(scrollable.id, "down")) break
             ctrl.waitForSettle(1200)
             snap = ctrl.buildSnapshot()

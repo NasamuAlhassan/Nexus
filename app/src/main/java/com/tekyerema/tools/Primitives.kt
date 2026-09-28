@@ -440,6 +440,13 @@ object ReadStateTool : Tool {
         val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
         if (!ctrl.ready) return ToolResult(false, NO_SERVICE)   // §1.19 — service attached but not yet ready
         val vision = args.boolOrDefault("vision", false)
+        // SECURE INPUT BOUNDARY: this tool observes on its own (a direct question's first step never went through the
+        // loop's credential check), so inspect the raw tree FIRST and never screenshot, OCR or describe a PIN,
+        // password, one-time-code or robot-check screen.
+        val raw = try { ctrl.buildSnapshot() } catch (_: Throwable) { null }
+        if (raw != null && (com.tekyerema.policy.TargetSemantics.isCredentialScreen(raw) || com.tekyerema.policy.TargetSemantics.isHumanCheckScreen(raw)))
+            return ToolResult(true, "This is a private screen (a PIN, password or code) — it is not read. Tell the user to finish it themselves.",
+                data = JSONObject().put("vision", false).put("secure", true), channel = "none")
         val snap = Perception.observe(ctrl, vision, args.str("reason"))
         val data = JSONObject().put("vision", vision).put("route", snap.perception.source)
         // §1.20 — a protected (FLAG_SECURE) screen with nothing readable must not be reported as "empty".

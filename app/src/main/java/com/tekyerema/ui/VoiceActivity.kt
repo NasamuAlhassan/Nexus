@@ -89,7 +89,8 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     }
     val context = LocalContext.current
     LaunchedEffect(Unit) {
-        if (!VoiceEngine.isRunning) {
+        // C-12: arriving while a task works (the mic free) opens an interjection — pause, status or a correction.
+        if (!VoiceEngine.isRunning || VoiceEngine.canInterject) {
             // A11Y-H2: when a screen reader is driving, let its window announcement finish before opening the
             // (gained) mic, so TalkBack's own speech isn't captured as a command.
             if (Perms.talkBack(context)) delay(1200)

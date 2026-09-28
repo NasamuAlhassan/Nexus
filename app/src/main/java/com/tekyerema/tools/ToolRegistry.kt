@@ -25,7 +25,7 @@ class ToolRegistry(
             if (subset != null && t.name !in subset) continue
             val decl = JSONObject()
                 .put("name", t.name)
-                .put("description", t.description)
+                .put("description", describe(t))
             if (t.params.isNotEmpty()) {
                 val props = JSONObject()
                 val required = JSONArray()
@@ -42,6 +42,12 @@ class ToolRegistry(
             arr.put(decl)
         }
         return arr
+    }
+
+    /** D-07: the tool's description plus up to two worked examples from tools.json (`examples`), when it has any. */
+    internal fun describe(t: Tool): String {
+        val ex = ToolManifest.meta(t.name).examples.take(2)
+        return if (ex.isEmpty()) t.description else t.description + " Example: " + ex.joinToString(" | ") { it.toString() }
     }
 
     /** OpenAI/Groq tools format: [{ "type":"function", "function": <declaration> }] — optionally a [subset] (D-02). */

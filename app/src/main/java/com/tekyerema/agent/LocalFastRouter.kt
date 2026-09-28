@@ -402,6 +402,8 @@ class LocalFastRouter(
     private suspend fun runTool(name: String, args: org.json.JSONObject, action: Boolean = false): FastOutcome? {
         val tool = com.tekyerema.tools.defaultTools().firstOrNull { it.name == name } ?: return null
         if (!com.tekyerema.tools.ToolManifest.isAvailable(tool)) return null
+        // D-08: the fast path is the "local" caller — a tool that doesn't list it goes to the agent instead.
+        if (!com.tekyerema.tools.ToolManifest.mayCall(tool, com.tekyerema.tools.ToolManifest.CALLER_LOCAL)) return null
         if (com.tekyerema.policy.PolicyEngine().evaluate(tool, args).outcome != com.tekyerema.policy.PolicyOutcome.ALLOW) return null
         val ctx = com.tekyerema.tools.ToolContext(appContext, controller(), com.tekyerema.notifications.NotificationStore)
         tool.preflight(args, ctx)?.let { return FastOutcome(name.uppercase(), speakable(it.message), systemVoice = action, ok = false) }

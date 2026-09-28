@@ -128,6 +128,10 @@ class VoiceController(
 
     val isRunning: Boolean get() = job?.isActive == true || confirmJob?.isActive == true
 
+    /** C-12: a task is working and nothing is using the microphone — the wake word may listen and interject now. */
+    val canInterject: Boolean get() = agent.busy && _state.value.state == VoiceState.EXECUTING &&
+        interjectJob?.isActive != true && askJob?.isActive != true && confirmJob?.isActive != true && secureJob?.isActive != true
+
     // The confirmation observer outlives any single turn, so it is not a child of the caller's scope
     // (a test scope would otherwise wait on it forever); shutdown() cancels it.
     private val observerScope = CoroutineScope(scope.coroutineContext + SupervisorJob())
@@ -292,13 +296,19 @@ class VoiceController(
         job?.cancel()
         confirmJob?.cancel()
         secureJob?.cancel()
-        val s = agent.state.value.status
-        if (s == AgentStatus.THINKING || s == AgentStatus.ACTING || s == AgentStatus.WAITING_CONFIRMATION || s == AgentStatus.SECURE_INPUT) agent.stop()
+        askJob?.cancel()          // a question the task was waiting on must not keep listening after "stop"
+        interjectJob?.cancel()
+        // J-14 kill switch: EVERY in-flight state stops the task — including one waiting on a question (ASKING)
+        // or paused by the user (PAUSED), which would otherwise wait forever and block the next request.
+        if (agent.busy || agent.state.value.status in ACTIVE) agent.stop()
         tts.stop()
         idle("Cancelled.")
     }
 
-    fun shutdown() { job?.cancel(); confirmJob?.cancel(); secureJob?.cancel(); observerScope.cancel(); tts.shutdown() }
+    fun shutdown() { job?.cancel(); confirmJob?.cancel(); secureJob?.cancel(); askJob?.cancel(); interjectJob?.cancel(); observerScope.cancel(); tts.shutdown() }
+
+    private val ACTIVE = setOf(AgentStatus.THINKING, AgentStatus.ACTING, AgentStatus.WAITING_CONFIRMATION,
+        AgentStatus.SECURE_INPUT, AgentStatus.ASKING, AgentStatus.PAUSED)
 
     /**
      * Ask the pending question aloud, listen for a spoken yes/no, and answer the agent.
@@ -728,7 +738,8 @@ class VoiceController(
             fail(VoiceStage.EXECUTION, "The assistant took too long to respond.", "Sorry, that took too long. Try again, or ask for one step at a time."); return null
         }
         val resultText = finalState.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text
-        return Outcome(finalState.status, spokenFor(finalState.status, resultText))
+        val steps = finalState.lastResult?.let { try { org.json.JSONObject(it).optInt("steps") } catch (_: Throwable) { 0 } } ?: 0
+        return Outcome(finalState.status, spokenFor(finalState.status, resultText, steps))
     }
 
     /**
@@ -786,7 +797,9 @@ class VoiceController(
                     ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
                 val lang = forceLanguage() ?: sessionLanguage()
                 val twi = lang == Lang.TWI
-                val line = if (step != null && !twi) Phrases.get("progress", false, "Still working on it — step {step}.", "step" to step)
+                // B-13 "detailed": say what it's doing right now ("I'm opening an app, on step 3…"), not just "still working".
+                val line = if (verbosity() == "detailed" && !twi) agent.statusLine()
+                    else if (step != null && !twi) Phrases.get("progress", false, "Still working on it — step {step}.", "step" to step)
                     else Phrases.get(if (twi) "progress" else "progressNoStep", twi, if (twi) "Mereyɛ ho adwuma da." else "Still working on it.")
                 cues.progress()
                 // B-13: "brief" users get the progress tick only — no spoken line.
@@ -799,12 +812,14 @@ class VoiceController(
     }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
-    private fun spokenFor(status: AgentStatus, resultText: String?): String {
+    private fun spokenFor(status: AgentStatus, resultText: String?, steps: Int = 0): String {
         // B-13: "brief" keeps the first sentence of the reply; the honesty tail is added AFTER trimming, never dropped.
         val text = resultText?.let { if (verbosity() == "brief") SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
+        // B-13: "detailed" also says how much work it took.
+        val detail = if (verbosity() == "detailed" && steps > 1) " That took $steps steps." else ""
         return when (status) {
-            AgentStatus.COMPLETED -> text ?: "Done."
-            AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it."
+            AgentStatus.COMPLETED -> (text ?: "Done.") + detail
+            AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it." + detail
             AgentStatus.CANNOT_DO -> text ?: "I can't do that."
             AgentStatus.FAILED -> text ?: "That didn't work."
             AgentStatus.STOPPED -> if (declinedByVoice) "" else "Stopped."   // a voice "no" was already acknowledged

@@ -133,14 +133,15 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             // text). Log it ONLY in debug builds — never in the shared/release APK.
             if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-REQ] ${body.toString().take(4000)}")
             var remaining: Int? = null; var limitTok: Int? = null; var resetMs: Long? = null; var retryMs: Long? = null
+            // Cancellable: stopping the task aborts this request instead of waiting for the model to answer.
             val (code, text) = try {
-                client.newCall(request).execute().use { resp ->
-                    remaining = resp.header("x-ratelimit-remaining-tokens")?.trim()?.toIntOrNull()
-                    limitTok = resp.header("x-ratelimit-limit-tokens")?.trim()?.toIntOrNull()
-                    resetMs = parseDurationMs(resp.header("x-ratelimit-reset-tokens"))
-                    retryMs = resp.header("retry-after")?.trim()?.toDoubleOrNull()?.let { (it * 1000).toLong() }
-                    resp.code to resp.body?.string().orEmpty()
-                }
+                val (c, body, headers) = com.tekyerema.core.Http.execute(client.newCall(request))
+                remaining = headers["x-ratelimit-remaining-tokens"]?.trim()?.toIntOrNull()
+                limitTok = headers["x-ratelimit-limit-tokens"]?.trim()?.toIntOrNull()
+                resetMs = parseDurationMs(headers["x-ratelimit-reset-tokens"])
+                retryMs = headers["retry-after"]?.trim()?.toDoubleOrNull()?.let { (it * 1000).toLong() }
+                c to body
+            } catch (ce: kotlinx.coroutines.CancellationException) { throw ce
             } catch (t: Throwable) {
                 com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", null)
                 return@withContext AgentDecision.Fail("LLM request failed: ${t.message}")

@@ -28,6 +28,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.text.SimpleDateFormat
@@ -89,7 +90,9 @@ class WakeWordService : Service() {
                     if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]}")
                     hb = now; top = 0f
                 }
-                if (handling || VoiceEngine.isRunning) { release(); delay(250); continue }   // a turn owns the mic
+                // A turn owns the mic — except while a task is working with the mic free, when the wake word keeps
+                // listening so the user can interject ("Hey Tɛkyerɛma… pause / what are you doing / send it to Kofi").
+                if (handling || (VoiceEngine.isRunning && !VoiceEngine.canInterject)) { release(); delay(250); continue }
                 if (rec == null) {
                     rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 8))
                     if (rec == null) { delay(1000); continue }
@@ -195,7 +198,16 @@ class WakeWordService : Service() {
 
     /** A wake match: hand the mic to a voice turn, then resume wake listening only once it's fully done. */
     private fun onWake() {
-        if (handling || VoiceEngine.isRunning) return
+        if (handling) return
+        if (VoiceEngine.isRunning) {
+            // C-12: a task is working — this wake is an interjection, heard on the answer mic while the task runs on.
+            if (!VoiceEngine.canInterject) return
+            handling = true
+            scope.launch {
+                try { withContext(Dispatchers.Main) { VoiceEngine.start() }; delay(1_500) } finally { handling = false }
+            }
+            return
+        }
         handling = true
         scope.launch {
             try {

@@ -19,7 +19,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
 /**
@@ -131,13 +130,10 @@ object WebSearch {
         "date" to java.text.SimpleDateFormat("EEEE d MMMM yyyy", java.util.Locale.ENGLISH).format(java.util.Date())
     )
 
+    /** N-04: derived from the shared pool, so a search reuses the planner's warm connection to the same host. */
     private val client: OkHttpClient by lazy {
         val callSec = AppConfig.long("answers.search.timeoutSec", 20L)
-        OkHttpClient.Builder()
-            .callTimeout(callSec, TimeUnit.SECONDS)
-            .connectTimeout(minOf(callSec, 8L), TimeUnit.SECONDS)
-            .readTimeout(callSec, TimeUnit.SECONDS)
-            .build()
+        com.tekyerema.core.Http.client(minOf(callSec, 8L), callSec)
     }
 
     internal class HttpReply(val code: Int, val body: String, val retryAfterMs: Long?)

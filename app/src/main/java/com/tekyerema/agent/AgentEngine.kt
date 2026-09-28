@@ -89,7 +89,10 @@ object AgentEngine {
     private const val TAG = "Tekyerema"
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
-    private val READING_TOOLS = setOf("read_notifications", "read_sms", "search_messages", "web_search", "call_log", "calendar", "find_contact", "location")
+    private val READING_TOOLS = setOf("read_notifications", "read_sms", "search_messages", "web_search", "call_log", "calendar",
+        "find_contact", "location", "read_all")
+    /** G-21: reads that can show whether an uncertain send / call went through (not `wait`, not the web). */
+    private val CHECK_TOOLS = setOf("read_state", "read_all", "read_sms", "call_log", "read_notifications", "search_messages")
     private fun resultLimit(tool: String): Int =
         com.tekyerema.core.config.AppConfig.int("tools.resultLimits.$tool", if (tool in READING_TOOLS) 600 else 160)
 
@@ -455,7 +458,14 @@ object AgentEngine {
                 // C-12: a pause holds the task HERE, between steps — never mid-action.
                 if (paused.value) {
                     setStatus(AgentStatus.PAUSED)
-                    paused.first { !it }
+                    // A pause nobody resumes must not hold the agent (and every later request) forever.
+                    val resumed = kotlinx.coroutines.withTimeoutOrNull(
+                        com.tekyerema.core.config.AppConfig.long("agent.pause.maxMs", 600_000L)) { paused.first { !it } }
+                    if (resumed == null) {
+                        paused.value = false
+                        log(LogEntry.Kind.RESULT, "I was paused for a long time, so I stopped. Ask me again when you're ready.")
+                        finish(AgentStatus.STOPPED, stats); return
+                    }
                     setStatus(AgentStatus.THINKING)
                 }
                 // C-19: fold in anything the user said while the task was running.
@@ -524,11 +534,11 @@ object AgentEngine {
                 val toolNames = if (directStep) registry.all.map { it.name }
                         .filter { it in DIRECT_TOOLS && (it != "web_search" || RouterTiers.enabled(RouterTiers.RETRIEVAL)) }
                     else ToolSelector.select(goal + " " + convo.takeLast(2).joinToString(" "), usedTools, discoveredTools, registry.all.map { it.name })
-                // C-21: think harder only when the task is going badly; a direct answer needs little reasoning.
+                // C-21: think harder only when the task is going badly; a direct answer needs little reasoning. gpt-oss
+                // already reasons at "medium" by default, so a struggling task goes straight to "high".
                 val effort = when {
                     directStep -> com.tekyerema.core.config.AppConfig.string("llm.reasoning.direct", "low")
-                    failStreak >= 4 -> "high"
-                    failStreak >= 2 -> "medium"
+                    failStreak >= 2 -> com.tekyerema.core.config.AppConfig.string("llm.reasoning.struggling", "high")
                     else -> com.tekyerema.core.config.AppConfig.string("llm.reasoning.default", "")
                 }.ifBlank { null }
                 val openAiTools = registry.openAiTools(toolNames)
@@ -667,6 +677,18 @@ object AgentEngine {
                             log(LogEntry.Kind.POLICY, "Not retrying ${decision.name} yet: the last attempt may have gone through — check first")
                             history.add("${decision.name} → NOT retried yet: the previous ${decision.name} failed or didn't verify, but it may " +
                                 "still have happened. First CHECK whether it went through (read_state, or read_sms / call_log); retry only if it clearly didn't.")
+                            continue
+                        }
+                        // B-12: tidy dictated words BEFORE the read-back, so what the user approves is exactly what is sent.
+                        if (decision.name in DICTATED_TOOLS) for (k in listOf("text", "message"))
+                            decision.args.optString(k).takeIf { it.isNotBlank() }?.let { decision.args.put(k, DictationCleanup.clean(it)) }
+                        // D-09: a send / call / payment that already succeeded in this task is never repeated — refused here,
+                        // BEFORE the confirmation, so the user is never asked to approve something that will then be refused.
+                        val sideEffectKey = if (consequential) tool.name + "|" + decision.args.toString() else null
+                        if (sideEffectKey != null && sideEffectKey in doneSideEffects) {
+                            log(LogEntry.Kind.POLICY, "Not repeating ${decision.name}: the identical action already succeeded in this task")
+                            history.add("${decision.name}(${shortArgs(decision.args)}) → NOT repeated: it already succeeded earlier in this task. " +
+                                "Check whether it worked instead of doing it again.")
                             continue
                         }
                         val expectation = Expects.parse(decision.expects)
@@ -965,19 +987,6 @@ object AgentEngine {
 
                         // ---- execute (serialized) ----
                         setStatus(AgentStatus.ACTING)
-                        // D-09: a successful send / call / payment is never repeated inside the same task — a retry after an
-                        // unverified step could otherwise text or pay someone twice.
-                        val sideEffectKey = if (!com.tekyerema.tools.ToolManifest.meta(tool.name).idempotent &&
-                            com.tekyerema.policy.PolicyConfig.effectiveTier(tool).ordinal >= RiskTier.TIER2.ordinal)
-                            tool.name + "|" + decision.args.toString() else null
-                        if (sideEffectKey != null && sideEffectKey in doneSideEffects) {
-                            log(LogEntry.Kind.POLICY, "Not repeating ${decision.name}: the identical action already succeeded in this task")
-                            history.add("${decision.name}(${shortArgs(decision.args)}) → NOT repeated: it already succeeded earlier in this task. " +
-                                "Check whether it worked instead of doing it again.")
-                            continue
-                        }
-                        if (decision.name in DICTATED_TOOLS) for (k in listOf("text", "message"))
-                            decision.args.optString(k).takeIf { it.isNotBlank() }?.let { decision.args.put(k, DictationCleanup.clean(it)) }   // B-12
                         val toolCtx = ToolContext(ctxApp, controller, NotificationStore, observedBefore = before, resolvedTarget = resolved)
                         val actionMark = controller?.lastEventUptime() ?: 0L   // G-10: settle waits for events AFTER this
                         val result = ActionQueue.run { tool.execute(decision.args, toolCtx) }
@@ -1066,7 +1075,7 @@ object AgentEngine {
                         }
                         failStreak = if (!result.success || (mutating && !vr.verified)) failStreak + 1 else 0
                         // G-21: reads check uncertain outcomes; a consequential action's outcome is remembered until then.
-                        if (!mutating && result.success) loopGuard.noteChecked()
+                        if (decision.name in CHECK_TOOLS && result.success) loopGuard.noteChecked()
                         if (consequential) loopGuard.noteConsequential(tool.name, result.success, vr.verified)
                         // G-12: two failed steps in a row on the plain tree → take the next look with vision (on-device OCR).
                         if (failStreak >= 2 && !before.perception.usedVision &&

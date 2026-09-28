@@ -48,6 +48,8 @@ object VoiceEngine {
     private val _level = kotlinx.coroutines.flow.MutableStateFlow(0f)
     val state: StateFlow<VoiceUiState> get() = controller.state
     val isRunning: Boolean get() = controller.isRunning
+    /** C-12: a task is working with the mic free — "Hey Tɛkyerɛma" then interjects (pause, status, a correction). */
+    val canInterject: Boolean get() = initialized && controller.canInterject
 
     fun init(app: Application) {
         if (initialized) return

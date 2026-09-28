@@ -17,7 +17,10 @@ object SpeechLint {
         Regex("(?i)\\bclicks\\b") to "taps",
         Regex("(?i)\\bclick\\b") to "tap",
         Regex("(?i)\\b(?:shown|displayed) (?:above|below|here)\\b") to "on the screen",
-        Regex("(?i)\\b(?:the )?(?:button|link|icon) (?:above|below|on the (?:left|right))\\b") to "that button",
+        // Position words become READING ORDER — how a screen-reader user moves (swipe to the previous / next item).
+        Regex("(?i)\\b(?:the )?(button|link|icon) above\\b") to "the $1 just before it",
+        Regex("(?i)\\b(?:the )?(button|link|icon) below\\b") to "the $1 just after it",
+        Regex("(?i)\\b(?:the )?(button|link|icon) on the (?:left|right)\\b") to "the $1",
         Regex("(?i)\\bhighlighted in (?:red|green|blue|yellow)\\b") to "marked",
         Regex("(?i)\\blook at\\b") to "check"
     )
