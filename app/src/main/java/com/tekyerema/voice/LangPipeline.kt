@@ -44,8 +44,19 @@ private val TWI_NUMBERS: Map<String, Int> = mapOf(
     "aduasa" to 30, "aduanan" to 40, "aduonum" to 50, "aduosia" to 60, "aduɔson" to 70,
     "aduɔwɔtwe" to 80, "aduɔkron" to 90, "ɔha" to 100,
     // observed ASR-output spellings (do not appear in gold; only help score real output)
-    "ziro" to 0, "anom" to 5, "mwɔtwe" to 8, "nkoron" to 9, "mmɔkye" to 8
+    "ziro" to 0, "anom" to 5, "mwɔtwe" to 8, "nkoron" to 9, "mmɔkye" to 8,
+    // X-06 — the other standard spellings of 2–5 and the larger units, from the Harvard Twi course's counting lesson
+    // (elias.fas.harvard.edu/languages/twi/beginning/2/counting): mienu, miɛnsa, ɛnan, enum; ahaanu = 200,
+    // apem = 1000. Recognition only — never spoken. [owner: verify with a native speaker]
+    "mienu" to 2, "miɛnsa" to 3, "ɛnan" to 4, "enum" to 5, "ahaanu" to 200, "apem" to 1000
 )
+
+/** The same tables keyed by [com.tekyerema.language.TwiText.fold], so plain-Latin and tone-marked spellings
+ *  ("mmiensa", "oha", "nwotwe") find their numeral. Exact spellings are always tried first. */
+private val TWI_NUMBERS_FOLDED: Map<String, Int> =
+    TWI_NUMBERS.entries.associate { com.tekyerema.language.TwiText.fold(it.key) to it.value }
+private val TWI_CURRENCY_FOLDED: Map<String, String> =
+    TWI_CURRENCY_VARIANTS.entries.associate { com.tekyerema.language.TwiText.fold(it.key) to it.value }
 
 /** Entity-first normalization — spoken numbers → digits; names/words untouched (§13). */
 object Normalizer {
@@ -58,13 +69,24 @@ object Normalizer {
 
     private val PUNCT = ".,;:?!“”\"'"
     private val TWI_CURRENCY_TOKENS = setOf("cedi", "cedis", "pesewa", "pesewas")
+    private fun twiNumber(core: String): Int? =
+        TWI_NUMBERS[core] ?: TWI_NUMBERS_FOLDED[com.tekyerema.language.TwiText.fold(core)]
+    private fun twiCurrency(core: String): String? =
+        TWI_CURRENCY_VARIANTS[core] ?: TWI_CURRENCY_FOLDED[com.tekyerema.language.TwiText.fold(core)]
     private fun isTwiNumeric(c: String): Boolean =
-        TWI_NUMBERS.containsKey(c) || TWI_CURRENCY_VARIANTS.containsKey(c) || c in TWI_CURRENCY_TOKENS || Regex("\\d+").matches(c)
+        twiNumber(c) != null || twiCurrency(c) != null || c in TWI_CURRENCY_TOKENS || Regex("\\d+").matches(c) ||
+            EN_UNITS.containsKey(c) || EN_TENS.containsKey(c)
 
-    private fun normalizeTwi(s: String): String {
-        val toks = s.split(" ")
-        val cores = toks.map { it.trim(*PUNCT.toCharArray()).lowercase() }
-        return toks.mapIndexed { i, w ->
+    /** One Twi token: its text, the numeral it stands for (if any), and the punctuation around it. */
+    private class TwiTok(val text: String, val value: Long?, val lead: String, val trail: String, val core: String)
+
+    private fun normalizeTwi(input: String): String {
+        // X-06 — standard spelling first (look-alike ɛ/ɔ, tone marks), so every lookup below sees one form. The raw
+        // transcript is kept separately by the pipeline; only the canonical goal is respelled.
+        val s = com.tekyerema.language.TwiText.canonical(input)
+        val words = s.split(" ")
+        val cores = words.map { it.trim(*PUNCT.toCharArray()).lowercase() }
+        val toks = words.mapIndexed { i, w ->
             val core = cores[i]
             val lead = w.takeWhile { it in PUNCT }
             val trail = w.takeLastWhile { it in PUNCT }
@@ -73,13 +95,53 @@ object Normalizer {
             // separate keys and unaffected.
             if (core == "du") {
                 val numericNeighbour = (i > 0 && isTwiNumeric(cores[i - 1])) || (i < cores.size - 1 && isTwiNumeric(cores[i + 1]))
-                return@mapIndexed if (numericNeighbour) "${lead}10$trail" else w
+                return@mapIndexed TwiTok(w, if (numericNeighbour) 10L else null, lead, trail, core)
             }
             // number table first (mirrors phase2/asr.py _twi_tok order), then colloquial currency words.
-            TWI_NUMBERS[core]?.let { return@mapIndexed "$lead$it$trail" }
-            TWI_CURRENCY_VARIANTS[core]?.let { return@mapIndexed "$lead$it$trail" }
-            w
-        }.joinToString(" ")
+            twiNumber(core)?.let { return@mapIndexed TwiTok(w, it.toLong(), lead, trail, core) }
+            twiCurrency(core)?.let { return@mapIndexed TwiTok("$lead$it$trail", null, lead, trail, core) }
+            TwiTok(w, null, lead, trail, core)
+        }
+        val twi = composeTwi(toks).joinToString(" ") { t -> t.value?.let { "${t.lead}$it${t.trail}" } ?: t.text }
+        // Code-switching: Twi speakers very often say amounts in English ("Soma five cedis kɔ Kofi"). English number
+        // words are not Twi words, so the English span parser can run over the result without touching the Twi.
+        return normalizeEnglish(twi)
+    }
+
+    /**
+     * Compound Twi numerals, following the Harvard counting lesson ("aduonu baako" 21, "aduonu enum" 25, "ɔha ne
+     * baako" 101): a tens word followed by a unit adds; a hundreds/thousand word, "ne" ("and"), then a smaller number
+     * adds. Only across words with no punctuation between them, so a list read out ("aduonu, anum") and a spoken
+     * digit string ("baako mmienu mmiɛnsa" → 1 2 3) stay separate. [owner: verify with a native speaker]
+     */
+    private fun composeTwi(toks: List<TwiTok>): List<TwiTok> {
+        fun joinable(a: TwiTok, b: TwiTok) = a.trail.isEmpty() && b.lead.isEmpty()
+        val tens = ArrayList<TwiTok>(toks.size)
+        var i = 0
+        while (i < toks.size) {
+            val a = toks[i]; val b = toks.getOrNull(i + 1)
+            val av = a.value; val bv = b?.value
+            if (b != null && av != null && bv != null && av in 20L..90L && av % 10L == 0L && bv in 1L..9L && joinable(a, b)) {
+                tens.add(TwiTok(a.text + " " + b.text, av + bv, a.lead, b.trail, a.core)); i += 2
+            } else { tens.add(a); i++ }
+        }
+        // Right to left, so "apem ne ɔha ne aduonu" folds the inner "ɔha ne aduonu" (120) before the outer (1120).
+        val out = ArrayList(tens)
+        var j = out.size - 3
+        while (j >= 0) {
+            if (j + 2 < out.size) {
+                val a = out[j]; val ne = out[j + 1]; val b = out[j + 2]
+                val av = a.value; val bv = b.value
+                val fits = av != null && bv != null && ne.value == null && ne.core == "ne" &&
+                    ((av in 100L..900L && av % 100L == 0L && bv in 1L..99L) || (av == 1000L && bv in 1L..999L))
+                if (fits && joinable(a, ne) && joinable(ne, b)) {
+                    out[j] = TwiTok(a.text + " " + ne.text + " " + b.text, av!! + bv!!, a.lead, b.trail, a.core)
+                    out.removeAt(j + 1); out.removeAt(j + 1)
+                }
+            }
+            j--
+        }
+        return out
     }
 
     private fun expand(tok: String): List<String> {
@@ -154,8 +216,21 @@ object Lid {
     private val TWI_WORDS = setOf(
         "wo","na","sɛ","ma","yɛ","mesoma","soma","frɛ","merefrɛ","kenkan","bue","mabue",
         "hwɛ","nkra","sika","bere","mia","kɔ","aane","daabi","obi","hena","dɛn","wopɛ","meyɛ","mewɔ","wɔ",
-        "firi","hɔ","seesei","ara","yɛsrɛ","toa","nua","barima","yere","ɛno","ɛyɛ","meretie","wʋm"
+        "firi","hɔ","seesei","ara","yɛsrɛ","toa","nua","barima","yere","ɛno","ɛyɛ","meretie","wʋm",
+        // B-05 — everyday request words that code-switched speech keeps in Twi ("Mepɛ sɛ me call Kofi"): want, show,
+        // thanks, please, where, or, so, today, tomorrow, speak, stop, wait, done. Recognition cues only, never
+        // spoken. [owner: verify with a native speaker]
+        "mepɛ","pɛ","kyerɛ","medaase","mesrɛ","ɛhe","anaa","nti","ɛnnɛ","ɔkyena","kasa","gyae","twɛn","awie"
     )
+    /** Plain-Latin spellings of the Twi cues ("mepe", "fre") that are not also English words — ASR output and
+     *  typed Twi often drop ɛ/ɔ. "ye", "den", "eye", "ho", "ko" fold from Twi words but are English (or too
+     *  close), so they only count when written with the Twi letter. */
+    private val TWI_FOLDED: Set<String> by lazy {
+        TWI_WORDS.map { com.tekyerema.language.TwiText.fold(it) }.toSet() -
+            setOf("ye", "den", "eye", "ho", "ko", "pe") - ENG_WORDS
+    }
+    private fun isTwiWord(t: String): Boolean =
+        t in TWI_WORDS || (t !in ENG_WORDS && com.tekyerema.language.TwiText.fold(t) in TWI_FOLDED)
     private val ENG_WORDS = setOf(
         "the","to","a","is","it","my","me","you","your","on","of","and","i","in","what","who","how","do",
         "want","send","call","read","open","check","play","stop","message","have","much","money","time",
@@ -172,11 +247,13 @@ object Lid {
         // Unicode letters + combining marks, so Twi tokens with diacritics (e.g. "sɛ", "frɛ") stay whole. NOT "(?U)":
         // Android's ICU regex rejects that flag ("Syntax error… near index 3") — it broke every spoken request on the
         // A20e (2026-09-28) while the JVM unit tests, on Java's engine, passed.
-        val toks = Regex("[\\p{L}\\p{M}]+").findAll((text ?: "").lowercase()).map { it.value }.toList()
+        // Standard spelling first: a Greek ε or a tone-marked "frɛ́" is the same Twi evidence as "frɛ".
+        val canon = com.tekyerema.language.TwiText.canonical(text ?: "")
+        val toks = Regex("[\\p{L}\\p{M}]+").findAll(canon.lowercase()).map { it.value }.toList()
         if (toks.isEmpty()) return Detection(Lang.GH_EN, 0.0, 0.0, 0.0)
-        val twi = toks.count { it in TWI_WORDS }
+        val twi = toks.count { isTwiWord(it) }
         val eng = toks.count { it in ENG_WORDS }
-        val diac = (text ?: "").count { it in TWI_DIACRITICS }
+        val diac = canon.count { it in TWI_DIACRITICS }
         val twiScore = twi + 1.5 * minOf(diac, 4)
         val engScore = eng.toDouble()
         val total = twiScore + engScore

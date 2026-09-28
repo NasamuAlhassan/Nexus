@@ -34,6 +34,12 @@ val defaultAsrOnlineUrl: String = localProps.getProperty("ASR_ONLINE_URL", "")
 val defaultAsrOnlineKey: String = localProps.getProperty("ASR_ONLINE_KEY", "")
 val defaultAsrOnlineModel: String = localProps.getProperty("ASR_ONLINE_MODEL", "")
 // The Khaya / Abena speech keys were removed with their clients (2026-09-28): the UG HCI Lab ASR/TTS API is required.
+// Language layer (B-18): every local.properties entry whose key starts with SPEECH_ (endpoints and keys for the UG HCI
+// Lab or any REST speech/translation API) reaches the app as ONE JSON map; `${SPEECH_…}` placeholders in
+// assets/config/language.json resolve against it. Nothing is committed — no SPEECH_ entries ⇒ every client stays off.
+fun jsonString(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
+val speechSecretsJson: String = localProps.stringPropertyNames().filter { it.startsWith("SPEECH_") }.sorted()
+    .joinToString(",", "{", "}") { jsonString(it) + ":" + jsonString(localProps.getProperty(it).trim()) }
 
 android {
     namespace = "com.tekyerema"
@@ -57,6 +63,7 @@ android {
         buildConfigField("String", "DEFAULT_ASR_ONLINE_URL", "\"$defaultAsrOnlineUrl\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_KEY", "\"$defaultAsrOnlineKey\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_MODEL", "\"$defaultAsrOnlineModel\"")
+        buildConfigField("String", "SPEECH_SECRETS_JSON", "\"" + speechSecretsJson.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
     }
 
     buildTypes {

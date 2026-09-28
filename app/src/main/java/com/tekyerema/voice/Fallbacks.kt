@@ -42,8 +42,10 @@ class FallbackAsr(private val chain: List<AsrProvider>) : AsrProvider {
  *                                                                          always the last resort (never silent)
  *   "asr": { "online": { "twi": [], "gh_en": [], "auto": [] } }            online ids per language; empty ⇒ on-device
  *
- * Known ids today: "system" (the phone's TTS engine). The UG HCI Lab ASR/TTS clients register their ids in the
- * registries VoiceEngine passes in; an id with no client is skipped and logged, never guessed.
+ * Known ids: "system" (the phone's TTS engine) plus every enabled client in `providers.speech.clients`
+ * (assets/config/language.json) — the language layer ([com.tekyerema.language.LanguageLayer]) builds those from config
+ * and local.properties, e.g. the UG HCI Lab ASR/TTS/MT API. An id with no client is skipped and logged, never guessed.
+ * Translation directions route the same way: `providers.speech.mt.enToTwi` / `twiToEn`.
  */
 object SpeechProviders {
     /** Pure: the configured ids that have a registered provider, in order (unknown ids dropped). */
