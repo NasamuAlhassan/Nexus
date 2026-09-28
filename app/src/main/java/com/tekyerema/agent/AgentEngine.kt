@@ -206,7 +206,10 @@ object AgentEngine {
     }
 
     /** @param unattended the goal came from a trigger (schedule / notification rule), not the user speaking now —
-     *  D-08: tools that don't list the "trigger" caller (money, calls, sends) are refused for it. */
+     *  D-08: tools that don't list the "trigger" caller (money, calls, sends) are refused for it.
+     *  Synchronized: a schedule/notification trigger (TriggerReceiver) and the voice layer can submit at the same moment;
+     *  the "is a task already running?" check and the launch must be one step, or both goals run at once on one screen. */
+    @Synchronized
     fun submitGoal(goal: String, unattended: Boolean = false) {
         if (!initialized) return
         val g = goal.trim().let { raw ->
@@ -237,6 +240,7 @@ object AgentEngine {
      * real goal — only the plan's source differs. Logs "Brain: TEST (<scenario>)", never conflated
      * with a real model result (Track A, plan §22).
      */
+    @Synchronized
     fun submitTestScenario(scenario: TestScenario) {
         if (!initialized) return
         if (currentJob?.isActive == true) {
