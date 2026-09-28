@@ -14,10 +14,12 @@ import com.tekyerema.accessibility.UiSnapshot
  */
 object TargetSemantics {
 
-    /** Controls whose activation leaves the device, spends, destroys, or is hard to undo. */
+    /** Controls whose activation leaves the device, spends, destroys, or is hard to undo. "install": the A20e trace
+     *  (2026-09-28) shows a planner tap on the Play Store's Install going through unconfirmed; installs are confirmed
+     *  (install_app is TIER2 — this closes the same action reached by a plain tap). */
     val consequential = Regex(
         "\\b(send|pay|transfer|delete|remove|confirm|call|buy|purchase|checkout|submit|post|share|forward|" +
-            "archive|block|report|unsubscribe|sign out|log out|logout|reset|format|erase|uninstall|accept|agree|allow)\\b",
+            "archive|block|report|unsubscribe|sign out|log out|logout|reset|format|erase|uninstall|install|accept|agree|allow)\\b",
         RegexOption.IGNORE_CASE
     )
 

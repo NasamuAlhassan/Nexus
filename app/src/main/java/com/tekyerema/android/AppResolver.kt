@@ -55,12 +55,46 @@ object AppResolver {
 
     private fun compact(s: String) = s.lowercase().replace(Regex("[^a-z0-9]"), "")
 
+    /**
+     * E-01 / C-03 — names people (and the ASR) use for an app that its launcher label doesn't contain. Keys are
+     * compacted (lower-case letters and digits only), values are the launcher label to look for. Seen on the A20e:
+     * "install cloud AI" (Claude), "YT music". `os.apps.aliases` in config adds or overrides entries.
+     * Deliberately NO bare generic words ("cloud", "music", "chat"): an alias must name one app, not a category.
+     */
+    private val DEFAULT_ALIASES = mapOf(
+        "ytmusic" to "YouTube Music", "youtubemusic" to "YouTube Music", "ytm" to "YouTube Music",
+        "yt" to "YouTube", "chatgbt" to "ChatGPT", "chatgpd" to "ChatGPT", "chatgp" to "ChatGPT", "openai" to "ChatGPT",
+        "claudeai" to "Claude", "cloudai" to "Claude", "clawedai" to "Claude", "anthropic" to "Claude",
+        "googleplay" to "Play Store", "playstore" to "Play Store", "googleplaystore" to "Play Store",
+        "sms" to "Messages", "textmessages" to "Messages", "samsungmessages" to "Messages",
+        "whatsup" to "WhatsApp", "watsapp" to "WhatsApp", "wassap" to "WhatsApp",
+        "googlegemini" to "Gemini", "bard" to "Gemini", "jijighana" to "Jiji", "gmail" to "Gmail"
+    )
+
+    /** The launcher label an alias stands for, or null. Pure → unit-tested. */
+    internal fun aliasFor(query: String): String? {
+        val words = query.trim().lowercase().split(Regex("[\\s.,]+")).filter { it.isNotEmpty() && it !in FILLER }
+        val key = compact(words.joinToString(""))
+        if (key.isEmpty()) return null
+        val cfg = com.tekyerema.core.config.AppConfig.obj("os.apps.aliases")
+        cfg?.optString(key)?.takeIf { it.isNotBlank() }?.let { return it }
+        return DEFAULT_ALIASES[key]
+    }
+
     /** Pure resolution core (unit-tested): [apps] = the launchable apps, [query] = the spoken name.
      *  [tolerant]=false skips the fuzzy subsequence/edit-distance rescue — for GUESSING an app out of free text,
      *  where only a confident name match may launch anything. */
-    internal fun match(apps: List<AppInfo>, query: String, tolerant: Boolean = true): Match {
+    internal fun match(apps: List<AppInfo>, query: String, tolerant: Boolean = true): Match = match(apps, query, tolerant, aliased = false)
+
+    private fun match(apps: List<AppInfo>, query: String, tolerant: Boolean, aliased: Boolean): Match {
         val raw = query.trim().lowercase()
         if (raw.isEmpty()) return Match.None
+        // An alias names ONE app; resolve it strictly (no fuzzy rescue on the alias), and only if that app is here —
+        // otherwise the original words still get the normal matching below. One hop only: a config alias cycle
+        // (a → b, b → a) must not recurse forever.
+        if (!aliased) aliasFor(raw)?.takeIf { !it.equals(raw, true) }?.let { alias ->
+            (match(apps, alias, tolerant = false, aliased = true) as? Match.One)?.let { return it }
+        }
         apps.firstOrNull { it.packageName.equals(raw, true) }?.let { return Match.One(it) }
         apps.firstOrNull { it.label.equals(raw, true) }?.let { return Match.One(it) }
         // ASR splits/joins names ("whats app", "you tube"): equal once spacing/punctuation is ignored.
