@@ -20,6 +20,17 @@ object References {
     fun noteOptions(options: List<String>) { if (options.size >= 2) lastOptions = options.take(6) }
     fun noteNumber(number: String?) { number?.filter { it.isDigit() || it == '+' }?.takeIf { it.count(Char::isDigit) in 9..13 }?.let { lastNumber = it } }
 
+    /** H-12: "forget that" / "forget everything". */
+    fun clear() { lastPerson = null; lastOptions = emptyList(); lastNumber = null }
+
+    /** H-12: "forget Ama" — drop her as the remembered person / option. */
+    fun forget(who: String) {
+        val w = who.trim()
+        if (w.isEmpty()) return
+        if (lastPerson?.contains(w, true) == true) lastPerson = null
+        lastOptions = lastOptions.filterNot { it.contains(w, true) }
+    }
+
     /** "Multiple contacts match 'ama' (…): Ama Mensah (024…); Ama Boateng (055…)" → [Ama Mensah, Ama Boateng]. */
     fun optionsFrom(message: String): List<String> {
         val body = message.substringAfter(':', "").substringBefore(". Which").substringBefore("Which one")

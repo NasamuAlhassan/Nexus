@@ -142,8 +142,12 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                     resp.code to resp.body?.string().orEmpty()
                 }
             } catch (t: Throwable) {
+                com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", null)
                 return@withContext AgentDecision.Fail("LLM request failed: ${t.message}")
             }
+            // Q-03 / N-03 / Q-10: every call counts; tokens (incl. cached) and the key's remaining minute budget when given.
+            com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model",
+                if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromOpenAi(text) else null, remaining)
 
             when {
                 // Rate-limited: cool THIS key until its own reset (precise), then the loop picks another or waits.

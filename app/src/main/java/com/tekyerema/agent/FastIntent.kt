@@ -80,6 +80,17 @@ sealed class FastIntent(val name: String) {
     data class WatchSender(val who: String, val on: Boolean) : FastIntent("WATCH_SENDER")
     /** I-07: where the last web answer came from; [links] = read the web addresses, not just the site names. */
     data class Sources(val links: Boolean) : FastIntent("SOURCES")
+    // ---- W8 ----
+    /** J-13: reverse the last request's reversible changes. */
+    object Undo : FastIntent("UNDO")
+    /** J-12: "what did you just do?" ([today] = false) / "what have you done today?". */
+    data class WhatDidYouDo(val today: Boolean) : FastIntent("WHAT_DID_YOU_DO")
+    /** H-12: "what do you remember about me?" */
+    object MemoryQuery : FastIntent("MEMORY_QUERY")
+    /** H-12: "forget that" ([scope] "last"), "forget everything" ("all"), "forget Ama" ("person", [who]). */
+    data class Forget(val scope: String, val who: String? = null) : FastIntent("FORGET")
+    /** J-15: "clear my history" — the History list, the action audit, traces and telemetry. */
+    object ClearHistory : FastIntent("CLEAR_HISTORY")
     /** Flip a Quick Settings tile ([QuickTiles]) to [on]. */
     data class QuickToggle(val key: String, val on: Boolean) : FastIntent("TOGGLE_${key.uppercase()}")
 }
@@ -106,6 +117,14 @@ object FastIntentClassifier {
         if (RE_SOURCES.matches(g)) return FastIntent.Sources(links = RE_LINK_WORD.containsMatchIn(g))
         RE_UNWATCH.matchEntire(g)?.let { m -> return FastIntent.WatchSender(watchName(raw, m.groupValues[1]), on = false) }
         RE_WATCH.matchEntire(g)?.let { m -> return FastIntent.WatchSender(watchName(raw, m.groupValues[1]), on = true) }
+        // W8: undo, the action audit, memory controls.
+        if (RE_UNDO.matches(g)) return FastIntent.Undo
+        if (RE_WHAT_DID.matches(g)) return FastIntent.WhatDidYouDo(today = g.contains("today") || g.contains("have you done"))
+        if (RE_MEMORY_QUERY.matches(g)) return FastIntent.MemoryQuery
+        if (RE_FORGET_LAST.matches(g)) return FastIntent.Forget("last")
+        if (RE_FORGET_ALL.matches(g)) return FastIntent.Forget("all")
+        if (RE_CLEAR_HISTORY.matches(g)) return FastIntent.ClearHistory
+        RE_FORGET_PERSON.matchEntire(g)?.let { m -> return FastIntent.Forget("person", watchName(raw, m.groupValues[1])) }
         // Compound / multi-step → the agent (the fast path is single deterministic action only).
         if (RE_MULTISTEP.containsMatchIn(g)) return null
 
@@ -237,6 +256,15 @@ object FastIntentClassifier {
     private val RE_LINK_WORD = Regex("\\b(?:links?|addresses?|websites?|sites?)\\b")
     private val RE_WATCH = Regex("^(?:tell|let) me (?:know )?when ([\\p{L}' .-]{2,40}?) (?:messages|texts|writes|sends|calls|emails|whatsapps)(?: me)?(?: something| anything)?$")
     private val RE_UNWATCH = Regex("^stop (?:telling me|announcing|letting me know) (?:when |about )?(?:messages from )?([\\p{L}' .-]{2,40}?)(?:'s)?(?: (?:messages|texts|writes|sends|calls|emails))?(?: me)?$")
+
+    private val RE_UNDO = Regex("^(?:undo(?: that| it| the last (?:thing|one|change))?|take (?:that|it) back|reverse (?:that|it)|" +
+        "put it back(?: the way it was)?|change it back)$")
+    private val RE_WHAT_DID = Regex("^what (?:did|have) you (?:just )?(?:do|done)(?: for me)?(?: just now| today| so far)?$")
+    private val RE_MEMORY_QUERY = Regex("^what do you (?:remember|know)(?: about me)?$|^what have you (?:remembered|saved|kept)(?: about me)?$")
+    private val RE_FORGET_LAST = Regex("^(?:forget (?:that|it|what i (?:just )?said)|scratch that)$")
+    private val RE_FORGET_ALL = Regex("^(?:forget everything(?: about me)?|(?:clear|delete|erase|wipe) (?:your|my) memory)$")
+    private val RE_FORGET_PERSON = Regex("^forget (?:everything about |all about |about )?(?!that$|it$|everything)([\\p{L}' .-]{2,40}?)(?:'s messages| messages)?$")
+    private val RE_CLEAR_HISTORY = Regex("^(?:clear|delete|erase|wipe) (?:my |the |your )?(?:history|activity(?: log)?|action log)$")
 
     private fun scheduleIntent(g: String, raw: String): FastIntent? {
         if (!RE_SCHEDULE_CUE.containsMatchIn(g) || RE_NOT_SCHEDULE.containsMatchIn(g)) return null

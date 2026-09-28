@@ -44,6 +44,9 @@ class RoutingBrain(
     }
 
     @Volatile private var stickyCloud = false
+
+    /** Q-02: did any step of this task go to the cloud operator? */
+    val usedCloud: Boolean get() = stickyCloud
     @Volatile private var cloudGoal: String? = null   // cached (possibly translated) goal for the cloud
 
     private fun cloudCtx(ctx: BrainContext): BrainContext =

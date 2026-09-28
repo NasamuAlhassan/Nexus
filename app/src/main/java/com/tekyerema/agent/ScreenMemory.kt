@@ -16,6 +16,8 @@ object ScreenMemory {
         this.labels = labels.distinct()
     }
 
+    fun clear() { app = null; labels = emptyList() }
+
     /** From a compact screen JSON (what LocalBrain reads). */
     fun rememberJson(screen: JSONObject) {
         val els = screen.optJSONArray("elements")

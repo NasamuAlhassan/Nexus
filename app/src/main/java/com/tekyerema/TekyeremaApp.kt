@@ -16,6 +16,13 @@ class TekyeremaApp : Application() {
         NetworkMonitor.init(this)   // online/offline detection for hybrid routing (§32)
         // A-13 safety net: re-arm the user's schedules (an alarm can be lost to a force-stop or a clock change).
         try { com.tekyerema.agent.triggers.ScheduledTasks.rescheduleAll(this) } catch (_: Throwable) {}
+        // W8: local telemetry and resources (Q-01..Q-10), the action audit (J-12), the message index (H-09), and the
+        // retention sweep of old traces / trajectories (J-15).
+        com.tekyerema.core.telemetry.Telemetry.init(this)
+        com.tekyerema.core.telemetry.Resources.init(this)
+        com.tekyerema.audit.AuditLog.init(this)
+        com.tekyerema.notifications.MessageIndex.init(this)
+        com.tekyerema.core.Privacy.sweepAll(filesDir)
         ModelManager.init(this)     // §Part D — single model store; first-run download is the delivery path
         AgentEngine.init(this)
         VoiceEngine.init(this)
@@ -24,6 +31,7 @@ class TekyeremaApp : Application() {
     /** N-08: release on-device models under memory pressure instead of being killed for them. */
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
+        com.tekyerema.core.telemetry.Telemetry.noteTrim(level)   // Q-10
         VoiceEngine.onTrimMemory(level)
     }
 }

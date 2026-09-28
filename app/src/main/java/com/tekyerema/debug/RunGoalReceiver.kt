@@ -29,6 +29,21 @@ class RunGoalReceiver : BroadcastReceiver() {
             } catch (t: Throwable) { Log.i("Tekyerema", "[TRACE] error ${t.message}") }
             return
         }
+        // W8 telemetry (Q-01..Q-10): a roll-up of the on-device turn records, or the last few raw records.
+        //   adb ... --es telemetry summary | --es telemetry last
+        //   adb ... --es trajectories export   (Q-07, only if the user opted in; decrypted into files/export/, pull with run-as)
+        intent.getStringExtra("telemetry")?.let { what ->
+            val recs = com.tekyerema.core.telemetry.Telemetry.records()
+            if (what == "last") recs.takeLast(5).forEach { Log.i("Tekyerema", "[TELEMETRY] $it") }
+            else Log.i("Tekyerema", "[TELEMETRY] ${com.tekyerema.core.telemetry.Telemetry.summary(recs)}")
+            return
+        }
+        intent.getStringExtra("trajectories")?.let {
+            val out = java.io.File(context.applicationContext.filesDir, "export/trajectories.jsonl")
+            val n = com.tekyerema.core.telemetry.Trajectories.exportTo(context.applicationContext, out)
+            Log.i("Tekyerema", "[TRAJECTORIES] exported $n to ${out.absolutePath}")
+            return
+        }
         // X-13/N-12: config overrides and capability state, zero LLM cost.
         //   adb ... --es set_config '{"flags":{"E-08":{"enabled":false}}}'   |   --es set_config off
         //   adb ... --es dump_config models.planner          (any dotted path; "1" dumps the whole tree)

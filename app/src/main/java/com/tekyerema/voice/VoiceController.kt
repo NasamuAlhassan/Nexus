@@ -482,6 +482,8 @@ class VoiceController(
 
             // N-16: a problem the user can't see (screen control switched off by the system) is said once, up front.
             if (!quiet) healthNotice()?.let { say(it) }
+            // Q-01: a voice turn starts at the trigger.
+            com.tekyerema.core.telemetry.Telemetry.beginTurn(if (quiet) "follow_up" else "voice", ownedByVoice = true)
             // A varied, natural acknowledgement ("Go ahead." / "Uh-huh." …) is the listening hint; the
             // earcon plays to completion BEFORE the mic opens so it is never captured as speech.
             val ack = Acknowledgements.next(forceLanguage() ?: sessionLanguage())
@@ -501,11 +503,12 @@ class VoiceController(
                 is CaptureResult.Error -> { if (quiet) { idle(""); return }; fail(VoiceStage.MIC, cap.message, "I can't use the microphone right now."); return }
             }
 
+            com.tekyerema.core.telemetry.Telemetry.mark("end_of_turn")
             set(VoiceState.CAPTURED, "Got it")
             cues.captured()
             set(VoiceState.TRANSCRIBING, "Transcribing…")
             var tr = try {
-                asr.transcribe(wav, sessionLanguage(), forceLanguage())
+                asr.transcribe(wav, sessionLanguage(), forceLanguage()).also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final") }
             } catch (c: CancellationException) { throw c
             } catch (e: Exception) { fail(VoiceStage.ASR, e.message ?: "ASR failed", "Sorry, I couldn't understand that. Try again, a little closer to the phone."); return }
             if (tr.isBlank) { fail(VoiceStage.ASR, "Empty transcript", "Sorry, I didn't catch that. Try again, a little closer to the phone."); return }
@@ -525,14 +528,20 @@ class VoiceController(
                 listenMore(VadStrategy.CONTINUE)?.let { tr = TurnDetector.join(tr, it) }
                 set(VoiceState.TRANSCRIBING, "Transcribing…")
             }
-            Log.i("Tekyerema", "[VOICE] raw='${tr.raw}' canonical='${tr.canonical}' lang=${tr.language} " +
-                "ASR=${tr.backend}${if (tr.fallbackUsed) "(fallback)" else ""} (${tr.reason})")
+            // J-15: what the user said stays out of logcat in release builds.
+            if (com.tekyerema.core.Privacy.logContent())
+                Log.i("Tekyerema", "[VOICE] raw='${tr.raw}' canonical='${tr.canonical}' lang=${tr.language} " +
+                    "ASR=${tr.backend}${if (tr.fallbackUsed) "(fallback)" else ""} (${tr.reason})")
+            else Log.i("Tekyerema", "[VOICE] len=${tr.canonical.length} lang=${tr.language} ASR=${tr.backend}${if (tr.fallbackUsed) "(fallback)" else ""}")
 
             runTurn(tr, InputSource.ASR)
         } catch (c: CancellationException) {
             cancelledToIdle()
         } catch (e: Exception) {
             fail(VoiceStage.NONE, e.message ?: "Voice error", "Sorry, something went wrong.")
+        } finally {
+            // A turn that never reached an answer (no speech, cancelled, an error) is not a measurement — drop it.
+            com.tekyerema.core.telemetry.Telemetry.discard(byVoice = true)
         }
     }
 
@@ -560,7 +569,11 @@ class VoiceController(
             // LOCAL FAST PATH (demo-critical): deterministic device ops execute HERE, before the agent/LLM —
             // no reasoning, no screen read, no app launch merely to answer (never open Clock to tell the time).
             // Returns null for anything it can't confidently handle → the agent path below runs unchanged.
+            val tel = com.tekyerema.core.telemetry.Telemetry
+            tel.ensureVoiceTurn(if (source == InputSource.ASR) "voice" else "typed")
+            tel.update { goal = tr.canonical }
             fastRouter?.tryHandle(tr.canonical, tr.language)?.let { fast ->
+                tel.mark("route"); tel.update { tier = com.tekyerema.agent.RouterTiers.FAST_PATH }   // Q-01 / Q-02
                 if (fast.ok) cues.done() else cues.error()   // K-03: a failure line never plays the "done" sound
                 set(VoiceState.SPEAKING, fast.spoken)
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
@@ -568,9 +581,11 @@ class VoiceController(
                 val useSystem = fast.systemVoice && systemVoice != null
                 val engine = if (useSystem) systemVoice!! else tts
                 val lang = if (useSystem) Lang.GH_EN else tr.language
+                tel.mark("reply_start")
                 val spoke = if (!speakAloud() || fast.spoken.isBlank()) false
                     else try { engine.speak(Verbalize.apply(fast.spoken), lang) }
                     catch (c: CancellationException) { throw c } catch (e: Exception) { false }
+                tel.endTurn(if (fast.ok) "full" else "failed", byVoice = true)
                 _state.update {
                     it.copy(state = VoiceState.IDLE, spoken = fast.spoken,
                         partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
@@ -578,6 +593,7 @@ class VoiceController(
                 return
             }
 
+            tel.mark("route")
             val outcome = runAgent(tr.canonical) ?: return   // null: already set fail/cancel
             when (outcome.status) {
                 AgentStatus.COMPLETED -> cues.done()
@@ -588,11 +604,13 @@ class VoiceController(
 
             set(VoiceState.SPEAKING, outcome.spoken)
             var interruption: ByteArray? = null
+            tel.mark("reply_start")
             val spoke = if (!speakAloud() || outcome.spoken.isBlank()) false else try {
                 val (ok, barged) = speakInterruptible(Verbalize.apply(outcome.spoken), tr.language)
                 interruption = barged
                 ok || barged != null
             } catch (c: CancellationException) { throw c } catch (e: Exception) { false }
+            tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
                 it.copy(state = VoiceState.IDLE, spoken = outcome.spoken,
                     partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
@@ -629,6 +647,8 @@ class VoiceController(
             idle("Cancelled.")
         } catch (e: Exception) {
             fail(VoiceStage.NONE, e.message ?: "Voice error", "Sorry, something went wrong.")
+        } finally {
+            com.tekyerema.core.telemetry.Telemetry.discard(byVoice = true)   // an unfinished turn measured nothing
         }
     }
 

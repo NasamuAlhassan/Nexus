@@ -43,9 +43,9 @@ import com.tekyerema.ui.components.SettingRow
 import com.tekyerema.ui.components.SwitchRow
 import com.tekyerema.ui.theme.Tk
 
-private enum class Page { ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, HELP }
+private enum class Page { ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP }
 
-/** Exactly five things: Language, Voice, Permissions, Accessibility, Help. */
+/** Six things: Language, Voice, Permissions, Accessibility, Privacy (J-15 / H-12 / Q-07 / Q-08), Help. */
 @Composable
 fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
     var page by rememberSaveable { mutableStateOf(Page.ROOT) }
@@ -61,12 +61,14 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
             SettingRow("Voice", value = remember(version) { rateLabel(settings.speechRate) }) { page = Page.VOICE }
             SettingRow("Permissions", value = permissionsSummary(context)) { page = Page.PERMISSIONS }
             SettingRow("Accessibility") { page = Page.ACCESSIBILITY }
+            SettingRow("Privacy") { page = Page.PRIVACY }
             SettingRow("Help") { page = Page.HELP }
         }
         Page.LANGUAGE -> LanguagePage(settings) { page = Page.ROOT }
         Page.VOICE -> VoicePage(settings) { page = Page.ROOT }
         Page.PERMISSIONS -> PermissionsPage { page = Page.ROOT }
         Page.ACCESSIBILITY -> AccessibilityPage(settings) { page = Page.ROOT }
+        Page.PRIVACY -> PrivacyPage(settings) { page = Page.ROOT }
         Page.HELP -> HelpPage { page = Page.ROOT }
     }
 }
@@ -245,6 +247,48 @@ private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
         SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off") { Perms.requestBatteryUnrestricted(context) }
         Note("Text size and TalkBack follow your phone's accessibility settings. On Samsung phones, also add Tɛkyerɛma to " +
             "Settings › Battery › Background usage limits › Never sleeping apps.")
+    }
+}
+
+/** J-15 / H-12 / Q-07 / Q-08: what Tɛkyerɛma keeps, the two opt-ins, and deleting it. */
+@Composable
+private fun PrivacyPage(settings: Settings, onBack: () -> Unit) {
+    val version by settings.changes.collectAsState()
+    val improve = remember(version) { settings.trajectoryConsent }
+    val taskLog = remember(version) { settings.fieldLog }
+    val context = LocalContext.current
+    var historyCleared by remember { mutableStateOf(false) }
+    var memoryCleared by remember { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        PageTitle("Privacy", onBack)
+        Hairline(inset = PageMargin)
+        SwitchRow("Help improve Tɛkyerɛma", "Keep a copy of your tasks — what was on the screen and what I did — on this phone, " +
+            "encrypted, so they can be used to improve me. Nothing is sent anywhere. Turning this off deletes them.", improve) {
+            settings.trajectoryConsent = it
+            if (!it) com.tekyerema.core.telemetry.Trajectories.clear(context)
+        }
+        SwitchRow("Keep a task log", "A private list of what you asked and how it went, to check how well I work. " +
+            "Encrypted, on this phone. Turning this off deletes it.", taskLog) {
+            settings.fieldLog = it
+            if (!it) com.tekyerema.core.telemetry.FieldLog.clear(context)
+        }
+        SettingRow("Delete history", if (historyCleared) "Deleted" else "") {
+            com.tekyerema.history.HistoryStore.clear()
+            com.tekyerema.audit.AuditLog.clear()
+            com.tekyerema.core.telemetry.Telemetry.clear()
+            com.tekyerema.agent.AgentEngine.clearTraces()
+            historyCleared = true
+        }
+        SettingRow("Delete memory", if (memoryCleared) "Deleted" else "") {
+            com.tekyerema.agent.AgentEngine.resetConversation()
+            com.tekyerema.agent.References.clear()
+            com.tekyerema.notifications.MessageIndex.clear()
+            com.tekyerema.core.telemetry.Trajectories.clear(context)
+            memoryCleared = true
+        }
+        Note("History is kept for ${com.tekyerema.core.Privacy.historyDays()} days and messages for a week, all encrypted on " +
+            "this phone. Screenshots are never saved. You can also say “what do you remember”, “forget everything” or " +
+            "“clear my history”.")
     }
 }
 

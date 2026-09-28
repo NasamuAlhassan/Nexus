@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /** How a finished request actually ended (§P1 — a blind user must hear the truth, not a blanket "not completed"). */
 enum class Outcome { COMPLETED, UNVERIFIED, CANNOT, FAILED, STOPPED;
@@ -25,27 +26,45 @@ data class HistoryEntry(val timeMs: Long, val title: String, val outcome: Outcom
 /**
  * The History screen's only data: a short list of what Tɛkyerɛma did, newest first. Deliberately
  * not an activity log — no steps, stats or reasoning; those stay in the trace files.
+ *
+ * J-15: the titles are the user's own requests, so the list is encrypted at rest ([com.tekyerema.core.SecureStore]),
+ * kept for `privacy.retention.historyDays` (90) and can be cleared by voice or in Settings. Rows written by older
+ * builds to plain SharedPreferences are moved into the encrypted file once, then removed.
  */
 object HistoryStore {
     private const val PREFS = "tekyerema_history"
     private const val KEY = "entries"
     private const val MAX = 200
 
-    private var prefs: android.content.SharedPreferences? = null
+    private var appContext: Context? = null
     private val _entries = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val entries: StateFlow<List<HistoryEntry>> = _entries
 
     fun init(context: Context) {
-        if (prefs != null) return
-        prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        _entries.value = load()
+        if (appContext != null) return
+        appContext = context.applicationContext
+        _entries.value = prune(load())
     }
+
+    private fun file(): File? = appContext?.let { File(it.filesDir, "history/history.enc") }
 
     fun record(goal: String, outcome: Outcome, timeMs: Long = System.currentTimeMillis()) {
         val entry = HistoryEntry(timeMs, titleFor(goal, outcome.done), outcome)
-        val next = (listOf(entry) + _entries.value).take(MAX)
+        val next = prune(listOf(entry) + _entries.value)
         _entries.value = next
         save(next)
+    }
+
+    /** J-15: "clear my history". */
+    fun clear() {
+        _entries.value = emptyList()
+        try { file()?.delete() } catch (_: Throwable) {}
+        appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)?.edit()?.remove(KEY)?.apply()
+    }
+
+    private fun prune(list: List<HistoryEntry>): List<HistoryEntry> {
+        val cutoff = System.currentTimeMillis() - com.tekyerema.core.Privacy.historyDays() * 86_400_000L
+        return list.filter { it.timeMs >= cutoff }.take(MAX)
     }
 
     /**
@@ -77,8 +96,19 @@ object HistoryStore {
         "wake" to "Woke", "remind" to "Reminded", "change" to "Changed", "close" to "Closed"
     )
 
-    private fun load(): List<HistoryEntry> = try {
-        val arr = JSONArray(prefs?.getString(KEY, "[]") ?: "[]")
+    private fun load(): List<HistoryEntry> {
+        val ctx = appContext ?: return emptyList()
+        file()?.let { com.tekyerema.core.SecureStore.read(it) }?.let { return parse(it) }
+        // One-time move from the plain SharedPreferences an older build wrote.
+        val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val legacy = prefs.getString(KEY, null) ?: return emptyList()
+        val rows = parse(legacy)
+        if (rows.isEmpty() || writeEncrypted(rows)) prefs.edit().remove(KEY).apply()
+        return rows
+    }
+
+    internal fun parse(text: String): List<HistoryEntry> = try {
+        val arr = JSONArray(text)
         (0 until arr.length()).map { i ->
             val o = arr.getJSONObject(i)
             // Back-compat: old rows stored only a boolean "ok".
@@ -88,9 +118,12 @@ object HistoryStore {
         }
     } catch (_: Throwable) { emptyList() }
 
-    private fun save(list: List<HistoryEntry>) {
+    private fun save(list: List<HistoryEntry>) { writeEncrypted(list) }   // no key → the list lives in memory only
+
+    private fun writeEncrypted(list: List<HistoryEntry>): Boolean {
+        val f = file() ?: return false
         val arr = JSONArray()
         list.forEach { arr.put(JSONObject().put("t", it.timeMs).put("title", it.title).put("outcome", it.outcome.name)) }
-        prefs?.edit()?.putString(KEY, arr.toString())?.apply()
+        return com.tekyerema.core.SecureStore.write(f, arr.toString())
     }
 }

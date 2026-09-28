@@ -26,6 +26,9 @@ class TekyeremaNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         val rec = sbn?.let { put(it) } ?: return
+        // H-09: remember it (encrypted, 7 days) so it can be found after it's dismissed — live posts only, not ongoing ones.
+        if (sbn?.notification?.flags?.and(android.app.Notification.FLAG_ONGOING_EVENT) == 0)
+            try { com.tekyerema.notifications.MessageIndex.add(rec) } catch (_: Throwable) {}
         // A-12: the user's own "tell me when Ama messages" rules — live posts only, never the reconnect backfill.
         try { com.tekyerema.agent.triggers.NotificationTriggers.onPosted(applicationContext, rec) } catch (_: Throwable) {}
     }

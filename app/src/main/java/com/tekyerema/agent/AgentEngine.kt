@@ -127,25 +127,41 @@ object AgentEngine {
     fun resetConversation() { synchronized(conversation) { conversation.clear() }; saveConversation() }
 
     // H-10 (owner-approved persistent memory): the conversation survives the process being killed mid-session
-    // (Samsung reclaims memory on a 2.8 GB phone), in app-private storage only, and is dropped once stale.
-    private fun conversationFile(): java.io.File? = appContext?.let { java.io.File(it.filesDir, "memory/conversation.json") }
+    // (Samsung reclaims memory on a 2.8 GB phone), in app-private storage only, encrypted (J-15), dropped once stale.
+    private fun conversationFile(): java.io.File? = appContext?.let { java.io.File(it.filesDir, "memory/conversation.enc") }
 
     private fun saveConversation() {
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("H-10", true)) return
         val f = conversationFile() ?: return
         try {
             val arr = org.json.JSONArray(synchronized(conversation) { conversation.toList() })
-            f.parentFile?.mkdirs()
-            f.writeText(org.json.JSONObject().put("lastTurnMs", lastTurnMs).put("turns", arr).toString())
+            if (arr.length() == 0) { f.delete(); return }
+            com.tekyerema.core.SecureStore.write(f, org.json.JSONObject().put("lastTurnMs", lastTurnMs).put("turns", arr).toString())
         } catch (_: Throwable) {}
     }
+
+    /** H-12: how many lines of conversation are remembered right now. */
+    fun conversationTurns(): Int = conversationSnapshot().size
+
+    /** H-12 "forget that": drop the last exchange (the user's last request and everything said after it). */
+    fun forgetLastTurn() {
+        synchronized(conversation) {
+            val i = conversation.indexOfLast { it.startsWith("User:") }
+            if (i >= 0) while (conversation.size > i) conversation.removeLast()
+        }
+        saveConversation()
+    }
+
+    /** J-15 "clear my history": delete the per-task trace files. */
+    fun clearTraces() { appContext?.let { try { java.io.File(it.filesDir, "traces").deleteRecursively() } catch (_: Throwable) {} } }
 
     private fun loadConversation() {
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("H-10", true)) return
         val f = conversationFile() ?: return
+        appContext?.let { java.io.File(it.filesDir, "memory/conversation.json").delete() }   // an older build's plain file
         try {
-            if (!f.exists()) return
-            val o = org.json.JSONObject(f.readText())
+            val text = com.tekyerema.core.SecureStore.read(f) ?: return
+            val o = org.json.JSONObject(text)
             val last = o.optLong("lastTurnMs", 0L)
             val idle = com.tekyerema.core.config.AppConfig.long("memory.session.idleResetMs", 30 * 60_000L)
             if (System.currentTimeMillis() - last > idle) { f.delete(); return }
@@ -382,6 +398,16 @@ object AgentEngine {
 
         // D-02: the tool schema is chosen per step (core primitives + needed groups + used + discovered).
         val usedTools = LinkedHashSet<String>()
+        // W8: telemetry turn (Q-01..Q-04, Q-10), audit task (J-12), undo snapshot (J-13), opt-in trajectory (Q-07).
+        val source = if (forcedBrain != null) "test" else if (unattended) "trigger" else "agent"
+        com.tekyerema.core.telemetry.Telemetry.ensureTurn(source)
+        com.tekyerema.core.telemetry.Telemetry.mark("route")
+        com.tekyerema.core.telemetry.Telemetry.update { this.goal = goal }
+        val runCtx = RunCtx(goal, source, direct, brain, usedTools, com.tekyerema.audit.AuditLog.newTask(),
+            undoBefore = if (forcedBrain == null) try { com.tekyerema.audit.DeviceState.capture(ctxApp) } catch (_: Throwable) { null } else null,
+            trajectory = if (forcedBrain == null && com.tekyerema.core.telemetry.Trajectories.enabled(ctxApp))
+                com.tekyerema.core.telemetry.TrajectoryRecorder(goal) else null)
+        activeRun = runCtx
         val discoveredTools = LinkedHashSet<String>()
         val history = ArrayList<String>()
         var stats = RunStats()
@@ -505,6 +531,7 @@ object AgentEngine {
                 val decision = brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo,
                     progress = (retrievalHint?.let { "$it\n" } ?: "") + taskMemory.render(), effort = effort, simple = directStep))
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
+                com.tekyerema.core.telemetry.Telemetry.mark("first_decision")   // Q-01 (only the first is kept)
 
                 when (decision) {
                     is AgentDecision.Done -> {
@@ -719,6 +746,8 @@ object AgentEngine {
                             PolicyOutcome.BLOCK -> {
                                 stats = stats.copy(blocked = stats.blocked + 1)
                                 log(LogEntry.Kind.POLICY, "Blocked: ${pd.reason}")
+                                if (mutating) com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.BLOCKED,
+                                    com.tekyerema.audit.ActionWords.describe(decision.name, decision.args, resolved?.element?.label), runCtx.auditTask)
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → BLOCKED by policy: ${pd.reason}. Do not retry it; if the goal needs it, call cannot_do.")
                                 // A blocked substantive action did not happen: a Done right after must not read as verified.
                                 if (mutating) { mutatingCount++; lastMutatingVerified = false }
@@ -798,9 +827,11 @@ object AgentEngine {
                                 when (reply) {
                                     is ConfirmReply.Decline -> {
                                         log(LogEntry.Kind.POLICY, "Declined by user.")
+                                        com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)   // J-12 planned
                                         finish(AgentStatus.STOPPED, stats); return
                                     }
                                     is ConfirmReply.Revise -> {
+                                        com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)
                                         // §8/§9/§13/§14 — the user answered with an instruction, not yes/no. Don't run the
                                         // pending action; re-plan. The brain sees this note + the proposal (in conversation
                                         // memory) and adjusts recipient/app/message/number, or cancels, then proposes again
@@ -953,6 +984,11 @@ object AgentEngine {
                         if (result.needsDisambiguation) References.noteOptions(References.optionsFrom(result.message))
                         stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, result.channel))
                         log(LogEntry.Kind.ACTION, "${decision.name} → ${if (result.success) "ok" else "failed"} [${result.channel}]: ${result.message}")
+                        // J-12: every device action in plain words; J-13: what can't be taken back is named for "undo".
+                        if (mutating) com.tekyerema.audit.AuditLog.record(source,
+                            if (result.success) com.tekyerema.audit.AuditLog.DONE else com.tekyerema.audit.AuditLog.FAILED,
+                            com.tekyerema.audit.ActionWords.describe(decision.name, decision.args, resolved?.element?.label), runCtx.auditTask)
+                        if (consequential && result.success) runCtx.irreversible.add(com.tekyerema.audit.ActionWords.noun(decision.name, decision.args))
                         // Phase II P0: remember durable entities the goal named so they survive step-to-step.
                         if (result.success) when (decision.name) {
                             "momo_send" -> { taskMemory.noteEntity("number", decision.args.str("number")); taskMemory.noteEntity("amount", decision.args.str("amount")) }
@@ -1011,6 +1047,7 @@ object AgentEngine {
                             }
                         }
                         log(LogEntry.Kind.VERIFY, if (vr.verified) "verified — ${vr.detail}" else "NOT verified — ${vr.detail}")
+                        runCtx.trajectory?.step(before.toCompactJson(), decision.name, decision.args, result.message, vr.verified)   // Q-07 (opt-in)
                         if (tool.scope != com.tekyerema.policy.CapabilityScope.PERCEIVE) {
                             stats = if (vr.verified) stats.copy(verifiedTrue = stats.verifiedTrue + 1) else stats.copy(verifiedFalse = stats.verifiedFalse + 1)
                         }
@@ -1147,6 +1184,7 @@ object AgentEngine {
             finish(AgentStatus.FAILED, stats)
         } catch (ce: CancellationException) {
             log(LogEntry.Kind.STATS, stats.summary())
+            if (activeRun === runCtx) { activeRun = null; com.tekyerema.core.telemetry.Telemetry.endTurn("stopped", byVoice = false) }
             setStatus(AgentStatus.STOPPED)
             throw ce
         } catch (t: Throwable) {
@@ -1170,16 +1208,60 @@ object AgentEngine {
         return ans
     }
 
+    /** W8: what [finish] needs to know about the run in flight. */
+    private class RunCtx(
+        val goal: String, val source: String, val direct: Boolean, val brain: AgentBrain,
+        val usedTools: Set<String>, val auditTask: Long,
+        val undoBefore: com.tekyerema.audit.DeviceSnap?,
+        val trajectory: com.tekyerema.core.telemetry.TrajectoryRecorder?
+    ) { val irreversible = ArrayList<String>() }
+
+    @Volatile private var activeRun: RunCtx? = null
+
+    /** Q-02: which tier resolved the run. */
+    private fun tierOf(r: RunCtx): String = when {
+        r.direct && "web_search" in r.usedTools -> RouterTiers.RETRIEVAL
+        r.direct -> RouterTiers.DIRECT
+        (r.brain as? RoutingBrain)?.usedCloud == false -> RouterTiers.LOCAL
+        else -> RouterTiers.CLOUD
+    }
+
+    /** Q-04: full = verified, partial = done but not confirmed, failed, stopped. */
+    fun gradeOf(status: AgentStatus): String = when (status) {
+        AgentStatus.COMPLETED -> "full"
+        AgentStatus.COMPLETED_UNVERIFIED -> "partial"
+        AgentStatus.STOPPED -> "stopped"
+        else -> "failed"
+    }
+
     private fun finish(status: AgentStatus, stats: RunStats) {
         log(LogEntry.Kind.STATS, stats.summary())
+        val summary = _state.value.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text ?: ""
+        val r = activeRun.also { activeRun = null }
+        val tier = r?.let { tierOf(it) }
         // C-15: a typed result for this run (history, traces, triggers and the run report read it).
         val result = org.json.JSONObject()
             .put("status", status.name)
-            .put("summary", _state.value.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text ?: "")
+            .put("grade", gradeOf(status))
+            .put("tier", tier ?: org.json.JSONObject.NULL)
+            .put("summary", summary)
             .put("steps", stats.steps).put("actions", stats.actions)
             .put("verified", stats.verifiedTrue).put("unverified", stats.verifiedFalse)
             .put("decideMs", stats.decideLatencyMs)
             .put("goal", _state.value.goal ?: "")
+        if (r != null) try {
+            com.tekyerema.core.telemetry.Telemetry.update { this.tier = tier; this.steps = stats.steps }
+            com.tekyerema.core.telemetry.Telemetry.mark("action_done")
+            com.tekyerema.core.telemetry.Telemetry.endTurn(gradeOf(status), byVoice = false)   // closes only a turn the engine opened
+            val ctx = appContext
+            // J-13: this task's reversible changes (last first), and what it did that can't be taken back.
+            if (ctx != null && r.undoBefore != null) {
+                val inverses = com.tekyerema.audit.DeviceState.diff(r.undoBefore, com.tekyerema.audit.DeviceState.capture(ctx)).reversed() +
+                    r.irreversible.distinct().map { com.tekyerema.audit.Inverse.Irreversible(it) }
+                com.tekyerema.audit.UndoLog.push(com.tekyerema.audit.UndoGroup(System.currentTimeMillis(), r.goal, inverses))
+            }
+            if (ctx != null) r.trajectory?.let { com.tekyerema.core.telemetry.Trajectories.save(ctx, it, status.name, summary) }
+        } catch (_: Throwable) {}
         _state.update { it.copy(status = status, lastStats = stats.summary(), lastResult = result.toString()) }
     }
 
@@ -1350,25 +1432,37 @@ object AgentEngine {
     private fun setStatus(s: AgentStatus) = _state.update { it.copy(status = s) }
     private fun setGoal(g: String) = _state.update { it.copy(goal = g) }
     private fun clearLog() = _state.update { it.copy(log = emptyList()) }
+    @Volatile private var traceStartMs = 0L
+
     private fun log(kind: LogEntry.Kind, text: String) {
         val entry = LogEntry(System.currentTimeMillis(), kind, text)
         _state.update { it.copy(log = (it.log + entry).takeLast(200)) }
-        Log.i(TAG, "[${kind.name}] $text")
+        // J-15: logcat is readable over USB debugging — release builds log the kind and length, never the words.
+        if (com.tekyerema.core.Privacy.logContent() || kind == LogEntry.Kind.STATS) Log.i(TAG, "[${kind.name}] $text")
+        else Log.i(TAG, "[${kind.name}] (${text.length} chars)")
         // Persist to a file too: logcat's ring buffer rotates during slow (~10-min) real-model
         // tasks, losing the trace. The file is the auditable record (plan §22, round-9 finding).
-        try { traceFile?.appendText("[${kind.name}] ${text.replace("\n", " ")}\n") } catch (t: Throwable) {}
+        // Q-05: each line carries its offset from the task start; J-15: release traces are redacted.
+        try {
+            val body = text.replace("\n", " ")
+            val line = if (com.tekyerema.core.Privacy.redactTraces()) com.tekyerema.core.TraceRedact.line(kind.name, body, UNTRUSTED_MARK) else body
+            traceFile?.appendText("[+${entry.timeMs - traceStartMs}ms ${kind.name}] $line\n")
+        } catch (t: Throwable) {}
     }
 
     /** Fresh trace file per task under filesDir/traces; pull with `adb ... run-as`/`cat` or the
-     *  debug receiver's --es dumptrace. Keeps the newest 40. */
+     *  debug receiver's --es dumptrace. Keeps the newest 40, none older than `privacy.retention.traceDays` (J-15). */
     private fun openTrace(goal: String) {
         val ctx = appContext ?: return
         try {
             val dir = java.io.File(ctx.filesDir, "traces").apply { mkdirs() }
             dir.listFiles()?.sortedBy { it.lastModified() }?.dropLast(39)?.forEach { it.delete() }
+            com.tekyerema.core.Privacy.sweep(dir, com.tekyerema.core.Privacy.traceDays())
             val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date())
             val f = java.io.File(dir, "trace-$stamp.log")
-            f.writeText("GOAL: $goal\n")
+            traceStartMs = System.currentTimeMillis()
+            val g = if (com.tekyerema.core.Privacy.redactTraces()) "[${goal.length} chars]" else goal
+            f.writeText("GOAL: $g\n")
             traceFile = f
         } catch (t: Throwable) { traceFile = null }
     }

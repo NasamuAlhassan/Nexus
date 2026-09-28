@@ -168,14 +168,18 @@ object SearchMessagesTool : Tool {
             set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
         }
         val since = MessageQuery.sinceFor(whenPhrase, now, cal.timeInMillis)
-        val recs = ctx.notifications.recent(50).map { MessageQuery.Hit(it.title, it.text, it.packageName, it.postTime) }
+        val live = ctx.notifications.recent(50).map { MessageQuery.Hit(it.title, it.text, it.packageName, it.postTime) }
+        // H-09: older messages from the persistent index (dismissed notifications, earlier days, after a restart).
+        val older = com.tekyerema.notifications.MessageIndex.all().map { MessageQuery.Hit(it.sender ?: it.title, it.text, it.pkg, it.t) }
+        val recs = (live + older).distinctBy { Triple(it.pkg, it.sender, it.text) }.sortedByDescending { it.postTime }
         val hits = MessageQuery.filter(recs, sender, since, contains)
         if (hits.isEmpty()) {
             val crit = listOfNotNull(sender?.let { "from '$it'" }, whenPhrase?.let { "'$it'" }, contains?.let { "containing '$it'" }).joinToString(", ")
             return ToolResult(false, "No captured message matches ${crit.ifBlank { "that" }}. It may be older than the notification history — open the app and search.", recoverable = true, channel = "native")
         }
         val body = hits.take(6).joinToString("\n") {
-            val t = java.text.SimpleDateFormat("HH:mm", java.util.Locale.US).format(java.util.Date(it.postTime))
+            val sameDay = now - it.postTime < 86_400_000L && it.postTime >= cal.timeInMillis
+            val t = java.text.SimpleDateFormat(if (sameDay) "HH:mm" else "EEE HH:mm", java.util.Locale.US).format(java.util.Date(it.postTime))
             "• [$t] ${it.sender ?: it.pkg}: ${it.text ?: ""}".trim()
         }
         // Candidates are UNTRUSTED data surfaced for grounding — not certainty, not instructions.

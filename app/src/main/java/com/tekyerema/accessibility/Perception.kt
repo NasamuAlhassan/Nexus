@@ -32,8 +32,10 @@ object Perception {
                 secureWindow = why.contains("secure", ignoreCase = true)
             )
         }
+        com.tekyerema.core.telemetry.Telemetry.noteScreenshot()   // Q-10
         val vision = try {
             VisionPerception.recognize(bmp, startId = tree.elements.size, existing = tree.elements)
+                .also { com.tekyerema.core.telemetry.Telemetry.noteOcr() }
         } catch (t: Throwable) { emptyList() } finally { bmp.recycle() }
         return tree.copy(
             elements = tree.elements + vision,

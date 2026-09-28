@@ -45,8 +45,11 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
             val (code, text) = try {
                 client.newCall(request).execute().use { resp -> resp.code to resp.body?.string().orEmpty() }
             } catch (t: Throwable) {
+                com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini", null)
                 return@withContext AgentDecision.Fail("Gemini request failed: ${t.message}")
             }
+            com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini",
+                if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromGemini(text) else null)   // Q-03 / N-03
             when {
                 code == 429 && rateAttempts < 6 && totalWaitMs < maxWaitMs -> {
                     rateAttempts++

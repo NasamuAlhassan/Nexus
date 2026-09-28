@@ -6,7 +6,7 @@ import com.tekyerema.BuildConfig
 /** Simple, synchronous settings backed by SharedPreferences. The API key stays on device. */
 class Settings(context: Context) {
     private val prefs = context.applicationContext
-        .getSharedPreferences("tekyerema", Context.MODE_PRIVATE)
+        .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Only what the user typed in the app (may be blank). */
     val storedApiKey: String get() = prefs.getString(KEY_API, "").orEmpty()
@@ -243,8 +243,22 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_ONBOARDED, false)
         set(v) = put { putBoolean(KEY_ONBOARDED, v) }
 
+    /** Q-07: the user agreed to keep their tasks (screens + actions) on this phone, encrypted, to improve Tɛkyerɛma.
+     *  Off unless they switch it on; switching it off deletes what was kept. */
+    var trajectoryConsent: Boolean
+        get() = prefs.getBoolean("trajectory_consent", false)
+        set(v) = put { putBoolean("trajectory_consent", v) }
+
+    /** Q-08: keep a private log of what was asked and how it ended (encrypted, on this phone). Off by default. */
+    var fieldLog: Boolean
+        get() = prefs.getBoolean("field_log", false)
+        set(v) = put { putBoolean("field_log", v) }
+
     companion object {
+        const val PREFS_NAME = "tekyerema"
         private val sharedChanges = kotlinx.coroutines.flow.MutableStateFlow(0L)
+        /** A preference was written outside this class (J-13 undo restoring voice settings). */
+        fun notifyChanged() { sharedChanges.value = sharedChanges.value + 1 }
         const val LANG_MODE_ENGLISH = "english"
         const val LANG_MODE_TWI = "twi"
         const val LANG_MODE_BOTH = "both"

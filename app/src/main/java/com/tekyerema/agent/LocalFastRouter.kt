@@ -45,9 +45,14 @@ class LocalFastRouter(
             return null
         }
         val t0 = SystemClock.uptimeMillis()
+        // J-13: snapshot what this command could change, so "undo" can put it back (not for the memory/audit commands).
+        val reversible = intent !in NOT_UNDOABLE && intent !is FastIntent.WhatDidYouDo && intent !is FastIntent.Forget
+        val before = if (reversible) try { com.tekyerema.audit.DeviceState.capture(appContext) } catch (_: Throwable) { null } else null
+        extraInverses.clear()
         val outcome = try { execute(intent) } catch (t: Throwable) {
             Log.w(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} threw ${t.message} → agent"); null
         }
+        if (outcome != null && reversible) recordFast(intent, outcome, before)
         val dt = SystemClock.uptimeMillis() - t0
         if (outcome == null) {
             Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} could_not_execute llm_called=false latency_ms=$dt → agent")
@@ -129,6 +134,133 @@ class LocalFastRouter(
         FastIntent.ClearSchedules -> clearSchedules()
         is FastIntent.WatchSender -> watchSender(intent)
         is FastIntent.Sources -> sources(intent)
+        FastIntent.Undo -> undo()
+        is FastIntent.WhatDidYouDo -> whatDidYouDo(intent)
+        FastIntent.MemoryQuery -> memoryQuery()
+        is FastIntent.Forget -> forget(intent)
+        FastIntent.ClearHistory -> clearHistory()
+    }
+
+    // ---------------------------------------------------------------- W8: audit, undo, memory controls
+    private val extraInverses = ArrayList<com.tekyerema.audit.Inverse>()
+
+    /** J-12 / J-13: an ACTION command is written to the audit in plain words, and its reversible changes become an undo group. */
+    private fun recordFast(intent: FastIntent, outcome: FastOutcome, before: com.tekyerema.audit.DeviceSnap?) {
+        try {
+            val inverses = (before?.let { com.tekyerema.audit.DeviceState.diff(it, com.tekyerema.audit.DeviceState.capture(appContext)) }.orEmpty() +
+                extraInverses).reversed()
+            val words = fastWords(intent)
+            if (words != null || inverses.isNotEmpty()) {
+                val task = com.tekyerema.audit.AuditLog.newTask()
+                com.tekyerema.audit.AuditLog.record("fast", if (outcome.ok) com.tekyerema.audit.AuditLog.DONE else com.tekyerema.audit.AuditLog.FAILED,
+                    words ?: intent.name.lowercase().replace('_', ' '), task)
+            }
+            if (outcome.ok && inverses.isNotEmpty())
+                com.tekyerema.audit.UndoLog.push(com.tekyerema.audit.UndoGroup(System.currentTimeMillis(), intent.name, inverses))
+        } catch (_: Throwable) {}
+    }
+
+    /** Plain past-tense words for an action command; null for a question (the time, the battery…) — not an action. */
+    private fun fastWords(intent: FastIntent): String? = when (intent) {
+        FastIntent.VolumeUp -> "turned the volume up"; FastIntent.VolumeDown -> "turned the volume down"
+        FastIntent.VolumeMute -> "muted the sound"; FastIntent.VolumeUnmute -> "unmuted the sound"
+        FastIntent.BrightnessUp -> "made the screen brighter"; FastIntent.BrightnessDown -> "made the screen dimmer"
+        is FastIntent.BrightnessSet -> "set the brightness"
+        FastIntent.FlashlightOn -> "turned the flashlight on"; FastIntent.FlashlightOff -> "turned the flashlight off"
+        FastIntent.WifiOn, FastIntent.WifiOff -> "opened the Wi-Fi settings"
+        FastIntent.BluetoothOn -> "turned Bluetooth on"; FastIntent.BluetoothOff -> "turned Bluetooth off"
+        FastIntent.MediaPlay -> "played the media"; FastIntent.MediaPause -> "paused the media"; FastIntent.MediaStop -> "stopped the media"
+        FastIntent.MediaNext -> "skipped to the next track"; FastIntent.MediaPrevious -> "went to the previous track"
+        FastIntent.Back -> "went back"; FastIntent.Home -> "went to the home screen"; FastIntent.Recents -> "opened recent apps"
+        FastIntent.Notifications -> "opened the notifications"; FastIntent.LockScreen -> "locked the phone"
+        FastIntent.ScrollUp -> "scrolled up"; FastIntent.ScrollDown -> "scrolled down"
+        is FastIntent.OpenApp -> "opened ${intent.query}"
+        is FastIntent.QuickToggle -> "turned ${intent.key.replace('_', ' ')} ${if (intent.on) "on" else "off"}"
+        FastIntent.AnswerCall -> "answered the call"; FastIntent.EndCall -> "ended the call"
+        is FastIntent.Ringer -> "put the phone on ${intent.mode}"
+        FastIntent.Screenshot -> "took a screenshot"; FastIntent.PowerMenu -> "opened the power menu"; FastIntent.TakePhoto -> "opened the camera"
+        is FastIntent.Preference -> "changed how I ${if (intent.key == "patience") "listen" else "speak"}"
+        is FastIntent.Magnify -> "changed the screen magnification"
+        is FastIntent.SetEmergencyContact -> "set your emergency contact"
+        is FastIntent.EmergencyLine -> "put the ${intent.service} number on the dial pad"
+        is FastIntent.CreateSchedule -> "saved a schedule"
+        FastIntent.ClearSchedules -> "cancelled your schedules"
+        is FastIntent.WatchSender -> if (intent.on) "started watching for ${intent.who}'s messages" else "stopped watching for ${intent.who}'s messages"
+        FastIntent.ClearHistory -> "cleared your history"
+        else -> null
+    }
+
+    /** J-13: reverse the last request's reversible changes, newest first. */
+    private fun undo(): FastOutcome {
+        val g = com.tekyerema.audit.UndoLog.pop()
+            ?: return handled(FastIntent.Undo, "There's nothing recent I can undo.")
+        val done = ArrayList<com.tekyerema.audit.Inverse>()
+        val failed = ArrayList<com.tekyerema.audit.Inverse>()
+        for (inv in g.inverses) if (com.tekyerema.audit.DeviceState.apply(appContext, inv)) done.add(inv) else failed.add(inv)
+        com.tekyerema.audit.AuditLog.record("fast", com.tekyerema.audit.AuditLog.DONE, "undid the last change", com.tekyerema.audit.AuditLog.newTask())
+        return action(FastIntent.Undo.name, com.tekyerema.audit.DeviceState.spoken(done, failed))
+    }
+
+    /** J-12: the action audit, read aloud. */
+    private fun whatDidYouDo(intent: FastIntent.WhatDidYouDo): FastOutcome {
+        val line = if (intent.today) {
+            val start = java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+            }.timeInMillis
+            com.tekyerema.audit.AuditLog.spokenToday(com.tekyerema.audit.AuditLog.since(start))
+        } else com.tekyerema.audit.AuditLog.spokenLast(com.tekyerema.audit.AuditLog.lastTask())
+        return handled(intent, line)
+    }
+
+    /** H-12: what is kept about the user, and how to remove it. */
+    private fun memoryQuery(): FastOutcome {
+        val s = com.tekyerema.settings.Settings(appContext)
+        val parts = ArrayList<String>()
+        val turns = AgentEngine.conversationTurns()
+        if (turns > 0) parts.add("our conversation from the last little while ($turns lines)")
+        if (s.emergencyContactName.isNotBlank()) parts.add("your emergency contact, ${s.emergencyContactName}")
+        when (s.speechRate) { 0 -> parts.add("that you like me to speak slowly"); 2 -> parts.add("that you like me to speak fast") }
+        if (s.verbosity == "brief") parts.add("that you like short answers") else if (s.verbosity == "detailed") parts.add("that you like more detail")
+        val schedules = com.tekyerema.agent.triggers.ScheduledTasks.list(appContext).count { it.enabled }
+        if (schedules > 0) parts.add("$schedules schedule${if (schedules == 1) "" else "s"}")
+        val rules = com.tekyerema.agent.triggers.NotificationTriggers.rules(appContext)
+        if (rules.isNotEmpty()) parts.add("to tell you when " + com.tekyerema.audit.AuditLog.joinAnd(rules.map { it.appOrSender }.take(3)) + " sends something")
+        val msgs = com.tekyerema.notifications.MessageIndex.size()
+        if (msgs > 0) parts.add("$msgs recent messages from ${com.tekyerema.notifications.MessageIndex.people()} people, kept for a week")
+        if (s.trajectoryConsent) parts.add("${com.tekyerema.core.telemetry.Trajectories.count(appContext)} saved tasks you agreed to share for improving me")
+        val line = if (parts.isEmpty()) "I'm not keeping anything about you right now."
+            else "I remember " + com.tekyerema.audit.AuditLog.joinAnd(parts) + ". Say “forget everything”, or “forget” and a name, to remove it."
+        return handled(FastIntent.MemoryQuery, line)
+    }
+
+    /** H-12: forget the last exchange, a person, or everything the assistant keeps (settings stay). */
+    private fun forget(intent: FastIntent.Forget): FastOutcome {
+        val line = when (intent.scope) {
+            "last" -> { AgentEngine.forgetLastTurn(); References.clear(); "Okay, I've forgotten that." }
+            "person" -> {
+                val who = intent.who.orEmpty()
+                val n = com.tekyerema.notifications.MessageIndex.forget(who)
+                References.forget(who)
+                if (n > 0) "Okay, I've forgotten ${n} message${if (n == 1) "" else "s"} from $who." else "I wasn't keeping anything about $who."
+            }
+            else -> {
+                AgentEngine.resetConversation(); References.clear()
+                com.tekyerema.notifications.MessageIndex.clear()
+                com.tekyerema.core.telemetry.Trajectories.clear(appContext)
+                ScreenMemory.clear()
+                "Okay, I've forgotten our conversations and the messages I was keeping. Your settings, schedules and emergency contact stay — change them in Settings."
+            }
+        }
+        return action(intent.name, line)
+    }
+
+    /** J-15: clear the History list, the action audit, the traces and the telemetry. */
+    private fun clearHistory(): FastOutcome {
+        com.tekyerema.history.HistoryStore.clear()
+        com.tekyerema.audit.AuditLog.clear()
+        com.tekyerema.core.telemetry.Telemetry.clear()
+        AgentEngine.clearTraces()
+        return action(FastIntent.ClearHistory.name, "Okay, I've cleared your history.")
     }
 
     // ---------------------------------------------------------------- W7
@@ -140,6 +272,7 @@ class LocalFastRouter(
                 "I can do a time today or repeating days, not a date yet.")
         val stored = com.tekyerema.agent.triggers.ScheduledTasks.add(appContext, parsed)
             ?: return handled(intent, "I couldn't save that schedule. Please say it another way.")
+        extraInverses.add(com.tekyerema.audit.Inverse.RemoveSchedule(stored.id))   // J-13
         val runsAlone = com.tekyerema.agent.triggers.TriggerSafety.reminderLine(stored.goal) != null ||
             com.tekyerema.agent.triggers.TriggerSafety.isReadOnlyGoal(stored.goal)
         val tail = if (runsAlone) "" else " At that time I'll remind you — I won't do it by myself."
@@ -168,6 +301,7 @@ class LocalFastRouter(
         return if (intent.on) {
             val ok = com.tekyerema.agent.triggers.NotificationTriggers.addRule(appContext,
                 com.tekyerema.agent.triggers.NotificationRule(id, intent.who, null, "announce"))
+            if (ok) extraInverses.add(com.tekyerema.audit.Inverse.RemoveRule(id))   // J-13
             action(intent.name, if (ok) "Okay. I'll tell you when ${intent.who} sends something." else "I couldn't set that up.")
         } else {
             val ok = com.tekyerema.agent.triggers.NotificationTriggers.removeRule(appContext, id)
@@ -678,7 +812,11 @@ class LocalFastRouter(
      *  blocked by the online Twi voice on a slow network. */
     private fun action(name: String, text: String) = FastOutcome(name, text, systemVoice = true)
 
-    companion object { private const val TAG = "Tekyerema" }
+    companion object {
+        private const val TAG = "Tekyerema"
+        /** Commands that must not become an undo group themselves (undoing an undo would flip-flop). */
+        private val NOT_UNDOABLE: Set<FastIntent> = setOf(FastIntent.Undo, FastIntent.MemoryQuery, FastIntent.ListSchedules)
+    }
 }
 
 /**

@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "privacy": {
+    "logcatContent": false,
+    "retention": { "traceDays": 7, "historyDays": 90, "telemetryDays": 30, "trajectoryDays": 30, "redactTraces": false }
+  },
+  "telemetry": {
+    "enabled": true,
+    "maxRecords": 1000,
+    "field": { "max": 500 },
+    "datasets": { "max": 100, "maxSteps": 40 }
+  },
+  "pipeline": {
+    "budgets": { "asrMs": 1500, "routeMs": 200, "firstDecisionMs": 3500, "ttsStartMs": 800, "responseMs": 4000 }
+  },
+  "audit": {
+    "max": 300,
+    "undo": { "ttlMs": 600000 }
+  },
+  "memory": {
+    "entityIndex": { "ttlDays": 7, "max": 500 }
+  }
+}
