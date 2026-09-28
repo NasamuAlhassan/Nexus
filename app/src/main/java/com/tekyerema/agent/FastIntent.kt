@@ -17,6 +17,8 @@ sealed class FastIntent(val name: String) {
     object VolumeQuery : FastIntent("VOLUME_QUERY")
     object BrightnessUp : FastIntent("BRIGHTNESS_UP")
     object BrightnessDown : FastIntent("BRIGHTNESS_DOWN")
+    /** An absolute level: [fraction] 0.0 = minimum … 1.0 = maximum. */
+    data class BrightnessSet(val fraction: Float) : FastIntent("BRIGHTNESS_SET")
     object FlashlightOn : FastIntent("FLASHLIGHT_ON")
     object FlashlightOff : FastIntent("FLASHLIGHT_OFF")
     object WifiQuery : FastIntent("WIFI_QUERY")
@@ -76,6 +78,7 @@ object FastIntentClassifier {
             RE_VOL_UP.containsMatchIn(g) -> FastIntent.VolumeUp
             RE_VOL_DOWN.containsMatchIn(g) -> FastIntent.VolumeDown
 
+            brightnessLevel(g) != null -> FastIntent.BrightnessSet(brightnessLevel(g)!!)
             RE_BRIGHT_UP.containsMatchIn(g) -> FastIntent.BrightnessUp
             RE_BRIGHT_DOWN.containsMatchIn(g) -> FastIntent.BrightnessDown
 
@@ -152,6 +155,17 @@ object FastIntentClassifier {
     private val RE_VOL_UP = Regex("\\bvolume\\s+up\\b|\\blouder\\b|\\bturn\\s+it\\s+up\\b|\\bturn\\s+up\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bturn\\s+(?:the\\s+)?(?:volume|sound)\\s+up\\b|\\b(?:increase|raise|boost|crank|pump|bump)\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bmake\\s+it\\s+louder\\b|\\bma\\s+volume\\s+no\\s+so\\b")
     private val RE_VOL_DOWN = Regex("\\bvolume\\s+down\\b|\\b(?:quieter|softer)\\b|\\bturn\\s+it\\s+down\\b|\\bturn\\s+down\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bturn\\s+(?:the\\s+)?(?:volume|sound)\\s+down\\b|\\b(?:decrease|lower|reduce|drop)\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bmake\\s+it\\s+(?:quieter|softer)\\b")
 
+    /** "set the brightness to maximum / 40 percent", "full brightness", "lowest brightness" → 0.0…1.0, else null. */
+    private fun brightnessLevel(g: String): Float? {
+        if (!g.contains("brightness")) return null   // "what's the brightest star?" must not touch the screen
+        RE_BRIGHT_PCT.find(g)?.let { m -> return (m.groupValues[1].toInt().coerceIn(0, 100) / 100f) }
+        if (RE_BRIGHT_MAX.containsMatchIn(g)) return 1f
+        if (RE_BRIGHT_MIN.containsMatchIn(g)) return 0f
+        return null
+    }
+    private val RE_BRIGHT_PCT = Regex("\\bbrightness\\b[^0-9]{0,20}?(\\d{1,3})\\s*(?:%|percent)")
+    private val RE_BRIGHT_MAX = Regex("\\b(?:max|maximum|full|highest|brightest)\\b")
+    private val RE_BRIGHT_MIN = Regex("\\b(?:min|minimum|lowest|dimmest)\\b")
     private val RE_BRIGHT_UP = Regex("\\b(?:increase|raise|boost|turn\\s+up|up)\\b[^.]*\\bbright(?:ness|er)?\\b|\\bbright(?:ness|er)?\\b[^.]*\\b(?:up|higher|brighter)\\b|\\bbrighter\\b|\\bbrighten\\b|\\bmake\\s+(?:the\\s+)?screen\\s+brighter\\b")
     private val RE_BRIGHT_DOWN = Regex("\\b(?:decrease|lower|reduce|turn\\s+down|dim)\\b[^.]*\\bbright(?:ness|er)?\\b|\\bmake\\s+(?:the\\s+)?screen\\s+(?:darker|dimmer)\\b|\\b(?:darker|dimmer)\\b|\\bdim\\s+the\\s+screen\\b")
 

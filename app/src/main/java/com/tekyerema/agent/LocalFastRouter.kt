@@ -69,8 +69,9 @@ class LocalFastRouter(
         FastIntent.VolumeUnmute -> muteVolume(mute = false)
         FastIntent.VolumeQuery -> handled(intent, volumeText())
 
-        FastIntent.BrightnessUp -> stepBrightness(up = true)
-        FastIntent.BrightnessDown -> stepBrightness(up = false)
+        FastIntent.BrightnessUp -> stepBrightness(up = true) ?: brightnessViaSlider(null, +0.2f)
+        FastIntent.BrightnessDown -> stepBrightness(up = false) ?: brightnessViaSlider(null, -0.2f)
+        is FastIntent.BrightnessSet -> setBrightness(intent.fraction)
 
         FastIntent.FlashlightOn -> torch(on = true)
         FastIntent.FlashlightOff -> torch(on = false)
@@ -175,6 +176,72 @@ class LocalFastRouter(
         } catch (t: Throwable) { null }
     }
 
+    /** An absolute level: straight through Settings.System when WRITE_SETTINGS is granted, else the Quick Settings
+     *  slider (no permission needed — it's the same control a sighted user would drag). */
+    private suspend fun setBrightness(fraction: Float): FastOutcome? {
+        if (Settings.System.canWrite(appContext)) try {
+            val cr = appContext.contentResolver
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
+            Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, Math.round(fraction * 254 + 1))
+            return action("BRIGHTNESS_SET", brightnessSaid(fraction))
+        } catch (_: Throwable) { /* fall back to the slider */ }
+        return brightnessViaSlider(fraction, null)
+    }
+
+    private fun brightnessSaid(fraction: Float) = when {
+        fraction >= 0.995f -> "Brightness is at maximum."
+        fraction <= 0.005f -> "Brightness is at minimum."
+        else -> "Brightness set to ${Math.round(fraction * 100)} percent."
+    }
+
+    /** Quick Settings' brightness slider: set [fraction] of its range, or move it by [delta] of its range; VERIFY the
+     *  slider's reported value, close the shade. Anything unexpected → null (the agent continues from here). */
+    private suspend fun brightnessViaSlider(fraction: Float?, delta: Float?): FastOutcome? {
+        val c = controller() ?: return null
+        openShade(c) ?: return null
+        var slider: com.tekyerema.accessibility.UiElement? = null
+        repeat(5) { i ->
+            if (slider == null) {
+                if (i > 0) { kotlinx.coroutines.delay(150); c.waitForSettle(1000) }
+                val snap = c.buildSnapshot()
+                slider = snap.elements.firstOrNull { it.range != null && it.label?.lowercase()?.contains("bright") == true }
+                    ?: snap.elements.firstOrNull { it.range != null }
+            }
+        }
+        val s = slider ?: run { c.globalAction("back"); return null }
+        val r = s.range!!
+        val span = r.max - r.min
+        val target = when {
+            fraction != null -> r.min + span * fraction
+            else -> (r.current + span * (delta ?: 0f)).coerceIn(r.min, r.max)
+        }
+        if (!c.setRangeValue(s.id, target)) return null
+        var now: Float? = null
+        repeat(6) {
+            if (now == null || kotlin.math.abs(now!! - target) > span * 0.03f) {
+                kotlinx.coroutines.delay(150); c.waitForSettle(800)
+                now = c.buildSnapshot().elements.firstOrNull { it.range != null && it.label == s.label }?.range?.current
+            }
+        }
+        val reached = now?.let { kotlin.math.abs(it - target) <= span * 0.03f } == true
+        if (!reached) return null
+        c.globalAction("back")
+        val frac = (target - r.min) / span
+        return action("BRIGHTNESS", if (fraction != null) brightnessSaid(fraction)
+            else if ((delta ?: 0f) > 0) "Brightness up, now ${Math.round(frac * 100)} percent." else "Brightness down, now ${Math.round(frac * 100)} percent.")
+    }
+
+    /** Pull down Quick Settings and wait until it is the active window and has stopped animating. Returns the package
+     *  that was in front before (to tell a drawn shade from the old app), or null if it couldn't be opened. */
+    private suspend fun openShade(c: AccessibilityController): String? {
+        val before = c.activeWindowPackage() ?: ""
+        if (!c.globalAction("quick_settings")) return null
+        var waited = 0
+        while (c.activeWindowPackage() == before && waited < 12) { kotlinx.coroutines.delay(200); waited++ }
+        c.waitForSettle(1500)
+        return before
+    }
+
     // ---------------------------------------------------------------- flashlight / torch
     private fun torch(on: Boolean): FastOutcome? {
         val cm = appContext.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return null
@@ -232,14 +299,10 @@ class LocalFastRouter(
     private suspend fun quickToggle(t: FastIntent.QuickToggle): FastOutcome? {
         val tile = QuickTiles.byKey(t.key) ?: return null
         val c = controller() ?: return null
-        val before = c.activeWindowPackage()
-        if (!c.globalAction("quick_settings")) return null
         val t0 = SystemClock.uptimeMillis()
-        // Wait (cheaply) until the shade IS the active window — reading earlier just re-reads the old app — then let
-        // it finish animating: a snapshot mid-animation blocks on System UI's busy UI thread (4–5 s on the emulator).
-        var waited = 0
-        while (c.activeWindowPackage() == before && waited < 12) { kotlinx.coroutines.delay(200); waited++ }
-        c.waitForSettle(1500)
+        // openShade waits (cheaply) until the shade IS the active window, then until it stops animating: a snapshot
+        // mid-animation blocks on System UI's busy UI thread (4–5 s on the emulator).
+        val before = openShade(c) ?: return null
         suspend fun look(tries: Int): com.tekyerema.accessibility.UiElement? {
             repeat(tries) { i ->
                 if (i > 0) { kotlinx.coroutines.delay(150); c.waitForSettle(1000) }

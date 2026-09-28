@@ -51,6 +51,16 @@ class FastIntentClassifierTest {
             assertTrue(s, c(s) !is FastIntent.QuickToggle)
     }
 
+    @Test fun brightness_levels() {
+        assertEquals(FastIntent.BrightnessSet(1f), c("Set the screen brightness to maximum"))
+        assertEquals(FastIntent.BrightnessSet(1f), c("full brightness please"))
+        assertEquals(FastIntent.BrightnessSet(0f), c("set brightness to the lowest"))
+        assertEquals(FastIntent.BrightnessSet(0.4f), c("set brightness to 40 percent"))
+        assertEquals(FastIntent.BrightnessSet(0.75f), c("brightness 75%"))
+        assertEquals(FastIntent.BrightnessUp, c("make it brighter"))
+        assertTrue(c("what's the brightest star in the sky") !is FastIntent.BrightnessSet)
+    }
+
     @Test fun quick_tile_is_found_by_name_and_must_be_checkable() {
         val t = com.tekyerema.agent.QuickTiles.byKey("dnd")!!
         fun el(id: Int, label: String, checkable: Boolean, checked: Boolean = false) = com.tekyerema.accessibility.UiElement(
