@@ -188,4 +188,37 @@ class FastIntentClassifierTest {
         assertNull(c(""))
         assertNull(c("   "))
     }
+
+    // ---- W4 deterministic phone actions ----
+    @Test fun calls_answer_end_and_history() {
+        for (s in listOf("Answer the call", "Pick up", "Answer", "Accept the call", "Take the call please"))
+            assertEquals(s, FastIntent.AnswerCall, c(s))
+        for (s in listOf("Hang up", "End the call", "Reject the call", "Decline this call"))
+            assertEquals(s, FastIntent.EndCall, c(s))
+        assertEquals(FastIntent.CallHistory(missedOnly = false), c("Who called me?"))
+        assertEquals(FastIntent.CallHistory(missedOnly = true), c("Any missed calls?"))
+        assertTrue(c("Accept") != FastIntent.AnswerCall)                  // a bare "accept" is a dialog button, not a call
+    }
+
+    @Test fun messages_location_network_media() {
+        for (s in listOf("Read my last text", "Any new texts?", "Check my SMS", "What was my last text message"))
+            assertEquals(s, FastIntent.LastSms, c(s))
+        assertTrue(c("Read the text on the screen") != FastIntent.LastSms)
+        for (s in listOf("Where am I?", "What's my current location")) assertEquals(s, FastIntent.WhereAmI, c(s))
+        for (s in listOf("Am I online?", "Do I have internet", "Am I on WiFi")) assertEquals(s, FastIntent.Connectivity, c(s))
+        assertEquals(FastIntent.NowPlaying, c("What's playing?"))
+        assertEquals(FastIntent.CalendarToday, c("What's on my calendar today?"))
+    }
+
+    @Test fun ringer_alarms_screenshot_camera() {
+        assertEquals(FastIntent.Ringer("vibrate"), c("Put my phone on vibrate"))
+        assertEquals(FastIntent.Ringer("normal"), c("Set the phone to ring"))
+        assertEquals(FastIntent.Ringer("silent"), c("Silent mode"))
+        assertEquals(FastIntent.ShowAlarms, c("Show my alarms"))
+        assertEquals(FastIntent.Screenshot, c("Take a screenshot"))
+        assertEquals(FastIntent.PowerMenu, c("Open the power menu"))
+        assertEquals(FastIntent.TakePhoto, c("Take a photo"))
+        assertEquals(FastIntent.LockQuery, c("Is my phone locked?"))
+        assertNull(c("Send a text to Ama and call Kofi"))                  // compound → agent
+    }
 }

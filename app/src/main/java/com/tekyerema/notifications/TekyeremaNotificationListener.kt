@@ -18,6 +18,7 @@ class TekyeremaNotificationListener : NotificationListenerService() {
      */
     override fun onListenerConnected() {
         super.onListenerConnected()
+        instance = this
         try {
             activeNotifications?.forEach { sbn -> put(sbn) }
         } catch (t: Throwable) { /* best-effort backfill; live onNotificationPosted still works */ }
@@ -37,17 +38,59 @@ class TekyeremaNotificationListener : NotificationListenerService() {
         val title = clean(extras?.getCharSequence(Notification.EXTRA_TITLE))
         val text = clean(extras?.getCharSequence(Notification.EXTRA_TEXT))
         val replyAction = findReplyAction(n)
+        // E-15: chat apps (MessagingStyle) put the group/conversation in the title — the latest SENDER and their
+        // words are in EXTRA_MESSAGES. Fall back to title/text for everything else.
+        val (sender, lastText) = latestMessage(extras)
         NotificationStore.put(
             NotificationRecord(
                 key = sbn.key,
                 packageName = sbn.packageName,
                 title = title,
-                text = text,
+                text = clean(lastText) ?: text,
                 postTime = sbn.postTime,
                 canReply = replyAction != null,
-                replyAction = replyAction
+                replyAction = replyAction,
+                appLabel = labelOf(sbn.packageName),
+                sender = clean(sender),
+                actions = n.actions?.toList().orEmpty()
             )
         )
+    }
+
+    private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    private fun labelOf(pkg: String): String? = labels[pkg] ?: try {
+        packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
+            .takeIf { it.isNotBlank() && it != pkg }?.also { labels[pkg] = it }
+    } catch (_: Throwable) { null }
+
+    /** The newest (sender, text) of a MessagingStyle notification, or (null, null). */
+    private fun latestMessage(extras: android.os.Bundle?): Pair<CharSequence?, CharSequence?> = try {
+        val msgs = extras?.getParcelableArray(Notification.EXTRA_MESSAGES)
+        val last = msgs?.lastOrNull() as? android.os.Bundle
+        if (last == null) null to null
+        else {
+            val person = if (android.os.Build.VERSION.SDK_INT >= 28)
+                (last.getParcelable<android.app.Person>("sender_person"))?.name else null
+            (person ?: last.getCharSequence("sender")) to last.getCharSequence("text")
+        }
+    } catch (_: Throwable) { null to null }
+
+    override fun onListenerDisconnected() {
+        instance = null
+        super.onListenerDisconnected()
+    }
+
+    companion object {
+        /** E-17: the connected listener, for dismissing a notification (cancelNotification lives on the service). */
+        @Volatile var instance: TekyeremaNotificationListener? = null
+            private set
+
+        /** E-17: dismiss the notification with [key]; false when the listener isn't connected. */
+        fun dismiss(key: String): Boolean {
+            val l = instance ?: return false
+            return try { l.cancelNotification(key); true } catch (_: Throwable) { false }
+        }
     }
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {

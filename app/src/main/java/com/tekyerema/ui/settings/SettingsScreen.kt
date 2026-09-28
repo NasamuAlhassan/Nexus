@@ -125,16 +125,21 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
     val version by settings.changes.collectAsState()
     val speak = remember(version) { settings.speakAloud }
     val rate = remember(version) { settings.speechRate }
-    val enVoice = remember(version) { settings.abenaEnglishVoice }
+    val pitch = remember(version) { settings.speechPitch }
+    val detail = remember(version) { settings.verbosity }
+    val patience = remember(version) { settings.vadStrategy }
+    val profile = remember(version) { settings.profile }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageTitle("Voice", onBack)
         Hairline(inset = PageMargin)
         SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak) { settings.speakAloud = it }
-        Overline("Ghanaian-English voice")
+        // K-11: one choice sets how much is said and how long Tɛkyerɛma waits for you.
+        Overline("Experience")
         Hairline(inset = PageMargin)
         Column(Modifier.selectableGroup()) {
-            ChoiceRow("Akua (female)", "Ghanaian-accented English.", selected = enVoice == "akua_eng") { settings.abenaEnglishVoice = "akua_eng" }
-            ChoiceRow("Kwabena (male)", "Ghanaian-accented English.", selected = enVoice == "kwabena_eng") { settings.abenaEnglishVoice = "kwabena_eng" }
+            ChoiceRow("New to Tɛkyerɛma", "Fuller explanations, and more time to finish speaking.", profile == "beginner") { settings.profile = "beginner" }
+            ChoiceRow("Experienced", "Short replies, and it answers as soon as you stop.", profile == "expert") { settings.profile = "expert" }
+            ChoiceRow("Custom", "Set detail and patience below.", profile != "beginner" && profile != "expert") { settings.profile = "custom" }
         }
         Overline("Speaking speed")
         Hairline(inset = PageMargin)
@@ -143,7 +148,28 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
             ChoiceRow("Normal", selected = rate == 1) { settings.speechRate = 1 }
             ChoiceRow("Fast", selected = rate == 2) { settings.speechRate = 2 }
         }
-        Note("English and Twi use a Ghanaian voice online (Abena, Khaya as backup). Offline, English uses your phone's voice.")
+        Overline("Voice pitch")
+        Hairline(inset = PageMargin)
+        Column(Modifier.selectableGroup()) {
+            ChoiceRow("Lower", selected = pitch == 0) { settings.speechPitch = 0 }
+            ChoiceRow("Normal", selected = pitch == 1) { settings.speechPitch = 1 }
+            ChoiceRow("Higher", selected = pitch == 2) { settings.speechPitch = 2 }
+        }
+        Overline("How much it says")
+        Hairline(inset = PageMargin)
+        Column(Modifier.selectableGroup()) {
+            ChoiceRow("Brief", "Just the result, and a soft tick while it works.", detail == "brief") { settings.verbosity = "brief"; settings.profile = "custom" }
+            ChoiceRow("Normal", selected = detail == "normal") { settings.verbosity = "normal"; settings.profile = "custom" }
+            ChoiceRow("Detailed", "Explains more and tells you what it's doing.", detail == "detailed") { settings.verbosity = "detailed"; settings.profile = "custom" }
+        }
+        Overline("Waiting for you to finish")
+        Hairline(inset = PageMargin)
+        Column(Modifier.selectableGroup()) {
+            ChoiceRow("Quick", "Answers as soon as you pause.", patience == "quick") { settings.vadStrategy = "quick"; settings.profile = "custom" }
+            ChoiceRow("Normal", selected = patience == "normal") { settings.vadStrategy = "normal"; settings.profile = "custom" }
+            ChoiceRow("Patient", "Waits through longer pauses.", patience == "patient") { settings.vadStrategy = "patient"; settings.profile = "custom" }
+        }
+        Note("Tɛkyerɛma speaks with your phone's voice. You can also say “speak slower”, “keep it short” or “be patient with me”.")
     }
 }
 
@@ -171,6 +197,22 @@ private fun PermissionsPage(onBack: () -> Unit) {
         }
         SettingRow("Read messages", v(notif)) { if (!notif) Perms.openNotificationAccess(context) }
         SettingRow("Show over other apps", v(overlay)) { if (!overlay) Perms.openOverlaySettings(context) }
+        // W4: the phone-action permissions, each requested on its own so one refusal doesn't block the rest.
+        val texts = remember(tick) { Perms.granted(context, android.Manifest.permission.SEND_SMS) && Perms.granted(context, android.Manifest.permission.READ_SMS) }
+        val callLog = remember(tick) { Perms.granted(context, android.Manifest.permission.READ_CALL_LOG) && Perms.granted(context, android.Manifest.permission.ANSWER_PHONE_CALLS) }
+        val location = remember(tick) { Perms.granted(context, android.Manifest.permission.ACCESS_FINE_LOCATION) }
+        val calendar = remember(tick) { Perms.granted(context, android.Manifest.permission.READ_CALENDAR) }
+        SettingRow("Text messages", v(texts)) {
+            if (!texts) launcher.launch(arrayOf(android.Manifest.permission.SEND_SMS, android.Manifest.permission.READ_SMS))
+        }
+        SettingRow("Call history and answering", v(callLog)) {
+            if (!callLog) launcher.launch(arrayOf(android.Manifest.permission.READ_CALL_LOG, android.Manifest.permission.ANSWER_PHONE_CALLS,
+                android.Manifest.permission.READ_PHONE_STATE))
+        }
+        SettingRow("Location", v(location)) {
+            if (!location) launcher.launch(arrayOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION))
+        }
+        SettingRow("Calendar", v(calendar)) { if (!calendar) launcher.launch(arrayOf(android.Manifest.permission.READ_CALENDAR)) }
         Note(
             "Screen control lets Tɛkyerɛma open apps and tap for you. Read messages lets it read and reply to your " +
                 "notifications. Show over other apps lets it ask for your OK without leaving what you were doing."
@@ -185,14 +227,24 @@ private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
     val sounds = remember(version) { settings.sounds }
     val reduce = remember(version) { settings.reduceMotion }
     val floating = remember(version) { settings.floatingTrigger }
+    val wake = remember(version) { settings.wakeWordEnabled }
+    val gemini = remember(version) { settings.allowGeminiBackup }
+    val context = LocalContext.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageTitle("Accessibility", onBack)
         Hairline(inset = PageMargin)
         SwitchRow("Sounds", "A short tone when listening starts, ends, and when a task is done.", sounds) { settings.sounds = it }
-        SwitchRow("Vibration", "A light tap with each change.", haptics) { settings.haptics = it }
+        SwitchRow("Vibration", "A different tap pattern for listening, done, needs your OK, and errors.", haptics) { settings.haptics = it }
         SwitchRow("Reduce motion", "Keeps the visual still.", reduce) { settings.reduceMotion = it }
         SwitchRow("Floating Talk button", "A button over other apps that starts Tɛkyerɛma. Needs screen control.", floating) { settings.floatingTrigger = it }
-        Note("Text size and TalkBack follow your phone's accessibility settings.")
+        // A-07: the hands-free wake word, switchable by the user (it was only reachable over ADB).
+        SwitchRow("“Hey Tɛkyerɛma”", "Listen for the wake phrase so you can talk without touching the phone.", wake) { settings.wakeWordEnabled = it }
+        // J-18: keep requests off a provider whose free tier may use them to improve its products.
+        SwitchRow("Backup AI (Google Gemini)", "Used only when the main AI is busy. Google may use these requests to improve its products.", gemini) { settings.allowGeminiBackup = it }
+        // N-11: Samsung puts unused apps to sleep, which silently stops the wake word and background tasks.
+        SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off") { Perms.requestBatteryUnrestricted(context) }
+        Note("Text size and TalkBack follow your phone's accessibility settings. On Samsung phones, also add Tɛkyerɛma to " +
+            "Settings › Battery › Background usage limits › Never sleeping apps.")
     }
 }
 
@@ -205,15 +257,25 @@ private fun HelpPage(onBack: () -> Unit) {
             listOf("“Call Prince.”", "“Read my WhatsApp messages.”", "“Reply to Prince that I’ll call him after class.”",
                 "“Set an alarm for 6 AM.”", "“Turn on Wi-Fi.”", "“How much credit do I have?”")
         )
+        HelpBlock("More you can say", listOf(
+            "“Who called me?” · “Read my last text.” · “Answer the call.” · “Hang up.”",
+            "“Where am I?” · “Am I online?” · “What's playing?” · “What's on my calendar today?”",
+            "“Put my phone on vibrate.” · “Take a screenshot.” · “Show my alarms.”",
+            "“Speak slower.” · “Keep it short.” · “Be patient with me.”"
+        ))
         HelpBlock("Talk from anywhere", listOf(
-            "Use the floating Talk button, or the accessibility button in your navigation bar, from any app.",
+            "Use the floating Talk button, the accessibility button in your navigation bar, or say “Hey Tɛkyerɛma”.",
+            "Press volume-down twice quickly, or add the Tɛkyerɛma tile to your Quick Settings.",
             "Tɛkyerɛma listens straight away. Tap anywhere outside the circle to close it."
         ))
         HelpBlock("Before anything risky", listOf(
             "For calls, messages, money and settings that matter, Tɛkyerɛma asks you out loud — “Should I go ahead?” — and waits for you to say yes or no.",
             "If it can’t make out your answer it asks once more, then leaves it. You can also tap Yes or No."
         ))
-        HelpBlock("To stop", listOf("Tap the centre of the screen while Tɛkyerɛma is working. Nothing more happens."))
+        HelpBlock("To stop", listOf(
+            "Tap the centre of the screen while Tɛkyerɛma is working. Nothing more happens.",
+            "From any app: press volume-down twice, tap the Tɛkyerɛma tile, or press Stop on its notification."
+        ))
     }
 }
 

@@ -212,7 +212,8 @@ object AgentEngine {
             // first, then Gemini, so a drained free-tier quota isn't a dead end (demo-readiness fix).
             val cloudChain = buildList {
                 if (set.hasGroqKey) add(OpenAiCompatBrain(set))
-                if (set.geminiApiKey.isNotBlank()) add(GeminiBrain(set))
+                // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
+                if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
             }
             val cloud: AgentBrain? = when (cloudChain.size) {
                 0 -> null; else -> FallbackBrain(cloudChain)   // even one brain gets the network-blip retry
@@ -236,7 +237,7 @@ object AgentEngine {
         }
         val cloudName = buildList {
             if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
-            if (set.geminiApiKey.isNotBlank()) add("Gemini/${set.model}")
+            if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
         }.joinToString(" → ").ifEmpty { "none" }
         val brainLabel = forcedLabel ?: "Hybrid on-device" +
             (if (online && cloudName != "none") " + cloud:$cloudName" else " (offline${if (cloudName == "none") ", no cloud key" else ""})")
@@ -979,6 +980,8 @@ object AgentEngine {
             // Deterministic *170# send driver: read back the CEDI amount + recipient number digit-by-digit so a
             // units (pesewa/cedi) or wrong-number mistake is caught BEFORE it drives the menu.
             "momo_send" -> Spec(Spec.Kind.SEND_MONEY, number = args.str("number"), amount = args.str("amount"))
+            // E-03: an SMS names its recipient and its words, like a reply.
+            "send_sms" -> Spec(Spec.Kind.SEND_MESSAGE, name = args.str("contact") ?: args.str("number"), message = args.str("message"))
             // §A.1 — the recipient must be named in the readback. ReplyToNotificationTool declares `sender`
             // (+ `message`); the old `_title` arg never existed, so the Twi confirmation asked "send a message
             // to them?" without naming who. Use the real args so the safety-critical recipient is spoken.

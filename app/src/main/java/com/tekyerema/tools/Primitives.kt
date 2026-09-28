@@ -367,19 +367,22 @@ object SetRangeTool : Tool {
 
 object KeyEventTool : Tool {
     override val name = "key_event"
-    override val description = "Press a system key: back/home/recents/volume keys, or pull down quick_settings (the " +
-        "toggle tiles: Wi-Fi, Bluetooth, Do Not Disturb, Auto-rotate, Flashlight, Battery Saver…) or notifications."
+    override val description = "Press a system key: back/home/recents/volume keys, lock_screen, power_menu, screenshot, " +
+        "split_screen, or pull down quick_settings (Wi-Fi, Bluetooth, Do Not Disturb, Flashlight… tiles) or notifications."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val params = listOf(
-        ToolParam("key", "string", "The key.", enumValues = listOf("back", "home", "recents", "quick_settings", "notifications", "volume_up", "volume_down", "volume_mute"))
+        ToolParam("key", "string", "The key.", enumValues = listOf("back", "home", "recents", "quick_settings", "notifications",
+            "volume_up", "volume_down", "volume_mute", "lock_screen", "power_menu", "screenshot", "split_screen"))
     ) + EXPECTS_PARAM
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
         val key = args.str("key")?.lowercase() ?: return ToolResult(false, "No key.")
         val ok = when (key) {
-            "back", "home", "recents", "quick_settings", "notifications" -> ctrl.globalAction(key)
+            // E-18: every global action the device exposes (getSystemActions) — unavailable ones fail honestly.
+            "back", "home", "recents", "quick_settings", "notifications",
+            "lock_screen", "power_menu", "screenshot", "split_screen" -> ctrl.globalAction(key)
             "volume_up", "volume_down", "volume_mute" -> ctrl.adjustVolume(key)
             else -> return ToolResult(false, "Unknown key '$key'.")
         }

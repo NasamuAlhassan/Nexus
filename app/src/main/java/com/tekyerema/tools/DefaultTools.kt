@@ -40,6 +40,19 @@ fun defaultTools(): List<Tool> = listOf(
     RunUssdTool,
     MakeCallTool,
     ReplyToNotificationTool,
+    NotificationActionTool,   // E-17 dismiss / press a notification button
+    // W4 deterministic phone actions (loaded per step only when the request needs them — D-02)
+    SendSmsTool,          // E-03
+    CallControlTool,      // E-02 answer / end
+    CallLogTool,          // E-28
+    ReadSmsTool,          // E-29
+    CalendarTool,         // E-06
+    CreateContactTool,    // E-07
+    LocationTool,         // E-13
+    ShowAlarmsTool,       // E-05
+    ClipboardTool,        // E-19
+    ShareTextTool,        // E-20
+    OpenIntentTool,       // D-14 / E-04 intent + deep-link templates
     // §A.2 reopened offline intents
     PlayMusicTool,
     OpenSettingTool,

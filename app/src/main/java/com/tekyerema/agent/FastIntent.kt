@@ -41,6 +41,25 @@ sealed class FastIntent(val name: String) {
     object LockScreen : FastIntent("LOCK_SCREEN")
     object Notifications : FastIntent("NOTIFICATIONS")
     data class OpenApp(val query: String) : FastIntent("OPEN_APP")
+    // ---- W4 deterministic phone actions (E-02, E-05, E-06, E-09, E-12, E-13, E-14, E-18, E-21, E-22, E-28, E-29) ----
+    object AnswerCall : FastIntent("ANSWER_CALL")
+    object EndCall : FastIntent("END_CALL")
+    data class CallHistory(val missedOnly: Boolean) : FastIntent("CALL_HISTORY")
+    object LastSms : FastIntent("LAST_SMS")
+    object WhereAmI : FastIntent("WHERE_AM_I")
+    object Connectivity : FastIntent("CONNECTIVITY")
+    object NowPlaying : FastIntent("NOW_PLAYING")
+    /** [mode] = "vibrate" | "silent" | "normal". */
+    data class Ringer(val mode: String) : FastIntent("RINGER")
+    object ShowAlarms : FastIntent("SHOW_ALARMS")
+    object Screenshot : FastIntent("SCREENSHOT")
+    object PowerMenu : FastIntent("POWER_MENU")
+    object TakePhoto : FastIntent("TAKE_PHOTO")
+    object CalendarToday : FastIntent("CALENDAR_TODAY")
+    object LockQuery : FastIntent("LOCK_QUERY")
+    /** H-08: a preference set by voice — key "rate" (slower|faster|normal), "verbosity" (brief|detailed|normal),
+     *  "patience" (patient|quick|normal). */
+    data class Preference(val key: String, val value: String) : FastIntent("PREFERENCE")
     /** Flip a Quick Settings tile ([QuickTiles]) to [on]. */
     data class QuickToggle(val key: String, val on: Boolean) : FastIntent("TOGGLE_${key.uppercase()}")
 }
@@ -67,6 +86,8 @@ object FastIntentClassifier {
             // FIRST: an explicit "turn on/off / enable X" naming a Quick Settings tile — before the topic regexes,
             // or "enable battery saver" is read as a battery-LEVEL question.
             quickToggle(g) != null -> quickToggle(g)
+            // E-09 ringer mode before the volume rules ("silent mode" is the ringer, not muting the media volume).
+            ringerMode(g) != null -> FastIntent.Ringer(ringerMode(g)!!)
             RE_TIME.containsMatchIn(g) -> FastIntent.Time
             RE_DAY.containsMatchIn(g) -> FastIntent.Day
             RE_DATE.containsMatchIn(g) -> FastIntent.Date
@@ -102,6 +123,22 @@ object FastIntentClassifier {
             RE_MEDIA_STOP.containsMatchIn(g) -> FastIntent.MediaStop
             RE_MEDIA_PLAY.containsMatchIn(g) -> FastIntent.MediaPlay
 
+            // H-08 preferences by voice (before the phone actions: "talk slower" is not a call).
+            preference(g) != null -> preference(g)
+            // W4 phone actions — before lock/navigation so "lock" questions and call words aren't read as navigation.
+            RE_ANSWER.matches(g) -> FastIntent.AnswerCall
+            RE_END_CALL.matches(g) -> FastIntent.EndCall
+            RE_CALL_HISTORY.containsMatchIn(g) -> FastIntent.CallHistory(missedOnly = g.contains("missed"))
+            RE_LAST_SMS.containsMatchIn(g) -> FastIntent.LastSms
+            RE_WHERE_AM_I.containsMatchIn(g) -> FastIntent.WhereAmI
+            RE_ONLINE.containsMatchIn(g) -> FastIntent.Connectivity
+            RE_NOW_PLAYING.containsMatchIn(g) -> FastIntent.NowPlaying
+            RE_SHOW_ALARMS.containsMatchIn(g) -> FastIntent.ShowAlarms
+            RE_SCREENSHOT.containsMatchIn(g) -> FastIntent.Screenshot
+            RE_POWER_MENU.containsMatchIn(g) -> FastIntent.PowerMenu
+            RE_TAKE_PHOTO.containsMatchIn(g) -> FastIntent.TakePhoto
+            RE_CALENDAR_TODAY.containsMatchIn(g) -> FastIntent.CalendarToday
+            RE_LOCK_QUERY.containsMatchIn(g) -> FastIntent.LockQuery
             RE_LOCK.containsMatchIn(g) -> FastIntent.LockScreen
             RE_NOTIFS.containsMatchIn(g) -> FastIntent.Notifications
             RE_RECENTS.containsMatchIn(g) -> FastIntent.Recents
@@ -174,6 +211,52 @@ object FastIntentClassifier {
     private val RE_BRIGHT_DOWN = Regex("\\b(?:decrease|lower|reduce|turn\\s+down|dim)\\b[^.]*\\bbright(?:ness|er)?\\b|\\bmake\\s+(?:the\\s+)?screen\\s+(?:darker|dimmer)\\b|\\b(?:darker|dimmer)\\b|\\bdim\\s+the\\s+screen\\b")
 
     private val RE_TORCH_OFF = Regex("\\b(?:flashlight|torch|flash\\s*light)\\b[^.]*\\boff\\b|\\boff\\b[^.]*\\b(?:flashlight|torch|flash\\s*light)\\b")
+    // ---- H-08 preferences by voice ----
+    private val RE_PREF_SLOWER = Regex("^(?:please\\s+)?(?:speak|talk|read)\\s+(?:a (?:bit|little) )?(?:more )?slow(?:er|ly)(?: please)?$|^slow down(?: please)?$")
+    private val RE_PREF_FASTER = Regex("^(?:please\\s+)?(?:speak|talk|read)\\s+(?:a (?:bit|little) )?faster(?: please)?$|^speed up(?: please)?$")
+    private val RE_PREF_NORMAL_SPEED = Regex("^(?:speak|talk) (?:at )?(?:normal|regular) speed$")
+    private val RE_PREF_BRIEF = Regex("^(?:please\\s+)?(?:be brief|keep it short|shorter answers|less detail|say less|don't talk so much)(?: please)?$")
+    private val RE_PREF_DETAILED = Regex("^(?:please\\s+)?(?:be more detailed|more detailed answers|give me more detail(?:s)? from now on|explain more from now on)(?: please)?$")
+    private val RE_PREF_PATIENT = Regex("^(?:please\\s+)?(?:be patient(?: with me)?|wait longer(?: for me)?|give me more time(?: to (?:speak|talk|finish))?|don't cut me off)(?: please)?$")
+
+    private fun preference(g: String): FastIntent.Preference? = when {
+        RE_PREF_SLOWER.matches(g) -> FastIntent.Preference("rate", "slower")
+        RE_PREF_FASTER.matches(g) -> FastIntent.Preference("rate", "faster")
+        RE_PREF_NORMAL_SPEED.matches(g) -> FastIntent.Preference("rate", "normal")
+        RE_PREF_BRIEF.matches(g) -> FastIntent.Preference("verbosity", "brief")
+        RE_PREF_DETAILED.matches(g) -> FastIntent.Preference("verbosity", "detailed")
+        RE_PREF_PATIENT.matches(g) -> FastIntent.Preference("patience", "patient")
+        else -> null
+    }
+
+    // ---- W4 phone actions ----
+    // "accept"/"take" only with "call" (a bare "accept" is more likely a dialog button than a ringing phone).
+    private val RE_ANSWER = Regex("^(?:please\\s+)?(?:(?:answer|pick up|pickup)(?:\\s+(?:the|this|my))?(?:\\s+(?:phone|call))?|(?:accept|take)\\s+(?:the |this |my )?call)(?:\\s+please)?$|^gye (?:frɛ|fre) no$")
+    private val RE_END_CALL = Regex("^(?:please\\s+)?(?:hang up|end (?:the |this )?call|end it|cut (?:the |this )?call|reject (?:the |this )?call|decline (?:the |this )?call|drop (?:the |this )?call)(?:\\s+please)?$")
+    private val RE_CALL_HISTORY = Regex("\\b(?:who (?:just )?called(?: me)?|missed calls?|any (?:missed )?calls|recent calls|call history|call log|did anyone call)\\b")
+    // SMS only — "texts", "sms", "text message(s)" or "my (last) text"; "read the text on the screen" is not an SMS.
+    private val RE_LAST_SMS = Regex("\\b(?:read|check|what(?:'s| is| was)|any)\\b.*\\b(?:text messages?|texts|sms|my (?:last |latest |new )?text)\\b|^(?:my )?(?:last|latest|new) (?:text|sms|text message)s?$")
+    private val RE_WHERE_AM_I = Regex("\\b(?:where am i|where i am|what(?:'s| is) my (?:current )?location|my current location|what street am i on)\\b")
+    private val RE_ONLINE = Regex("\\b(?:am i (?:online|connected)|(?:is|do i have) (?:the )?internet|internet connection|am i on (?:wi-?fi|data|mobile data)|what network am i on)\\b")
+    private val RE_NOW_PLAYING = Regex("\\b(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|who (?:sings|is singing) this)\\b")
+    private val RE_SHOW_ALARMS = Regex("\\b(?:show|open|list|check)\\b.*\\balarms\\b|^(?:my )?alarms$|\\bwhat alarms\\b")
+    private val RE_SCREENSHOT = Regex("\\b(?:take|capture|grab|save)\\b.*\\bscreenshot\\b|^screenshot$")
+    private val RE_POWER_MENU = Regex("\\b(?:power (?:menu|options)|power button menu|restart menu|shut ?down menu)\\b")
+    private val RE_TAKE_PHOTO = Regex("\\btake (?:a |me a )?(?:photo|picture|pic|selfie)\\b|^open (?:the )?camera$")
+    private val RE_CALENDAR_TODAY = Regex("\\b(?:what(?:'s| is) on my (?:calendar|schedule|agenda)|my (?:schedule|agenda|calendar) (?:for )?today|do i have (?:any )?(?:meetings|appointments|events)|what do i have (?:on )?today)\\b")
+    private val RE_LOCK_QUERY = Regex("^is (?:my )?(?:phone|screen) locked$")
+    private val RE_RINGER = Regex("\\b(?:put|set|switch|turn|change)\\b(?:.*\\b(?:phone|ringer|sound)\\b)?.*\\b(?:on|to|into)\\s+(vibrate|vibration|silent|ring|ringing|sound|normal)(?:\\s+mode)?$|^(vibrate|silent|ring)\\s+mode(?:\\s+on)?$")
+
+    private fun ringerMode(g: String): String? {
+        val m = RE_RINGER.find(g) ?: return null
+        return when ((m.groups[1] ?: m.groups[2])?.value) {
+            "vibrate", "vibration" -> "vibrate"
+            "silent" -> "silent"
+            "ring", "ringing", "sound", "normal" -> "normal"
+            else -> null
+        }
+    }
+
     private const val TORCH = "(?:flashlight|torch|flash\\s*light)"
     private val RE_TORCH_ON = Regex(
         "\\b(?:turn|switch|put)\\s+on\\b[^.]*\\b$TORCH\\b|\\b$TORCH\\b[^.]*\\bon\\b" +

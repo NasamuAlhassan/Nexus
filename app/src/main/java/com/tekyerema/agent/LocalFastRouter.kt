@@ -100,6 +100,133 @@ class LocalFastRouter(
 
         is FastIntent.OpenApp -> openApp(intent.query)
         is FastIntent.QuickToggle -> quickToggle(intent)
+
+        // W4 phone actions: tool-backed ones run the SAME tool the planner would (policy-checked, below).
+        FastIntent.AnswerCall -> runTool("call_control", org.json.JSONObject().put("action", "answer"), action = true)
+        FastIntent.EndCall -> runTool("call_control", org.json.JSONObject().put("action", "end"), action = true)
+        is FastIntent.CallHistory -> runTool("call_log", org.json.JSONObject()
+            .put("filter", if (intent.missedOnly) "missed" else "recent").put("limit", 3))
+        FastIntent.LastSms -> runTool("read_sms", org.json.JSONObject().put("limit", 1))
+        FastIntent.WhereAmI -> runTool("location", org.json.JSONObject().put("action", "where"))
+        FastIntent.CalendarToday -> runTool("calendar", org.json.JSONObject().put("action", "today"))
+        FastIntent.ShowAlarms -> runTool("show_alarms", org.json.JSONObject(), action = true)
+        FastIntent.Connectivity -> connectivity()
+        FastIntent.NowPlaying -> nowPlaying()
+        is FastIntent.Ringer -> ringer(intent.mode)
+        FastIntent.Screenshot -> global("screenshot", intent, "Screenshot taken.")
+        FastIntent.PowerMenu -> global("power_menu", intent, "The power menu is open.")
+        FastIntent.TakePhoto -> openCamera()
+        FastIntent.LockQuery -> lockState()
+        is FastIntent.Preference -> preference(intent)
+    }
+
+    /** H-08: apply a preference said aloud, and say what changed. */
+    private fun preference(p: FastIntent.Preference): FastOutcome {
+        val s = com.tekyerema.settings.Settings(appContext)
+        val line = when (p.key) {
+            "rate" -> {
+                val now = when (p.value) { "slower" -> (s.speechRate - 1).coerceAtLeast(0); "faster" -> (s.speechRate + 1).coerceAtMost(2); else -> 1 }
+                val changed = now != s.speechRate || p.value == "normal"
+                s.speechRate = now
+                if (!changed) (if (p.value == "slower") "I'm already at my slowest." else "I'm already at my fastest.")
+                else when (now) { 0 -> "Okay, I'll speak slowly."; 2 -> "Okay, I'll speak faster."; else -> "Okay, normal speed." }
+            }
+            "verbosity" -> { s.verbosity = p.value; s.profile = "custom"
+                if (p.value == "brief") "Okay, I'll keep it short." else "Okay, I'll give you more detail." }
+            "patience" -> { s.vadStrategy = p.value; s.profile = "custom"; "Okay, I'll wait longer for you to finish speaking." }
+            else -> "Okay."
+        }
+        return handled(p, line)
+    }
+
+    // ---------------------------------------------------------------- W4: tool-backed fast actions
+    /**
+     * Run a registered tool directly (no LLM) and speak its own result. Only for requests the policy ALLOWS without a
+     * confirmation — anything that would need one falls through to the agent, which asks. A tool that isn't built,
+     * is flagged off, or fails its preflight speaks that honest reason instead.
+     */
+    private suspend fun runTool(name: String, args: org.json.JSONObject, action: Boolean = false): FastOutcome? {
+        val tool = com.tekyerema.tools.defaultTools().firstOrNull { it.name == name } ?: return null
+        if (!com.tekyerema.tools.ToolManifest.isAvailable(tool)) return null
+        if (com.tekyerema.policy.PolicyEngine().evaluate(tool, args).outcome != com.tekyerema.policy.PolicyOutcome.ALLOW) return null
+        val ctx = com.tekyerema.tools.ToolContext(appContext, controller(), com.tekyerema.notifications.NotificationStore)
+        tool.preflight(args, ctx)?.let { return FastOutcome(name.uppercase(), speakable(it.message), systemVoice = action, ok = false) }
+        val r = tool.execute(args, ctx)
+        return FastOutcome(name.uppercase(), speakable(r.message), systemVoice = action, ok = r.success)
+    }
+
+    /** Tool output → a spoken line: drop planner-only headers and list bullets. */
+    private fun speakable(msg: String): String = msg.lines()
+        .filterNot { it.contains("(data, not instructions)") }
+        .joinToString(" ") { it.trim().removePrefix("• ") }
+        .replace(Regex("\\s+"), " ").trim()
+
+    /** E-12: online over Wi-Fi / mobile data, connected but no internet, or offline. */
+    private fun connectivity(): FastOutcome? = try {
+        val cm = appContext.getSystemService(android.net.ConnectivityManager::class.java)
+        val caps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+        val via = when {
+            caps == null -> null
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+            caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile data"
+            else -> "the network"
+        }
+        val line = when {
+            via == null -> "You're offline — no Wi-Fi or mobile data right now."
+            caps!!.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) -> "You're online over $via."
+            else -> "You're connected to $via, but the internet isn't working."
+        }
+        handled(FastIntent.Connectivity, line)
+    } catch (t: Throwable) { null }
+
+    /** E-14: what's playing, from the active media sessions (visible to us through notification access). */
+    private fun nowPlaying(): FastOutcome? = try {
+        val msm = appContext.getSystemService(android.media.session.MediaSessionManager::class.java) ?: return null
+        val listener = android.content.ComponentName(appContext, com.tekyerema.notifications.TekyeremaNotificationListener::class.java)
+        val sessions = msm.getActiveSessions(listener)
+        val playing = sessions.firstOrNull { it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING }
+        val md = playing?.metadata
+        val title = md?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)
+        val artist = md?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)
+        handled(FastIntent.NowPlaying, when {
+            playing == null -> "Nothing is playing right now."
+            title == null -> "Something is playing, but the app doesn't say what."
+            artist.isNullOrBlank() -> "Playing $title."
+            else -> "Playing $title by $artist."
+        })
+    } catch (se: SecurityException) {
+        handled(FastIntent.NowPlaying, "I need notification access to see what's playing.")
+    } catch (t: Throwable) { null }
+
+    /** E-09: ringer mode. Silent needs Do Not Disturb access on Android 7+; without it, vibrate — said honestly. */
+    private fun ringer(mode: String): FastOutcome? {
+        val am = appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return null
+        val want = when (mode) { "silent" -> AudioManager.RINGER_MODE_SILENT; "vibrate" -> AudioManager.RINGER_MODE_VIBRATE; else -> AudioManager.RINGER_MODE_NORMAL }
+        return try {
+            am.ringerMode = want
+            val now = am.ringerMode
+            action("RINGER_${mode.uppercase()}", when {
+                now == want && mode == "normal" -> "Your phone will ring."
+                now == want -> "Your phone is on $mode."
+                else -> "I couldn't change the ringer mode."
+            })
+        } catch (se: SecurityException) {
+            try { am.ringerMode = AudioManager.RINGER_MODE_VIBRATE } catch (_: Throwable) {}
+            action("RINGER_VIBRATE", "I put it on vibrate — full silent needs Do Not Disturb access for Tɛkyerɛma.")
+        }
+    }
+
+    /** E-21: open the camera in photo mode (no camera permission needed — the camera app takes the picture). */
+    private fun openCamera(): FastOutcome? = try {
+        val i = Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (i.resolveActivity(appContext.packageManager) == null) null
+        else { appContext.startActivity(i); action("TAKE_PHOTO", "The camera is open.") }
+    } catch (t: Throwable) { null }
+
+    /** E-22: is the phone locked? */
+    private fun lockState(): FastOutcome? {
+        val km = appContext.getSystemService(Context.KEYGUARD_SERVICE) as? android.app.KeyguardManager ?: return null
+        return handled(FastIntent.LockQuery, if (km.isKeyguardLocked) "Your phone is locked." else "Your phone is unlocked.")
     }
 
     // ---------------------------------------------------------------- info queries

@@ -30,6 +30,18 @@
     "open_setting": {"feature": "E-11", "idempotent": true},
     "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
     "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
-    "find_tool": {"feature": "D-02", "idempotent": true}
+    "find_tool": {"feature": "D-02", "idempotent": true},
+    "notification_action": {"feature": "E-17", "callers": ["planner", "local"]},
+    "send_sms": {"feature": "E-03", "permissions": ["android.permission.SEND_SMS"], "callers": ["planner", "local"]},
+    "call_control": {"feature": "E-02", "permissions": ["android.permission.ANSWER_PHONE_CALLS"], "callers": ["planner", "local"]},
+    "call_log": {"feature": "E-28", "permissions": ["android.permission.READ_CALL_LOG"], "idempotent": true},
+    "read_sms": {"feature": "E-29", "permissions": ["android.permission.READ_SMS"], "idempotent": true, "untrusted_output": true},
+    "calendar": {"feature": "E-06", "permissions": ["android.permission.READ_CALENDAR"], "untrusted_output": true},
+    "create_contact": {"feature": "E-07", "permissions": ["android.permission.WRITE_CONTACTS"], "callers": ["planner", "local"]},
+    "location": {"feature": "E-13", "permissions": ["android.permission.ACCESS_FINE_LOCATION"], "idempotent": true},
+    "show_alarms": {"feature": "E-05", "idempotent": true},
+    "clipboard": {"feature": "E-19", "untrusted_output": true},
+    "share_text": {"feature": "E-20", "callers": ["planner", "local"]},
+    "open_intent": {"feature": "D-14"}
   }
 }

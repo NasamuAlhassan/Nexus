@@ -19,8 +19,25 @@ object SetAlarmTool : Tool {
     override val params = listOf(
         ToolParam("hour", "integer", "Hour of day, 0-23."),
         ToolParam("minute", "integer", "Minute, 0-59.", required = false),
-        ToolParam("message", "string", "Optional alarm label.", required = false)
+        ToolParam("message", "string", "Optional alarm label.", required = false),
+        ToolParam("repeat", "string", "Optional repeat: every day | weekdays | weekends | e.g. 'mon,wed,fri'.", required = false)
     )
+
+    /** E-05: "weekdays" / "every day" / "mon,wed" → java.util.Calendar day numbers for AlarmClock.EXTRA_DAYS. */
+    internal fun repeatDays(spec: String?): ArrayList<Int>? {
+        val s = spec?.trim()?.lowercase()?.takeIf { it.isNotEmpty() } ?: return null
+        val all = listOf(java.util.Calendar.MONDAY, java.util.Calendar.TUESDAY, java.util.Calendar.WEDNESDAY,
+            java.util.Calendar.THURSDAY, java.util.Calendar.FRIDAY, java.util.Calendar.SATURDAY, java.util.Calendar.SUNDAY)
+        return when {
+            Regex("every ?day|daily|all days").containsMatchIn(s) -> ArrayList(all)
+            s.contains("weekday") -> ArrayList(all.take(5))
+            s.contains("weekend") -> arrayListOf(java.util.Calendar.SATURDAY, java.util.Calendar.SUNDAY)
+            else -> {
+                val names = listOf("mon", "tue", "wed", "thu", "fri", "sat", "sun")
+                ArrayList(names.indices.filter { i -> Regex("\\b" + names[i]).containsMatchIn(s) }.map { all[it] }).takeIf { it.isNotEmpty() }
+            }
+        }
+    }
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val hour = args.intOrNull("hour") ?: return ToolResult(false, "No hour provided.")
@@ -32,6 +49,7 @@ object SetAlarmTool : Tool {
             .putExtra(AlarmClock.EXTRA_SKIP_UI, false)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         args.str("message")?.let { intent.putExtra(AlarmClock.EXTRA_MESSAGE, it) }
+        repeatDays(args.str("repeat"))?.let { intent.putExtra(AlarmClock.EXTRA_DAYS, it) }
         if (intent.resolveActivity(ctx.appContext.packageManager) == null)
             return ToolResult(false, "No clock app can set alarms.")
         return try {

@@ -86,7 +86,9 @@ class VoiceController(
     private val systemVoice: TtsProvider? = null,
     /** B-07: echo-cancelled mic that listens while a reply plays (null = no barge-in, e.g. tests). */
     private val bargeMic: Recorder? = null,
-    private val bargeInEnabled: () -> Boolean = { false }
+    private val bargeInEnabled: () -> Boolean = { false },
+    /** B-13: "brief" | "normal" | "detailed". */
+    private val verbosity: () -> String = { "normal" }
 ) {
     private val _state = MutableStateFlow(VoiceUiState(language = sessionLanguage()))
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()
@@ -672,7 +674,9 @@ class VoiceController(
                 val lang = forceLanguage() ?: sessionLanguage()
                 val line = if (lang == Lang.TWI) "Mereyɛ ho adwuma da." else if (step != null) "Still working on it — step $step." else "Still working on it."
                 cues.progress()
-                try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                // B-13: "brief" users get the progress tick only — no spoken line.
+                if (verbosity() != "brief")
+                    try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                 lines++
             }
             kotlinx.coroutines.delay(interval)
@@ -680,13 +684,17 @@ class VoiceController(
     }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
-    private fun spokenFor(status: AgentStatus, resultText: String?): String = when (status) {
-        AgentStatus.COMPLETED -> resultText ?: "Done."
-        AgentStatus.COMPLETED_UNVERIFIED -> (resultText ?: "I tried that") + " — but I could not confirm it."
-        AgentStatus.CANNOT_DO -> resultText ?: "I can't do that."
-        AgentStatus.FAILED -> resultText ?: "That didn't work."
-        AgentStatus.STOPPED -> if (declinedByVoice) "" else "Stopped."   // a voice "no" was already acknowledged
-        else -> resultText ?: "Done."
+    private fun spokenFor(status: AgentStatus, resultText: String?): String {
+        // B-13: "brief" keeps the first sentence of the reply; the honesty tail is added AFTER trimming, never dropped.
+        val text = resultText?.let { if (verbosity() == "brief") SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
+        return when (status) {
+            AgentStatus.COMPLETED -> text ?: "Done."
+            AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it."
+            AgentStatus.CANNOT_DO -> text ?: "I can't do that."
+            AgentStatus.FAILED -> text ?: "That didn't work."
+            AgentStatus.STOPPED -> if (declinedByVoice) "" else "Stopped."   // a voice "no" was already acknowledged
+            else -> text ?: "Done."
+        }
     }
 
     private fun set(s: VoiceState, hint: String = "") =

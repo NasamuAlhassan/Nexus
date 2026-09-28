@@ -58,24 +58,41 @@ object OpenSettingTool : Tool {
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true
     override val params = listOf(
-        ToolParam("target", "string", "Which setting: wifi | mobile_data | bluetooth | airplane | location | sound | display | settings."),
+        ToolParam("target", "string", "Which setting: wifi | mobile_data | bluetooth | airplane | location | nfc | volume | sound | " +
+            "display | battery | accessibility | apps | storage | date | language | security | dnd | settings."),
         ToolParam("state", "string", "The position to leave the switch in. Omit to only open the screen.", required = false,
             enumValues = listOf("on", "off"))
     )
 
     private fun norm(target: String) = target.trim().lowercase().replace(" ", "_")
 
-    /** Map a target to (intent action, spoken label). Panel actions land on a togglable surface where they exist. */
-    private fun actionFor(target: String): Pair<String, String>? = when (norm(target)) {
-        "wifi", "wi-fi", "wi_fi" -> Settings.Panel.ACTION_WIFI to "Wi-Fi"
-        "mobile_data", "data", "internet", "cellular" -> Settings.Panel.ACTION_INTERNET_CONNECTIVITY to "mobile data"
-        "airplane", "flight", "aeroplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS to "airplane mode"
-        "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS to "Bluetooth"
-        "location", "gps" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS to "location"
-        "sound", "volume", "silent" -> Settings.ACTION_SOUND_SETTINGS to "sound"
-        "display", "brightness", "screen" -> Settings.ACTION_DISPLAY_SETTINGS to "display"
-        "settings" -> Settings.ACTION_SETTINGS to "Settings"
-        else -> null
+    /** Map a target to (intent action, spoken label). Panel actions land on a togglable surface where they exist.
+     *  E-11: `os.settings.map` in config can add targets ({"target": {"action": "...", "label": "..."}}). */
+    private fun actionFor(target: String): Pair<String, String>? {
+        com.tekyerema.core.config.AppConfig.obj("os.settings.map.${norm(target)}")?.let { o ->
+            val a = o.optString("action"); if (a.isNotBlank()) return a to o.optString("label", target)
+        }
+        return when (norm(target)) {
+            "wifi", "wi-fi", "wi_fi" -> Settings.Panel.ACTION_WIFI to "Wi-Fi"
+            "mobile_data", "data", "internet", "cellular" -> Settings.Panel.ACTION_INTERNET_CONNECTIVITY to "mobile data"
+            "airplane", "flight", "aeroplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS to "airplane mode"
+            "bluetooth" -> Settings.ACTION_BLUETOOTH_SETTINGS to "Bluetooth"
+            "location", "gps" -> Settings.ACTION_LOCATION_SOURCE_SETTINGS to "location"
+            "nfc" -> Settings.Panel.ACTION_NFC to "NFC"                                   // E-10 panel
+            "volume", "volume_panel" -> Settings.Panel.ACTION_VOLUME to "volume"          // E-10 panel
+            "sound", "silent", "ringtone" -> Settings.ACTION_SOUND_SETTINGS to "sound"
+            "display", "brightness", "screen" -> Settings.ACTION_DISPLAY_SETTINGS to "display"
+            "battery", "battery_saver", "power_saving" -> Settings.ACTION_BATTERY_SAVER_SETTINGS to "battery saver"
+            "accessibility", "talkback" -> Settings.ACTION_ACCESSIBILITY_SETTINGS to "accessibility"
+            "apps", "applications" -> Settings.ACTION_APPLICATION_SETTINGS to "apps"
+            "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS to "storage"
+            "date", "time", "date_time" -> Settings.ACTION_DATE_SETTINGS to "date and time"
+            "language", "languages" -> Settings.ACTION_LOCALE_SETTINGS to "language"
+            "security", "lock", "screen_lock" -> Settings.ACTION_SECURITY_SETTINGS to "security"
+            "dnd", "do_not_disturb" -> Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS to "Do Not Disturb"
+            "settings" -> Settings.ACTION_SETTINGS to "Settings"
+            else -> null
+        }
     }
 
     /** Whole-word label patterns for each target's switch ("wi" alone matched "Switch", "Window"…). */

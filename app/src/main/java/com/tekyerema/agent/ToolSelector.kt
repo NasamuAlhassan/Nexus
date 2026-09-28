@@ -20,7 +20,8 @@ object ToolSelector {
     private val DEFAULT_GROUPS = linkedMapOf(
         "comms" to Group(
             listOf("make_call", "reply_to_notification", "read_notifications", "search_contacts", "find_contact",
-                "search_messages", "send_sms", "call_control", "call_log", "read_sms", "notification_action"),
+                "search_messages", "send_sms", "call_control", "call_log", "read_sms", "notification_action",
+                "open_intent", "create_contact", "share_text"),
             Regex("(?i)\\b(call|calls|called|phone|ring|dial|answer|hang ?up|text|sms|message|messages|reply|whatsapp|chat|" +
                 "notification|notifications|contact|contacts|number|send|tell|missed|inbox|frɛ|fre|nkra)\\b")
         ),
@@ -31,10 +32,11 @@ object ToolSelector {
         ),
         "device" to Group(
             listOf("set_alarm", "set_timer", "set_volume", "volume_up", "volume_down", "open_setting", "play_music",
-                "show_alarms", "calendar", "create_contact", "location", "clipboard", "share_text", "intent"),
+                "show_alarms", "calendar", "create_contact", "location", "clipboard", "share_text", "open_intent"),
             Regex("(?i)\\b(alarm|alarms|timer|wake me|remind|reminder|volume|louder|quieter|sound|mute|wi-?fi|bluetooth|" +
                 "data|airplane|location|where am i|setting|settings|music|song|play|calendar|event|meeting|appointment|" +
-                "schedule|copy|paste|clipboard|share|save (?:the )?(?:number|contact)|add (?:a )?contact)\\b")
+                "schedule|copy|paste|clipboard|share|save (?:the )?(?:number|contact)|add (?:a )?contact|directions|navigate|" +
+                "map|maps|dial|email|e-mail|youtube|google|link)\\b")
         ),
         "gesture" to Group(
             listOf("drag", "pinch", "set_range", "scroll_to_find", "wait_for_element", "node_action"),

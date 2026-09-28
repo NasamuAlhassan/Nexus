@@ -108,6 +108,9 @@ class AndroidTts(context: Context) : TtsProvider {
     /** 1.0 = the engine's normal pace; the Voice settings page offers slow/normal/fast. */
     fun setRate(rate: Float) { try { engine.setSpeechRate(rate.coerceIn(0.5f, 2.0f)) } catch (_: Throwable) {} }
 
+    /** B-13: 1.0 = the engine's normal pitch. */
+    fun setPitch(pitch: Float) { try { engine.setPitch(pitch.coerceIn(0.5f, 2.0f)) } catch (_: Throwable) {} }
+
     override fun stop() { try { engine.stop() } catch (_: Throwable) {} }
     override fun shutdown() { try { engine.stop(); engine.shutdown() } catch (_: Throwable) {} }
 }

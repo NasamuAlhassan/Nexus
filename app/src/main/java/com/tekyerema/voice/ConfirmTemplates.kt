@@ -59,7 +59,9 @@ object ConfirmTemplates {
                     (spec.name?.takeIf { it.isNotBlank() } ?: twiDigits(spec.number.orEmpty())) +
                     "? Wo ankasa na wobɛhyɛ PIN."
             Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime cedi ${twiDigits(spec.amount.orEmpty())}? Wo ankasa na wobɛhyɛ PIN."
-            Spec.Kind.SEND_MESSAGE -> "Wopɛ sɛ mesoma nkra kɔ ${spec.name ?: "no"} hɔ?"
+            // K-05: the words themselves are read back too (verbatim), not only the recipient.
+            Spec.Kind.SEND_MESSAGE -> "Wopɛ sɛ mesoma nkra kɔ ${spec.name ?: "no"} hɔ?" +
+                (spec.message?.takeIf { it.isNotBlank() }?.let { " Nkra no se: “$it”." } ?: "")
             Spec.Kind.GENERIC -> "Wopɛ sɛ meyɛ eyi?"
         }
         return body + TWI_YESNO

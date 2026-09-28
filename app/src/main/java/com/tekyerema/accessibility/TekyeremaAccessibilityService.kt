@@ -15,6 +15,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
@@ -79,6 +80,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 buttonCallback?.let { accessibilityButtonController.registerAccessibilityButtonCallback(it) }
             } catch (_: Throwable) {}
         }
+        registerFingerprintGestures()   // A-04
         // Floating "Talk to Tɛkyerɛma" bubble, following the user's Accessibility setting live.
         val settings = Settings(this)
         triggerJob?.cancel()
@@ -164,6 +166,62 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     }
 
     override fun priorForegroundPackage(): String? = priorApp
+
+    // ---------------------------------------------------------------- A-01 / A-04 / J-14 activation + kill switch
+    private val keyPattern = KeyPattern()
+
+    /** A-01 / J-14: volume-down twice → talk, or stop a running task. The keys are never swallowed. */
+    override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
+        val e = event ?: return false
+        if (e.action != android.view.KeyEvent.ACTION_UP) return false
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-01", true) ||
+            !com.tekyerema.core.config.AppConfig.bool("activation.keys.enabled", true)) return false
+        if (keyPattern.onKeyUp(e.keyCode, e.eventTime)) {
+            restoreVolume(e.keyCode, steps = 2)   // the gesture's two presses moved the volume; put it back
+            talkOrStop("keys")
+        }
+        return false
+    }
+
+    private fun restoreVolume(code: Int, steps: Int) {
+        val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
+        val dir = if (code == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+        repeat(steps) { try { am.adjustSuggestedStreamVolume(dir, AudioManager.USE_DEFAULT_STREAM_TYPE, 0) } catch (_: Throwable) {} }
+    }
+
+    /** One gesture, two meanings: when Tɛkyerɛma is busy it STOPS everything (J-14 kill switch); otherwise it opens
+     *  the voice screen (in front, so the microphone is allowed) and listens. */
+    private fun talkOrStop(source: String) {
+        val st = AgentEngine.state.value.status
+        val busy = com.tekyerema.voice.VoiceEngine.isRunning || st == com.tekyerema.agent.AgentStatus.THINKING ||
+            st == com.tekyerema.agent.AgentStatus.ACTING || st == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION ||
+            st == com.tekyerema.agent.AgentStatus.SECURE_INPUT
+        Log.i("Tekyerema", "[TRIGGER] $source → ${if (busy) "STOP (kill switch)" else "talk"}")
+        if (busy) android.os.Handler(mainLooper).post { com.tekyerema.voice.VoiceEngine.cancel() }
+        else try {
+            startActivity(android.content.Intent(this, com.tekyerema.ui.VoiceActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (t: Throwable) { Log.w("Tekyerema", "[TRIGGER] couldn't open the voice screen: ${t.message}") }
+    }
+
+    /** A-04: swipe down on the fingerprint sensor = talk (or stop); swipe up = stop. Only where the sensor supports
+     *  gestures (isGestureDetectionAvailable) — otherwise nothing is registered. */
+    private fun registerFingerprintGestures() {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-04", true)) return
+        try {
+            val fgc = fingerprintGestureController
+            if (!fgc.isGestureDetectionAvailable) { Log.i("Tekyerema", "[TRIGGER] fingerprint gestures not available on this sensor"); return }
+            fgc.registerFingerprintGestureCallback(object : android.accessibilityservice.FingerprintGestureController.FingerprintGestureCallback() {
+                override fun onGestureDetected(gesture: Int) {
+                    when (gesture) {
+                        android.accessibilityservice.FingerprintGestureController.FINGERPRINT_GESTURE_SWIPE_DOWN -> talkOrStop("fingerprint")
+                        android.accessibilityservice.FingerprintGestureController.FINGERPRINT_GESTURE_SWIPE_UP ->
+                            android.os.Handler(mainLooper).post { com.tekyerema.voice.VoiceEngine.cancel() }
+                    }
+                }
+            }, null)
+            Log.i("Tekyerema", "[TRIGGER] fingerprint gestures registered")
+        } catch (t: Throwable) { Log.w("Tekyerema", "[TRIGGER] fingerprint gestures unavailable: ${t.message}") }
+    }
 
     /** J-08: app overlays (TYPE_APPLICATION_OVERLAY, drawn via SYSTEM_ALERT_WINDOW) are reported to accessibility as
      *  TYPE_SYSTEM windows owned by the drawing app's package. Anything not the system UI, the platform, the keyboard
@@ -553,9 +611,19 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             "recents" -> GLOBAL_ACTION_RECENTS
             "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
             "quick_settings" -> GLOBAL_ACTION_QUICK_SETTINGS
-            // Lock screen is API 28+; on older devices report failure (never fake it).
-            "lock" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_LOCK_SCREEN else return false
+            // Lock screen / screenshot are API 28+; on older devices report failure (never fake it).
+            "lock", "lock_screen" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_LOCK_SCREEN else return false
+            "screenshot" -> if (android.os.Build.VERSION.SDK_INT >= 28) GLOBAL_ACTION_TAKE_SCREENSHOT else return false
+            "power_menu", "power_dialog" -> GLOBAL_ACTION_POWER_DIALOG
+            "split_screen" -> GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN
             else -> return false
+        }
+        // E-18: on API 30 the system lists the global actions this device supports — don't press a newer one it lacks.
+        // (Only for the newer actions: some OEM lists omit the classic back/home/lock even though they work.)
+        val newer = setOf(GLOBAL_ACTION_POWER_DIALOG, GLOBAL_ACTION_TAKE_SCREENSHOT, GLOBAL_ACTION_TOGGLE_SPLIT_SCREEN)
+        if (android.os.Build.VERSION.SDK_INT >= 30 && a in newer) {
+            val supported = try { systemActions.map { it.id } } catch (_: Throwable) { null }
+            if (supported != null && supported.isNotEmpty() && a !in supported) return false
         }
         return try { performGlobalAction(a) } catch (t: Throwable) { false }
     }

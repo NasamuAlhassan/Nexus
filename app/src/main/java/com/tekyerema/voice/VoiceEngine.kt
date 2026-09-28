@@ -112,6 +112,7 @@ object VoiceEngine {
             // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
             // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
             bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
+            verbosity = { settings.verbosity },   // B-13
             bargeInEnabled = {
                 com.tekyerema.core.config.FeatureFlags.isEnabled("B-07") &&
                     com.tekyerema.core.config.AppConfig.bool("speech.bargeIn.enabled", true)
@@ -178,6 +179,7 @@ object VoiceEngine {
 
     private fun applyVoiceSettings() {
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
+        systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
     }
 
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */

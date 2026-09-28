@@ -37,7 +37,11 @@ object Perms {
 
     /** The runtime permissions requested on first launch (POST_NOTIFICATIONS only exists on 33+). */
     fun runtimePermissions(): Array<String> {
-        val base = arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CALL_PHONE, Manifest.permission.READ_CONTACTS)
+        val base = arrayOf(Manifest.permission.RECORD_AUDIO, Manifest.permission.CALL_PHONE, Manifest.permission.READ_CONTACTS,
+            // W4 phone actions (owner-approved 2026-09-28): contacts, SMS, call log and answering, location, calendar.
+            Manifest.permission.WRITE_CONTACTS, Manifest.permission.SEND_SMS, Manifest.permission.READ_SMS,
+            Manifest.permission.READ_CALL_LOG, Manifest.permission.ANSWER_PHONE_CALLS, Manifest.permission.READ_PHONE_STATE,
+            Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.READ_CALENDAR)
         return if (Build.VERSION.SDK_INT >= 33) base + Manifest.permission.POST_NOTIFICATIONS else base
     }
 

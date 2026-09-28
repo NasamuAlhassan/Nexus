@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "intents": {
+    "templates": {
+      "whatsapp_chat": {"action": "android.intent.action.VIEW", "uri": "https://wa.me/{number}?text={text}", "package": "com.whatsapp", "number_format": "intl"},
+      "sms_compose": {"action": "android.intent.action.SENDTO", "uri": "smsto:{number}", "extras": {"sms_body": "{text}"}},
+      "dial": {"action": "android.intent.action.DIAL", "uri": "tel:{number}"},
+      "email_compose": {"action": "android.intent.action.SENDTO", "uri": "mailto:{email}", "extras": {"android.intent.extra.TEXT": "{text}"}},
+      "maps_search": {"action": "android.intent.action.VIEW", "uri": "geo:0,0?q={query}"},
+      "walking_directions": {"action": "android.intent.action.VIEW", "uri": "google.navigation:q={query}&mode=w"},
+      "web_search": {"action": "android.intent.action.VIEW", "uri": "https://www.google.com/search?q={query}"},
+      "youtube_search": {"action": "android.intent.action.VIEW", "uri": "https://www.youtube.com/results?search_query={query}"}
+    }
+  }
+}

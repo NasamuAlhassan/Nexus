@@ -12,9 +12,26 @@
     <!-- Tier-2 capabilities (requested at runtime). -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- W4 phone actions (runtime permissions approved by the owner 2026-09-28; each feature explains itself when one
+         is missing and falls back to a no-permission path where one exists). -->
+    <uses-permission android:name="android.permission.WRITE_CONTACTS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- E-12: install-time, no prompt — Wi-Fi/Bluetooth state queries and the Bluetooth toggle on Android 11. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- B-14: haptic cues (install-time; without it every vibration silently failed). -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- A-04: fingerprint-sensor gestures for the accessibility service (install-time). -->
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" />
     <!-- Alarm/timer accelerators (§1.4): without this SET_ALARM is denied and the tool must NOT claim success. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- §C.1 keep the voice session (mic + agent loop) alive while a task is in flight, so the assistant
@@ -66,6 +83,18 @@
             android:launchMode="singleInstance"
             android:taskAffinity=""
             android:theme="@style/Theme.Tekyerema.Voice" />
+
+        <!-- A-08 Quick Settings tile: tap to talk; tap again while working to stop (J-14). -->
+        <service
+            android:name=".voice.TalkTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_logo_tile"
+            android:label="Tɛkyerɛma"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
 
         <!-- §C.1 Foreground service that pins the process during an active voice session. -->
         <service

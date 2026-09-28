@@ -150,9 +150,10 @@ class Settings(context: Context) {
 
     // --- User-facing preferences (the only things the Settings screens expose) ---
 
-    /** Bumped on every write so Compose screens can re-read synchronously without a listener. */
-    private val _changes = kotlinx.coroutines.flow.MutableStateFlow(0L)
-    val changes: kotlinx.coroutines.flow.StateFlow<Long> = _changes
+    /** Bumped on every write so Compose screens can re-read synchronously without a listener. Process-wide (shared by
+     *  every Settings instance): a preference changed by voice (H-08) must reach the voice engine's own instance. */
+    private val _changes get() = sharedChanges
+    val changes: kotlinx.coroutines.flow.StateFlow<Long> get() = sharedChanges
     private fun put(block: android.content.SharedPreferences.Editor.() -> Unit) {
         prefs.edit().apply(block).apply(); _changes.value = _changes.value + 1
     }
@@ -176,6 +177,36 @@ class Settings(context: Context) {
     var speechRate: Int
         get() = prefs.getInt(KEY_RATE, 1)
         set(v) = put { putInt(KEY_RATE, v.coerceIn(0, 2)) }
+
+    /** B-13: how much Tɛkyerɛma says — "brief" | "normal" | "detailed" (default from config ux.verbosity). */
+    var verbosity: String
+        get() = prefs.getString("verbosity", null) ?: com.tekyerema.core.config.AppConfig.string("ux.verbosity", "normal")
+        set(v) = put { putString("verbosity", v.trim().lowercase()) }
+
+    /** B-13: voice pitch 0 = lower, 1 = normal, 2 = higher. */
+    var speechPitch: Int
+        get() = prefs.getInt("speech_pitch", 1)
+        set(v) = put { putInt("speech_pitch", v.coerceIn(0, 2)) }
+
+    /** K-11: "beginner" (patient listening, fuller explanations, hints) | "expert" (brief, quick) | "custom". */
+    var profile: String
+        get() = prefs.getString("profile", null) ?: "custom"
+        set(v) {
+            val p = v.trim().lowercase()
+            put {
+                putString("profile", p)
+                when (p) {
+                    "beginner" -> { putString("verbosity", "detailed"); putString("vad_strategy", "patient") }
+                    "expert" -> { putString("verbosity", "brief"); putString("vad_strategy", "quick") }
+                }
+            }
+        }
+
+    /** J-18: allow the Gemini free tier as a backup brain. Google may use free-tier requests to improve its products,
+     *  so a user can switch it off; Groq (no training on API data) then carries every request alone. */
+    var allowGeminiBackup: Boolean
+        get() = prefs.getBoolean("allow_gemini_backup", com.tekyerema.core.config.AppConfig.bool("privacy.allowGeminiBackup", true))
+        set(v) = put { putBoolean("allow_gemini_backup", v) }
 
     /** B-03: how long Tɛkyerɛma waits through pauses — "quick" | "normal" | "patient" (default from config). */
     var vadStrategy: String
@@ -205,6 +236,7 @@ class Settings(context: Context) {
         set(v) = put { putBoolean(KEY_ONBOARDED, v) }
 
     companion object {
+        private val sharedChanges = kotlinx.coroutines.flow.MutableStateFlow(0L)
         const val LANG_MODE_ENGLISH = "english"
         const val LANG_MODE_TWI = "twi"
         const val LANG_MODE_BOTH = "both"

@@ -25,6 +25,9 @@ object PolicyConfig {
      * `policy.moneyUssdPrefixes` can add prefixes.
      */
     fun argTier(tool: Tool, args: org.json.JSONObject): RiskTier? {
+        // E-17: pressing a notification's button (archive, delete, call back…) is confirmed; dismissing isn't.
+        if (tool.name == "notification_action")
+            return if (args.optString("action").trim().equals("dismiss", true)) null else RiskTier.TIER2
         if (tool.name != "run_ussd") return null
         val code = args.optString("code").replace(Regex("\\s"), "")
         if (code.isEmpty()) return null
