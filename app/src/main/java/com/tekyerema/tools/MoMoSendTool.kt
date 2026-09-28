@@ -43,6 +43,24 @@ object MoMoSendTool : Tool {
 
     private const val TAG = "Tekyerema"
 
+    private fun operatorOf(ctx: ToolContext): String? {
+        val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        return tm?.simOperatorName?.ifBlank { tm.simOperator } ?: tm?.simOperator
+    }
+
+    /** M-03: the automatic driver only runs where a send sequence has been confirmed live (MTN today). On any other
+     *  network it refuses BEFORE the confirmation, so the planner falls back to the guided mobile_money menu —
+     *  it used to fire MTN's key sequence into AirtelTigo/Telecel's *110# menu. */
+    override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        val op = operatorOf(ctx)
+        val net = GhanaMobileMoney.network(op)
+            ?: return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't drive Mobile Money automatically.", recoverable = true)
+        if (GhanaMobileMoney.sendSequence(op, "0", "0", "x") == null)
+            return ToolResult(false, "My automatic send only knows MTN's menu, and this SIM is on ${net.replaceFirstChar { it.uppercase() }}. " +
+                "Use mobile_money to open the menu and guide the user through it instead.", recoverable = true)
+        return null
+    }
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val number = args.str("number")?.filter { it.isDigit() }.orEmpty()
         val amount = args.str("amount")?.trim().orEmpty()
@@ -53,10 +71,12 @@ object MoMoSendTool : Tool {
             return ToolResult(false, "CALL_PHONE permission isn't granted, so I can't open Mobile Money.")
         val ctrl = ctx.controller ?: return ToolResult(false, "The accessibility service isn't running, so I can't drive the menu.")
 
-        val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
-        val operator = tm?.simOperatorName?.ifBlank { tm.simOperator } ?: tm?.simOperator
+        val operator = operatorOf(ctx)
         val root = GhanaMobileMoney.rootUssd(operator)
             ?: return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't guess a Mobile Money code.", recoverable = true)
+        // M-03: the network's confirmed sequence, or refuse (preflight normally catches this before confirmation).
+        val keys = GhanaMobileMoney.sendSequence(operator, number, amount, reference)
+            ?: return ToolResult(false, "My automatic send only knows MTN's menu. Nothing was sent.", recoverable = true)
 
         // Open the interactive USSD session.
         try {
@@ -75,15 +95,9 @@ object MoMoSendTool : Tool {
         // Money keypresses in order; the only screen inspection is (a) waiting for each USSD dialog to be
         // ready (timing) and (b) the PIN safety-stop — we NEVER type into a PIN screen. [owner: this order
         // must match your live *170# Send Money flow — a wrong/extra step moves real money.]
-        // Owner-confirmed live sequence: 1, 1, number, number (re-entered to confirm), amount, reference, PIN.
-        val sequence = listOf(
-            "1"       to "menu: Transfer/Send Money",
-            "1"       to "menu: MoMo User",
-            number    to "recipient number",
-            number    to "confirm recipient number (re-enter)",
-            amount    to "amount",
-            reference to "reference"
-        )
+        // Owner-confirmed live MTN sequence: 1, 1, number, number (re-entered to confirm), amount, reference, PIN —
+        // now data (connectors.mobileMoney.networks.<net>.sendSequence), with the same default in code.
+        val sequence = keys.mapIndexed { i, v -> v to "step ${i + 1}" }
         var lastText = ""
         for ((idx, s) in sequence.withIndex()) {
             val (value, label) = s

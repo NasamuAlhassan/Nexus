@@ -185,6 +185,7 @@ class LocalBrain : AgentBrain {
         // it must never be spoken to the user (same class as the §1.7 UNVERIFIED-prefix leak).
         val msg = (if ("); " in last) last.substringAfterLast("); ") else last.substringAfterLast("; "))
             .substringBefore(" — the '")
+            .removePrefix(AgentEngine.UNTRUSTED_MARK)   // J-07 planner-only marker, never spoken
             .trim()
         return AgentDecision.Done(if (msg.isNotEmpty()) msg else doneLine)
     }

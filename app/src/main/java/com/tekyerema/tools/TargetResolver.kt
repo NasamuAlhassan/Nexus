@@ -101,6 +101,31 @@ object TargetResolver {
         return ResolveOutcome.NotFound("couldn't find an item labelled '${target.label}' after scrolling") to snap
     }
 
+    /**
+     * G-08 — find the SAME element in a fresh snapshot after a delay (a confirmation wait). Element ids are
+     * indices into one snapshot, so after a reflow (new message, keyboard, scroll) "element 7" can be a different
+     * node. Match by identity instead: resource id, label, role and editability, then nearest bounds. Ambiguous
+     * or far-moved matches are refused rather than guessed.
+     */
+    fun reResolve(previous: UiElement, fresh: UiSnapshot): ResolveOutcome {
+        val same = fresh.elements.filter { e ->
+            e.source == previous.source && e.editable == previous.editable && e.role == previous.role &&
+                (if (previous.viewId != null && e.viewId != null) e.viewId == previous.viewId else true) &&
+                (if (!previous.label.isNullOrBlank()) e.label == previous.label else e.bounds == previous.bounds)
+        }
+        if (same.isEmpty()) return ResolveOutcome.NotFound("the item you confirmed is no longer on the screen")
+        fun dist(e: UiElement) = Math.hypot((e.bounds.centerX - previous.bounds.centerX).toDouble(), (e.bounds.centerY - previous.bounds.centerY).toDouble())
+        val ranked = same.sortedBy(::dist)
+        val best = ranked.first()
+        // Several identical items (e.g. a "Reply" per message): only accept one that stayed (almost) in place.
+        if (ranked.size > 1 && dist(best) > REFLOW_TOLERANCE_PX)
+            return ResolveOutcome.NotFound("several items look like the one you confirmed and it moved — re-observe")
+        return ResolveOutcome.Found(ResolvedTarget(best, best.bounds.centerX, best.bounds.centerY,
+            if (best.source == ElementSource.VISION) "vision" else "identity"))
+    }
+
+    private const val REFLOW_TOLERANCE_PX = 48.0
+
     fun describe(t: Target): String = when (t) {
         is Target.ById -> "element ${t.id}"
         is Target.ByLabel -> "'${t.label}'"

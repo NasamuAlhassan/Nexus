@@ -299,16 +299,14 @@ class VoiceController(
      */
     private suspend fun secureInputByVoice() {
         val lang = forceLanguage() ?: sessionLanguage()
-        val instruction = if (lang == Lang.TWI)
-            "Yei yɛ ahotoso adeyɛ. Fa wo MoMo PIN no hyɛ wo fɔn no mu ankasa. Merenhwɛ screen no. Sɛ wowie a, ka sɛ 'awie'."
-        else
-            "This is a secure step. Please enter your MoMo PIN directly on the phone. I'm not looking at the screen. Say 'done' when you've finished."
+        // G-13: name what the screen actually wants (it used to always say "MoMo PIN").
+        val instruction = secureInstruction(agent.state.value.handoffReason, lang == Lang.TWI)
         val remind = if (lang == Lang.TWI) "Sɛ wowie a, ka sɛ 'awie'." else "Say 'done' when you've finished."
         cues.needsOk()
         try {
             var attempt = 0
             while (attempt < 8) {
-                _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = if (lang == Lang.TWI) "Hyɛ wo PIN, na ka 'awie'" else "Enter your PIN, then say 'done'") }
+                _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = if (lang == Lang.TWI) "Hyɛ mu, na ka 'awie'" else "Finish it yourself, then say 'done'") }
                 try { tts.speak(if (attempt == 0) instruction else remind, lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                 if (!hasMicPermission()) return    // can't listen; stay secure (user completes on the phone, taps to cancel/retry)
                 val cap = answerMic.capture(onListening = { cues.listening() }, onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
@@ -336,6 +334,19 @@ class VoiceController(
         } catch (c: CancellationException) {
             _state.update { it.copy(speechDetected = false) }
             throw c
+        }
+    }
+
+    private fun secureInstruction(reason: String?, twi: Boolean): String {
+        if (twi) return if (reason == null || reason == "momo_pin")
+            "Yei yɛ ahotoso adeyɛ. Fa wo MoMo PIN no hyɛ wo fɔn no mu ankasa. Merenhwɛ screen no. Sɛ wowie a, ka sɛ 'awie'."
+        else "Yei yɛ ahotoso adeyɛ. Wo ankasa hyɛ mu wɔ wo fɔn no so. Merenhwɛ screen no. Sɛ wowie a, ka sɛ 'awie'."
+        return when (reason) {
+            "pin" -> "This is a secure step. Please enter your PIN directly on the phone. I'm not looking at the screen. Say 'done' when you've finished."
+            "password" -> "This screen wants your password. Please type it yourself — I'm not looking at the screen. Say 'done' when you've finished."
+            "otp" -> "This screen wants a one-time code. Please enter it yourself — I'm not looking at the screen. Say 'done' when you've finished."
+            "captcha" -> "This page wants to check that you're a person, and that step is yours. I'm not looking at the screen. Say 'done' when it's finished."
+            else -> "This is a secure step. Please enter your MoMo PIN directly on the phone. I'm not looking at the screen. Say 'done' when you've finished."
         }
     }
 
@@ -489,24 +500,20 @@ class VoiceController(
             AgentStatus.CANNOT_DO, AgentStatus.FAILED, AgentStatus.STOPPED
         )
         val finalState: AgentUiState? = try {
-            withTimeoutOrNull(agentTimeoutMs) {
-                agent.state
-                    .onEach { st ->
-                        when (st.status) {
-                            AgentStatus.WAITING_CONFIRMATION -> {
-                                fillers?.stop()   // the confirmation question is about to be spoken — never talk over it
-                                if (_state.value.state != VoiceState.CONFIRMATION_REQUIRED && !voiceConfirmation()) cues.needsOk()
-                                _state.update {
-                                    it.copy(state = VoiceState.CONFIRMATION_REQUIRED,
-                                        partialHint = st.pendingConfirmation ?: "Waiting for your confirmation")
-                                }
-                            }
-                            AgentStatus.THINKING, AgentStatus.ACTING ->
-                                if (_state.value.state != VoiceState.EXECUTING) set(VoiceState.EXECUTING, "Working on it…")
-                            else -> {}
+            awaitAgent(goal, terminal) { st ->
+                when (st.status) {
+                    AgentStatus.WAITING_CONFIRMATION -> {
+                        fillers?.stop()   // the confirmation question is about to be spoken — never talk over it
+                        if (_state.value.state != VoiceState.CONFIRMATION_REQUIRED && !voiceConfirmation()) cues.needsOk()
+                        _state.update {
+                            it.copy(state = VoiceState.CONFIRMATION_REQUIRED,
+                                partialHint = st.pendingConfirmation ?: "Waiting for your confirmation")
                         }
                     }
-                    .first { it.status in terminal && it.goal == goal }
+                    AgentStatus.THINKING, AgentStatus.ACTING ->
+                        if (_state.value.state != VoiceState.EXECUTING) set(VoiceState.EXECUTING, "Working on it…")
+                    else -> {}
+                }
             }
         } finally {
             // Always stop the backchannel once the wait ends — success, timeout, OR cancellation — so it can
@@ -523,6 +530,40 @@ class VoiceController(
         val resultText = finalState.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text
         return Outcome(finalState.status, spokenFor(finalState.status, resultText))
     }
+
+    /**
+     * Wait for [goal] to reach a terminal status. The [agentTimeoutMs] budget counts only time the AGENT is working:
+     * while it waits on the user (a confirmation, or the user typing a PIN in Secure Input Mode) the clock stops —
+     * G-13: a user entering their PIN used to be cut off by the 180 s cap. A separate, longer cap
+     * (`voice.agent.maxUserWaitMs`, 10 min) still ends a turn nobody answers. Null = timed out.
+     */
+    private suspend fun awaitAgent(goal: String, terminal: Set<AgentStatus>, onState: suspend (AgentUiState) -> Unit): AgentUiState? =
+        kotlinx.coroutines.coroutineScope {
+            val tick = 250L
+            val maxUserWait = com.tekyerema.core.config.AppConfig.long("voice.agent.maxUserWaitMs", 600_000L)
+            val out = kotlinx.coroutines.CompletableDeferred<AgentUiState?>()
+            val watcher = launch {
+                agent.state.collect { st ->
+                    onState(st)
+                    if (st.status in terminal && st.goal == goal) out.complete(st)
+                }
+            }
+            // The clock samples the agent's status each tick: time on the user (confirmation, secure hand-off) and
+            // time working are budgeted separately.
+            val clock = launch {
+                var worked = 0L
+                var waited = 0L
+                while (true) {
+                    kotlinx.coroutines.delay(tick)
+                    val s = agent.state.value.status
+                    if (s == AgentStatus.WAITING_CONFIRMATION || s == AgentStatus.SECURE_INPUT) waited += tick else worked += tick
+                    if (worked >= agentTimeoutMs || waited >= maxUserWait) { out.complete(null); break }
+                }
+            }
+            val result = out.await()
+            watcher.cancel(); clock.cancel()
+            result
+        }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
     private fun spokenFor(status: AgentStatus, resultText: String?): String = when (status) {

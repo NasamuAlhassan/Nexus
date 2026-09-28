@@ -19,6 +19,20 @@ object PolicyConfig {
         return if (configured != null && configured.ordinal > tool.riskTier.ordinal) configured else tool.riskTier
     }
 
+    /**
+     * J-01: a tier implied by the ARGUMENTS, or null. A USSD code that opens a Mobile-Money menu (any network's
+     * root, e.g. *170#, or a one-shot *170*1*1*…# string) can move money, so it is TIER3 whichever tool dials it;
+     * `policy.moneyUssdPrefixes` can add prefixes.
+     */
+    fun argTier(tool: Tool, args: org.json.JSONObject): RiskTier? {
+        if (tool.name != "run_ussd") return null
+        val code = args.optString("code").replace(Regex("\\s"), "")
+        if (code.isEmpty()) return null
+        val prefixes = com.tekyerema.tools.GhanaMobileMoney.moneyPrefixes() +
+            AppConfig.stringList("policy.moneyUssdPrefixes", emptyList()).map { it.trim().trimEnd('#') }.filter { it.isNotEmpty() }
+        return if (prefixes.any { p -> code == "$p#" || code.startsWith("$p*") || code == p }) RiskTier.TIER3 else null
+    }
+
     /** J-11: packages the agent must never operate. */
     fun denyApps(): Set<String> = AppConfig.stringList("policy.denyApps", emptyList()).map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 

@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "connectors": {
+    "mobileMoney": {
+      "_note": "Root codes and the MTN send sequence were owner-confirmed on 2026-09-21; verify with a 10-pesewa run after any change. A network without sendSequence is never driven automatically (M-03).",
+      "networks": {
+        "mtn": {
+          "names": ["mtn"],
+          "mccmnc": ["62001"],
+          "root": "*170#",
+          "sendSequence": ["1", "1", "{number}", "{number}", "{amount}", "{reference}"]
+        },
+        "airteltigo": {
+          "names": ["airteltigo", "airtel", "tigo"],
+          "mccmnc": ["62003", "62006"],
+          "root": "*110#"
+        },
+        "telecel": {
+          "names": ["vodafone", "telecel"],
+          "mccmnc": ["62002"],
+          "root": "*110#"
+        }
+      }
+    }
+  }
+}

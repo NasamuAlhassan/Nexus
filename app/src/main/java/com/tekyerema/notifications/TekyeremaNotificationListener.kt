@@ -29,9 +29,13 @@ class TekyeremaNotificationListener : NotificationListenerService() {
 
     private fun put(sbn: StatusBarNotification) {
         val n = sbn.notification ?: return
+        // J-10: authenticator apps are never captured; one-time codes/PINs in any other app are hidden.
+        if (com.tekyerema.core.Redact.deniedPackage(sbn.packageName)) return
         val extras = n.extras
-        val title = extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString()
-        val text = extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
+        // J-07: notification text is app-supplied (untrusted): strip hidden-channel characters like screen text.
+        fun clean(s: CharSequence?) = com.tekyerema.core.Redact.secrets(com.tekyerema.core.Sanitize.label(s?.toString()))
+        val title = clean(extras?.getCharSequence(Notification.EXTRA_TITLE))
+        val text = clean(extras?.getCharSequence(Notification.EXTRA_TEXT))
         val replyAction = findReplyAction(n)
         NotificationStore.put(
             NotificationRecord(

@@ -20,16 +20,50 @@ import org.json.JSONObject
  * [owner: verify these root codes against current network specs before relying on them.]
  */
 object GhanaMobileMoney {
-    /** Root Mobile-Money USSD menu per network (interactive; user completes amount + PIN). */
-    fun rootUssd(operator: String?): String? {
-        val o = operator?.lowercase().orEmpty()
-        return when {
-            o.contains("mtn") || o == "62001" -> "*170#"          // MTN MoMo [owner: verify]
-            o.contains("airteltigo") || o.contains("airtel") || o.contains("tigo") || o == "62006" || o == "62003" -> "*110#"  // AirtelTigo Money [owner: verify]
-            o.contains("vodafone") || o.contains("telecel") || o == "62002" -> "*110#"  // Telecel/Vodafone Cash [owner: verify]
-            else -> null
+    /** Code defaults; `connectors.mobileMoney.networks` (connectors.json) is the source of truth when present. */
+    private data class Net(val key: String, val names: List<String>, val mccmnc: List<String>, val root: String, val sendSequence: List<String>?)
+
+    private val DEFAULTS = listOf(
+        // Owner-confirmed live MTN sequence: 1, 1, number, number (re-entered to confirm), amount, reference, PIN.
+        Net("mtn", listOf("mtn"), listOf("62001"), "*170#", listOf("1", "1", "{number}", "{number}", "{amount}", "{reference}")),
+        Net("airteltigo", listOf("airteltigo", "airtel", "tigo"), listOf("62003", "62006"), "*110#", null),
+        Net("telecel", listOf("vodafone", "telecel"), listOf("62002"), "*110#", null)
+    )
+
+    private fun networks(): List<Net> {
+        val o = com.tekyerema.core.config.AppConfig.obj("connectors.mobileMoney.networks") ?: return DEFAULTS
+        val out = ArrayList<Net>()
+        for (k in o.keys()) {
+            val n = o.optJSONObject(k) ?: continue
+            fun list(name: String) = n.optJSONArray(name)?.let { a -> (0 until a.length()).map { a.optString(it) } }
+            val root = n.optString("root").takeIf { it.isNotBlank() } ?: continue
+            out.add(Net(k, list("names").orEmpty(), list("mccmnc").orEmpty(), root, list("sendSequence")))
         }
+        return out.ifEmpty { DEFAULTS }
     }
+
+    private fun match(operator: String?): Net? {
+        val o = operator?.lowercase()?.trim().orEmpty()
+        if (o.isEmpty()) return null
+        return networks().firstOrNull { n -> o in n.mccmnc || n.names.any { it.isNotBlank() && o.contains(it) } }
+    }
+
+    /** "mtn" | "airteltigo" | "telecel" (config keys), or null when the SIM's network is unknown. */
+    fun network(operator: String?): String? = match(operator)?.key
+
+    /** Root Mobile-Money USSD menu per network (interactive; user completes amount + PIN). */
+    fun rootUssd(operator: String?): String? = match(operator)?.root
+
+    /** M-03: the deterministic send key sequence for this network with slots filled, or null when this network has
+     *  no confirmed sequence — then the send is never driven automatically. */
+    fun sendSequence(operator: String?, number: String, amount: String, reference: String): List<String>? =
+        match(operator)?.sendSequence?.map {
+            it.replace("{number}", number).replace("{amount}", amount).replace("{reference}", reference)
+        }
+
+    /** J-01: every network's Mobile-Money root without the trailing '#' ("*170", "*110") — a USSD code starting with
+     *  one of these can move money, so it is TIER3 whatever tool dials it. */
+    fun moneyPrefixes(): List<String> = networks().map { it.root.trimEnd('#') }.distinct()
 
     /** Extract a cedi amount (integer or decimal) from a goal, or null. */
     fun parseAmount(goal: String): String? =

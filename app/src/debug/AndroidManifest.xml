@@ -8,9 +8,12 @@
     <!-- DEBUG-ONLY: allow plain HTTP so the on-laptop brain relay (http://…/v1) is reachable. Release
          builds merge WITHOUT this manifest, so they stay cleartext-blocked (relay is a dev tool only). -->
     <application android:usesCleartextTraffic="true">
+        <!-- J-17: even in debug builds only the ADB shell (which holds DUMP) may drive goals or set config; another
+             app on the test phone cannot broadcast to it. -->
         <receiver
             android:name=".debug.RunGoalReceiver"
-            android:exported="true">
+            android:exported="true"
+            android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="com.tekyerema.RUN_GOAL" />
             </intent-filter>

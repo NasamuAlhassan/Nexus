@@ -91,9 +91,11 @@ object Verify {
      * is a different app/screen entirely," which is the actual risk (a tap landing in the wrong
      * app), without being sensitive to ordinary in-screen change.
      */
-    fun screenStillCurrent(observed: UiSnapshot?, livePackage: String?): Boolean {
-        val expectedPkg = observed?.appPackage ?: return true // nothing meaningful to compare
-        if (livePackage == null) return true // can't tell — don't block on missing data
+    fun screenStillCurrent(observed: UiSnapshot?, livePackage: String?, strict: Boolean = false): Boolean {
+        val expectedPkg = observed?.appPackage ?: return !strict // nothing meaningful to compare
+        // J-09: an ordinary step doesn't block on missing data, but a CONFIRMED (send/call/pay) step fails closed —
+        // "I can't tell which app is in front" is not good enough to press Send.
+        if (livePackage == null) return !strict
         return expectedPkg == livePackage
     }
 }

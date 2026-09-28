@@ -60,6 +60,10 @@ interface AccessibilityController {
     fun priorForegroundPackage(): String?
     fun screenSize(): Pair<Int, Int>
 
+    /** J-08: the package of ANOTHER app's overlay window (drawn over apps) covering screen point (x,y), or null.
+     *  A coordinate gesture there would land on that overlay instead of the app the agent observed. */
+    fun foreignOverlayAt(x: Int, y: Int): String? = null
+
     /** Suspends until the UI stops changing (or timeout). */
     suspend fun waitForSettle(timeoutMs: Long = 2500L)
 }

@@ -67,6 +67,33 @@ object TargetSemantics {
         return texts.any { credentialField.containsMatchIn(it) }   // e.g. "Enter MoMo PIN", "OTP", "password"
     }
 
+    /** G-13: a "prove you're human" check. The agent never solves these; the user takes over, like a PIN screen. */
+    private val humanCheck = Regex(
+        "\\b(captcha|recaptcha|hcaptcha|i'?m not a robot|verify (?:that )?you(?:'re| are) (?:a )?human|are you a robot|" +
+            "select all (?:images|squares)|security check)\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    fun isHumanCheckScreen(screen: UiSnapshot): Boolean {
+        val texts = screen.elements.mapNotNull { it.label } + listOfNotNull(screen.screenTitle)
+        return texts.any { humanCheck.containsMatchIn(it) }
+    }
+
+    /**
+     * G-13: what the user is being asked to do on a hand-off screen, from structure and wording only — so the spoken
+     * instruction names it ("your MoMo PIN", "the one-time code", "the robot check") instead of always "MoMo PIN".
+     */
+    fun handoffReason(screen: UiSnapshot, dialerLike: Boolean): String {
+        val texts = (screen.elements.mapNotNull { it.label } + listOfNotNull(screen.screenTitle)).joinToString(" ").lowercase()
+        return when {
+            humanCheck.containsMatchIn(texts) -> "captcha"
+            Regex("\\b(otp|one[- ]time|verification code|security code)\\b").containsMatchIn(texts) -> "otp"
+            Regex("\\b(momo|mobile money)\\b").containsMatchIn(texts) || (dialerLike && Regex("\\bpin\\b").containsMatchIn(texts)) -> "momo_pin"
+            Regex("\\b(pin|passcode)\\b").containsMatchIn(texts) -> "pin"
+            else -> "password"
+        }
+    }
+
     /** A search / address box, recognised by its resource id or widget class — NOT its label: once text is in it,
      *  the label IS that text (Chrome's omnibox showed "kakum national park" and a new search was gated as a
      *  possible SEND). A box that ever receives a message has a comms id (compose, message, reply…), not these. */
@@ -133,10 +160,37 @@ object TargetSemantics {
         if (primitive == "tap" && label.isNullOrBlank() && target?.clickable == true && composing)
             return Classification(RiskTier.TIER2, null, "an unlabelled control tapped while composing a message may send it")
 
+        // J-03: a control that SPENDS money is TIER3 — its own read-back class, above an ordinary send. A real button
+        // whose caption STARTS with a spend verb counts even when long ("Pay GH₵ 50.00 to Kwame Mensah").
+        if (lower != null && isSpendCaption(label!!, target))
+            return Classification(RiskTier.TIER3, null, "target '$label' spends money")
+
         if (lower != null && consequential.containsMatchIn(lower) && looksLikeControlCaption(label!!)) {
             return Classification(RiskTier.TIER2, null, "target '$label' is a consequential control")
         }
         return Classification.NONE
+    }
+
+    /** J-03: generic purchase/payment vocabulary (no app names); `policy.financialWords` can add more, never remove. */
+    // "subscribe" stays: on Ghanaian networks a Subscribe button often starts an airtime-billed service.
+    private const val SPEND_WORDS = "buy|buy now|purchase|checkout|check out|pay|pay now|place order|order now|book now|reserve now|" +
+        "subscribe|top ?up|recharge|donate|withdraw|cash ?out|add money|send money|continue to payment|proceed to (?:pay|payment|checkout)|" +
+        "confirm (?:payment|purchase|order|transfer|booking)|complete (?:purchase|order|payment)"
+
+    private fun spendRegex(anchored: Boolean): Regex {
+        val extra = com.tekyerema.core.config.AppConfig.stringList("policy.financialWords", emptyList())
+            .filter { it.isNotBlank() }.joinToString("") { "|" + Regex.escape(it.trim()) }
+        val words = "(?:$SPEND_WORDS$extra)"
+        return Regex(if (anchored) "^\\s*$words\\b" else "\\b$words\\b", RegexOption.IGNORE_CASE)
+    }
+
+    internal fun isSpendCaption(label: String, target: UiElement?): Boolean {
+        val t = label.trim()
+        if (t.isEmpty()) return false
+        if (looksLikeControlCaption(t) && spendRegex(anchored = false).containsMatchIn(t)) return true
+        // Longer captions: only a real button whose text leads with the spend verb (not a message preview row).
+        val isButton = target != null && target.clickable && !target.editable && Regex("(?i)button").containsMatchIn(target.role)
+        return isButton && t.length <= 60 && spendRegex(anchored = true).containsMatchIn(t)
     }
 
     /**

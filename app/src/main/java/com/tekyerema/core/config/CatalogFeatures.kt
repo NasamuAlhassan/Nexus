@@ -13,7 +13,7 @@ internal data class CatalogFeature(
     val status: String
 )
 
-/** Catalog features that have code in this build (128). */
+/** Catalog features that have code in this build (130). */
 internal val BUILT_FEATURES: List<CatalogFeature> = listOf(
     CatalogFeature("A-03", "Accessibility button and shortcut launch", 26, listOf("android.permission.RECORD_AUDIO"), true, false, "implemented"),
     CatalogFeature("A-07", "On-device wake word", 26, listOf("android.permission.RECORD_AUDIO"), true, false, "partial"),
@@ -75,11 +75,11 @@ internal val BUILT_FEATURES: List<CatalogFeature> = listOf(
     CatalogFeature("G-05", "Text entry", 26, emptyList(), true, false, "partial"),
     CatalogFeature("G-06", "Element lookup helpers", 26, emptyList(), true, false, "partial"),
     CatalogFeature("G-07", "Weighted multi-attribute locators", 26, emptyList(), false, false, "partial"),
-    CatalogFeature("G-08", "Pre-action revalidation", 26, emptyList(), true, false, "partial"),
+    CatalogFeature("G-08", "Pre-action revalidation", 26, emptyList(), true, false, "implemented"),
     CatalogFeature("G-09", "Post-condition verification", 26, emptyList(), false, false, "partial"),
     CatalogFeature("G-10", "Event-driven settle detection", 26, emptyList(), true, false, "partial"),
     CatalogFeature("G-12", "Recovery routines", 26, emptyList(), false, false, "partial"),
-    CatalogFeature("G-13", "User takeover handoff", 26, listOf("android.permission.RECORD_AUDIO"), true, false, "partial"),
+    CatalogFeature("G-13", "User takeover handoff", 26, listOf("android.permission.RECORD_AUDIO"), true, false, "implemented"),
     CatalogFeature("G-15", "Step budget and timeouts", 26, emptyList(), false, false, "partial"),
     CatalogFeature("G-20", "Pre-action critic", 26, emptyList(), false, false, "partial"),
     CatalogFeature("G-21", "No-op and stuck-loop detection", 26, emptyList(), false, false, "partial"),
@@ -96,10 +96,12 @@ internal val BUILT_FEATURES: List<CatalogFeature> = listOf(
     CatalogFeature("J-01", "Risk-tiered action policy", 26, emptyList(), false, false, "implemented"),
     CatalogFeature("J-02", "Approval before send and spend", 26, listOf("android.permission.RECORD_AUDIO"), false, false, "implemented"),
     CatalogFeature("J-03", "Pre-purchase alerts", 26, emptyList(), false, false, "partial"),
-    CatalogFeature("J-06", "Prompt-injection detection and auto-stop", 26, emptyList(), true, false, "partial"),
+    CatalogFeature("J-06", "Prompt-injection detection and auto-stop", 26, emptyList(), true, false, "implemented"),
     CatalogFeature("J-07", "Untrusted-content tagging", 26, emptyList(), true, true, "partial"),
+    CatalogFeature("J-08", "Overlay detection", 26, emptyList(), false, false, "implemented"),
     CatalogFeature("J-09", "Per-step package allowlist", 26, emptyList(), true, false, "partial"),
     CatalogFeature("J-10", "Sensitive-field and secure-window handling", 26, emptyList(), true, false, "partial"),
+    CatalogFeature("J-11", "App denylist and guide-only apps", 26, emptyList(), false, false, "implemented"),
     CatalogFeature("J-12", "Action audit log", 26, emptyList(), false, false, "partial"),
     CatalogFeature("J-14", "Global kill switch", 26, emptyList(), true, false, "partial"),
     CatalogFeature("J-15", "Data minimization and retention", 26, emptyList(), false, false, "partial"),

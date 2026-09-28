@@ -14,21 +14,21 @@
     "key_event": {"feature": "E-18"},
     "open_app": {"feature": "E-01", "idempotent": true},
     "cannot_do": {"feature": "C-16", "idempotent": true},
-    "read_notifications": {"feature": "E-15", "idempotent": true},
+    "read_notifications": {"feature": "E-15", "idempotent": true, "untrusted_output": true},
     "search_contacts": {"feature": "E-07", "permissions": ["android.permission.READ_CONTACTS"], "idempotent": true},
     "find_contact": {"feature": "E-07", "permissions": ["android.permission.READ_CONTACTS"], "idempotent": true},
-    "search_messages": {"feature": "H-09", "idempotent": true},
+    "search_messages": {"feature": "H-09", "idempotent": true, "untrusted_output": true},
     "set_alarm": {"feature": "E-05"},
     "set_timer": {"feature": "E-05"},
     "set_volume": {"feature": "E-09", "idempotent": true},
     "volume_up": {"feature": "E-09"},
     "volume_down": {"feature": "E-09"},
-    "run_ussd": {"feature": "E-24", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"]},
+    "run_ussd": {"feature": "E-24", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
     "make_call": {"feature": "E-02", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"]},
     "reply_to_notification": {"feature": "E-16", "callers": ["planner", "local"]},
     "play_music": {"feature": "E-14"},
     "open_setting": {"feature": "E-11", "idempotent": true},
-    "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"]},
-    "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"]}
+    "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
+    "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true}
   }
 }

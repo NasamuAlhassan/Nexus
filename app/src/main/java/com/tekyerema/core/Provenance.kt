@@ -23,13 +23,19 @@ object Provenance {
     /** Argument keys whose values are payloads that leave the device or change state. Targeting
      *  keys (element_id, label, x, y, app, direction…) are deliberately excluded: a target label is
      *  screen-derived by definition, and its risk is handled by TargetSemantics, not here. */
-    val payloadKeys = setOf("text", "message", "number", "contact", "code", "query")
+    val payloadKeys = setOf("text", "message", "number", "contact", "code", "query",
+        "amount", "reference", "_amount", "_number", "_recipient")
     private const val MIN_LEN = 4
 
-    fun tagArgs(args: JSONObject, goal: String, snapshot: UiSnapshot?): Map<String, Tagged<String>> {
+    /**
+     * @param untrustedTexts third-party text this run has already read through tools (notification and message
+     *   bodies, USSD replies — J-07). A payload copied from them is untrusted exactly like one copied from the screen.
+     */
+    fun tagArgs(args: JSONObject, goal: String, snapshot: UiSnapshot?, untrustedTexts: List<String> = emptyList()): Map<String, Tagged<String>> {
         val out = LinkedHashMap<String, Tagged<String>>()
         val goalLc = goal.lowercase()
         val labels = snapshot?.elements?.mapNotNull { it.label?.lowercase() }.orEmpty()
+        val read = untrustedTexts.map { it.lowercase() }
         for (key in payloadKeys) {
             if (!args.has(key) || args.isNull(key)) continue
             val v = args.optString(key).trim()
@@ -38,6 +44,7 @@ object Provenance {
             out[key] = when {
                 goalLc.contains(vLc) -> Tagged(v, Trust.TRUSTED, "in user goal")
                 labels.any { it.contains(vLc) } -> Tagged(v, Trust.UNTRUSTED, "copied from screen")
+                read.any { it.contains(vLc) } -> Tagged(v, Trust.UNTRUSTED, "copied from a message or notification")
                 else -> Tagged(v, Trust.TRUSTED, "model-authored")
             }
         }

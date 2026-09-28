@@ -43,7 +43,8 @@ class PolicyEngine(
                 "Capability '${tool.scope}' is not granted for this task."
             )
         }
-        var tier = maxTier(PolicyConfig.effectiveTier(tool), targetTier)   // X-04: config may only raise
+        // X-04: config may only raise; J-01: arguments can raise too (a Mobile-Money USSD code is TIER3).
+        var tier = maxTier(maxTier(PolicyConfig.effectiveTier(tool), PolicyConfig.argTier(tool, args)), targetTier)
         var note = ""
         // Provenance escalation: an untrusted payload only raises the tier when the action
         // actually leaves the device or targets a consequential control — reading a name off the

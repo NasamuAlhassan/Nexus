@@ -23,7 +23,9 @@ data class ToolMeta(
     val permissions: List<String>,
     val idempotent: Boolean,
     val callers: List<String>,
-    val examples: List<JSONObject>
+    val examples: List<JSONObject>,
+    /** J-07: the result carries third-party text (message bodies, USSD replies) — marked untrusted for the model. */
+    val untrustedOutput: Boolean = false
 )
 
 object ToolManifest {
@@ -44,7 +46,8 @@ object ToolManifest {
             idempotent = o?.optBoolean("idempotent", false) ?: false,
             callers = callers?.let { a -> (0 until a.length()).map { a.optString(it) } }
                 ?: listOf(CALLER_PLANNER, CALLER_LOCAL, CALLER_TRIGGER),
-            examples = ex?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
+            examples = ex?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty(),
+            untrustedOutput = o?.optBoolean("untrusted_output", false) ?: false
         )
     }
 

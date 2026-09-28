@@ -136,9 +136,9 @@ class OperatorLogicTest {
         // making it impossible to simply read messages. A long text blob is navigation, not an action.
         val row = el(1, "Prince Melanin Can you send me 10 pesewas to buy water?? 16:19")
         assertNull("a message-preview row is navigation, not a send", TargetSemantics.classify("tap", row, null, false).tier)
-        // A short caption that IS the action still escalates (safety preserved).
-        assertEquals(RiskTier.TIER2, TargetSemantics.classify("tap", el(2, "Send money"), null, false).tier)
-        assertEquals(RiskTier.TIER2, TargetSemantics.classify("tap", el(3, "Confirm & Pay"), null, false).tier)
+        // A short caption that IS the action still escalates (safety preserved) — spending captions to TIER3 (J-03).
+        assertEquals(RiskTier.TIER3, TargetSemantics.classify("tap", el(2, "Send money"), null, false).tier)
+        assertEquals(RiskTier.TIER3, TargetSemantics.classify("tap", el(3, "Confirm & Pay"), null, false).tier)
         assertEquals(RiskTier.TIER2, TargetSemantics.classify("tap", el(4, "Delete conversation"), null, false).tier)
     }
 

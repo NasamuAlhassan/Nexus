@@ -45,7 +45,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     @Volatile private var lastEventTime = 0L
     @Volatile private var lastScreenshotMs = 0L
     /** Set when the platform refused a screenshot because the window is FLAG_SECURE. */
-    @Volatile private var lastScreenshotSecure = false
+    /** J-10: the package whose window refused a screenshot as FLAG_SECURE — scoped to that package, so one secure
+     *  screen doesn't mark every later app secure (it used to stay set until the next successful screenshot). */
+    @Volatile private var secureWindowPkg: String? = null
     @Volatile private var lastScreenshotError: String? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val mainExecutor = Executor { r -> mainHandler.post(r) }
@@ -163,6 +165,21 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun priorForegroundPackage(): String? = priorApp
 
+    /** J-08: app overlays (TYPE_APPLICATION_OVERLAY, drawn via SYSTEM_ALERT_WINDOW) are reported to accessibility as
+     *  TYPE_SYSTEM windows owned by the drawing app's package. Anything not the system UI, the platform, the keyboard
+     *  or Tɛkyerɛma itself that covers (x,y) is foreign. Window list requires flagRetrieveInteractiveWindows (set). */
+    override fun foreignOverlayAt(x: Int, y: Int): String? = try {
+        val ime = android.provider.Settings.Secure.getString(contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+            ?.substringBefore('/')
+        val trusted = setOf(packageName, "com.android.systemui", "android", ime)
+        windows?.firstOrNull { w ->
+            w.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM && run {
+                val r = android.graphics.Rect(); w.getBoundsInScreen(r)
+                r.contains(x, y)
+            } && (w.root?.packageName?.toString()?.let { it !in trusted } ?: false)
+        }?.root?.packageName?.toString()
+    } catch (_: Throwable) { null }
+
     override fun screenSize(): Pair<Int, Int> {
         val wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         return if (Build.VERSION.SDK_INT >= 30) {
@@ -265,7 +282,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             elements = elements,
             timestampMs = System.currentTimeMillis(),
             perception = PerceptionRoute("tree", "tree traversal"),
-            secureWindow = lastScreenshotSecure,
+            secureWindow = pkg != null && pkg == secureWindowPkg,
             strippedHiddenText = stripped,
             appName = pkg?.let { appNameOf(it) }
         )
@@ -328,7 +345,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             try {
                 takeScreenshot(Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
                     override fun onSuccess(screenshot: ScreenshotResult) {
-                        lastScreenshotSecure = false
+                        secureWindowPkg = null
                         lastScreenshotError = null
                         val bmp = try {
                             val hb = screenshot.hardwareBuffer
@@ -340,7 +357,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                         if (cont.isActive) cont.resume(bmp)
                     }
                     override fun onFailure(errorCode: Int) {
-                        lastScreenshotSecure = errorCode == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
+                        // ERROR_TAKE_SCREENSHOT_SECURE_WINDOW only exists from API 34; on API 30 a secure window is
+                        // never reported here, so credential detection relies on password fields and wording (J-10).
+                        if (errorCode == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW) secureWindowPkg = activeWindowPackage()
                         lastScreenshotError = when (errorCode) {
                             ERROR_TAKE_SCREENSHOT_SECURE_WINDOW -> "secure window (FLAG_SECURE)"
                             ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT -> "rate limited"
