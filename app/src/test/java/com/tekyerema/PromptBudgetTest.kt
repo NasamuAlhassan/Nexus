@@ -21,7 +21,9 @@ class PromptBudgetTest {
         println("[PROMPT-BUDGET] tools=$tools chars (~${tools / 4} tok), system=$system chars (~${system / 4} tok), " +
             "fixed total ~${(tools + system) / 4} tok/step")
         // D-02: the model never receives the whole schema any more (per-step subsets, below); this caps the compiled set.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 26_000)
+        // 27.5k: +4 app-task accelerators (install_app, take_photo, ask_app, google_sign_in — [D] 2026-09-28), which
+        // load only with the "apps" tool-search group; the per-step subset guard below is unchanged.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 27_500)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
     }
 
