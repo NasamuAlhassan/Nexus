@@ -52,14 +52,21 @@ object PlayMusicTool : Tool {
  */
 object OpenSettingTool : Tool {
     override val name = "open_setting"
-    override val description = "Open a system setting screen so the user can toggle it (wifi, mobile data, bluetooth, airplane, location, sound, display)."
+    override val description = "Open a system setting screen (wifi, mobile data, bluetooth, airplane, location, sound, display). " +
+        "Pass state=on or state=off to have its switch set to that position; without state the screen is only opened."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true
-    override val params = listOf(ToolParam("target", "string", "Which setting: wifi | mobile_data | bluetooth | airplane | location | sound | display | settings."))
+    override val params = listOf(
+        ToolParam("target", "string", "Which setting: wifi | mobile_data | bluetooth | airplane | location | sound | display | settings."),
+        ToolParam("state", "string", "The position to leave the switch in. Omit to only open the screen.", required = false,
+            enumValues = listOf("on", "off"))
+    )
+
+    private fun norm(target: String) = target.trim().lowercase().replace(" ", "_")
 
     /** Map a target to (intent action, spoken label). Panel actions land on a togglable surface where they exist. */
-    private fun actionFor(target: String): Pair<String, String>? = when (target.lowercase().replace(" ", "_")) {
+    private fun actionFor(target: String): Pair<String, String>? = when (norm(target)) {
         "wifi", "wi-fi", "wi_fi" -> Settings.Panel.ACTION_WIFI to "Wi-Fi"
         "mobile_data", "data", "internet", "cellular" -> Settings.Panel.ACTION_INTERNET_CONNECTIVITY to "mobile data"
         "airplane", "flight", "aeroplane" -> Settings.ACTION_AIRPLANE_MODE_SETTINGS to "airplane mode"
@@ -71,26 +78,25 @@ object OpenSettingTool : Tool {
         else -> null
     }
 
-    /** Keyword a toggle's label should contain for each target. */
-    private fun keyword(target: String): String = when (target.lowercase().replace(" ", "_")) {
-        "wifi", "wi-fi", "wi_fi" -> "wi"
-        "mobile_data", "data", "internet", "cellular" -> "data"
-        "airplane", "flight", "aeroplane" -> "airplane"
-        "bluetooth" -> "bluetooth"
-        "location", "gps" -> "location"
-        "display", "brightness", "screen" -> "brightness"
-        else -> target.lowercase()
+    /** Whole-word label patterns for each target's switch ("wi" alone matched "Switch", "Window"…). */
+    internal fun labelPattern(target: String): Regex? = when (norm(target)) {
+        "wifi", "wi-fi", "wi_fi" -> Regex("(?i)\\b(wi-?fi|wlan)\\b")
+        "mobile_data", "data", "internet", "cellular" -> Regex("(?i)\\b(mobile data|data|cellular data)\\b")
+        "airplane", "flight", "aeroplane" -> Regex("(?i)\\b(airplane|aeroplane|flight) mode\\b|\\bairplane\\b")
+        "bluetooth" -> Regex("(?i)\\bbluetooth\\b")
+        "location", "gps" -> Regex("(?i)\\b(location|use location|gps)\\b")
+        else -> null
     }
 
-    /** Find the switch to flip: a checkable element whose label matches the target, else the first checkable. */
-    private fun findToggle(snap: UiSnapshot, target: String): com.tekyerema.accessibility.UiElement? {
-        val kw = keyword(target)
-        return snap.elements.firstOrNull { it.checkable && (it.label?.lowercase()?.contains(kw) == true) }
-            ?: snap.elements.firstOrNull { it.checkable && it.clickable }
+    /** E-10: the switch whose label names the target — never "the first checkable thing on the screen". */
+    internal fun findToggle(snap: UiSnapshot, target: String): com.tekyerema.accessibility.UiElement? {
+        val re = labelPattern(target) ?: return null
+        return snap.elements.firstOrNull { it.checkable && it.label?.let(re::containsMatchIn) == true }
     }
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val target = args.str("target")?.trim().orEmpty()
+        val want: Boolean? = when (args.str("state")?.trim()?.lowercase()) { "on" -> true; "off" -> false; else -> null }
         val (action, label) = actionFor(target)
             ?: return ToolResult(false, "I don't know which setting '$target' is.", recoverable = true)
         val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -99,28 +105,38 @@ object OpenSettingTool : Tool {
         try { ctx.appContext.startActivity(intent) } catch (t: Throwable) {
             return ToolResult(false, "Couldn't open $label settings: ${t.message}", recoverable = true)
         }
-        // §P2.2 — the API forbids an app from flipping these directly, but our ACCESSIBILITY service can find
-        // and tap the switch like a person would. Open the panel, locate the toggle, tap it, and VERIFY the
-        // checked state actually changed — reporting honestly if it didn't (never claim a flip we can't see).
+        // §P2.2 — the API forbids an app from flipping these directly, but our ACCESSIBILITY service can find and
+        // tap the switch like a person would. It only taps when a direction was asked for AND the switch isn't
+        // already there, then VERIFIES the checked state — reporting honestly if it didn't change.
         val ctrl = ctx.controller
-            ?: return ToolResult(true, "Opened $label settings — turn it on or off there (screen control is off, so I can't do it for you).", channel = "intent")
+            ?: return ToolResult(true, "Opened $label settings — screen control is off, so please use the switch there.",
+                data = JSONObject().put("confirmed", false), channel = "intent")
         ctrl.waitForSettle(1500)
         val before = ctrl.buildSnapshot()
         val toggle = findToggle(before, target)
-            ?: return ToolResult(true, "Opened $label settings — I couldn't find the switch to flip, so please toggle it there.", channel = "intent", recoverable = true)
-        val wasChecked = toggle.checked
+        if (want == null) {
+            val now = toggle?.checked?.let { if (it) " It's on." else " It's off." } ?: ""
+            return ToolResult(true, "Opened $label settings.$now", data = JSONObject().put("confirmed", true), channel = "intent")
+        }
+        if (toggle == null)
+            return ToolResult(true, "Opened $label settings — I couldn't find its switch, so please set it there.",
+                data = JSONObject().put("confirmed", false), channel = "intent", recoverable = true)
+        val word = if (want) "on" else "off"
+        if (toggle.checked == want)
+            return ToolResult(true, "$label is already $word.", data = JSONObject().put("confirmed", true), channel = "a11y")
         val tapped = ctrl.clickElement(toggle.id)
         ctrl.waitForSettle(900)
         val after = ctrl.buildSnapshot()
         val nowChecked = after.elements.firstOrNull { it.checkable && it.label == toggle.label }?.checked
             ?: findToggle(after, target)?.checked
-        return if (tapped && nowChecked != null && nowChecked != wasChecked)
-            ToolResult(true, "Turned $label ${if (nowChecked) "on" else "off"}.", channel = "a11y")
+        return if (tapped && nowChecked == want)
+            ToolResult(true, "Turned $label $word.", data = JSONObject().put("confirmed", true), channel = "a11y")
         else
-            ToolResult(true, "Opened $label settings — I tapped the switch but couldn't confirm it changed, so please check it.", channel = "a11y", recoverable = true)
+            ToolResult(true, "Opened $label settings — I tried to turn it $word but couldn't confirm it, so please check it.",
+                data = JSONObject().put("confirmed", false), channel = "a11y", recoverable = true)
     }
 
     override suspend fun verify(
         args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult
-    ): VerificationResult = VerificationResult(result.success, "opened a settings screen; the toggle is the user's to flip")
+    ): VerificationResult = VerificationResult(result.success && result.data?.optBoolean("confirmed", false) == true, result.message)
 }

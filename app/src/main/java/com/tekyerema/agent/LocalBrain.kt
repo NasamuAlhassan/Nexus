@@ -107,8 +107,14 @@ class LocalBrain : AgentBrain {
         // --- §A.2 settings toggle → open the setting screen (Android 11 won't let us flip it directly) ---
         if (g.contains("turn ") || g.contains("switch ") || g.contains("enable") || g.contains("disable") || g.contains(" settings")) {
             settingTarget(g)?.let { target ->
-                doneLine = "Opened the setting."
-                return call("open_setting", JSONObject().put("target", target), "open setting: $target")
+                // E-10: pass the direction the user asked for; with none, the screen is only opened (never flipped).
+                val args = JSONObject().put("target", target)
+                when {
+                    RE_SETTING_OFF.containsMatchIn(g) -> args.put("state", "off")
+                    RE_SETTING_ON.containsMatchIn(g) -> args.put("state", "on")
+                }
+                pendingResultSpeak = true   // speak the tool's own verified outcome ("Turned Wi-Fi off." / "already off")
+                return call("open_setting", args, "open setting: $target ${args.optString("state")}".trim())
             }
         }
 
@@ -395,6 +401,8 @@ class LocalBrain : AgentBrain {
         // (§1.9). Bare "and"/Twi "na"/"then"/";" all count — the earlier regex missed a plain "and", so
         // "open whatsapp and send prince a message" fell through to RE_OPEN and mis-opened a single app.
         private val RE_MULTISTEP = Regex("\\b(and|then|after that|na)\\b|;", RegexOption.IGNORE_CASE)
+        private val RE_SETTING_OFF = Regex("\\b(turn|switch|put)\\s+(\\w+\\s+){0,3}?off\\b|\\bdisable\\b|\\bdeactivate\\b", RegexOption.IGNORE_CASE)
+        private val RE_SETTING_ON = Regex("\\b(turn|switch|put)\\s+(\\w+\\s+){0,3}?on\\b|\\benable\\b|\\bactivate\\b", RegexOption.IGNORE_CASE)
         // Action verbs that essentially never occur inside an app LABEL — if "open <x>" carries one, <x> is
         // really a second instruction (e.g. "open whatsapp send a message"), so defer to the planner rather
         // than open a wrong app off a loose token match (§1.9). Deliberately excludes ambiguous words that DO

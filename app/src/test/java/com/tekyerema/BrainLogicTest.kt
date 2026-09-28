@@ -114,6 +114,21 @@ class BrainLogicTest {
         // §A.2 — settings toggles open the setting screen (Android 11 can't flip directly)
         val w = tool(decide(LocalBrain(), "turn on wifi")); assertEquals("open_setting", w.name); assertEquals("wifi", w.args.getString("target"))
         val d = tool(decide(LocalBrain(), "turn off mobile data")); assertEquals("mobile_data", d.args.getString("target"))
+        // E-10: the direction travels with the call; with none, the screen is only opened.
+        assertEquals("on", w.args.getString("state"))
+        assertEquals("off", d.args.getString("state"))
+        assertEquals("off", tool(decide(LocalBrain(), "turn bluetooth off")).args.getString("state"))
+        assertEquals("off", tool(decide(LocalBrain(), "disable location")).args.getString("state"))
+    }
+
+    @Test fun open_setting_matches_its_own_switch_only() {
+        val t = com.tekyerema.tools.OpenSettingTool
+        assertTrue(t.labelPattern("wifi")!!.containsMatchIn("Wi-Fi"))
+        assertTrue(t.labelPattern("wifi")!!.containsMatchIn("Use Wi-Fi"))
+        assertFalse(t.labelPattern("wifi")!!.containsMatchIn("Switch"))          // the old "wi" keyword hit this
+        assertFalse(t.labelPattern("wifi")!!.containsMatchIn("Window animation"))
+        assertTrue(t.labelPattern("bluetooth")!!.containsMatchIn("Bluetooth"))
+        assertNull(t.labelPattern("sound"))                                        // no switch to flip for a screen
     }
 
     @Test fun local_mobile_money_send_and_airtime() {
