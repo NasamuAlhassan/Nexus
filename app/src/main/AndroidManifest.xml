@@ -59,6 +59,8 @@
     <application
         android:name=".TekyeremaApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        tools:targetApi="31"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"

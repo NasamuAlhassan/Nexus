@@ -35,6 +35,19 @@ val defaultAsrOnlineKey: String = localProps.getProperty("ASR_ONLINE_KEY", "")
 val defaultAsrOnlineModel: String = localProps.getProperty("ASR_ONLINE_MODEL", "")
 // The Khaya / Abena speech keys were removed with their clients (2026-09-28): the UG HCI Lab ASR/TTS API is required.
 
+// API KEYS go into DEBUG builds only (the owner's sideloaded test phones). Anything in BuildConfig can be read back out of
+// the APK by decompiling it (OWASP MASVS-STORAGE; Android "hardcoded secrets" guidance), so a RELEASE build never carries
+// one: there the user's own key comes from Settings (or, later, a backend proxy holds it). Non-secret defaults (URLs,
+// model names) stay in defaultConfig.
+val secretBuildFields = linkedMapOf(
+    "DEFAULT_GEMINI_KEY" to defaultGeminiKey,
+    "DEFAULT_GROQ_KEY" to defaultGroqKey,
+    "DEFAULT_GROQ_KEY_2" to defaultGroqKey2,
+    "DEFAULT_GROQ_KEY_3" to defaultGroqKey3,
+    "DEFAULT_GROQ_KEY_4" to defaultGroqKey4,
+    "DEFAULT_ASR_ONLINE_KEY" to defaultAsrOnlineKey
+)
+
 android {
     namespace = "com.tekyerema"
     compileSdk = 34
@@ -46,24 +59,21 @@ android {
         versionCode = 1
         versionName = "0.1.0-phase1"
         vectorDrawables { useSupportLibrary = true }
-        buildConfigField("String", "DEFAULT_GEMINI_KEY", "\"$defaultGeminiKey\"")
-        buildConfigField("String", "DEFAULT_GROQ_KEY", "\"$defaultGroqKey\"")
-        buildConfigField("String", "DEFAULT_GROQ_KEY_2", "\"$defaultGroqKey2\"")
-        buildConfigField("String", "DEFAULT_GROQ_KEY_3", "\"$defaultGroqKey3\"")
-        buildConfigField("String", "DEFAULT_GROQ_KEY_4", "\"$defaultGroqKey4\"")
         buildConfigField("String", "DEFAULT_GROQ_BASE_URL", "\"$defaultGroqBaseUrl\"")
         buildConfigField("String", "DEFAULT_GROQ_MODEL", "\"$defaultGroqModel\"")
         buildConfigField("String", "DEFAULT_GROQ_REASONING_EFFORT", "\"$defaultGroqReasoningEffort\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_URL", "\"$defaultAsrOnlineUrl\"")
-        buildConfigField("String", "DEFAULT_ASR_ONLINE_KEY", "\"$defaultAsrOnlineKey\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_MODEL", "\"$defaultAsrOnlineModel\"")
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
+            secretBuildFields.forEach { (name, value) -> buildConfigField("String", name, "\"$value\"") }
         }
         release {
+            // No key is ever baked into a release APK (see secretBuildFields).
+            secretBuildFields.keys.forEach { name -> buildConfigField("String", name, "\"\"") }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

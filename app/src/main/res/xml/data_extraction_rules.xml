@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  J-15 (Android 12+ / API 31): nothing of Tɛkyerɛma's leaves the phone through a cloud backup OR a device-to-device
+  transfer. android:allowBackup="false" stops cloud backup, but on API 31+ it does NOT stop a device-to-device
+  migration; these rules do. What would otherwise move: per-task traces (plain text in debug builds), a user-entered
+  API key in shared preferences, trigger rules and settings. The encrypted stores would move as useless ciphertext
+  (their Keystore key never leaves the phone) — excluded anyway. See Android "Security recommendations for backups".
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" path="." />
+        <exclude domain="file" path="." />
+        <exclude domain="database" path="." />
+        <exclude domain="sharedpref" path="." />
+        <exclude domain="external" path="." />
+        <exclude domain="device_root" path="." />
+        <exclude domain="device_file" path="." />
+        <exclude domain="device_database" path="." />
+        <exclude domain="device_sharedpref" path="." />
+    </device-transfer>
+</data-extraction-rules>
