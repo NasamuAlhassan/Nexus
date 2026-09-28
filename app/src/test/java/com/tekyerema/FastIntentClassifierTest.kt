@@ -243,4 +243,12 @@ class FastIntentClassifierTest {
             assertEquals(s, FastIntent.DeviceInfo, c(s))
         assertNull("a compound request stays with the agent", c("open Settings and tell me which Android version this phone has"))
     }
+
+    /** Found by the device suite: Twi's focus "na" isn't "and", and "ase" (down) had no rule. */
+    @Test fun twi_time_question_and_volume_down() {
+        assertEquals(FastIntent.Time, c("Bere bɛn na ɛyɛ?"))
+        assertEquals(FastIntent.VolumeDown, c("ma volume no ase"))
+        assertEquals(FastIntent.VolumeUp, c("ma volume no so"))
+        assertNull("\"na\" still joins two commands", c("bue whatsapp na frɛ kofi"))
+    }
 }

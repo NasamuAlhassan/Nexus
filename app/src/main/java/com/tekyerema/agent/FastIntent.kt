@@ -251,7 +251,9 @@ object FastIntentClassifier {
     }
 
     // Compound/multi-step markers → hand the whole thing to the agent.
-    private val RE_MULTISTEP = Regex("\\b(and then|and|then|after that|na)\\b|;")
+    // Twi "na" joins two commands, but after a question word it is the focus marker of ONE question ("bere bɛn na ɛyɛ?"
+    // = what time is it) — that isn't compound (the device suite found the time question missing the fast path).
+    private val RE_MULTISTEP = Regex("\\b(and then|and|then|after that|(?<!(?:bɛn|bɛ|dɛn|hena|ɛhe|ehe|ben|den) )na)\\b|;")
 
     // ---- W7: schedules (A-13), notification rules (A-12), source readback (I-07)
     private val RE_SCHEDULE_CUE = Regex(
@@ -314,7 +316,7 @@ object FastIntentClassifier {
     private val RE_UNMUTE = Regex("\\bunmute\\b|\\bun-mute\\b|\\bturn\\s+(?:the\\s+)?(?:sound|volume|audio)\\s+back\\s+on\\b|\\bunsilence\\b|\\bsound\\s+back\\s+on\\b")
     private val RE_MUTE = Regex("\\bmute\\b|\\bsilence\\b|\\bgo\\s+silent\\b|\\bsilent\\s+mode\\b")
     private val RE_VOL_UP = Regex("\\bvolume\\s+up\\b|\\blouder\\b|\\bturn\\s+it\\s+up\\b|\\bturn\\s+up\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bturn\\s+(?:the\\s+)?(?:volume|sound)\\s+up\\b|\\b(?:increase|raise|boost|crank|pump|bump)\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bmake\\s+it\\s+louder\\b|\\bma\\s+volume\\s+no\\s+so\\b")
-    private val RE_VOL_DOWN = Regex("\\bvolume\\s+down\\b|\\b(?:quieter|softer)\\b|\\bturn\\s+it\\s+down\\b|\\bturn\\s+down\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bturn\\s+(?:the\\s+)?(?:volume|sound)\\s+down\\b|\\b(?:decrease|lower|reduce|drop)\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bmake\\s+it\\s+(?:quieter|softer)\\b")
+    private val RE_VOL_DOWN = Regex("\\bvolume\\s+down\\b|\\b(?:quieter|softer)\\b|\\bturn\\s+it\\s+down\\b|\\bturn\\s+down\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bturn\\s+(?:the\\s+)?(?:volume|sound)\\s+down\\b|\\b(?:decrease|lower|reduce|drop)\\s+(?:the\\s+|my\\s+)?(?:volume|sound)\\b|\\bmake\\s+it\\s+(?:quieter|softer)\\b|\\bma\\s+volume\\s+no\\s+ase\\b")
 
     /** "set the brightness to maximum / 40 percent", "full brightness", "lowest brightness" → 0.0…1.0, else null. */
     private fun brightnessLevel(g: String): Float? {
