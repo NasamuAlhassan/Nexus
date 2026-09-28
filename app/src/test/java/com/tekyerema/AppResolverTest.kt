@@ -86,4 +86,16 @@ class AppResolverTest {
         assertEquals("Messenger", one("messenger"))
         assertTrue(AppResolver.match(apps, "") is Match.None)
     }
+
+    /** A20e: YouTube Music is labelled "YT Music" there — "open YouTube Music" opened YouTube (word overlap tie). */
+    @Test fun an_alias_names_the_app_by_package_whatever_its_label() {
+        val phone = listOf(AppInfo("YouTube", "com.google.android.youtube"), AppInfo("YT Music", "com.google.android.apps.youtube.music"),
+            AppInfo("Samsung Music", "com.sec.android.app.music"), AppInfo("Play Store", "com.android.vending"))
+        fun pick(q: String) = (AppResolver.match(phone, q) as? Match.One)?.app?.packageName
+        for (q in listOf("YouTube Music", "youtube music app", "YT Music", "yt music"))
+            assertEquals(q, "com.google.android.apps.youtube.music", pick(q))
+        assertEquals("com.google.android.youtube", pick("YouTube"))
+        assertEquals("com.android.vending", pick("the Play Store"))
+        assertEquals("com.android.vending", pick("Google Play"))
+    }
 }

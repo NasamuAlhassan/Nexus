@@ -109,7 +109,12 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
             val cls = event.className?.toString()
-            if (pkg != null && cls != null && isActivity(pkg, cls)) {
+            // An app can come to front with a window-state event whose class ISN'T one of its Activities: the Play
+            // Store brought forward reported cls="gn" (obfuscated) on the A20e, the foreground stayed "launcher", the
+            // fast path waited 6 s, gave up and the agent opened it a second time. So an ordinary APPLICATION window
+            // (asked of the system's window list — never a binder into the app) counts too; overlays, the keyboard and
+            // the shade are other window types and still can't flip it.
+            if (pkg != null && cls != null && (isActivity(pkg, cls) || isAppWindow(event.windowId))) {
                 fgActivityPkg = pkg
                 refreshTriggerVisibility(pkg)
                 // A-11: a user-configured offer for this app (flag off by default; cheap no-op for the same package).
@@ -177,6 +182,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     /** True when [cls] is a real Activity of [pkg] — i.e. this window-state event is an app screen coming to
      *  front, not an overlay, dialog pane, keyboard or the notification shade. PackageManager only (system
      *  server), cached; never touches the foreground app. */
+    /** The event's window is an ordinary app window (from the system's window list; the app itself isn't asked). */
+    private fun isAppWindow(windowId: Int): Boolean = windowId >= 0 && try {
+        windows?.firstOrNull { it.id == windowId }?.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION
+    } catch (_: Throwable) { false }
+
     private fun isActivity(pkg: String, cls: String): Boolean = activityClassCache.getOrPut("$pkg/$cls") {
         try { packageManager.getActivityInfo(android.content.ComponentName(pkg, cls), 0); true } catch (_: Throwable) { false }
     }

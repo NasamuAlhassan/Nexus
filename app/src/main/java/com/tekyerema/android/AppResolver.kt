@@ -60,15 +60,27 @@ object AppResolver {
      * compacted (lower-case letters and digits only), values are the launcher label to look for. Seen on the A20e:
      * "install cloud AI" (Claude), "YT music". `os.apps.aliases` in config adds or overrides entries.
      * Deliberately NO bare generic words ("cloud", "music", "chat"): an alias must name one app, not a category.
+     * A value is "package|label|other label", tried in order and EXACTLY: labels differ by phone and version — on the
+     * A20e YouTube Music is labelled "YT Music", so the alias to the label "YouTube Music" missed, the words fell to
+     * token overlap, and "open YouTube Music" opened YouTube.
      */
+    private const val YT_MUSIC = "com.google.android.apps.youtube.music|YouTube Music|YT Music"
+    private const val CHATGPT = "com.openai.chatgpt|ChatGPT"
+    private const val CLAUDE = "com.anthropic.claude|Claude"
+    private const val PLAY = "com.android.vending|Play Store|Google Play Store"
+    private const val MESSAGES = "com.samsung.android.messaging|com.google.android.apps.messaging|Messages"
+    private const val WHATSAPP = "com.whatsapp|WhatsApp"
+    private const val GEMINI = "com.google.android.apps.bard|Gemini"
     private val DEFAULT_ALIASES = mapOf(
-        "ytmusic" to "YouTube Music", "youtubemusic" to "YouTube Music", "ytm" to "YouTube Music",
-        "yt" to "YouTube", "chatgbt" to "ChatGPT", "chatgpd" to "ChatGPT", "chatgp" to "ChatGPT", "openai" to "ChatGPT",
-        "claudeai" to "Claude", "cloudai" to "Claude", "clawedai" to "Claude", "anthropic" to "Claude",
-        "googleplay" to "Play Store", "playstore" to "Play Store", "googleplaystore" to "Play Store",
-        "sms" to "Messages", "textmessages" to "Messages", "samsungmessages" to "Messages",
-        "whatsup" to "WhatsApp", "watsapp" to "WhatsApp", "wassap" to "WhatsApp",
-        "googlegemini" to "Gemini", "bard" to "Gemini", "jijighana" to "Jiji", "gmail" to "Gmail"
+        "ytmusic" to YT_MUSIC, "youtubemusic" to YT_MUSIC, "ytm" to YT_MUSIC, "youtubemusicapp" to YT_MUSIC,
+        "yt" to "com.google.android.youtube|YouTube", "chatgbt" to CHATGPT, "chatgpd" to CHATGPT, "chatgp" to CHATGPT,
+        "chatgpt" to CHATGPT, "openai" to CHATGPT,
+        "claudeai" to CLAUDE, "cloudai" to CLAUDE, "clawedai" to CLAUDE, "anthropic" to CLAUDE,
+        "googleplay" to PLAY, "playstore" to PLAY, "googleplaystore" to PLAY,
+        "sms" to MESSAGES, "textmessages" to MESSAGES, "samsungmessages" to MESSAGES,
+        "whatsup" to WHATSAPP, "watsapp" to WHATSAPP, "wassap" to WHATSAPP,
+        "googlegemini" to GEMINI, "bard" to GEMINI, "jiji" to "com.olx.ssa.gh|Jiji", "jijighana" to "com.olx.ssa.gh|Jiji",
+        "gmail" to "com.google.android.gm|Gmail"
     )
 
     /** The launcher label an alias stands for, or null. Pure → unit-tested. */
@@ -93,7 +105,11 @@ object AppResolver {
         // otherwise the original words still get the normal matching below. One hop only: a config alias cycle
         // (a → b, b → a) must not recurse forever.
         if (!aliased) aliasFor(raw)?.takeIf { !it.equals(raw, true) }?.let { alias ->
-            (match(apps, alias, tolerant = false, aliased = true) as? Match.One)?.let { return it }
+            // Exact only: a package id, or a label equal (ignoring case/spacing) to one of the alias's names.
+            for (name in alias.split('|').map { it.trim() }.filter { it.isNotEmpty() }) {
+                apps.firstOrNull { it.packageName.equals(name, true) || it.label.equals(name, true) ||
+                    compact(it.label) == compact(name) }?.let { return Match.One(it) }
+            }
         }
         apps.firstOrNull { it.packageName.equals(raw, true) }?.let { return Match.One(it) }
         apps.firstOrNull { it.label.equals(raw, true) }?.let { return Match.One(it) }
