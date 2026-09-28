@@ -22,7 +22,10 @@ enum class TestScenario {
     DONE_AFTER_UNVERIFIED_MUTATION, DONE_PURE_OBSERVATION, DONE_CLEAN,
     // Hybrid execution: an accelerator MISS must not end the task — the plan continues via the
     // General Operator (directive §3/§4, Tests B/C/D).
-    ACCELERATOR_MISS_FALLBACK
+    ACCELERATOR_MISS_FALLBACK,
+    // Consequential read-back: with an SMS DRAFT already open (opened over ADB), tap Send → the policy must ask,
+    // naming WHO and WHAT. The harness declines — nothing is ever sent.
+    SEND_READBACK
 }
 
 /**
@@ -68,6 +71,11 @@ class TestBrain(
                 // Tier 2 — exercises the real PolicyEngine confirmation gate (confirm via --es confirm).
                 1 -> tool("make_call", JSONObject().put("contact", "Prince"))
                 else -> done("call_contact scenario complete")
+            }
+            TestScenario.SEND_READBACK -> when (step) {
+                // re-proposed if the engine re-observes (e.g. the draft wasn't in front yet when step 1 was planned)
+                1, 2, 3 -> tool("tap", JSONObject().put("label", "Send SMS"), expects = "element_absent: Send SMS")
+                else -> done("send_readback scenario complete")
             }
             TestScenario.DIRECT_REPLY -> when (step) {
                 1 -> tool("reply_to_notification", JSONObject().put("sender", "Prince").put("message", "I'll call him after class"))

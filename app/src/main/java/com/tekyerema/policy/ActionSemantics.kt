@@ -16,6 +16,9 @@ object ActionSemantics {
 
     private val SEND_VERBS = setOf("send", "reply", "post", "share", "forward")
 
+    /** A send read-back with neither recipient nor message — the caller re-reads the screen before settling for it. */
+    const val BARE_SEND = "Send this message?"
+
     /** Looks like a placeholder/hint rather than a typed message. */
     private fun isPlaceholder(label: String): Boolean {
         val l = label.trim().lowercase().trimEnd('.', '…')

@@ -102,7 +102,9 @@ class RunGoalReceiver : BroadcastReceiver() {
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
                 try {
                     val snap = AgentEngine.currentController()?.buildSnapshot()
-                    Log.i("Tekyerema", "[SCREEN] app=${snap?.appPackage} name=${snap?.appName} title=${snap?.screenTitle} n=${snap?.elements?.size}")
+                    Log.i("Tekyerema", "[SCREEN] app=${snap?.appPackage} name=${snap?.appName} title=${snap?.screenTitle} n=${snap?.elements?.size} " +
+                        "compactJsonChars=${snap?.toCompactJson()?.toString()?.length}")
+                    snap?.toCompactJson()?.toString()?.chunked(3000)?.forEach { Log.d("Tekyerema", "[SCREEN-JSON] $it") }
                     snap?.elements?.forEach { e ->
                         Log.i("Tekyerema", "[SCREEN] #${e.id} ${e.role} '${e.label?.take(50)}'" +
                             (if (e.editable) " EDITABLE hint='${e.hint}' id=${e.viewId?.substringAfter(":id/")}" else "") +

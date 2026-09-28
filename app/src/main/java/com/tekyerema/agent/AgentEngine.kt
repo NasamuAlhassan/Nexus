@@ -446,10 +446,34 @@ object AgentEngine {
                                 // §19 semantic safety: describe the REAL consequence (recipient +
                                 // message / callee) rather than "Tap element N?". Falls back to the
                                 // policy prompt, then a semantic description, then the tool default.
-                                val semantic = com.tekyerema.policy.ActionSemantics.confirmation(
-                                    decision.name, resolved?.element, requestedLabel, before,
+                                // The read-back must be built from a REAL tree read: if this step's observation was weak
+                                // (0 tree elements — an app still rendering, OCR fallback) re-read it now, or the user hears a
+                                // bare "Send this message?" with no recipient and no text (seen on-device).
+                                // Also: never ask the user to approve an action on a screen the model didn't reason about —
+                                // if the app in front changed since this decision, re-observe instead (the stale-screen check
+                                // below runs only AFTER this gate).
+                                val fresh = try { controller?.buildSnapshot() } catch (_: Throwable) { null }
+                                if (fresh?.appPackage != null && before.appPackage != null && fresh.appPackage != before.appPackage) {
+                                    stats = stats.copy(staleRefusals = stats.staleRefusals + 1)
+                                    log(LogEntry.Kind.POLICY, "screen changed before confirmation (was ${before.appPackage}, now ${fresh.appPackage}) — re-observing, not asking")
+                                    history.add("${decision.name}(${shortArgs(decision.args)}) → not attempted: the screen changed " +
+                                        "(now ${fresh.appName ?: fresh.appPackage}) before it could be confirmed — re-observe and decide again.")
+                                    continue
+                                }
+                                val readBackScreen = fresh?.takeIf { s -> s.elements.any { it.source == com.tekyerema.accessibility.ElementSource.TREE } } ?: before
+                                fun readBack(s: com.tekyerema.accessibility.UiSnapshot) = com.tekyerema.policy.ActionSemantics.confirmation(
+                                    decision.name, resolved?.element, requestedLabel, s,
                                     decision.args.boolOrDefault("submit", false), decision.args.str("text")
                                 )
+                                var semantic = readBack(readBackScreen)
+                                // A bare "Send this message?" (no recipient, no text) usually means the screen is still
+                                // rendering — re-read up to twice before asking (seen on-device with a just-opened draft).
+                                var rereads = 0
+                                while (semantic == com.tekyerema.policy.ActionSemantics.BARE_SEND && rereads < 2) {
+                                    kotlinx.coroutines.delay(800); rereads++
+                                    val again = try { controller?.buildSnapshot() } catch (_: Throwable) { null } ?: break
+                                    semantic = readBack(again)
+                                }
                                 // Prefer the action-describing sentence (§19); the policy's default is
                                 // just tool.confirmationPrompt(args), so semantic never hides a safety note.
                                 val basePrompt = semantic ?: pd.confirmationPrompt ?: tool.confirmationPrompt(decision.args)
