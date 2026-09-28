@@ -176,29 +176,34 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         AgentDecision.Fail("unreachable")
     }
 
-    private fun parseResponse(text: String): AgentDecision {
-        val json = try { JSONObject(text) } catch (t: Throwable) { return AgentDecision.Fail("Unparseable LLM response.") }
-        val message = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
-            ?: return AgentDecision.Fail("No message in LLM response.")
-        val toolCalls = message.optJSONArray("tool_calls")
-        if (toolCalls != null && toolCalls.length() > 0) {
-            val fn = toolCalls.optJSONObject(0)?.optJSONObject("function")
-                ?: return AgentDecision.Fail("Malformed tool call.")
-            val name = fn.optString("name")
-            val rawArgs = fn.optString("arguments").ifBlank { "{}" }
-            val args = try { JSONObject(rawArgs) } catch (t: Throwable) { JSONObject() }
-            return AgentDecision.fromToolCall(name, args, null)
-        }
-        // No structured tool_calls. gpt-oss-120b (and some other models) frequently emit the tool call as
-        // prose/JSON in `content` instead of the tool_calls channel — which previously became Malformed and
-        // looped the agent to MAX_STEPS. Recover it: parse a tool call out of the content and EXECUTE it,
-        // so multi-step tasks actually progress. Falls back to plain text (Done/Malformed) only if none.
-        val content = message.optString("content")
-        recoverToolCallFromContent(content)?.let { return it }
-        return AgentDecision.fromText(content)
-    }
-
     companion object {
+        /** Turn a chat-completions response into a decision. Pure (no instance state), so it is unit-tested. */
+        fun parseResponse(text: String): AgentDecision {
+            val json = try { JSONObject(text) } catch (t: Throwable) { return AgentDecision.Fail("Unparseable LLM response.") }
+            val message = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
+                ?: return AgentDecision.Fail("No message in LLM response.")
+            val toolCalls = message.optJSONArray("tool_calls")
+            if (toolCalls != null && toolCalls.length() > 0) {
+                val fn = toolCalls.optJSONObject(0)?.optJSONObject("function")
+                    ?: return AgentDecision.Fail("Malformed tool call.")
+                val name = fn.optString("name")
+                val rawArgs = fn.optString("arguments").ifBlank { "{}" }
+                // D-06: never run a tool on silently-emptied arguments. Repair the common damage (code fences,
+                // trailing prose) and otherwise hand the engine a rejection it can feed back to the model.
+                val args = tryJson(rawArgs) ?: jsonObjectsIn(rawArgs).firstOrNull()
+                    ?: return AgentDecision.fromToolCall(name, JSONObject(), null,
+                        argError = "its arguments were not valid JSON (${rawArgs.take(80)})")
+                return AgentDecision.fromToolCall(name, args, null)
+            }
+            // No structured tool_calls. gpt-oss-120b (and some other models) frequently emit the tool call as
+            // prose/JSON in `content` instead of the tool_calls channel — which previously became Malformed and
+            // looped the agent to MAX_STEPS. Recover it: parse a tool call out of the content and EXECUTE it,
+            // so multi-step tasks actually progress. Falls back to plain text (Done/Malformed) only if none.
+            val content = message.optString("content")
+            recoverToolCallFromContent(content)?.let { return it }
+            return AgentDecision.fromText(content)
+        }
+
         /** Sticky index of the last Groq key that returned successfully — shared across tasks so a
          *  rate-limited key isn't re-tried first on every step. Guarded only by @Volatile (best-effort). */
         @Volatile private var lastGoodKey = 0
@@ -234,13 +239,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         }
 
         // The model's tool vocabulary — used to validate a content-embedded call so ordinary prose that
-        // merely mentions a word isn't mistaken for a call.
-        private val KNOWN_TOOLS = setOf(
-            "tap", "long_press", "swipe", "drag", "scroll", "type", "set_range", "key_event", "read_state",
-            "wait", "open_app", "cannot_do", "make_call", "reply_to_notification", "run_ussd",
-            "search_contacts", "set_alarm", "set_timer", "read_notifications", "set_volume", "volume_up",
-            "volume_down", "find_contact", "search_messages"
-        )
+        // merely mentions a word isn't mistaken for a call. D-06: derived from the registry, never a stale copy.
+        private val KNOWN_TOOLS: Set<String> get() = AgentDecision.knownTools
 
         /** Extract a tool call the model wrote into `content` (prose or JSON), or null if there isn't one.
          *  Handles three shapes: a JSON object with name+arguments (optionally ```fenced``` or nested under

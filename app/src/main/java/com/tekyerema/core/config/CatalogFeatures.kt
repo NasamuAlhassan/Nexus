@@ -42,7 +42,7 @@ internal val BUILT_FEATURES: List<CatalogFeature> = listOf(
     CatalogFeature("C-21", "Adaptive reasoning effort", 26, emptyList(), false, false, "partial"),
     CatalogFeature("C-22", "Conversational reference resolution", 26, emptyList(), false, false, "partial"),
     CatalogFeature("D-01", "Self-describing tool manifests", 26, emptyList(), false, false, "implemented"),
-    CatalogFeature("D-06", "Strict schema validation", 26, emptyList(), false, false, "partial"),
+    CatalogFeature("D-06", "Strict schema validation", 26, emptyList(), false, false, "implemented"),
     CatalogFeature("D-10", "Tool result compaction", 26, emptyList(), false, false, "partial"),
     CatalogFeature("D-14", "Intent and deep-link templates", 26, listOf("android.permission.CALL_PHONE"), false, false, "partial"),
     CatalogFeature("E-01", "Launch app by name", 26, emptyList(), false, false, "implemented"),

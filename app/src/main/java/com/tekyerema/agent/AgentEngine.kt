@@ -377,6 +377,13 @@ object AgentEngine {
                             history.add("Tried unknown tool ${decision.name}")
                             continue
                         }
+                        // D-06: malformed or schema-violating arguments never reach a tool — the model gets the reason.
+                        val argProblem = decision.argError ?: com.tekyerema.tools.ToolArgs.validate(tool, decision.args)
+                        if (argProblem != null) {
+                            log(LogEntry.Kind.ACTION, "${decision.name} → rejected: $argProblem")
+                            history.add("${decision.name}(${shortArgs(decision.args)}) → rejected: $argProblem. Call it again with valid arguments.")
+                            continue
+                        }
                         val expectation = Expects.parse(decision.expects)
                         // Mutating = changes device state (anything that isn't pure observation).
                         // Scope-based, so it stays generic — no per-tool flag, no app knowledge.

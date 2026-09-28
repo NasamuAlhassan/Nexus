@@ -20,8 +20,11 @@ data class BrainContext(
 )
 
 sealed class AgentDecision {
-    /** One primitive (or accelerator) call, with the model's claim about the outcome it expects. */
-    data class CallTool(val name: String, val args: JSONObject, val rationale: String?, val expects: String? = null) : AgentDecision()
+    /** One primitive (or accelerator) call, with the model's claim about the outcome it expects.
+     *  [argError] is set when the call's arguments could not be parsed (D-06): the engine rejects the call with
+     *  that reason instead of running the tool with empty arguments. */
+    data class CallTool(val name: String, val args: JSONObject, val rationale: String?, val expects: String? = null,
+                        val argError: String? = null) : AgentDecision()
     data class Done(val summary: String) : AgentDecision()
     /** Honest stop: the environment, not a missing tool, prevents the goal (plan §15). */
     data class CannotDo(val reasonClass: String, val detail: String) : AgentDecision()
@@ -30,7 +33,12 @@ sealed class AgentDecision {
     data class Fail(val reason: String) : AgentDecision()
 
     companion object {
-        private val toolShape = Regex("\"(name|function|parameters|arguments)\"\\s*:|\\b(tap|long_press|swipe|drag|scroll|type|set_range|key_event|read_state|open_app|cannot_do|make_call|reply_to_notification|run_ussd|search_contacts|set_alarm|set_timer|read_notifications)\\s*\\(")
+        /** D-06: every compiled tool name, from the registry itself, so a new tool can never be missing here. */
+        val knownTools: Set<String> by lazy { com.tekyerema.tools.defaultTools().map { it.name }.toSet() }
+
+        private val toolShape by lazy {
+            Regex("\"(name|function|parameters|arguments)\"\\s*:|\\b(" + knownTools.joinToString("|") { Regex.escape(it) } + ")\\s*\\(")
+        }
 
         /** Interpret a plain-text reply: a tool-shaped narration is Malformed, anything else is Done. */
         fun fromText(content: String): AgentDecision {
@@ -41,7 +49,8 @@ sealed class AgentDecision {
 
         /** Build a decision from a parsed tool call, lifting the `expects` claim out of the arguments
          *  and turning the `cannot_do` decision-tool into its own decision type. */
-        fun fromToolCall(name: String, args: JSONObject, rationale: String?): AgentDecision {
+        fun fromToolCall(name: String, args: JSONObject, rationale: String?, argError: String? = null): AgentDecision {
+            if (argError != null) return CallTool(name, args, rationale, null, argError)
             if (name == "cannot_do") {
                 return CannotDo(
                     args.optString("reason_class").ifBlank { "unsafe_or_uncertain" },
