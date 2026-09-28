@@ -5,6 +5,11 @@
       "enabled": false,
       "minChars": 60,
       "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself. Turn on per device after checking; SelfEcho still guards against it."
+    },
+    "reading": {
+      "partSeconds": 20,
+      "charsPerSecond": 15,
+      "_note": "A screen reading is spoken in parts of about partSeconds at the user's speech rate (was a fixed 480 characters, ~30 s), each ending 'There's more — say continue'; the mic re-opens after each part for 'continue' or 'stop'."
     }
   },
   "ux": {

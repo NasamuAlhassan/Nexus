@@ -208,6 +208,7 @@ object VoiceEngine {
 
     private fun applyVoiceSettings() {
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
+        ReadingPace.rate = when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }   // readings sized in seconds
         systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
     }
 

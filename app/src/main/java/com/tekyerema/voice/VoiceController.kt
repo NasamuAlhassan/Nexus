@@ -730,6 +730,15 @@ class VoiceController(
                 listenMore(VadStrategy.CONTINUE)?.let { tr = TurnDetector.join(tr, it) }
                 set(VoiceState.TRANSCRIBING, "Transcribing…")
             }
+            // Right after a reply (a reading part, a question, a tap to interrupt), "stop" / "that's enough" ends the
+            // conversation here — it isn't a new command for the phone.
+            if (quiet && ReadingPace.isEnough(tr.canonical)) {
+                Log.i("Tekyerema", "[VOICE] follow-up: the user said that's enough")
+                cues.captured()
+                say(if ((forceLanguage() ?: sessionLanguage()) == Lang.TWI) "Yoo." else "Okay.")
+                idle("")
+                return
+            }
             // J-15: what the user said stays out of logcat in release builds.
             if (com.tekyerema.core.Privacy.logContent())
                 Log.i("Tekyerema", "[VOICE] raw='${tr.raw}' canonical='${tr.canonical}' lang=${tr.language} " +
@@ -845,15 +854,20 @@ class VoiceController(
             // runOnce → idle, no further tail); a spoken answer becomes the next turn. Capped so mic noise
             // can't spin forever, and only for spoken (ASR) turns, never a pending confirmation (handled
             // separately by confirmByVoice).
-            val isQuestion = outcome.spoken.trim().endsWith("?") &&
+            // A reading cut into parts ends "There's more — say continue": listen for it the same way, so going on is one
+            // word instead of a new trigger plus "continue" (no card — it isn't a question the task is waiting on).
+            val invitesMore = ReadingPace.invitesContinue(outcome.spoken)
+            val isQuestion = (outcome.spoken.trim().endsWith("?") || invitesMore) &&
                 agent.state.value.status != AgentStatus.WAITING_CONFIRMATION && followUpChain < maxFollowUps
             if (isQuestion) {
                 followUpChain++
-                Log.i("Tekyerema", "[VOICE] agent asked a question — showing the ask card ($source)")
-                showAsking(outcome.spoken)         // a VISIBLE card over any app (typed OR spoken), so the user sees it's waiting
+                if (!invitesMore) {
+                    Log.i("Tekyerema", "[VOICE] agent asked a question — showing the ask card ($source)")
+                    showAsking(outcome.spoken)         // a VISIBLE card over any app (typed OR spoken), so the user sees it's waiting
+                }
                 // Reopen the mic only for a SPOKEN turn; a TYPED turn is answered by typing (card stays until then).
                 if (source == InputSource.ASR && speakAloud() && hasMicPermission()) {
-                    try { runOnce(quiet = true) } finally { hideAsking() }
+                    try { runOnce(quiet = true) } finally { if (!invitesMore) hideAsking() }
                 }
             }
         } catch (c: CancellationException) {
@@ -956,7 +970,9 @@ class VoiceController(
             fail(VoiceStage.EXECUTION, "The assistant took too long to respond.", "Sorry, that took too long. Try again, or ask for one step at a time."); return null
         }
         val resultText = finalState.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text
-        return Outcome(finalState.status, spokenFor(finalState.status, resultText))
+        val reading = com.tekyerema.agent.ScreenReadIntent.isRead(goal) || com.tekyerema.agent.ScreenReadIntent.isContinue(goal) ||
+            (resultText != null && ReadingPace.invitesContinue(resultText))
+        return Outcome(finalState.status, spokenFor(finalState.status, resultText, exact = reading))
     }
 
     /**
@@ -1028,10 +1044,11 @@ class VoiceController(
     }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
-    private fun spokenFor(status: AgentStatus, resultText: String?): String {
+    private fun spokenFor(status: AgentStatus, resultText: String?, exact: Boolean = false): String {
         // B-13: "brief" keeps the first sentence of the reply; the honesty tail is added AFTER trimming, never dropped.
         // ("detailed" no longer adds "That took N steps." — no spoken step numbers, owner 2026-09-28.)
-        val text = resultText?.let { if (verbosity() == "brief") SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
+        // [exact]: a reading the user asked for is never cut — "brief" used to keep only "You're in Messages." of a screen.
+        val text = resultText?.let { if (verbosity() == "brief" && !exact) SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
         return when (status) {
             AgentStatus.COMPLETED -> text ?: "Done."
             AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it."
