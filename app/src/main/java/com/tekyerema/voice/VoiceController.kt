@@ -597,8 +597,9 @@ class VoiceController(
                     catch (c: CancellationException) { throw c } catch (e: Exception) { false }
                 tel.endTurn(if (fast.ok) "full" else "failed", byVoice = true)
                 _state.update {
+                    // A command with nothing to say (the camera reader announces itself) is not a missing voice.
                     it.copy(state = VoiceState.IDLE, spoken = fast.spoken,
-                        partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
+                        partialHint = if (spoke || !speakAloud() || fast.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
                 }
                 return
             }

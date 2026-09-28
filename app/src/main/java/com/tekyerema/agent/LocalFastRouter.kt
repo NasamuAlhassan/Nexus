@@ -228,8 +228,8 @@ class LocalFastRouter(
         val msgs = com.tekyerema.notifications.MessageIndex.size()
         if (msgs > 0) {
             val who = com.tekyerema.notifications.MessageIndex.people()
-            parts.add("$msgs recent message${if (msgs == 1) "" else "s"} and notification${if (msgs == 1) "" else "s"} " +
-                "from $who sender${if (who == 1) "" else "s"}, kept for a week")
+            parts.add((if (msgs == 1) "1 recent message or notification" else "$msgs recent messages and notifications") +
+                " from $who sender${if (who == 1) "" else "s"}, kept for a week")
         }
         if (s.trajectoryConsent) parts.add("${com.tekyerema.core.telemetry.Trajectories.count(appContext)} saved tasks you agreed to share for improving me")
         val line = if (parts.isEmpty()) "I'm not keeping anything about you right now."
