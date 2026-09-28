@@ -534,7 +534,7 @@ object AgentEngine {
                 }
                 // J-11: an app on the user's deny list is never shown to the cloud model and never operated.
                 if (before.appPackage != null && before.appPackage in denyApps) {
-                    before = before.copy(elements = emptyList(), screenTitle = null)
+                    before = com.tekyerema.policy.ScreenPrivacy.blank(before)
                     if (history.lastOrNull()?.startsWith("DENIED APP") != true)
                         history.add("DENIED APP: ${before.appName ?: before.appPackage} is on the user's deny list — you cannot see or " +
                             "operate it. Go Back or Home, or call cannot_do.")
@@ -776,14 +776,10 @@ object AgentEngine {
                         if (untrusted) log(LogEntry.Kind.POLICY, "provenance: ${Provenance.describe(tags)}")
                         if (cls.tier != null) log(LogEntry.Kind.POLICY, "target semantics: ${cls.reason} → ${cls.tier}")
                         val pd = policy.evaluate(tool, decision.args, hasUntrustedParams = untrusted, targetTier = cls.tier, hardBlock = cls.block)
-                        // J-11: nothing is operated inside a denied app; a guide-only app is read and explained, never acted on.
-                        val fgPkg = before.appPackage
-                        val appRule = when {
-                            fgPkg != null && fgPkg in denyApps && tool.grounded -> "this app is on the user's deny list"
-                            fgPkg != null && fgPkg in guideOnlyApps && tool.grounded && mutating ->
-                                "this app is guide-only — tell the user what to tap instead of tapping it"
-                            else -> null
-                        }
+                        // J-11: nothing is operated OR READ inside a denied app (read_state / read_all return screen text,
+                        // which would reach the cloud model); a guide-only app is read and explained, never acted on.
+                        val appRule = com.tekyerema.policy.ScreenPrivacy.appRule(decision.name, tool.grounded, mutating,
+                            before.appPackage, denyApps, guideOnlyApps)
                         if (appRule != null) {
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "Blocked: $appRule")

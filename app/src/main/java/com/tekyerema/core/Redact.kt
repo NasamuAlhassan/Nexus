@@ -27,10 +27,12 @@ object Redact {
         "org.fedorahosted.freeotp"
     )
 
-    /** True when a notification from [packageName] must not be captured at all. */
+    /** True when a notification from [packageName] must not be captured at all. J-11: an app on the user's deny list
+     *  (`policy.denyApps`) is never shown to the model, so its notifications are not captured either. */
     fun deniedPackage(packageName: String?): Boolean {
         if (packageName == null) return false
-        val extra = AppConfig.stringList("privacy.notifications.denyPackages", emptyList())
+        val extra = AppConfig.stringList("privacy.notifications.denyPackages", emptyList()) +
+            AppConfig.stringList("policy.denyApps", emptyList()).map { it.trim() }
         return packageName in DEFAULT_DENY_PACKAGES || packageName in extra
     }
 

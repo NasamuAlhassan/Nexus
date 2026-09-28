@@ -122,7 +122,8 @@ data class UiSnapshot(
             val o = JSONObject()
             o.put("id", e.id)
             o.put("role", e.role)
-            if (!e.label.isNullOrBlank()) o.put("label", e.label.take(labelMax))
+            // J-10: a one-time code / PIN in a label (an SMS preview, a banner) never reaches the model; the element stays.
+            if (!e.label.isNullOrBlank()) o.put("label", (com.tekyerema.core.Redact.secrets(e.label) ?: e.label).take(labelMax))
             // Mark only vision elements (they need x,y grounding); "tree" is the default, so omit it — this
             // JSON is sent for up to 45 elements on every step, so per-element bytes dominate the request.
             if (e.source == ElementSource.VISION) o.put("source", "vision")
@@ -157,14 +158,14 @@ data class UiSnapshot(
         return JSONObject()
             .put("app", appPackage ?: "unknown")
             .apply { if (!appName.isNullOrBlank()) put("appName", appName) }
-            .apply { if (!screenTitle.isNullOrBlank()) put("screen", screenTitle) }
+            .apply { if (!screenTitle.isNullOrBlank()) put("screen", com.tekyerema.core.Redact.secrets(screenTitle)) }
             .put("snap", snapshotId)                                                            // F-03
             .apply { if (focus != null) put("focus", focus) }                                   // F-03 input focus
             .put("elementCount", elements.size)
             .put("perception", JSONObject().put("source", perception.source).put("reason", perception.reason))
             .apply { if (secureWindow) put("secureWindow", true) }
             .apply { if (windowType != null) put("window", windowType) }                       // F-13
-            .apply { if (announcements.isNotEmpty()) put("announced", JSONArray(announcements)) }  // F-17
+            .apply { if (announcements.isNotEmpty()) put("announced", JSONArray(announcements.map { com.tekyerema.core.Redact.secrets(it) })) }  // F-17
             // F-01: the service's traversal hit its node cap (not the listing cap below).
             .apply { if (this@UiSnapshot.truncated) put("longScreen", "only part of this screen was read — scroll for more") }
             .put("elements", arr)
@@ -178,7 +179,8 @@ data class UiSnapshot(
     }
 
     fun summarize(): String {
-        val visible = elements.mapNotNull { it.label?.takeIf { l -> l.isNotBlank() } }.take(12)
+        // J-10: this is read_state's result (it goes to the model) — codes hidden like in [toCompactJson].
+        val visible = elements.mapNotNull { it.label?.takeIf { l -> l.isNotBlank() }?.let { l -> com.tekyerema.core.Redact.secrets(l) } }.take(12)
         val head = "App: ${appPackage ?: "unknown"}" + (screenTitle?.let { "; screen: $it" } ?: "") +
             "; perception: ${perception.source}"
         return if (visible.isEmpty()) "$head. No readable text found."

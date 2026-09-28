@@ -447,6 +447,9 @@ object ReadStateTool : Tool {
         if (raw != null && (com.tekyerema.policy.TargetSemantics.isCredentialScreen(raw) || com.tekyerema.policy.TargetSemantics.isHumanCheckScreen(raw)))
             return ToolResult(true, "This is a private screen (a PIN, password or code) — it is not read. Tell the user to finish it themselves.",
                 data = JSONObject().put("vision", false).put("secure", true), channel = "none")
+        // J-11: a denied app's screen never reaches the model — this result goes into the step history.
+        if (raw != null && com.tekyerema.policy.ScreenPrivacy.isDenied(raw.appPackage))
+            return ToolResult(true, "This app is on the user's deny list — its screen is not read.", data = JSONObject().put("vision", false), channel = "none")
         val snap = Perception.observe(ctrl, vision, args.str("reason"))
         val data = JSONObject().put("vision", vision).put("route", snap.perception.source)
         // §1.20 — a protected (FLAG_SECURE) screen with nothing readable must not be reported as "empty".
