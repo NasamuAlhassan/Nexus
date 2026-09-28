@@ -64,6 +64,24 @@ interface AccessibilityController {
      *  A coordinate gesture there would land on that overlay instead of the app the agent observed. */
     fun foreignOverlayAt(x: Int, y: Int): String? = null
 
+    /** K-09: screen magnification — "in" | "out" | "reset". Returns the scale now in effect, or null if unavailable. */
+    fun magnify(action: String): Float? = null
+
+    /** G-01 / G-02 / G-03: a semantic node action on element [id] — "select" | "expand" | "collapse" | "dismiss" |
+     *  "copy" | "paste" | "cut" | "show_on_screen" | "page_up" | "page_down" | "page_left" | "page_right" |
+     *  "context_click" | "custom:<label>" (an action the app itself defines, e.g. "Archive", "Mark as read"). */
+    suspend fun nodeAction(id: Int, action: String): Boolean = false
+
     /** Suspends until the UI stops changing (or timeout). */
     suspend fun waitForSettle(timeoutMs: Long = 2500L)
+
+    /** Uptime (ms) of the last accessibility event — the mark an action's settle waits to see passed. */
+    fun lastEventUptime(): Long = 0L
+
+    /**
+     * G-10: event-driven settle after an action — wait for the screen to REACT (an event after [sinceUptime]), then for
+     * it to go quiet. Returns when nothing reacted within [reactMs] (a no-op, or a change the events don't report),
+     * so a dead tap costs [reactMs], not a fixed sleep. Default: the plain quiet wait.
+     */
+    suspend fun waitForChange(sinceUptime: Long, reactMs: Long, timeoutMs: Long) = waitForSettle(timeoutMs)
 }

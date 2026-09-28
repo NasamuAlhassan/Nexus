@@ -39,6 +39,7 @@ class LocalFastRouter(
 ) {
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
+        if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         val intent = FastIntentClassifier.classify(text) ?: run {
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${text.take(60)}'")
             return null
@@ -118,6 +119,125 @@ class LocalFastRouter(
         FastIntent.TakePhoto -> openCamera()
         FastIntent.LockQuery -> lockState()
         is FastIntent.Preference -> preference(intent)
+        is FastIntent.Camera -> openCameraReader(intent.mode)
+        FastIntent.WhatChanged -> whatChanged()
+        is FastIntent.Magnify -> magnify(intent.action)
+        is FastIntent.SetEmergencyContact -> setEmergencyContact(intent.contact)
+        is FastIntent.EmergencyLine -> emergencyLine(intent.service)
+        is FastIntent.CreateSchedule -> createSchedule(intent)
+        FastIntent.ListSchedules -> listSchedules()
+        FastIntent.ClearSchedules -> clearSchedules()
+        is FastIntent.WatchSender -> watchSender(intent)
+        is FastIntent.Sources -> sources(intent)
+    }
+
+    // ---------------------------------------------------------------- W7
+    /** A-13: store and arm a schedule. Only read-only goals will ever run by themselves; the rest are spoken reminders. */
+    private fun createSchedule(intent: FastIntent.CreateSchedule): FastOutcome? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(com.tekyerema.agent.triggers.ScheduledTasks.FEATURE, true)) return null
+        val parsed = com.tekyerema.agent.triggers.ScheduleParser.parse(intent.text)
+            ?: return handled(intent, "Tell me the time too — for example: at 6 pm remind me to take my medicine. " +
+                "I can do a time today or repeating days, not a date yet.")
+        val stored = com.tekyerema.agent.triggers.ScheduledTasks.add(appContext, parsed)
+            ?: return handled(intent, "I couldn't save that schedule. Please say it another way.")
+        val runsAlone = com.tekyerema.agent.triggers.TriggerSafety.reminderLine(stored.goal) != null ||
+            com.tekyerema.agent.triggers.TriggerSafety.isReadOnlyGoal(stored.goal)
+        val tail = if (runsAlone) "" else " At that time I'll remind you — I won't do it by myself."
+        return action(intent.name, "Okay. " + com.tekyerema.agent.triggers.ScheduledTasks.describe(stored) + tail)
+    }
+
+    private fun listSchedules(): FastOutcome {
+        val all = com.tekyerema.agent.triggers.ScheduledTasks.list(appContext).filter { it.enabled }
+        if (all.isEmpty()) return handled(FastIntent.ListSchedules, "You have no schedules or reminders.")
+        val lines = all.take(5).joinToString(" ") { com.tekyerema.agent.triggers.ScheduledTasks.describe(it) }
+        val more = if (all.size > 5) " And ${all.size - 5} more." else ""
+        return handled(FastIntent.ListSchedules, "You have ${all.size}. $lines$more")
+    }
+
+    private fun clearSchedules(): FastOutcome {
+        val mine = com.tekyerema.agent.triggers.ScheduledTasks.list(appContext).filter { !it.id.startsWith("cfg:") }
+        mine.forEach { com.tekyerema.agent.triggers.ScheduledTasks.remove(appContext, it.id) }
+        return action(FastIntent.ClearSchedules.name,
+            if (mine.isEmpty()) "You had no schedules to cancel." else "Cancelled ${mine.size} schedule${if (mine.size == 1) "" else "s"}.")
+    }
+
+    /** A-12: announce (never act on) new notifications from someone. */
+    private fun watchSender(intent: FastIntent.WatchSender): FastOutcome? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(com.tekyerema.agent.triggers.NotificationTriggers.FEATURE, true)) return null
+        val id = "who:" + intent.who.lowercase()
+        return if (intent.on) {
+            val ok = com.tekyerema.agent.triggers.NotificationTriggers.addRule(appContext,
+                com.tekyerema.agent.triggers.NotificationRule(id, intent.who, null, "announce"))
+            action(intent.name, if (ok) "Okay. I'll tell you when ${intent.who} sends something." else "I couldn't set that up.")
+        } else {
+            val ok = com.tekyerema.agent.triggers.NotificationTriggers.removeRule(appContext, id)
+            action(intent.name, if (ok) "Okay. I'll stop telling you about ${intent.who}." else "I wasn't watching for ${intent.who}.")
+        }
+    }
+
+    /** I-07: where the last web answer came from. */
+    private fun sources(intent: FastIntent.Sources): FastOutcome {
+        val recent = com.tekyerema.agent.search.LastSearch.recent()
+        val line = com.tekyerema.agent.search.LastSearch.spoken(recent, intent.links)
+        return handled(intent, line.ifBlank { "I haven't looked anything up on the web just now, so there's no source to read." })
+    }
+
+    // ---------------------------------------------------------------- W6
+    /** P-03 / P-06 / P-01: the camera reader, opened in front (CameraX needs a visible activity). */
+    private fun openCameraReader(mode: String): FastOutcome? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(when (mode) { "color" -> "P-06"; "describe" -> "P-01"; else -> "P-03" }, true)) return null
+        return try {
+            appContext.startActivity(com.tekyerema.camera.CameraReadActivity.intent(appContext, mode))
+            // The reader announces itself; nothing extra to say here.
+            FastOutcome("CAMERA_${mode.uppercase()}", "", systemVoice = true)
+        } catch (t: Throwable) { null }
+    }
+
+    /** K-15: speak only what differs from the last time the screen was described. */
+    private suspend fun whatChanged(): FastOutcome? {
+        val c = controller() ?: return handled(FastIntent.WhatChanged, "I can't see the screen — screen control is off.")
+        val snap = c.buildSnapshot()
+        if (com.tekyerema.policy.TargetSemantics.isCredentialScreen(snap))
+            return handled(FastIntent.WhatChanged, "This screen is private, so I'm not reading it.")
+        val labels = snap.elements.mapNotNull { it.label?.trim()?.takeIf { l -> l.length in 2..64 } }
+        val line = ScreenDiff.describe(ScreenMemory.app, ScreenMemory.labels, snap.appName ?: snap.appPackage, labels)
+        ScreenMemory.remember(snap.appName ?: snap.appPackage, labels)
+        return handled(FastIntent.WhatChanged, line)
+    }
+
+    /** K-09: full-screen magnification. */
+    private fun magnify(action: String): FastOutcome? {
+        val c = controller() ?: return null
+        val scale = c.magnify(action) ?: return action("MAGNIFY", "I can't magnify the screen on this phone.")
+        return action("MAGNIFY", if (scale <= 1f) "Magnification is off." else "Magnified ${"%.1f".format(java.util.Locale.US, scale)} times.")
+    }
+
+    /** L-04: "set my emergency contact to Ama" — one clear contact match, or an honest question. */
+    private fun setEmergencyContact(name: String): FastOutcome {
+        val matches = try { com.tekyerema.android.ContactResolver.resolve(appContext, name) } catch (_: Throwable) { emptyList() }
+        return when {
+            matches.isEmpty() -> handled(FastIntent.SetEmergencyContact(name), "I couldn't find $name in your contacts.")
+            matches.size > 1 -> handled(FastIntent.SetEmergencyContact(name),
+                "More than one contact matches $name: ${matches.take(3).joinToString(", ") { it.name }}. Say the full name.")
+            else -> {
+                val s = com.tekyerema.settings.Settings(appContext)
+                s.emergencyContactName = matches[0].name
+                s.emergencyContactNumber = matches[0].number
+                handled(FastIntent.SetEmergencyContact(name), "${matches[0].name} is now your emergency contact.")
+            }
+        }
+    }
+
+    /** L-04: Ghana's emergency lines go on the dial pad (Android never lets an app place an emergency call itself). */
+    private fun emergencyLine(service: String): FastOutcome? {
+        val defaults = mapOf("ambulance" to "193", "police" to "191", "fire" to "192", "emergency" to "112")
+        val number = com.tekyerema.core.config.AppConfig.string("os.emergency.numbers.$service", defaults[service] ?: "112")
+        return try {
+            appContext.startActivity(Intent(Intent.ACTION_DIAL, android.net.Uri.parse("tel:$number")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            // Digits spaced so the voice reads "one one two", not "one hundred twelve".
+            action("EMERGENCY_LINE", "I've put ${number.toCharArray().joinToString(" ")}, the ${if (service == "emergency") "emergency" else service} " +
+                "line, on the dial pad. Press Call to ring.")
+        } catch (t: Throwable) { null }
     }
 
     /** H-08: apply a preference said aloud, and say what changed. */
@@ -152,6 +272,9 @@ class LocalFastRouter(
         val ctx = com.tekyerema.tools.ToolContext(appContext, controller(), com.tekyerema.notifications.NotificationStore)
         tool.preflight(args, ctx)?.let { return FastOutcome(name.uppercase(), speakable(it.message), systemVoice = action, ok = false) }
         val r = tool.execute(args, ctx)
+        // C-22: "who called me?" → "call her back" resolves locally to the person just named.
+        if (r.success && (name == "call_log" || name == "read_sms"))
+            Regex("\\bfrom ([^,.:]{2,40})").find(r.message)?.groupValues?.get(1)?.let { References.notePerson(it) }
         return FastOutcome(name.uppercase(), speakable(r.message), systemVoice = action, ok = r.success)
     }
 

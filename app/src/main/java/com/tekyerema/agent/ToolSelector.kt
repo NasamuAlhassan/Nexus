@@ -13,11 +13,18 @@ import com.tekyerema.tools.Tool
  */
 object ToolSelector {
     val DEFAULT_CORE = listOf("read_state", "wait", "tap", "long_press", "swipe", "scroll", "type", "key_event",
-        "open_app", "cannot_do", "find_tool")
+        "open_app", "cannot_do", "find_tool", "ask_user")
 
     private data class Group(val tools: List<String>, val keywords: Regex)
 
     private val DEFAULT_GROUPS = linkedMapOf(
+        // I-02 / I-03: time-sensitive questions load the web search tool.
+        "web" to Group(
+            listOf("web_search"),
+            Regex("(?i)\\b(news|headlines|latest|today|tonight|tomorrow|this week|weekend|price|prices|exchange rate|rate|weather|" +
+                "forecast|rain|temperature|score|scores|won|result|results|fixture|fixtures|current|currently|open now|opening hours|" +
+                "near me|search|google|look up|nnɛ|ɔkyena|nsɛm)\\b")
+        ),
         "comms" to Group(
             listOf("make_call", "reply_to_notification", "read_notifications", "search_contacts", "find_contact",
                 "search_messages", "send_sms", "call_control", "call_log", "read_sms", "notification_action",
@@ -39,8 +46,9 @@ object ToolSelector {
                 "map|maps|dial|email|e-mail|youtube|google|link)\\b")
         ),
         "gesture" to Group(
-            listOf("drag", "pinch", "set_range", "scroll_to_find", "wait_for_element", "node_action"),
-            Regex("(?i)\\b(drag|move|zoom|pinch|slider|slide|brightness|seek|range|rearrange|find|look for|search for|expand|collapse)\\b")
+            listOf("drag", "pinch", "set_range", "scroll_to_find", "wait_for_element", "node_action", "read_all"),
+            Regex("(?i)\\b(drag|move|zoom|pinch|slider|slide|brightness|seek|range|rearrange|find|look for|search for|expand|collapse|" +
+                "whole|entire|article|rest of|wait for|archive|mark as read|select|copy|paste)\\b")
         )
     )
 

@@ -23,6 +23,9 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- P-01/P-03/P-06: read text, name colours and describe what's in front of the camera (owner approved). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
     <!-- E-12: install-time, no prompt — Wi-Fi/Bluetooth state queries and the Bluetooth toggle on Android 11. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
@@ -41,6 +44,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <!-- §C.1 so a session isn't killed by Doze/battery optimisation; the user grants this in onboarding. -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- A-13: re-arm the user's schedules after a reboot (install-time, no prompt). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Draw the Tier-2 confirmation card OVER the app the agent is operating, so the user can
          approve/decline without switching back to Tɛkyerɛma. Optional: degrades to the in-app
          card if not granted. -->
@@ -81,6 +86,15 @@
             android:exported="false"
             android:excludeFromRecents="true"
             android:launchMode="singleInstance"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Tekyerema.Voice" />
+
+        <!-- P-03/P-06/P-01 camera reading: its own task so closing it returns to whatever was open.
+             No fixed screenOrientation: API 26 crashes when a translucent activity locks orientation. -->
+        <activity
+            android:name=".camera.CameraReadActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
             android:taskAffinity=""
             android:theme="@style/Theme.Tekyerema.Voice" />
 
@@ -136,6 +150,19 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
+
+        <!-- A-13 schedules (owner-approved unattended triggers): fires the user's own schedules and re-arms them after
+             a reboot, an update or a clock change. Not exported — system broadcasts still arrive, no other app can fire one. -->
+        <receiver
+            android:name=".agent.triggers.TriggerReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

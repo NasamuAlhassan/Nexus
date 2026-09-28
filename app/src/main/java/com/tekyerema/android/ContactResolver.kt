@@ -40,7 +40,35 @@ object ContactResolver {
         return results.distinctBy { it.name }
     }
 
+    /** C-03: family words a user says instead of the saved name ("call mum" → a contact saved as "Mama" / "Mother").
+     *  `os.contacts.aliases` (word → saved-name candidates) adds or overrides these. */
+    private val DEFAULT_ALIASES = mapOf(
+        "mum" to listOf("mum", "mom", "mama", "mother", "maa", "ena"),
+        "mom" to listOf("mom", "mum", "mama", "mother", "maa", "ena"),
+        "mother" to listOf("mother", "mum", "mom", "mama", "maa", "ena"),
+        "dad" to listOf("dad", "daddy", "papa", "father", "paa", "agya"),
+        "father" to listOf("father", "dad", "daddy", "papa", "agya"),
+        "wife" to listOf("wife", "my wife", "darling", "sweetheart"),
+        "husband" to listOf("husband", "my husband", "darling", "sweetheart")
+    )
+
+    /** The saved-name candidates to try for a spoken name: itself first, then its aliases. Pure → unit-tested. */
+    fun aliasesFor(name: String): List<String> {
+        val key = name.trim().lowercase().removePrefix("my ").trim()
+        val cfg = com.tekyerema.core.config.AppConfig.stringList("os.contacts.aliases.$key", emptyList())
+        return (listOf(name.trim()) + cfg + DEFAULT_ALIASES[key].orEmpty()).distinctBy { it.lowercase() }
+    }
+
     fun resolve(context: Context, name: String): List<Contact> {
+        // C-03: try the name as said, then its family aliases, before fuzzy matching.
+        for (candidate in aliasesFor(name)) {
+            val hit = resolveOne(context, candidate)
+            if (hit.isNotEmpty() || candidate == aliasesFor(name).last()) return hit
+        }
+        return emptyList()
+    }
+
+    private fun resolveOne(context: Context, name: String): List<Contact> {
         val q = name.trim()
         // Exact-ish substring match first. The user's spoken name is untrusted text going into a SQL LIKE,
         // so escape the wildcards %/_ (and the escape char) — otherwise "%" would match EVERY contact and a

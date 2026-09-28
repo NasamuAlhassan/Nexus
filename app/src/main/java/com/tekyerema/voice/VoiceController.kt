@@ -32,6 +32,15 @@ interface AgentBridge {
     fun revise(text: String) {}
     /** The user finished entering their MoMo PIN and said "done" — leave Secure Input Mode and resume. */
     fun secureInputDone() {}
+    /** N-04: warm the cloud connection while the user speaks. */
+    fun prewarm() {}
+    // C-12 / C-13 / C-19 task control while a task runs.
+    val busy: Boolean get() = false
+    fun pause() {}
+    fun resume() {}
+    fun steer(text: String) {}
+    fun answer(text: String?) {}
+    fun statusLine(): String = ""
 }
 
 /** Production bridge → the real [AgentEngine] singleton. */
@@ -42,6 +51,13 @@ object AgentEngineBridge : AgentBridge {
     override fun confirm(approved: Boolean) = AgentEngine.confirm(approved)
     override fun revise(text: String) = AgentEngine.revise(text)
     override fun secureInputDone() = AgentEngine.secureInputDone()
+    override fun prewarm() = AgentEngine.prewarm()
+    override val busy: Boolean get() = AgentEngine.isBusy
+    override fun pause() = AgentEngine.pause()
+    override fun resume() = AgentEngine.resume()
+    override fun steer(text: String) = AgentEngine.steer(text)
+    override fun answer(text: String?) = AgentEngine.answer(text)
+    override fun statusLine(): String = AgentEngine.statusLine()
 }
 
 /**
@@ -88,7 +104,9 @@ class VoiceController(
     private val bargeMic: Recorder? = null,
     private val bargeInEnabled: () -> Boolean = { false },
     /** B-13: "brief" | "normal" | "detailed". */
-    private val verbosity: () -> String = { "normal" }
+    private val verbosity: () -> String = { "normal" },
+    /** N-16: a one-time spoken health notice (screen control off, background restricted), or null. */
+    private val healthNotice: () -> String? = { null }
 ) {
     private val _state = MutableStateFlow(VoiceUiState(language = sessionLanguage()))
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()
@@ -97,6 +115,10 @@ class VoiceController(
     /** Runs while the agent is in SECURE_INPUT (MoMo PIN): speaks the secure instruction and listens for
      *  "done". Never touches or forwards the PIN. */
     private var secureJob: Job? = null
+    /** C-13: speaks an ask_user question and listens for the answer. */
+    private var askJob: Job? = null
+    /** C-12: a turn taken WHILE a task runs (stop / pause / continue / status / a correction). */
+    private var interjectJob: Job? = null
     /** Set when the user declined by voice, so the turn's closing line isn't spoken twice. */
     @Volatile private var declinedByVoice = false
     /** Consecutive auto follow-up listens in the current exchange, capped so mic noise can't loop forever.
@@ -133,10 +155,16 @@ class VoiceController(
                         if (confirmJob?.isActive == true) confirmJob?.cancel()
                         if (secureJob?.isActive != true) secureJob = observerScope.launch { secureInputByVoice() }
                     }
+                    // C-13: the task asked a question — say it, listen for the answer, hand it back to the run.
+                    AgentStatus.ASKING -> {
+                        val q = st.pendingQuestion
+                        if (q != null && askJob?.isActive != true) askJob = observerScope.launch { askByVoice(q) }
+                    }
                     else -> {
                         lastPrompt = null
                         if (confirmJob?.isActive == true) confirmJob?.cancel()
                         if (secureJob?.isActive == true) secureJob?.cancel()
+                        if (askJob?.isActive == true) { askJob?.cancel(); hideAsking() }
                         if (_state.value.confirmPhase != ConfirmPhase.NONE)
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                     }
@@ -147,6 +175,64 @@ class VoiceController(
 
     /** Mic button: start a fresh utterance, or cancel the running one (§25). */
     fun toggle() { if (isRunning) cancel() else start() }
+
+    /**
+     * C-12 / C-19 — the user speaks WHILE a task runs (wake word, voice button): "stop", "pause", "continue",
+     * "what are you doing?", or a correction ("make it 50", "send it to Kofi instead") that the running task folds
+     * in. A tap on the circle still cancels outright (the kill switch), so this never replaces stopping.
+     */
+    fun interject() {
+        if (!agent.busy) { start(); return }
+        if (interjectJob?.isActive == true || askJob?.isActive == true || confirmJob?.isActive == true || secureJob?.isActive == true) return
+        interjectJob = observerScope.launch {
+            val lang = forceLanguage() ?: sessionLanguage()
+            if (!hasMicPermission()) return@launch
+            val cap = answerMic.captureWith(VadStrategy.QUICK, onListening = { cues.listening() },
+                onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
+            val wav = (cap as? CaptureResult.Success)?.wav ?: return@launch
+            cues.captured()
+            val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
+            if (text.isBlank()) return@launch
+            val twi = lang == Lang.TWI
+            val line = when (ControlVerbs.classify(text)) {
+                ControlVerbs.Verb.STOP -> { agent.stop(); if (twi) "Magyae." else "Stopped." }
+                ControlVerbs.Verb.PAUSE -> { agent.pause(); if (twi) "Matwɛn. Ka kɔ so na mɛtoa so." else "Paused. Say continue when you're ready." }
+                ControlVerbs.Verb.RESUME -> { agent.resume(); if (twi) "Yoo, mɛtoa so." else "Carrying on." }
+                ControlVerbs.Verb.STATUS -> agent.statusLine()
+                ControlVerbs.Verb.STEER -> { agent.steer(text); if (twi) "Yoo, mɛsesa." else "Got it, I'll change that." }
+            }
+            try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+        }
+    }
+
+    /** C-13: speak the task's question and listen (patiently) for the answer; two silences = no answer. */
+    private suspend fun askByVoice(question: String) {
+        val lang = forceLanguage() ?: sessionLanguage()
+        showAsking(question)
+        try {
+            fillers?.stop()
+            if (speakAloud()) try { tts.speak(Verbalize.apply(question), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            if (!hasMicPermission()) return   // typed answers still work (submitText)
+            repeat(2) { attempt ->
+                _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = question) }
+                val cap = answerMic.captureWith(VadStrategy.PATIENT, onListening = { cues.listening() },
+                    onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
+                if (cap is CaptureResult.Cancelled) return
+                val wav = (cap as? CaptureResult.Success)?.wav
+                if (wav != null) {
+                    cues.captured()
+                    val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
+                    if (text.isNotBlank()) { agent.answer(text); return }
+                }
+                if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
+                    catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            }
+            agent.answer(null)
+        } finally {
+            hideAsking()
+            _state.update { it.copy(speechDetected = false) }
+        }
+    }
 
     fun start() {
         if (isRunning) return
@@ -176,6 +262,8 @@ class VoiceController(
      */
     fun submitText(text: String): Boolean {
         val t = text.trim()
+        // C-13: typing while the task waits on a question answers it.
+        if (t.isNotEmpty() && agent.state.value.status == AgentStatus.ASKING) { askJob?.cancel(); hideAsking(); agent.answer(t); return true }
         if (t.isEmpty() || isRunning) return false
         followUpChain = 0
         val language = forceLanguage() ?: sessionLanguage()
@@ -285,8 +373,8 @@ class VoiceController(
                     }
                     Confirmation.Answer.HOLD -> if (++holds <= 3) {
                         patient = true
-                        spokenQuestion = if (lang == Lang.TWI) "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
-                            else "Okay, take your time. Say yes or no when you're ready."
+                        spokenQuestion = Phrases.get("confirmHold", lang == Lang.TWI, if (lang == Lang.TWI) "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
+                            else "Okay, take your time. Say yes or no when you're ready.")
                     } else {
                         if (attempt == 0) spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT
                         attempt++
@@ -392,10 +480,13 @@ class VoiceController(
                 fail(VoiceStage.MIC, "Microphone permission is off.", "I need microphone permission to hear you."); return
             }
 
+            // N-16: a problem the user can't see (screen control switched off by the system) is said once, up front.
+            if (!quiet) healthNotice()?.let { say(it) }
             // A varied, natural acknowledgement ("Go ahead." / "Uh-huh." …) is the listening hint; the
             // earcon plays to completion BEFORE the mic opens so it is never captured as speech.
             val ack = Acknowledgements.next(forceLanguage() ?: sessionLanguage())
             set(VoiceState.LISTENING, ack)
+            agent.prewarm()   // N-04: open the brain's connection while the user talks
             val cap = mic.capture(
                 onListening = { cues.listening(); set(VoiceState.LISTENING, ack) },   // tone once the mic is open
                 onSpeechStart = { _state.update { it.copy(state = VoiceState.LISTENING, partialHint = ack, speechDetected = true) } }
@@ -416,12 +507,13 @@ class VoiceController(
             var tr = try {
                 asr.transcribe(wav, sessionLanguage(), forceLanguage())
             } catch (c: CancellationException) { throw c
-            } catch (e: Exception) { fail(VoiceStage.ASR, e.message ?: "ASR failed", "Sorry, I couldn't understand that. Please try again."); return }
-            if (tr.isBlank) { fail(VoiceStage.ASR, "Empty transcript", "Sorry, I didn't catch that. Please try again."); return }
+            } catch (e: Exception) { fail(VoiceStage.ASR, e.message ?: "ASR failed", "Sorry, I couldn't understand that. Try again, a little closer to the phone."); return }
+            if (tr.isBlank) { fail(VoiceStage.ASR, "Empty transcript", "Sorry, I didn't catch that. Try again, a little closer to the phone."); return }
             // B-09: "wait" / "hold on" on its own → the user needs a moment: listen patiently for the real request.
             var holds = 0
             while (TurnDetector.isHold(tr.canonical) && holds++ < 2) {
-                say(if ((forceLanguage() ?: sessionLanguage()) == Lang.TWI) "Yoo, twɛn." else "Okay, take your time.")
+                val twi = (forceLanguage() ?: sessionLanguage()) == Lang.TWI
+                say(Phrases.get("holdAck", twi, if (twi) "Yoo, twɛn." else "Okay, take your time."))
                 set(VoiceState.LISTENING, ack)
                 val more = listenMore(VadStrategy.PATIENT) ?: run { idle(""); return }
                 tr = more
@@ -613,7 +705,7 @@ class VoiceController(
             // the agent's own coroutine keeps running in the background and could still perform (or speak
             // about) a consequential action after we've told the user it timed out.
             agent.stop()
-            fail(VoiceStage.EXECUTION, "The assistant took too long to respond.", "Sorry, that took too long. Please try again."); return null
+            fail(VoiceStage.EXECUTION, "The assistant took too long to respond.", "Sorry, that took too long. Try again, or ask for one step at a time."); return null
         }
         val resultText = finalState.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text
         return Outcome(finalState.status, spokenFor(finalState.status, resultText))
@@ -644,7 +736,8 @@ class VoiceController(
                 while (true) {
                     kotlinx.coroutines.delay(tick)
                     val s = agent.state.value.status
-                    if (s == AgentStatus.WAITING_CONFIRMATION || s == AgentStatus.SECURE_INPUT) waited += tick else worked += tick
+                    if (s == AgentStatus.WAITING_CONFIRMATION || s == AgentStatus.SECURE_INPUT || s == AgentStatus.ASKING ||
+                        s == AgentStatus.PAUSED) waited += tick else worked += tick
                     if (worked >= agentTimeoutMs || waited >= maxUserWait) { out.complete(null); break }
                 }
             }
@@ -672,7 +765,9 @@ class VoiceController(
                 val step = st.log.lastOrNull { it.kind == LogEntry.Kind.PLAN }?.text
                     ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
                 val lang = forceLanguage() ?: sessionLanguage()
-                val line = if (lang == Lang.TWI) "Mereyɛ ho adwuma da." else if (step != null) "Still working on it — step $step." else "Still working on it."
+                val twi = lang == Lang.TWI
+                val line = if (step != null && !twi) Phrases.get("progress", false, "Still working on it — step {step}.", "step" to step)
+                    else Phrases.get(if (twi) "progress" else "progressNoStep", twi, if (twi) "Mereyɛ ho adwuma da." else "Still working on it.")
                 cues.progress()
                 // B-13: "brief" users get the progress tick only — no spoken line.
                 if (verbosity() != "brief")

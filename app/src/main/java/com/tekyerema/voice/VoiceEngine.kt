@@ -113,6 +113,9 @@ object VoiceEngine {
             // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
             bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
             verbosity = { settings.verbosity },   // B-13
+            // C-10: long tasks keep working (time on the user never counts); check-ins + notification cover the wait.
+            agentTimeoutMs = com.tekyerema.core.config.AppConfig.long("agent.limits.maxTaskMs", 600_000L),
+            healthNotice = { if (com.tekyerema.core.config.FeatureFlags.isEnabled("N-16", true)) com.tekyerema.core.Health.newNotice(app) else null },
             bargeInEnabled = {
                 com.tekyerema.core.config.FeatureFlags.isEnabled("B-07") &&
                     com.tekyerema.core.config.AppConfig.bool("speech.bargeIn.enabled", true)
@@ -120,6 +123,7 @@ object VoiceEngine {
         )
         scope.launch { combine(mic.level, answerMic.level) { a, b -> maxOf(a, b) }.collect { _level.value = it } }
         HistoryStore.init(app)
+        com.tekyerema.core.Health.logStartup(app)   // N-16: why the process last ended, current issues
         applyVoiceSettings()
         scope.launch { settings.changes.collect { applyVoiceSettings() } }
         // History: one row per finished task, written on the transition into a terminal status.
@@ -128,7 +132,8 @@ object VoiceEngine {
             AgentEngine.state.collect { st ->
                 // SECURE_INPUT counts as active: a task paused at a PIN is still running (it used to lose its history row).
                 val active = st.status == AgentStatus.THINKING || st.status == AgentStatus.ACTING ||
-                    st.status == AgentStatus.WAITING_CONFIRMATION || st.status == AgentStatus.SECURE_INPUT
+                    st.status == AgentStatus.WAITING_CONFIRMATION || st.status == AgentStatus.SECURE_INPUT ||
+                    st.status == AgentStatus.ASKING || st.status == AgentStatus.PAUSED
                 val terminal = st.status == AgentStatus.COMPLETED || st.status == AgentStatus.COMPLETED_UNVERIFIED ||
                     st.status == AgentStatus.CANNOT_DO || st.status == AgentStatus.FAILED || st.status == AgentStatus.STOPPED
                 if (wasActive && terminal) st.goal?.let {
@@ -161,6 +166,8 @@ object VoiceEngine {
     private fun notificationLine(st: com.tekyerema.agent.AgentUiState): String = when (st.status) {
         AgentStatus.WAITING_CONFIRMATION -> "Waiting for your OK: " + (st.pendingConfirmation ?: "confirm the next step").take(120)
         AgentStatus.SECURE_INPUT -> "Secure step — finish it on the phone yourself, then say \"done\"."
+        AgentStatus.ASKING -> "Waiting for your answer: " + (st.pendingQuestion ?: "").take(120)
+        AgentStatus.PAUSED -> "Paused — say \"continue\" when you're ready."
         else -> {
             val step = st.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.PLAN }?.text
                 ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
@@ -182,9 +189,17 @@ object VoiceEngine {
         systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
     }
 
+    /** K-10: speak a line outside a voice turn (onboarding steps) — only when replies are read aloud and no screen
+     *  reader is already reading the page (TalkBack users hear the screen itself). */
+    fun announce(text: String) {
+        if (!initialized || !settings.speakAloud || text.isBlank()) return
+        scope.launch { try { systemTts.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) {} }
+    }
+
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */
     fun toggle() = controller.toggle()
-    fun start() = controller.start()
+    /** C-12: starting a turn while a task runs is an interjection (stop / pause / continue / status / a correction). */
+    fun start() = if (AgentEngine.isBusy) controller.interject() else controller.start()
     /** Listen once more after a reply so the conversation can continue; silence just rests (no nag). */
     fun followUp() = controller.followUp()
     fun cancel() = controller.cancel()

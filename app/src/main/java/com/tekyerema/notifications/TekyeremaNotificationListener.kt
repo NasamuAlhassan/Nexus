@@ -25,13 +25,15 @@ class TekyeremaNotificationListener : NotificationListenerService() {
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
-        sbn?.let { put(it) }
+        val rec = sbn?.let { put(it) } ?: return
+        // A-12: the user's own "tell me when Ama messages" rules — live posts only, never the reconnect backfill.
+        try { com.tekyerema.agent.triggers.NotificationTriggers.onPosted(applicationContext, rec) } catch (_: Throwable) {}
     }
 
-    private fun put(sbn: StatusBarNotification) {
-        val n = sbn.notification ?: return
+    private fun put(sbn: StatusBarNotification): NotificationRecord? {
+        val n = sbn.notification ?: return null
         // J-10: authenticator apps are never captured; one-time codes/PINs in any other app are hidden.
-        if (com.tekyerema.core.Redact.deniedPackage(sbn.packageName)) return
+        if (com.tekyerema.core.Redact.deniedPackage(sbn.packageName)) return null
         val extras = n.extras
         // J-07: notification text is app-supplied (untrusted): strip hidden-channel characters like screen text.
         fun clean(s: CharSequence?) = com.tekyerema.core.Redact.secrets(com.tekyerema.core.Sanitize.label(s?.toString()))
@@ -41,20 +43,20 @@ class TekyeremaNotificationListener : NotificationListenerService() {
         // E-15: chat apps (MessagingStyle) put the group/conversation in the title — the latest SENDER and their
         // words are in EXTRA_MESSAGES. Fall back to title/text for everything else.
         val (sender, lastText) = latestMessage(extras)
-        NotificationStore.put(
-            NotificationRecord(
-                key = sbn.key,
-                packageName = sbn.packageName,
-                title = title,
-                text = clean(lastText) ?: text,
-                postTime = sbn.postTime,
-                canReply = replyAction != null,
-                replyAction = replyAction,
-                appLabel = labelOf(sbn.packageName),
-                sender = clean(sender),
-                actions = n.actions?.toList().orEmpty()
-            )
+        val rec = NotificationRecord(
+            key = sbn.key,
+            packageName = sbn.packageName,
+            title = title,
+            text = clean(lastText) ?: text,
+            postTime = sbn.postTime,
+            canReply = replyAction != null,
+            replyAction = replyAction,
+            appLabel = labelOf(sbn.packageName),
+            sender = clean(sender),
+            actions = n.actions?.toList().orEmpty()
         )
+        NotificationStore.put(rec)
+        return rec
     }
 
     private val labels = java.util.concurrent.ConcurrentHashMap<String, String>()

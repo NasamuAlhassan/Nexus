@@ -42,6 +42,13 @@
     "show_alarms": {"feature": "E-05", "idempotent": true},
     "clipboard": {"feature": "E-19", "untrusted_output": true},
     "share_text": {"feature": "E-20", "callers": ["planner", "local"]},
-    "open_intent": {"feature": "D-14"}
+    "open_intent": {"feature": "D-14"},
+    "emergency": {"feature": "L-04", "permissions": ["android.permission.CALL_PHONE", "android.permission.SEND_SMS"], "callers": ["planner", "local"]},
+    "ask_user": {"feature": "C-13", "idempotent": true, "callers": ["planner", "local"]},
+    "node_action": {"feature": "G-01", "callers": ["planner", "local"]},
+    "scroll_to_find": {"feature": "G-18", "idempotent": true},
+    "wait_for_element": {"feature": "G-18", "idempotent": true},
+    "read_all": {"feature": "F-15", "idempotent": true, "untrusted_output": true},
+    "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true}
   }
 }

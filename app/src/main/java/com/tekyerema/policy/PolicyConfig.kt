@@ -28,6 +28,11 @@ object PolicyConfig {
         // E-17: pressing a notification's button (archive, delete, call back…) is confirmed; dismissing isn't.
         if (tool.name == "notification_action")
             return if (args.optString("action").trim().equals("dismiss", true)) null else RiskTier.TIER2
+        // G-03: an app-defined action that sounds consequential ("Delete", "Archive", "Send") is confirmed.
+        if (tool.name == "node_action") {
+            val custom = args.optString("custom").trim()
+            return if (custom.isNotEmpty() && TargetSemantics.consequential.containsMatchIn(custom)) RiskTier.TIER2 else null
+        }
         if (tool.name != "run_ussd") return null
         val code = args.optString("code").replace(Regex("\\s"), "")
         if (code.isEmpty()) return null

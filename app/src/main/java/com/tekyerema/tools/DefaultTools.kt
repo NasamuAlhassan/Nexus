@@ -24,6 +24,8 @@ fun defaultTools(): List<Tool> = listOf(
     CannotDoTool,
     // D-02 tool search (intercepted by the engine): loads tools the current step's subset left out
     FindTool,
+    // C-13 ask the user and wait inside the task (intercepted by the engine)
+    AskUserTool,
     // Native accelerators (justified case-by-case in the plan's §14 table)
     ReadNotificationsTool,
     SearchContactsTool,
@@ -53,6 +55,13 @@ fun defaultTools(): List<Tool> = listOf(
     ClipboardTool,        // E-19
     ShareTextTool,        // E-20
     OpenIntentTool,       // D-14 / E-04 intent + deep-link templates
+    EmergencyTool,        // L-04 call + text the emergency contact (confirmed)
+    // W7 GUI primitives beyond tap: node actions, find-by-scrolling, waiting, whole-page reading
+    NodeActionTool,       // G-01 / G-02 / G-03
+    ScrollToFindTool,     // G-18
+    WaitForElementTool,   // G-18
+    ReadAllTool,          // F-15
+    WebSearchTool,        // I-03 current facts with sources (owner-approved web search)
     // §A.2 reopened offline intents
     PlayMusicTool,
     OpenSettingTool,

@@ -60,6 +60,26 @@ sealed class FastIntent(val name: String) {
     /** H-08: a preference set by voice — key "rate" (slower|faster|normal), "verbosity" (brief|detailed|normal),
      *  "patience" (patient|quick|normal). */
     data class Preference(val key: String, val value: String) : FastIntent("PREFERENCE")
+    // ---- W6 ----
+    /** P-03 / P-06 / P-01: "text" | "color" | "describe". */
+    data class Camera(val mode: String) : FastIntent("CAMERA")
+    /** K-15: what changed on the screen since it was last described. */
+    object WhatChanged : FastIntent("WHAT_CHANGED")
+    /** K-09: "in" | "out" | "reset". */
+    data class Magnify(val action: String) : FastIntent("MAGNIFY")
+    /** L-04: remember [name] (a contact) as the emergency contact. */
+    data class SetEmergencyContact(val contact: String) : FastIntent("SET_EMERGENCY_CONTACT")
+    /** L-04: put a Ghana emergency line on the dial pad — "ambulance" | "police" | "fire" | "emergency". */
+    data class EmergencyLine(val service: String) : FastIntent("EMERGENCY_LINE")
+    // ---- W7 ----
+    /** A-13: "every day at 7 read my calendar", "at 9 pm remind me to take my medicine" (the user's words). */
+    data class CreateSchedule(val text: String) : FastIntent("CREATE_SCHEDULE")
+    object ListSchedules : FastIntent("LIST_SCHEDULES")
+    object ClearSchedules : FastIntent("CLEAR_SCHEDULES")
+    /** A-12: "tell me when Ama messages me" / "stop telling me when Ama messages". */
+    data class WatchSender(val who: String, val on: Boolean) : FastIntent("WATCH_SENDER")
+    /** I-07: where the last web answer came from; [links] = read the web addresses, not just the site names. */
+    data class Sources(val links: Boolean) : FastIntent("SOURCES")
     /** Flip a Quick Settings tile ([QuickTiles]) to [on]. */
     data class QuickToggle(val key: String, val on: Boolean) : FastIntent("TOGGLE_${key.uppercase()}")
 }
@@ -79,6 +99,13 @@ object FastIntentClassifier {
     fun classify(raw: String): FastIntent? {
         val g = raw.trim().lowercase().replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
         if (g.isEmpty()) return null
+        // W7, before the compound check: a schedule's goal may itself be compound (the trigger re-checks what may run).
+        scheduleIntent(g, raw)?.let { return it }
+        if (RE_LIST_SCHEDULES.containsMatchIn(g)) return FastIntent.ListSchedules
+        if (RE_CLEAR_SCHEDULES.matches(g)) return FastIntent.ClearSchedules
+        if (RE_SOURCES.matches(g)) return FastIntent.Sources(links = RE_LINK_WORD.containsMatchIn(g))
+        RE_UNWATCH.matchEntire(g)?.let { m -> return FastIntent.WatchSender(watchName(raw, m.groupValues[1]), on = false) }
+        RE_WATCH.matchEntire(g)?.let { m -> return FastIntent.WatchSender(watchName(raw, m.groupValues[1]), on = true) }
         // Compound / multi-step → the agent (the fast path is single deterministic action only).
         if (RE_MULTISTEP.containsMatchIn(g)) return null
 
@@ -125,6 +152,16 @@ object FastIntentClassifier {
 
             // H-08 preferences by voice (before the phone actions: "talk slower" is not a call).
             preference(g) != null -> preference(g)
+            // W6: camera, screen changes, magnification, emergency set-up.
+            RE_CAMERA_COLOR.containsMatchIn(g) -> FastIntent.Camera("color")
+            RE_CAMERA_TEXT.containsMatchIn(g) -> FastIntent.Camera("text")
+            RE_CAMERA_DESCRIBE.containsMatchIn(g) -> FastIntent.Camera("describe")
+            RE_WHAT_CHANGED.containsMatchIn(g) -> FastIntent.WhatChanged
+            RE_MAGNIFY_IN.containsMatchIn(g) -> FastIntent.Magnify("in")
+            RE_MAGNIFY_OUT.containsMatchIn(g) -> FastIntent.Magnify("out")
+            RE_MAGNIFY_RESET.containsMatchIn(g) -> FastIntent.Magnify("reset")
+            RE_SET_EMERGENCY.find(g) != null -> FastIntent.SetEmergencyContact(RE_SET_EMERGENCY.find(g)!!.groupValues[1].trim())
+            RE_EMERGENCY_LINE.find(g) != null -> FastIntent.EmergencyLine(emergencyService(RE_EMERGENCY_LINE.find(g)!!.groupValues[1]))
             // W4 phone actions — before lock/navigation so "lock" questions and call words aren't read as navigation.
             RE_ANSWER.matches(g) -> FastIntent.AnswerCall
             RE_END_CALL.matches(g) -> FastIntent.EndCall
@@ -180,6 +217,40 @@ object FastIntentClassifier {
     // Compound/multi-step markers → hand the whole thing to the agent.
     private val RE_MULTISTEP = Regex("\\b(and then|and|then|after that|na)\\b|;")
 
+    // ---- W7: schedules (A-13), notification rules (A-12), source readback (I-07)
+    private val RE_SCHEDULE_CUE = Regex(
+        "^(?:at \\d|at (?:noon|midday|midnight)\\b|every\\b|each\\b|daily\\b|on (?:weekdays|weekends|(?:mon|tues|wednes|thurs|fri|satur|sun)days?)\\b)" +
+            "|\\bremind me\\b|\\b(?:every|each) (?:day|morning|afternoon|evening|night|weekday|(?:mon|tues|wednes|thurs|fri|satur|sun)day)\\b" +
+            "|\\bdaily\\b|^(?:set|create|add|make) (?:a|an|me a) reminder\\b")
+    private val RE_NOT_SCHEDULE = Regex("\\b(?:alarm|timer|wake me)\\b")
+    private val RE_LIST_SCHEDULES = Regex("^(?:what|which) (?:are )?(?:my )?(?:schedules|reminders|scheduled tasks)\\b|" +
+        "^(?:list|read|tell me) (?:all )?(?:of )?my (?:schedules|reminders|scheduled tasks)$|^what reminders do i have|^do i have any (?:reminders|schedules)")
+    private val RE_CLEAR_SCHEDULES = Regex("^(?:cancel|delete|remove|clear|stop) (?:all )?(?:of )?my (?:schedules|reminders|scheduled tasks)$")
+    private val RE_SOURCES = Regex(
+        "^(?:what(?:'s| is| are| was| were)? (?:the |your |its )?sources?(?: for (?:that|this|it))?" +
+            "|(?:read|give|tell) (?:me )?(?:the |your )?sources?(?: for (?:that|this|it))?" +
+            "|where did (?:you|that|this|it) (?:get|find|come from|read)(?: (?:that|this|it))?(?: from)?" +
+            "|where(?:'s| is| was) (?:that|this|it) from" +
+            "|(?:what|which) (?:site|website|sites|websites) (?:was|is|were|are|did) (?:that|this|it)(?: come)?(?: from)?" +
+            "|(?:read|give|tell) (?:me )?(?:the )?(?:links?|web addresses?|websites?) for (?:that|this|it)(?: answer)?" +
+            "|sources? please)$")
+    private val RE_LINK_WORD = Regex("\\b(?:links?|addresses?|websites?|sites?)\\b")
+    private val RE_WATCH = Regex("^(?:tell|let) me (?:know )?when ([\\p{L}' .-]{2,40}?) (?:messages|texts|writes|sends|calls|emails|whatsapps)(?: me)?(?: something| anything)?$")
+    private val RE_UNWATCH = Regex("^stop (?:telling me|announcing|letting me know) (?:when |about )?(?:messages from )?([\\p{L}' .-]{2,40}?)(?:'s)?(?: (?:messages|texts|writes|sends|calls|emails))?(?: me)?$")
+
+    private fun scheduleIntent(g: String, raw: String): FastIntent? {
+        if (!RE_SCHEDULE_CUE.containsMatchIn(g) || RE_NOT_SCHEDULE.containsMatchIn(g)) return null
+        // "remind me to …" without a usable time still comes here, so the router can ask for the time.
+        val text = raw.trim()
+        return if (com.tekyerema.agent.triggers.ScheduleParser.parse(text) != null || g.contains("remind me")) FastIntent.CreateSchedule(text) else null
+    }
+
+    /** The name as the user said it (original case), found in the raw text. */
+    private fun watchName(raw: String, lower: String): String {
+        val i = raw.lowercase().indexOf(lower)
+        return (if (i >= 0) raw.substring(i, i + lower.length) else lower).trim()
+    }
+
     private val RE_TIME = Regex("\\b(what(?:'?s| is)?\\s+(?:the\\s+)?time|what\\s+time\\s+is\\s+it|tell\\s+me\\s+(?:the\\s+)?time|current\\s+time|check\\s+the\\s+time|bere\\s+bɛn|bɛre\\s+bɛn)\\b")
     private val RE_DAY = Regex("\\bwhat\\s+day\\b|\\bwhich\\s+day\\b|\\bis\\s+today\\s+\\w+day\\b|\\btell\\s+me\\s+the\\s+day\\b|\\bday\\s+(?:of\\s+the\\s+week|is\\s+it|is\\s+today)\\b")
     private val RE_DATE = Regex("\\bdate\\b")
@@ -211,6 +282,28 @@ object FastIntentClassifier {
     private val RE_BRIGHT_DOWN = Regex("\\b(?:decrease|lower|reduce|turn\\s+down|dim)\\b[^.]*\\bbright(?:ness|er)?\\b|\\bmake\\s+(?:the\\s+)?screen\\s+(?:darker|dimmer)\\b|\\b(?:darker|dimmer)\\b|\\bdim\\s+the\\s+screen\\b")
 
     private val RE_TORCH_OFF = Regex("\\b(?:flashlight|torch|flash\\s*light)\\b[^.]*\\boff\\b|\\boff\\b[^.]*\\b(?:flashlight|torch|flash\\s*light)\\b")
+    // ---- W6 camera / screen / magnification / emergency ----
+    // Camera phrases name a physical object or the camera, so "read my screen" never opens the camera.
+    private val RE_CAMERA_TEXT = Regex("\\bwhat does (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|page|medicine|book) say\\b|" +
+        "\\bread (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book)\\b|" +
+        "\\bread (?:it |this |the text )?(?:with|using) the camera\\b|^scan (?:this|it)$")
+    private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")
+    private val RE_CAMERA_DESCRIBE = Regex("\\bwhat(?:'s| is) in front of me\\b|\\bwhat am i holding\\b|\\bdescribe what (?:you see|is in front of me)\\b|" +
+        "\\blook at this for me\\b|\\bwhat is this (?:thing|object)\\b")
+    private val RE_WHAT_CHANGED = Regex("^(?:what(?:'s| has)? changed|what(?:'s| is) new on (?:the |my )?screen|anything new on (?:the |my )?screen)$")
+    private val RE_MAGNIFY_IN = Regex("\\bmagnify\\b|\\bzoom (?:in )?(?:on )?the screen\\b|\\bmake the screen bigger\\b")
+    private val RE_MAGNIFY_OUT = Regex("\\bzoom out (?:of )?the screen\\b|\\bmake the screen smaller\\b")
+    private val RE_MAGNIFY_RESET = Regex("\\b(?:stop|turn off|reset) (?:magnif(?:ying|ication)|zooming|the zoom)\\b")
+    private val RE_SET_EMERGENCY = Regex("^(?:set|make|save) (?:my )?emergency contact (?:to |as )?(.{2,40})$")
+    private val RE_EMERGENCY_LINE = Regex("^(?:please )?(?:call|get|dial|phone) (?:an? |the )?(ambulance|police|fire service|fire brigade|fire|emergency services?|emergency)(?: please)?$")
+
+    private fun emergencyService(s: String): String = when {
+        s.startsWith("ambulance") -> "ambulance"
+        s.startsWith("police") -> "police"
+        s.startsWith("fire") -> "fire"
+        else -> "emergency"
+    }
+
     // ---- H-08 preferences by voice ----
     private val RE_PREF_SLOWER = Regex("^(?:please\\s+)?(?:speak|talk|read)\\s+(?:a (?:bit|little) )?(?:more )?slow(?:er|ly)(?: please)?$|^slow down(?: please)?$")
     private val RE_PREF_FASTER = Regex("^(?:please\\s+)?(?:speak|talk|read)\\s+(?:a (?:bit|little) )?faster(?: please)?$|^speed up(?: please)?$")

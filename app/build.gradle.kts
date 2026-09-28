@@ -123,6 +123,10 @@ dependencies {
     // On-device OCR for the vision perception route (plan §6). Bundled model: works offline,
     // nothing leaves the device. Used only when the accessibility tree is insufficient.
     implementation("com.google.mlkit:text-recognition:16.0.1")
+    // P-01/P-03/P-06/P-09 camera perception (owner approved CAMERA 2026-09-28): CameraX preview + frame analysis.
+    implementation("androidx.camera:camera-camera2:1.3.4")
+    implementation("androidx.camera:camera-lifecycle:1.3.4")
+    implementation("androidx.camera:camera-view:1.3.4")
     // On-device ASR runtime: sherpa-onnx (static-linked onnxruntime), reused from the old project. Runs the
     // proven whisper-TINY per-language fine-tunes (Ghanaian English + Twi, tuned on the owner's command
     // register) fully offline — fast on the A20 (tiny, not base). Local AAR (not on Maven).

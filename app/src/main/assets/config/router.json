@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "router": {
+    "tiers": ["fast_path", "direct_answer", "retrieval", "local_brain", "cloud_operator"],
+    "escalation": { "onDeviation": true },
+    "network": { "weakKbps": 400, "fastModelWhenWeak": true }
+  },
+  "executor": {
+    "settle": { "quietMs": 350, "reactMs": 600, "timeoutMs": 1200 },
+    "locators": { "weights": { "viewId": 0.75, "hint": 0.7, "role": 0.5 }, "minScore": 0.5 },
+    "noop": { "switchToVision": true },
+    "loopGuard": { "cycleNudge": 2, "cycleStop": 3 },
+    "recovery": { "maxConsecutiveFailures": 3, "maxEscalations": 1, "visionOnFailure": true }
+  },
+  "answers": {
+    "citations": { "freshMs": 1800000, "maxSpoken": 3 }
+  }
+}

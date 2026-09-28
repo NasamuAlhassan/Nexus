@@ -35,6 +35,14 @@ class RoutingBrain(
     private val isOnline: () -> Boolean
 ) : AgentBrain {
 
+    companion object {
+        /** C-17: the engine's history line for the previous step reports a failure, a rejection or an unverified result. */
+        fun deviated(history: List<String>): Boolean {
+            val last = history.lastOrNull() ?: return false
+            return last.contains("verified=false") || Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
+        }
+    }
+
     @Volatile private var stickyCloud = false
     @Volatile private var cloudGoal: String? = null   // cached (possibly translated) goal for the cloud
 
@@ -48,12 +56,25 @@ class RoutingBrain(
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         // Cloud-first: hand EVERYTHING to the cloud brain (the relay = Claude), skipping LocalBrain. Sticky so
         // multi-step planning stays coherent; the (optional) Twi→English rewrite still runs once.
-        if (!stickyCloud && cloudFirst() && cloud != null && isOnline()) {
+        // N-10: not on a weak connection — the on-device brain answers what it can there without a slow round-trip.
+        // C-01: with the local_brain tier switched off, every request goes to the cloud operator the same way.
+        val skipLocal = !RouterTiers.enabled(RouterTiers.LOCAL)
+        if (!stickyCloud && (cloudFirst() || skipLocal) && cloud != null && isOnline() && (skipLocal || !isWeak())) {
             android.util.Log.i("Tekyerema", "[ROUTE] cloud-first: all requests → cloud brain '${ctx.goal.take(60)}'")
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = goalForCloud?.invoke(ctx.goal)?.takeIf { it.isNotBlank() }
         }
         if (stickyCloud && cloud != null) return cloud.decide(cloudCtx(ctx))
+
+        // C-17: the local brain's last step failed or didn't verify — a deviation from its routine plan. Hand the rest
+        // of the task to the cloud operator (sticky) instead of letting the rules try the same thing again.
+        if (cloud != null && isOnline() && deviated(ctx.history) &&
+            com.tekyerema.core.config.AppConfig.bool("router.escalation.onDeviation", true)) {
+            android.util.Log.i("Tekyerema", "[ROUTE] local step deviated → escalating to cloud brain mid-task")
+            stickyCloud = true
+            if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
+            return cloud.decide(cloudCtx(ctx))
+        }
 
         val d = local.decide(ctx)
         val escalatable = d is AgentDecision.CannotDo && (d.reasonClass == LocalBrain.DEFER || d.reasonClass == LocalBrain.NETWORK)
@@ -87,6 +108,8 @@ class RoutingBrain(
             else "I'm offline and I don't know that command yet. Offline I can " + LocalBrain.offlineCapabilities() + "."
         )
     }
+
+    private fun isWeak(): Boolean = try { com.tekyerema.core.NetworkMonitor.isWeak() } catch (_: Throwable) { false }
 
     /** The goal as the cloud should see it (computed once per task). §4.6 — do NOT replace the user's Twi with the
      *  machine translation: Khaya MT can mangle it (observed: "…tell Prince to come home" → "…asks print to clean

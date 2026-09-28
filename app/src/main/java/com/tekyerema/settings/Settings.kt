@@ -208,6 +208,14 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("allow_gemini_backup", com.tekyerema.core.config.AppConfig.bool("privacy.allowGeminiBackup", true))
         set(v) = put { putBoolean("allow_gemini_backup", v) }
 
+    /** L-04: the person called and texted (with your location) when you say "emergency". Set by voice or in Settings. */
+    var emergencyContactName: String
+        get() = prefs.getString("emergency_contact_name", "").orEmpty()
+        set(v) = put { putString("emergency_contact_name", v.trim()) }
+    var emergencyContactNumber: String
+        get() = prefs.getString("emergency_contact_number", "").orEmpty()
+        set(v) = put { putString("emergency_contact_number", v.filter { it.isDigit() || it == '+' }) }
+
     /** B-03: how long Tɛkyerɛma waits through pauses — "quick" | "normal" | "patient" (default from config). */
     var vadStrategy: String
         get() = prefs.getString("vad_strategy", null) ?: com.tekyerema.core.config.AppConfig.string("speech.vad.strategy", "normal")

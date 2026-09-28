@@ -35,7 +35,7 @@ private fun presenceOfVoice(v: VoiceUiState, a: AgentUiState): Presence = when (
     VoiceState.CAPTURED, VoiceState.TRANSCRIBING, VoiceState.UNDERSTANDING -> Presence.THINKING
     VoiceState.EXECUTING -> when (a.status) {
         AgentStatus.ACTING -> Presence.ACTING
-        AgentStatus.WAITING_CONFIRMATION -> Presence.CONFIRMING
+        AgentStatus.WAITING_CONFIRMATION, AgentStatus.ASKING -> Presence.CONFIRMING
         else -> Presence.THINKING
     }
     VoiceState.CONFIRMATION_REQUIRED -> Presence.CONFIRMING
@@ -44,7 +44,7 @@ private fun presenceOfVoice(v: VoiceUiState, a: AgentUiState): Presence = when (
     VoiceState.IDLE, VoiceState.CANCELLED, VoiceState.TYPING -> when (a.status) {   // typed/ADB goals with no voice turn
         AgentStatus.THINKING -> Presence.THINKING
         AgentStatus.ACTING -> Presence.ACTING
-        AgentStatus.WAITING_CONFIRMATION -> Presence.CONFIRMING
+        AgentStatus.WAITING_CONFIRMATION, AgentStatus.ASKING -> Presence.CONFIRMING
         else -> Presence.IDLE
     }
 }

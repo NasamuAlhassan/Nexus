@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "locales": {
+    "_note": "X-06 language packs: spoken phrases per locale. Keys missing here fall back to the wording in code. Twi lines are marked [owner: verify with a native speaker] until reviewed.",
+    "en": {
+      "progress": "Still working on it — step {step}.",
+      "progressNoStep": "Still working on it.",
+      "holdAck": "Okay, take your time.",
+      "confirmHold": "Okay, take your time. Say yes or no when you're ready."
+    },
+    "tw": {
+      "progress": "Mereyɛ ho adwuma da.",
+      "progressNoStep": "Mereyɛ ho adwuma da.",
+      "holdAck": "Yoo, twɛn.",
+      "confirmHold": "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
+    }
+  }
+}

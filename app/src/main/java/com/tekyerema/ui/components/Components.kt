@@ -55,6 +55,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -190,7 +191,8 @@ fun Hairline(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
  */
 @Composable
 fun PageTitle(text: String, onBack: (() -> Unit)? = null, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth()) {
+    // K-17: the page title is also the pane title, so TalkBack announces "Voice", "Permissions"… on arrival.
+    Column(modifier.fillMaxWidth().semantics { paneTitle = text }) {
         if (onBack != null) {
             IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp, top = 4.dp).size(52.dp)) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Tk.Text)

@@ -53,11 +53,26 @@ fun PermissionsScreen(onDone: () -> Unit) {
                 // Tɛkyerɛma open apps, place calls and drive MoMo from its service — without it those launches
                 // are silently blocked (REL-P0-1), so onboarding now asks for it after screen control.
                 if (step == 2 && Perms.screenControl(context)) step = 3
-                if (step == 3 && Perms.overlay(context)) onDone()
+                if (step == 3 && Perms.overlay(context)) step = 4
+                // K-10: notification access (reading and replying to messages) is the last step.
+                if (step == 4 && Perms.notifications(context)) onDone()
             }
         }
         owner.lifecycle.addObserver(obs)
         onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    // K-10: each step is SPOKEN too (unless TalkBack is reading the screen) — a blind user without a screen reader
+    // otherwise meets a silent page.
+    androidx.compose.runtime.LaunchedEffect(step) {
+        if (!com.tekyerema.voice.ScreenReader.active(context)) com.tekyerema.voice.VoiceEngine.announce(when (step) {
+            1 -> "Welcome to Tɛkyerɛma. To work for you it needs the microphone, calls, contacts, messages, location and calendar. " +
+                "Tap the big button at the bottom of the screen, then allow each one."
+            2 -> "Next, turn on screen control. Tap the button near the bottom; it opens Accessibility settings. Choose Tɛkyerɛma, " +
+                "switch it on, then come back."
+            3 -> "Next, let Tɛkyerɛma show over other apps. Tap the button near the bottom, switch it on, then come back."
+            else -> "Last step: let Tɛkyerɛma read your notifications, so it can read and reply to your messages. " +
+                "Tap the button near the bottom, switch it on, then come back. Or tap Skip."
+        })
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         step = if (Perms.screenControl(context)) 3 else 2
@@ -109,7 +124,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             BigButton("Not now", onClick = { step = 3 }, filled = false)
-        } else {
+        } else if (step == 3) {
             // REL-P0-1 — without "display over other apps", opening apps / placing calls / driving MoMo from
             // the background is silently blocked, and the confirmation card can't float over other apps.
             Text("Let it act for you", style = MaterialTheme.typography.titleLarge, color = Tk.Text,
@@ -122,7 +137,19 @@ fun PermissionsScreen(onDone: () -> Unit) {
             Spacer(Modifier.height(36.dp))
             BigButton("Turn on display over other apps", onClick = { Perms.openOverlaySettings(context) })
             Spacer(Modifier.height(12.dp))
-            BigButton("Continue anyway", onClick = onDone, filled = false)
+            BigButton("Continue anyway", onClick = { step = 4 }, filled = false)
+        } else {
+            Text("Read your messages", style = MaterialTheme.typography.titleLarge, color = Tk.Text,
+                modifier = Modifier.semantics { heading() })
+            Spacer(Modifier.height(10.dp))
+            Text(
+                "So Tɛkyerɛma can read your messages and notifications to you, and reply for you, turn on notification access for Tɛkyerɛma, then come back.",
+                style = MaterialTheme.typography.bodyLarge, color = Tk.TextSecondary
+            )
+            Spacer(Modifier.height(36.dp))
+            BigButton("Turn on notification access", onClick = { Perms.openNotificationAccess(context) })
+            Spacer(Modifier.height(12.dp))
+            BigButton("Skip for now", onClick = onDone, filled = false)
         }
         Spacer(Modifier.height(32.dp))
     }

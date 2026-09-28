@@ -18,7 +18,7 @@ import org.json.JSONObject
  * level first: node action → gesture at the node's bounds → gesture at vision coordinates.
  */
 
-private val TARGET_PARAMS = listOf(
+internal val TARGET_PARAMS = listOf(
     ToolParam("element_id", "integer", "Element id from the current screen.", required = false),
     ToolParam("label", "string", "Item text, if no element_id (scrolls to find it).", required = false),
     ToolParam("x", "integer", "source=vision elements only.", required = false),
@@ -32,12 +32,12 @@ val EXPECTS_PARAM = ToolParam(
 )
 
 // §1.19 — spoken to a user who can't see the screen, so it names the problem and the fix plainly.
-private const val NO_SERVICE = "I can't see or control your screen yet — Tɛkyerɛma's accessibility service is off. Turn it on in Settings, under Accessibility."
+internal const val NO_SERVICE = "I can't see or control your screen yet — Tɛkyerɛma's accessibility service is off. Turn it on in Settings, under Accessibility."
 // §1.20 — a FLAG_SECURE window blocks screen reading; say that instead of implying the screen is empty.
 private const val SECURE_SCREEN = "This screen is protected — the app blocks screen reading, so I can't tell you what's on it."
 
 /** Resolve the target at execution time, scrolling to reveal a label if the engine's static pass missed it. */
-private suspend fun resolveForExecute(args: JSONObject, ctx: ToolContext, ctrl: AccessibilityController, allowScroll: Boolean): Pair<ResolvedTarget?, String?> {
+internal suspend fun resolveForExecute(args: JSONObject, ctx: ToolContext, ctrl: AccessibilityController, allowScroll: Boolean): Pair<ResolvedTarget?, String?> {
     ctx.resolvedTarget?.let { return it to null }
     val target = TargetResolver.parse(args) ?: return null to "No target: give element_id, label, or (x,y) of a vision element."
     val (outcome, _) = TargetResolver.resolve(target, ctrl, ctx.observedBefore, allowScroll)
@@ -53,7 +53,7 @@ private suspend fun resolveForExecute(args: JSONObject, ctx: ToolContext, ctrl: 
     }
 }
 
-private fun weakVerify(before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+internal fun weakVerify(before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
     val changed = Verify.screenChanged(before, after)
     return VerificationResult(false, "screen changed=$changed (weak signal only)").let {
         if (!result.success) VerificationResult(false, "action failed") else it
@@ -307,8 +307,18 @@ object TypeTool : Tool {
         if (t == null) return ToolResult(false, err ?: "Could not resolve target.")
         val nodeId = t.nodeId ?: return ToolResult(false, "Typing needs an editable tree element, not a vision target.")
         if (t.element?.editable != true) return ToolResult(false, "Element $nodeId is not editable.")
-        val ok = ctrl.setText(nodeId, text, submit)
-        return ToolResult(ok, if (ok) "Entered text into element $nodeId${if (submit) " and submitted" else ""}." else "Could not set text on element $nodeId.", channel = "node")
+        var ok = ctrl.setText(nodeId, text, submit)
+        var how = "node"
+        // G-05: some fields (custom editors, some web inputs) reject ACTION_SET_TEXT; paste the text instead.
+        if (!ok && text.isNotEmpty()) {
+            val cm = ctx.appContext.getSystemService(android.content.ClipboardManager::class.java)
+            if (cm != null && try { cm.setPrimaryClip(android.content.ClipData.newPlainText("Tɛkyerɛma", text)); true } catch (_: Throwable) { false }) {
+                ok = ctrl.nodeAction(nodeId, "paste")
+                how = "paste"
+            }
+        }
+        return ToolResult(ok, if (ok) "Entered text into element $nodeId${if (how == "paste") " (pasted)" else ""}${if (submit && how == "node") " and submitted" else ""}."
+            else "Could not set text on element $nodeId.", channel = how)
     }
 
     override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {

@@ -97,6 +97,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         lastEventTime = SystemClock.uptimeMillis()
+        event?.let { noteAnnouncement(it) }   // F-17: "Message sent", toasts — evidence for verification
         // Hide the trigger while a Tɛkyerɛma screen is in front; show it over everything else.
         // Decided from the window that actually has focus, so our own overlay windows, the
         // keyboard, the shade and permission dialogs (which all report window-state changes
@@ -110,6 +111,8 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             if (pkg != null && cls != null && isActivity(pkg, cls)) {
                 fgActivityPkg = pkg
                 refreshTriggerVisibility(pkg)
+                // A-11: a user-configured offer for this app (flag off by default; cheap no-op for the same package).
+                if (pkg != packageName) try { com.tekyerema.agent.triggers.ProactiveRules.onForeground(this, pkg) } catch (_: Throwable) {}
             }
         }
     }
@@ -167,6 +170,18 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun priorForegroundPackage(): String? = priorApp
 
+    /** K-09: full-screen magnification for low-vision users (MagnificationController, API 24; needs
+     *  canControlMagnification). Steps of 1.5x up to 5x; "out" below 1.2x resets. */
+    override fun magnify(action: String): Float? = try {
+        val mc = magnificationController
+        val cur = mc.scale
+        when (action) {
+            "in" -> { val s = (cur * 1.5f).coerceIn(1.5f, 5f); mc.setScale(s, true); s }
+            "out" -> { val s = cur / 1.5f; if (s < 1.2f) { mc.reset(true); 1f } else { mc.setScale(s, true); s } }
+            else -> { mc.reset(true); 1f }
+        }
+    } catch (t: Throwable) { Log.w("Tekyerema", "[MAGNIFY] unavailable: ${t.message}"); null }
+
     // ---------------------------------------------------------------- A-01 / A-04 / J-14 activation + kill switch
     private val keyPattern = KeyPattern()
 
@@ -192,10 +207,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     /** One gesture, two meanings: when Tɛkyerɛma is busy it STOPS everything (J-14 kill switch); otherwise it opens
      *  the voice screen (in front, so the microphone is allowed) and listens. */
     private fun talkOrStop(source: String) {
-        val st = AgentEngine.state.value.status
-        val busy = com.tekyerema.voice.VoiceEngine.isRunning || st == com.tekyerema.agent.AgentStatus.THINKING ||
-            st == com.tekyerema.agent.AgentStatus.ACTING || st == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION ||
-            st == com.tekyerema.agent.AgentStatus.SECURE_INPUT
+        val busy = com.tekyerema.voice.VoiceEngine.isRunning || AgentEngine.isBusy
         Log.i("Tekyerema", "[TRIGGER] $source → ${if (busy) "STOP (kill switch)" else "talk"}")
         if (busy) android.os.Handler(mainLooper).post { com.tekyerema.voice.VoiceEngine.cancel() }
         else try {
@@ -251,11 +263,24 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override suspend fun waitForSettle(timeoutMs: Long) {
         val start = SystemClock.uptimeMillis()
-        val quietMs = 350L
+        val quietMs = com.tekyerema.core.config.AppConfig.long("executor.settle.quietMs", 350L)
         while (SystemClock.uptimeMillis() - start < timeoutMs) {
             if (SystemClock.uptimeMillis() - lastEventTime >= quietMs) return
             delay(100)
         }
+    }
+
+    override fun lastEventUptime(): Long = lastEventTime
+
+    override suspend fun waitForChange(sinceUptime: Long, reactMs: Long, timeoutMs: Long) {
+        val start = SystemClock.uptimeMillis()
+        // Phase 1: did anything react to the action? Poll until an event lands after the mark.
+        while (lastEventTime <= sinceUptime) {
+            if (SystemClock.uptimeMillis() - start >= reactMs) return
+            delay(50)
+        }
+        // Phase 2: it reacted — wait for it to finish changing (bounded by what's left of the timeout).
+        waitForSettle((timeoutMs - (SystemClock.uptimeMillis() - start)).coerceAtLeast(0L))
     }
 
     // ------------------------------------------------------------------ perception
@@ -316,7 +341,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                             range = ri?.let { UiRange(it.min, it.max, it.current) },
                             viewId = try { node.viewIdResourceName } catch (t: Throwable) { null },
                             collection = collectionHint(node),
-                            hint = if (node.isEditable) try { node.hintText?.toString()?.takeIf { it.isNotBlank() } } catch (t: Throwable) { null } else null
+                            hint = if (node.isEditable) try { node.hintText?.toString()?.takeIf { it.isNotBlank() } } catch (t: Throwable) { null } else null,
+                            heading = isHeading(node),
+                            link = webRole(node)?.contains("link", true) == true,
+                            customActions = customActionsOf(node)
                         )
                     )
                 } else if (label != null) {
@@ -334,6 +362,14 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         val window = try { root.window } catch (t: Throwable) { null }
         val title = try { window?.title?.toString() } catch (t: Throwable) { null }
         val pkg = root.packageName?.toString()
+        // F-13: say when the focused window isn't an ordinary app window (a system dialog, the keyboard, an overlay).
+        val wtype = when (try { window?.type } catch (_: Throwable) { null }) {
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_SYSTEM -> "system"
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD -> "keyboard"
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY -> "overlay"
+            android.view.accessibility.AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split-screen divider"
+            else -> null
+        }
         return UiSnapshot(
             appPackage = pkg,
             screenTitle = title,
@@ -342,8 +378,42 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             perception = PerceptionRoute("tree", "tree traversal"),
             secureWindow = pkg != null && pkg == secureWindowPkg,
             strippedHiddenText = stripped,
-            appName = pkg?.let { appNameOf(it) }
+            appName = pkg?.let { appNameOf(it) },
+            windowType = wtype,
+            truncated = visited >= maxVisited || elements.size >= maxCollected,   // F-01
+            announcements = recentAnnouncements()                                  // F-17
         )
+    }
+
+    private fun isHeading(n: AccessibilityNodeInfo): Boolean =
+        (Build.VERSION.SDK_INT >= 28 && try { n.isHeading } catch (_: Throwable) { false }) ||
+            webRole(n)?.startsWith("heading", true) == true
+
+    /** F-14: Chrome/WebView put the web role ("link", "heading 2"…) in the node's extras. */
+    private fun webRole(n: AccessibilityNodeInfo): String? = try {
+        n.extras?.getCharSequence("AccessibilityNodeInfo.roleDescription")?.toString()
+    } catch (_: Throwable) { null }
+
+    /** G-03: app-defined actions (custom ids with a label) — not the platform's own ids (bit flags, android.R.id). */
+    private fun customActionsOf(n: AccessibilityNodeInfo): List<String> = try {
+        n.actionList.filter { a -> a.label != null && a.id >= 0x01000000 && (a.id and 0xFFFF0000.toInt()) != 0x01020000 }
+            .mapNotNull { Sanitize.label(it.label?.toString()) }
+    } catch (_: Throwable) { emptyList() }
+
+    // ---------------------------------------------------------------- F-17 announcements and toasts
+    private val announced = ArrayDeque<Pair<Long, String>>()
+
+    private fun noteAnnouncement(e: AccessibilityEvent) {
+        val isToast = e.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
+            e.className?.toString()?.contains("Toast", true) == true
+        if (e.eventType != AccessibilityEvent.TYPE_ANNOUNCEMENT && !isToast) return
+        val text = Sanitize.label(e.text?.joinToString(" ")) ?: return
+        synchronized(announced) { announced.addLast(SystemClock.uptimeMillis() to text.take(120)); while (announced.size > 5) announced.removeFirst() }
+    }
+
+    private fun recentAnnouncements(): List<String> {
+        val cutoff = SystemClock.uptimeMillis() - 10_000L
+        return synchronized(announced) { announced.filter { it.first >= cutoff }.map { it.second } }
     }
 
     private val appNames = java.util.concurrent.ConcurrentHashMap<String, String>()
@@ -478,10 +548,55 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     override suspend fun scrollElement(id: Int, direction: String): Boolean {
         val node = nodeMap[id] ?: return false
         val scrollable = if (node.isScrollable) node else ancestorWhere(node, 8) { it.isScrollable } ?: return false
+        // G-02: keep the AXIS — a horizontal carousel scrolled "down" used to be scrolled forward on its only axis.
+        val directional = when (direction.lowercase()) {
+            "up" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP
+            "down" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN
+            "left" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_LEFT
+            "right" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_RIGHT
+            else -> null
+        }
+        if (directional != null && scrollable.actionList.any { it.id == directional.id }) {
+            if (try { scrollable.performAction(directional.id) } catch (_: Throwable) { false }) return true
+        }
         val backward = direction.equals("up", true) || direction.equals("backward", true) || direction.equals("left", true)
         val action = if (backward) AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         else AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
         return try { scrollable.performAction(action) } catch (t: Throwable) { false }
+    }
+
+    override suspend fun nodeAction(id: Int, action: String): Boolean {
+        val node = nodeMap[id] ?: return false
+        val a = action.trim().lowercase()
+        if (a.startsWith("custom:")) {
+            // G-03: an action the app defines on this element (its label is what TalkBack's actions menu shows).
+            val label = action.substringAfter(':').trim()
+            val custom = node.actionList.firstOrNull { it.label?.toString()?.equals(label, true) == true }
+                ?: ancestorWhere(node, 4) { n -> n.actionList.any { it.label?.toString()?.equals(label, true) == true } }
+                    ?.actionList?.firstOrNull { it.label?.toString()?.equals(label, true) == true }
+                ?: return false
+            val owner = if (node.actionList.any { it.id == custom.id }) node else ancestorWhere(node, 4) { n -> n.actionList.any { it.id == custom.id } } ?: node
+            return try { owner.performAction(custom.id) } catch (_: Throwable) { false }
+        }
+        val id2 = when (a) {
+            "select" -> AccessibilityNodeInfo.ACTION_SELECT
+            "expand" -> AccessibilityNodeInfo.ACTION_EXPAND
+            "collapse" -> AccessibilityNodeInfo.ACTION_COLLAPSE
+            "dismiss" -> AccessibilityNodeInfo.ACTION_DISMISS
+            "copy" -> AccessibilityNodeInfo.ACTION_COPY
+            "paste" -> AccessibilityNodeInfo.ACTION_PASTE
+            "cut" -> AccessibilityNodeInfo.ACTION_CUT
+            "show_on_screen" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id
+            "context_click" -> AccessibilityNodeInfo.AccessibilityAction.ACTION_CONTEXT_CLICK.id
+            "page_up" -> if (Build.VERSION.SDK_INT >= 29) AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_UP.id else return false
+            "page_down" -> if (Build.VERSION.SDK_INT >= 29) AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN.id else return false
+            "page_left" -> if (Build.VERSION.SDK_INT >= 29) AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_LEFT.id else return false
+            "page_right" -> if (Build.VERSION.SDK_INT >= 29) AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_RIGHT.id else return false
+            else -> return false
+        }
+        // The action may live on the element or a close ancestor (a row that owns "expand").
+        val target = if (node.actionList.any { it.id == id2 }) node else ancestorWhere(node, 4) { n -> n.actionList.any { it.id == id2 } } ?: node
+        return try { target.performAction(id2) } catch (_: Throwable) { false }
     }
 
     override suspend fun focusElement(id: Int): Boolean {

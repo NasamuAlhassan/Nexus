@@ -41,6 +41,20 @@ class LocalBrain : AgentBrain {
         twi = looksTwi(raw)   // phrase spoken confirmations in the language the user used
 
         // --- online-only intents: honest network gate (router decides refuse vs escalate) ---
+        // --- F-12: "call this number" — the number on the screen, when there is exactly one (the engine confirms). ---
+        if (RE_THIS_NUMBER.containsMatchIn(g)) {
+            val labels = ctx.screen.optJSONArray("elements")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it)?.optString("label") } }.orEmpty()
+            val nums = ScreenEntities.phoneNumbers(labels)
+            when {
+                nums.size == 1 && g.contains("copy") -> { pendingResultSpeak = true; return call("clipboard", JSONObject().put("action", "copy").put("text", nums[0]), "copy on-screen number") }
+                nums.size == 1 -> return call("make_call", JSONObject().put("number", nums[0]), "call on-screen number")
+                nums.size > 1 -> return AgentDecision.Done("I see ${nums.size} numbers: ${nums.take(3).joinToString(", ") { it.chunked(3).joinToString(" ") }}. Which one?")
+            }
+        }
+
+        // --- L-04 emergency: before the network gate (a call and an SMS need no internet). The engine confirms. ---
+        if (RE_EMERGENCY.containsMatchIn(g)) { pendingResultSpeak = true; return call("emergency", JSONObject(), "emergency") }
+
         if (OfflineCapability.needsInternet(raw)) return network(raw)
 
         // --- compound / multi-step requests → let the cloud operator plan them (fast path is single-action) ---
@@ -199,26 +213,41 @@ class LocalBrain : AgentBrain {
         if (appName == null && (src == "none" || src == "no controller"))
             return AgentDecision.Done("I can't see your screen — Tɛkyerɛma's accessibility service is off. Turn it on in Settings, under Accessibility.")
         val app = listOf("app", "foreground", "package", "screen").map { screen.optString(it) }.firstOrNull { it.isNotBlank() }
+        // K-01 / F-10 orientation: where you are, the main things you can DO (buttons, fields, switches), then
+        // what is listed — so "what's on my screen" answers "where am I and what can I do here".
+        val controls = ArrayList<String>()
         val labels = ArrayList<String>()
         val els = screen.optJSONArray("elements")
         if (els != null) {
-            var i = 0
-            while (i < els.length() && labels.size < 6) {
-                val l = els.optJSONObject(i)?.optString("label")?.trim()
-                if (!l.isNullOrEmpty() && l.length in 2..40 && labels.none { it.equals(l, true) }) labels.add(l)
-                i++
+            for (i in 0 until els.length()) {
+                val o = els.optJSONObject(i) ?: continue
+                val l = o.optString("label").trim()
+                if (l.length !in 2..40) continue
+                val flags = o.optJSONArray("flags")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                val control = "editable" in flags || "checkable" in flags ||
+                    ("clickable" in flags && Regex("(?i)button|imageview|fab").containsMatchIn(o.optString("role")))
+                if (control && controls.size < 4 && controls.none { it.equals(l, true) }) controls.add(l)
+                else if (!control && labels.size < 6 && labels.none { it.equals(l, true) }) labels.add(l)
             }
         }
         // Speak the app's name, never its package id ("You're in com.google.android.apps.nexuslauncher").
         val name = screen.optString("appName").takeIf { it.isNotBlank() }
+        val title = screen.optString("screen").takeIf { it.isNotBlank() && it != name && it.length <= 40 }
         val where = when {
-            name != null && name.startsWith("the ") -> "You're on $name. "
-            name != null -> "You're in $name. "
-            !app.isNullOrBlank() && app != "unknown" && !app.contains('.') -> "You're in $app. "
+            name != null && name.startsWith("the ") -> "You're on $name"
+            name != null -> "You're in $name"
+            !app.isNullOrBlank() && app != "unknown" && !app.contains('.') -> "You're in $app"
+            else -> ""
+        }.let { if (it.isNotEmpty() && title != null) "$it, on $title. " else if (it.isNotEmpty()) "$it. " else "" }
+        val can = if (controls.isEmpty()) "" else "You can use: ${controls.joinToString(", ")}. "
+        val what = when {
+            labels.isNotEmpty() -> "I can see: ${labels.joinToString(", ")}."
+            controls.isEmpty() -> "I don't see any labelled items."
             else -> ""
         }
-        val what = if (labels.isEmpty()) "I don't see any labelled items." else "I can see: ${labels.joinToString(", ")}."
-        return AgentDecision.Done(where + what)
+        val more = screen.optInt("elementCount", 0).let { n -> if (n > 25) " There's more if you scroll." else "" }
+        ScreenMemory.rememberJson(screen)   // K-15: "what changed?" compares against what was just described
+        return AgentDecision.Done((where + can + what + more).trim())
     }
 
     // ---- helpers ----
@@ -402,6 +431,11 @@ class LocalBrain : AgentBrain {
         // (§1.9). Bare "and"/Twi "na"/"then"/";" all count — the earlier regex missed a plain "and", so
         // "open whatsapp and send prince a message" fell through to RE_OPEN and mis-opened a single app.
         private val RE_MULTISTEP = Regex("\\b(and|then|after that|na)\\b|;", RegexOption.IGNORE_CASE)
+        // F-12: a number the user points at on the screen.
+        private val RE_THIS_NUMBER = Regex("\\b(?:call|dial|ring|copy) (?:this|that|the) (?:phone )?number\\b|\\bnumber on (?:the |my )?screen\\b", RegexOption.IGNORE_CASE)
+        // L-04: an urgent request for personal help (the public lines are "call an ambulance/police" on the fast path).
+        private val RE_EMERGENCY = Regex("^(?:please )?(?:help me(?: please)?|i need help|i need urgent help|this is an emergency|emergency|" +
+            "call (?:my )?emergency contact|i(?:'ve| have) fallen(?: down)?|mmoa(?: me)?|boa me)[.!]*$", RegexOption.IGNORE_CASE)
         private val RE_SETTING_OFF = Regex("\\b(turn|switch|put)\\s+(\\w+\\s+){0,3}?off\\b|\\bdisable\\b|\\bdeactivate\\b", RegexOption.IGNORE_CASE)
         private val RE_SETTING_ON = Regex("\\b(turn|switch|put)\\s+(\\w+\\s+){0,3}?on\\b|\\benable\\b|\\bactivate\\b", RegexOption.IGNORE_CASE)
         // Action verbs that essentially never occur inside an app LABEL — if "open <x>" carries one, <x> is

@@ -9,9 +9,16 @@
       "provider": "groq",
       "model": "openai/gpt-oss-120b",
       "fallbacks": ["openai/gpt-oss-20b"],
+      "fastModel": "openai/gpt-oss-20b",
       "temperature": 0.2,
       "requestTokens": 4800,
       "timeouts": {"connectSec": 8, "callSec": 35}
+    },
+    "guard": {
+      "provider": "groq",
+      "model": "meta-llama/llama-prompt-guard-2-86m",
+      "role": "guard",
+      "_note": "O-14: separate free-tier quota bucket; used by J-19 (flag off until verified on device)"
     },
     "gemini": {
       "provider": "gemini",

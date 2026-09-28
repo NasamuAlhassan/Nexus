@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "triggers": {
+    "quietHours": "22:00-06:00",
+    "maxRetries": 5,
+    "retryDelayMs": 120000,
+    "runTimeoutMs": 120000,
+    "notification": [],
+    "schedule": []
+  },
+  "proactive": {
+    "rules": []
+  }
+}

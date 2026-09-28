@@ -34,9 +34,7 @@ class TalkTileService : TileService() {
     }
 
     private fun busy(): Boolean {
-        val st = AgentEngine.state.value.status
-        return VoiceEngine.isRunning || st == AgentStatus.THINKING || st == AgentStatus.ACTING ||
-            st == AgentStatus.WAITING_CONFIRMATION || st == AgentStatus.SECURE_INPUT
+        return VoiceEngine.isRunning || AgentEngine.isBusy
     }
 
     private fun refresh() {

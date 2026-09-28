@@ -4,12 +4,13 @@
      genuine assistive tool for blind/low-vision users (the policy basis for using
      the Accessibility API to operate the UI). -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewTextChanged|typeNotificationStateChanged"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewTextChanged|typeNotificationStateChanged|typeAnnouncement"
     android:accessibilityFeedbackType="feedbackSpoken|feedbackGeneric"
     android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagRequestAccessibilityButton|flagRequestFilterKeyEvents|flagRequestFingerprintGestures"
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRequestFingerprintGestures="true"
+    android:canControlMagnification="true"
     android:canRetrieveWindowContent="true"
     android:canTakeScreenshot="true"
     android:description="@string/accessibility_service_description"

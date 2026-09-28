@@ -25,18 +25,39 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
     // Bounded so a slow/unreachable brain can never leave the user in "thinking" for minutes (§5/§10/§20).
     // The on-device LocalBrain handles simple goals ("open whatsapp") with NO network at all, so the cloud
     // is only for genuinely complex requests; 35 s is ample for those and fails fast otherwise.
-    private val client = OkHttpClient.Builder()
-        .callTimeout(AppConfig.long("models.planner.timeouts.callSec", 35), TimeUnit.SECONDS)
-        .connectTimeout(AppConfig.long("models.planner.timeouts.connectSec", 8), TimeUnit.SECONDS)
-        .readTimeout(AppConfig.long("models.planner.timeouts.callSec", 35), TimeUnit.SECONDS)
-        .build()
+    // N-04: derived from the shared pool (a warm TLS connection is reused across steps and tasks).
+    private val client = com.tekyerema.core.Http.client(
+        AppConfig.long("models.planner.timeouts.connectSec", 8), AppConfig.long("models.planner.timeouts.callSec", 35))
 
     /** Groq limits are per MODEL per organization: when the primary model's DAILY quota is gone on every key, the
      *  same keys still have a full, separate budget on the fallback model (seen: gpt-oss-120b 429 "tokens per day"
      *  on every key while gpt-oss-20b answered fresh). The free Gemini tier is only 20 requests/day, so this is the
      *  fallback that actually carries a multi-step task. */
     override suspend fun decide(ctx: BrainContext): AgentDecision {
-        val models = (listOf(settings.groqModel) + AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS)).distinct()
+        var models = (listOf(settings.groqModel) + AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS)).distinct()
+        val fast = AppConfig.string("models.planner.fastModel", "openai/gpt-oss-20b")
+        // C-08: a simple step (a direct knowledge answer) goes to the fast model first, keeping the deep model's own
+        // per-model daily/minute quota for GUI tasks.
+        if (ctx.simple && fast in models && com.tekyerema.core.config.FeatureFlags.isEnabled("C-08", true))
+            models = listOf(fast) + (models - fast)
+        // N-10: on a weak connection the smaller model answers sooner (less to generate over a slow link).
+        else if (fast in models && com.tekyerema.core.config.FeatureFlags.isEnabled("N-10", true) &&
+            AppConfig.bool("router.network.fastModelWhenWeak", true) && com.tekyerema.core.NetworkMonitor.isWeak()) {
+            android.util.Log.i("Tekyerema", "[LLM] weak network → $fast first")
+            models = listOf(fast) + (models - fast)
+        }
+        // N-15: Groq limits are per MODEL. If every key is cooling on the first model (per-minute cap) for longer than
+        // a short wait, take this step on the next model whose bucket is free now, instead of stalling.
+        val keys = settings.groqApiKeys
+        if (models.size > 1 && keys.isNotEmpty() && com.tekyerema.core.config.FeatureFlags.isEnabled("N-15", true)) {
+            val now = System.currentTimeMillis()
+            fun waitFor(m: String) = keys.minOf { coolUntil["$m|$it"] ?: 0L } - now
+            val maxWait = AppConfig.long("router.quota.maxWaitMs", 1500L)
+            if (waitFor(models[0]) > maxWait) models.drop(1).firstOrNull { waitFor(it) <= 0 }?.let { free ->
+                android.util.Log.i("Tekyerema", "[LLM] ${models[0]} is cooling on every key → this step on $free (separate quota)")
+                models = listOf(free) + (models - free)
+            }
+        }
         var last: AgentDecision = AgentDecision.Fail("no model configured")
         for ((i, model) in models.withIndex()) {
             last = decideWith(model, ctx)
@@ -98,7 +119,9 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                 .put("tools", ctx.openAiTools)
                 .put("tool_choice", "auto")
                 .put("temperature", AppConfig.double("models.planner.temperature", 0.2))
-            if (settings.groqReasoningEffort.isNotBlank()) body.put("reasoning_effort", settings.groqReasoningEffort)
+            // C-21: a debug override wins; else this step's effort (raised by the engine after failures); else the default.
+            val effort = settings.reasoningEffortOverride?.takeIf { it.isNotBlank() } ?: ctx.effort ?: settings.groqReasoningEffort
+            if (effort.isNotBlank()) body.put("reasoning_effort", effort)
 
             val request = Request.Builder()
                 .url(url)

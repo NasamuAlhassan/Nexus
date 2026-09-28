@@ -16,11 +16,9 @@ import java.util.concurrent.TimeUnit
 /** Product planner: Gemini via the Generative Language REST API with function calling. */
 class GeminiBrain(private val settings: Settings) : AgentBrain {
 
-    private val client = OkHttpClient.Builder()
-        .callTimeout(AppConfig.long("models.gemini.timeouts.callSec", 45), TimeUnit.SECONDS)
-        .connectTimeout(AppConfig.long("models.gemini.timeouts.connectSec", 15), TimeUnit.SECONDS)
-        .readTimeout(AppConfig.long("models.gemini.timeouts.callSec", 45), TimeUnit.SECONDS)
-        .build()
+    // N-04: derived from the shared pool.
+    private val client = com.tekyerema.core.Http.client(
+        AppConfig.long("models.gemini.timeouts.connectSec", 15), AppConfig.long("models.gemini.timeouts.callSec", 45))
 
     override suspend fun decide(ctx: BrainContext): AgentDecision = withContext(Dispatchers.IO) {
         val apiKey = settings.geminiApiKey

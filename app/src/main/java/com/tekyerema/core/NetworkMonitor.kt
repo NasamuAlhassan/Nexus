@@ -36,11 +36,28 @@ object NetworkMonitor {
     /** True only when a validated internet-capable network is present (DEGRADED counts as usable-ish). */
     fun isOnline(): Boolean = state() != Connectivity.OFFLINE
 
+    @Volatile private var downKbps: Int = 0
+
+    /**
+     * N-10: a usable but WEAK connection — unvalidated, or the OS's downstream estimate is under `router.network.weakKbps`
+     * (default 400 kbps, roughly 2G/EDGE). The router then keeps work on the device and uses the smaller cloud model.
+     */
+    fun isWeak(): Boolean {
+        val s = state()
+        if (s == Connectivity.OFFLINE) return false
+        if (s == Connectivity.DEGRADED) return true
+        return isWeakLink(downKbps, com.tekyerema.core.config.AppConfig.int("router.network.weakKbps", 400))
+    }
+
+    /** Pure: 0 means the OS gave no estimate — not weak. */
+    fun isWeakLink(downKbps: Int, weakKbps: Int): Boolean = downKbps in 1 until weakKbps
+
     private fun recompute() {
         val mgr = cm ?: return
         cached = try {
             val net = mgr.activeNetwork
             val caps = if (net != null) mgr.getNetworkCapabilities(net) else null
+            downKbps = try { caps?.linkDownstreamBandwidthKbps ?: 0 } catch (_: Throwable) { 0 }
             when {
                 caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) -> Connectivity.OFFLINE
                 caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) -> Connectivity.ONLINE

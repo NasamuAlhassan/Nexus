@@ -8,14 +8,20 @@ object AppResolver {
 
     data class AppInfo(val label: String, val packageName: String)
 
-    fun launchable(context: Context): List<AppInfo> {
+    /** H-11: loading every launcher label is ~100-300 ms on the A20e and happened on every "open …"; the list is
+     *  cached briefly (installs are rare, and a miss re-queries once before giving up). */
+    @Volatile private var cached: Pair<Long, List<AppInfo>>? = null
+
+    fun launchable(context: Context, fresh: Boolean = false): List<AppInfo> {
+        val ttl = com.tekyerema.core.config.AppConfig.long("cache.apps.ttlMs", 120_000L)
+        cached?.let { (at, list) -> if (!fresh && System.currentTimeMillis() - at < ttl) return list }
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return pm.queryIntentActivities(intent, 0).mapNotNull { ri ->
             val pkg = ri.activityInfo?.packageName ?: return@mapNotNull null
             val label = ri.loadLabel(pm)?.toString() ?: pkg
             AppInfo(label, pkg)
-        }.distinctBy { it.packageName }
+        }.distinctBy { it.packageName }.also { cached = System.currentTimeMillis() to it }
     }
 
     /** Result of resolving a name: exactly one app, a genuine ambiguity to ask about, or nothing. */
@@ -29,7 +35,11 @@ object AppResolver {
      *  "not resolved" here (null) so a caller that can't ask never silently launches a coin-flip guess. */
     fun resolve(context: Context, query: String): AppInfo? = (resolveDetailed(context, query) as? Match.One)?.app
 
-    fun resolveDetailed(context: Context, query: String): Match = match(launchable(context), query)
+    fun resolveDetailed(context: Context, query: String): Match =
+        match(launchable(context), query).let { m ->
+            // H-11: a miss against the cached list re-queries once (the app may have just been installed).
+            if (m is Match.None) match(launchable(context, fresh = true), query) else m
+        }
 
     /** Words that carry no app identity ("open THE zorblax APP") — stripped before fuzzy matching so they
      *  can't produce a match on their own (the token "app" used to match "MBWhatsApp"). Exact label/package

@@ -115,7 +115,12 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
                 // If not conversational (visual/TalkBack), the IDLE that follows closes us.
             }
             // A11Y-H3: a screen-reader user explores by touch (slower) — don't dismiss the panel out from under them.
-            Presence.IDLE -> { delay(if (Perms.talkBack(context)) 12000 else 4000); if (!VoiceEngine.isRunning && Perms.mic(context)) onClose() }
+            // I-08: the answer card stays long enough to be read (≈60 ms a character, up to 15 s).
+            Presence.IDLE -> {
+                val readMs = (voice.spoken.length * 60L).coerceAtMost(15_000L)
+                delay(maxOf(if (Perms.talkBack(context)) 12000L else 4000L, readMs))
+                if (!VoiceEngine.isRunning && Perms.mic(context)) onClose()
+            }
             else -> {}
         }
     }

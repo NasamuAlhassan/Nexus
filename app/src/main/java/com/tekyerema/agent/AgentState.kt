@@ -7,6 +7,10 @@ enum class AgentStatus {
      *  all suspended; the user enters the secret directly and says "done" to resume. The PIN never enters
      *  the observation pipeline. */
     SECURE_INPUT,
+    /** C-13: the task asked the user a question (ask_user) and waits for the answer — the run continues after it. */
+    ASKING,
+    /** C-12: the user said "pause"; the run waits at its next step until "continue". */
+    PAUSED,
     COMPLETED, COMPLETED_UNVERIFIED, CANNOT_DO, FAILED, STOPPED
 }
 
@@ -60,8 +64,12 @@ data class AgentUiState(
     /** G-13: why the agent handed the screen to the user in SECURE_INPUT — "momo_pin" | "pin" | "password" | "otp" |
      *  "captcha" — so the spoken instruction matches the screen instead of always saying "MoMo PIN". */
     val handoffReason: String? = null,
+    /** C-13: the question an ask_user step is waiting on (spoken + shown). */
+    val pendingQuestion: String? = null,
     val serviceReady: Boolean = false,
     val hasApiKey: Boolean = false,
     val brain: String = "not configured",
-    val lastStats: String? = null
+    val lastStats: String? = null,
+    /** C-15: the last run's typed result as JSON (status, summary, steps, actions, verified, goal). */
+    val lastResult: String? = null
 )

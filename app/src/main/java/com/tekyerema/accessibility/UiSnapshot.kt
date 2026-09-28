@@ -48,7 +48,13 @@ data class UiElement(
     /** Generic structure hint, e.g. "list 12 rows" or "row 3" — no app semantics. */
     val collection: String? = null,
     /** An editable's placeholder hint ("Search", "Message") even when it holds text — internal (policy), never shown. */
-    val hint: String? = null
+    val hint: String? = null,
+    /** F-14: a heading (native isHeading, or a web page's heading role) — how screen-reader users skim a page. */
+    val heading: Boolean = false,
+    /** F-14: a web link. */
+    val link: Boolean = false,
+    /** G-03: actions the app itself defines on this element ("Archive", "Mark as read") — TalkBack's actions menu. */
+    val customActions: List<String> = emptyList()
 ) {
     val interactive: Boolean
         get() = clickable || longClickable || editable || scrollable || checkable || range != null
@@ -86,7 +92,13 @@ data class UiSnapshot(
     val strippedHiddenText: Int = 0,
     /** What a person calls [appPackage]: the launcher label ("Settings"), or "the home screen" for the
      *  launcher. Spoken to the user instead of a package id; null when unknown. */
-    val appName: String? = null
+    val appName: String? = null,
+    /** F-13: the kind of window this came from when it isn't an ordinary app window ("system", "keyboard", "overlay"). */
+    val windowType: String? = null,
+    /** F-01: the traversal hit its node cap — the screen is longer than what was read. */
+    val truncated: Boolean = false,
+    /** F-17: what the app just announced (TalkBack announcements, toasts) in the last few seconds. */
+    val announcements: List<String> = emptyList()
 ) {
     fun element(id: Int): UiElement? = elements.firstOrNull { it.id == id }
 
@@ -121,7 +133,10 @@ data class UiSnapshot(
             if (e.focused) flags.add("focused")
             if (e.password) flags.add("password")
             if (e.range != null) flags.add("adjustable")
+            if (e.heading) flags.add("heading")   // F-14
+            if (e.link) flags.add("link")         // F-14
             if (flags.isNotEmpty()) o.put("flags", JSONArray(flags))
+            if (e.customActions.isNotEmpty()) o.put("custom_actions", JSONArray(e.customActions.take(6)))   // G-03
             // Keep the explicit primitive vocabulary per element: the model can't be trusted to map the
             // "adjustable" flag to the `set_range` primitive (names differ), so `actions` earns its bytes.
             val acts = e.actions
@@ -140,6 +155,9 @@ data class UiSnapshot(
             .put("elementCount", elements.size)
             .put("perception", JSONObject().put("source", perception.source).put("reason", perception.reason))
             .apply { if (secureWindow) put("secureWindow", true) }
+            .apply { if (windowType != null) put("window", windowType) }                       // F-13
+            .apply { if (announcements.isNotEmpty()) put("announced", JSONArray(announcements)) }  // F-17
+            .apply { if (truncated) put("longScreen", "only part of this screen was read — scroll for more") }   // F-01
             .put("elements", arr)
             .apply {
                 if (truncated) put(

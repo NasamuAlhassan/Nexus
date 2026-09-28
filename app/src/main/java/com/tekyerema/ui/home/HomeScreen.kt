@@ -165,12 +165,14 @@ fun HomeContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
+                // I-08: a long answer keeps ALL its words (smaller type, up to 8 lines) instead of being cut at 3 lines.
+                val long = phrase.length > 90
                 if (phrase.isNotEmpty()) Text(
                     text = phrase,
-                    style = MaterialTheme.typography.headlineMedium,
+                    style = if (long) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
                     color = if (presence == Presence.IDLE) Tk.TextSecondary else Tk.Text,
                     textAlign = TextAlign.Center,
-                    maxLines = 3,
+                    maxLines = if (long) 8 else 3,
                     modifier = Modifier.fillMaxWidth().semantics { if (announce) liveRegion = LiveRegionMode.Polite }
                 )
                 if (hint.isNotEmpty()) {

@@ -14,7 +14,9 @@ class PolicyEngine(
         CapabilityScope.DEVICE_CONTROL,
         CapabilityScope.COMMS_READ,
         CapabilityScope.COMMS_SEND,
-        CapabilityScope.SETTINGS
+        CapabilityScope.SETTINGS,
+        // I-03: web search (owner-approved 2026-09-28). A query copied from screen text is still confirmed (externalScopes).
+        CapabilityScope.WEB
     )
 ) {
     /** Scopes where a screen-derived payload crossing the boundary must be confirmed. */

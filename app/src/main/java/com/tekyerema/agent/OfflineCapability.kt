@@ -20,6 +20,9 @@ object OfflineCapability {
         Regex("\\b(news|headlines)\\b", RegexOption.IGNORE_CASE),
         Regex("\\b(share|stock)\\s+price\\b|\\bexchange\\s+rate\\b|\\bhow much is\\b", RegexOption.IGNORE_CASE),
         Regex("\\b(latest|today'?s|current|live)\\b.*\\b(price|score|result|rate|news|weather)\\b", RegexOption.IGNORE_CASE),
+        // I-02: schedules and relative dates only live data can answer; a little Twi (nnɛ = today, ɔkyena = tomorrow, nsɛm = news).
+        Regex("\\b(open now|opening hours|closing time|who won|fixtures?|kick-?off|match (today|tonight|tomorrow))\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(nnɛ|nne|ɔkyena|okyena|nsɛm|nsem)\\b", RegexOption.IGNORE_CASE),
         // open-ended general-knowledge questions → need the online reasoning brain
         Regex("^(who|what|when|where|why|how)\\b(?!'?s\\s+(on|my)\\b).*\\?*$", RegexOption.IGNORE_CASE),
         Regex("\\b(tell me about|explain|translate)\\b", RegexOption.IGNORE_CASE)
@@ -29,7 +32,10 @@ object OfflineCapability {
     private val LOCAL_OVERRIDE = listOf(
         Regex("\\bon\\s+(my|the)\\s+screen\\b", RegexOption.IGNORE_CASE),
         Regex("\\bwhat('?s| is| am i)\\b.*\\b(screen|looking at|showing|open)\\b", RegexOption.IGNORE_CASE),
-        Regex("\\b(read|describe)\\b.*\\bscreen\\b", RegexOption.IGNORE_CASE)
+        Regex("\\b(read|describe)\\b.*\\bscreen\\b", RegexOption.IGNORE_CASE),
+        // K-01: "where is the send button?", "which app am I in?" are about the phone, not the web.
+        Regex("\\bwhere (is|are) (the|my)\\b.*\\b(button|icon|setting|settings|option|menu|tab|field|box|link)\\b", RegexOption.IGNORE_CASE),
+        Regex("\\b(which|what) app (am i|is this|is open)\\b|\\bwhat screen\\b", RegexOption.IGNORE_CASE)
     )
 
     fun needsInternet(goal: String): Boolean {

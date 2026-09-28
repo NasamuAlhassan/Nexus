@@ -16,7 +16,11 @@ data class BrainContext(
     val conversation: List<String> = emptyList(),
     /** Compact structured PROGRESS (current app/screen, known entities, recent problems) from [TaskMemory],
      *  so the brain needn't reconstruct task state from the flat history. Additive + optional. */
-    val progress: String = ""
+    val progress: String = "",
+    /** C-21: reasoning effort for THIS step ("low" | "medium" | "high"; null = the configured default). */
+    val effort: String? = null,
+    /** C-08: a step the fast model can take (a direct knowledge answer) — saves the deep model's quota. */
+    val simple: Boolean = false
 )
 
 sealed class AgentDecision {
