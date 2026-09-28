@@ -516,7 +516,8 @@ object ReadScreenTool : Tool {
             return ToolResult(true, "That app is on your do-not-read list, so I won't read it.", channel = "none")
         if (snap.secureWindow && snap.elements.none { !it.label.isNullOrBlank() })
             return ToolResult(true, SECURE_SCREEN, JSONObject().put("secure", true), channel = "none")
-        val parts = com.tekyerema.agent.ScreenReadout.compose(snap)
+        // Parts sized to ~20 s of speech at the user's rate (voice/ReadingPace), not a fixed 480 characters (~30 s).
+        val parts = com.tekyerema.agent.ScreenReadout.compose(snap, com.tekyerema.voice.ReadingPace.partChars())
         // K-15: "what changed?" compares against what was just read.
         com.tekyerema.agent.ScreenMemory.remember(snap.appPackage, snap.elements.mapNotNull { e -> e.label?.takeIf { it.isNotBlank() } })
         return ToolResult(true, com.tekyerema.agent.ScreenReadCursor.start(parts, key ?: com.tekyerema.agent.ScreenReadCursor.keyOf(snap)),

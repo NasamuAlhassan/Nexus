@@ -4,7 +4,14 @@
     "bargeIn": {
       "enabled": false,
       "minChars": 60,
-      "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself. Turn on per device after checking; SelfEcho still guards against it."
+      "duplex": true,
+      "matchVolume": true,
+      "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself (the reply played on the media stream, which the platform AEC does not take as its echo reference). With duplex on, a barge-in reply plays on the voice-communication path (MODE_IN_COMMUNICATION + loudspeaker, call volume matched to the media volume) so the AEC can cancel it; never during a call or with a headset. Turn enabled on per device after checking; SelfEcho still guards against it."
+    },
+    "reading": {
+      "partSeconds": 20,
+      "charsPerSecond": 15,
+      "_note": "A screen reading is spoken in parts of about partSeconds at the user's speech rate (was a fixed 480 characters, ~30 s), each ending 'There's more — say continue'; the mic re-opens after each part for 'continue' or 'stop'."
     }
   },
   "ux": {

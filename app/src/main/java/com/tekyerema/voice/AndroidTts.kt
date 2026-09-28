@@ -71,36 +71,35 @@ class AndroidTts(context: Context) : TtsProvider {
         }
         // B-15/K-07: our stream (accessibility when TalkBack drives the phone) + may-duck focus for the duration.
         try { engine.setAudioAttributes(focus.attributes(AudioFocus.Kind.SPEAK)) } catch (_: Throwable) {}
-        focus.acquire(AudioFocus.Kind.SPEAK)
+        // Our OWN focus request, released only by us: a newer line used to acquire focus, then this line's finally
+        // released it, and the newer line played with the music at full volume.
+        val focusToken = focus.acquire(AudioFocus.Kind.SPEAK)
         val chunks = SpeechChunks.split(text, com.tekyerema.core.config.AppConfig.int("speech.tts.chunkChars", 180))
         val t0 = android.os.SystemClock.uptimeMillis()
         try {
             return suspendCancellableCoroutine { cont ->
                 // B-06: queue every chunk now (the engine pipelines synthesis) and finish on the LAST one's onDone.
                 val ids = chunks.indices.map { "tk-" + System.nanoTime() + "-" + it }
-                engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {
-                        if (utteranceId == ids.first()) lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0   // Q-01
-                    }
-                    override fun onDone(utteranceId: String?) { if (utteranceId == ids.last() && cont.isActive) cont.resume(true) }
-                    // Flushed by a newer utterance or stop(): end this one instead of leaving the caller suspended.
-                    // Only for OUR ids: this listener replaced the previous call's, so the flushed earlier line's onStop
-                    // lands here too — taking it as ours ended a question's speech at once and opened the mic over it.
-                    override fun onStop(utteranceId: String?, interrupted: Boolean) { if (utteranceId in ids && cont.isActive) cont.resume(false) }
-                    @Deprecated("deprecated in API 21")
-                    override fun onError(utteranceId: String?) { if (utteranceId in ids && cont.isActive) cont.resume(false) }
-                    override fun onError(utteranceId: String?, errorCode: Int) { if (utteranceId in ids && cont.isActive) cont.resume(false) }
-                })
+                val call = Utterances.Call(ids, onFirstAudio = { lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0 }) { ok ->   // Q-01
+                    if (cont.isActive) cont.resume(ok)
+                }
+                // QUEUE_FLUSH below drops whatever this engine was still saying. End those callers now — they used to stay
+                // suspended forever once their listener was replaced (a progress line talked over by a confirmation never
+                // returned, and its later cancellation stopped whatever was speaking by then).
+                utterances.begin(call)
+                engine.setOnUtteranceProgressListener(utterances.listener)
                 for ((i, c) in chunks.withIndex()) {
                     val rc = engine.speak(c, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, ids[i])
-                    if (rc != TextToSpeech.SUCCESS) { if (cont.isActive) cont.resume(false); break }
+                    if (rc != TextToSpeech.SUCCESS) { utterances.finish(call, false); break }
                 }
-                cont.invokeOnCancellation { engine.stop() }
+                cont.invokeOnCancellation { if (utterances.isCurrent(call)) engine.stop(); utterances.finish(call, false) }
             }
         } finally {
-            focus.release()
+            focus.release(focusToken)
         }
     }
+
+    private val utterances = Utterances()
 
     private val focus = AudioFocus(context)
 
@@ -115,4 +114,45 @@ class AndroidTts(context: Context) : TtsProvider {
 
     override fun stop() { try { engine.stop() } catch (_: Throwable) {} }
     override fun shutdown() { try { engine.stop(); engine.shutdown() } catch (_: Throwable) {} }
+}
+
+/**
+ * Who is waiting on which utterance of ONE TextToSpeech instance. A single listener serves every caller: the engine
+ * keeps only one listener, and each speak() used to install its own, so the caller it replaced was never told its
+ * line was flushed and stayed suspended. Pure (no Android) → unit-tested.
+ */
+internal class Utterances {
+    class Call(val ids: List<String>, val onFirstAudio: () -> Unit = {}, val onEnd: (Boolean) -> Unit)
+
+    private val byId = java.util.concurrent.ConcurrentHashMap<String, Call>()
+    @Volatile private var current: Call? = null
+
+    /** [call] is about to QUEUE_FLUSH: every earlier caller's line is being dropped — end them (not spoken fully). */
+    fun begin(call: Call) {
+        byId.values.toSet().forEach { if (it !== call) finish(it, false) }
+        call.ids.forEach { byId[it] = call }
+        current = call
+    }
+
+    fun isCurrent(call: Call) = current === call
+
+    /** Ends [call] once (later callbacks for its ids find nothing). */
+    fun finish(call: Call, ok: Boolean) {
+        var mine = false
+        call.ids.forEach { if (byId.remove(it, call)) mine = true }
+        if (current === call) current = null
+        if (mine) call.onEnd(ok)
+    }
+
+    private fun owner(id: String?): Call? = id?.let { byId[it] }   // ConcurrentHashMap rejects a null key
+
+    val listener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) { owner(utteranceId)?.let { c -> if (c.ids.first() == utteranceId) c.onFirstAudio() } }
+        override fun onDone(utteranceId: String?) { owner(utteranceId)?.let { c -> if (c.ids.last() == utteranceId) finish(c, true) } }
+        // Stopped, or flushed by a newer line: only the caller that owns this id ends.
+        override fun onStop(utteranceId: String?, interrupted: Boolean) { owner(utteranceId)?.let { finish(it, false) } }
+        @Deprecated("deprecated in API 21")
+        override fun onError(utteranceId: String?) { owner(utteranceId)?.let { finish(it, false) } }
+        override fun onError(utteranceId: String?, errorCode: Int) { owner(utteranceId)?.let { finish(it, false) } }
+    }
 }

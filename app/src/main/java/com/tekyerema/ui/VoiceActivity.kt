@@ -101,7 +101,8 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     LaunchedEffect(Unit) {
         // C-12: arriving while a task works (the mic free) opens an interjection — pause, status or a correction.
         // A task waiting on the user (a question nobody is listening for): opening Tɛkyerɛma is the reply.
-        if (!VoiceEngine.isRunning || VoiceEngine.canInterject || VoiceEngine.canRespond) {
+        // Still reading out the last reply: opening Tɛkyerɛma means "I want to talk" — stop reading and listen.
+        if (!VoiceEngine.isRunning || VoiceEngine.canInterject || VoiceEngine.canRespond || VoiceEngine.canPreempt) {
             // A11Y-H2: when a screen reader is driving, let its window announcement finish before opening the
             // (gained) mic, so TalkBack's own speech isn't captured as a command.
             if (Perms.talkBack(context)) delay(1200)

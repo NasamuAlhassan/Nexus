@@ -56,6 +56,8 @@ object VoiceEngine {
     val canInterject: Boolean get() = initialized && controller.canInterject
     /** The task waits on the user and nothing is listening for the reply — a wake or a tap should answer it. */
     val canRespond: Boolean get() = initialized && controller.canRespond
+    /** Only our own reply is in the way — opening Tɛkyerɛma stops it and listens (C-12). */
+    val canPreempt: Boolean get() = initialized && controller.canPreempt
 
     fun init(app: Application) {
         if (initialized) return
@@ -96,6 +98,7 @@ object VoiceEngine {
             "language layer: ${layer.summary()} | " +
             "cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
+        val duplex = DuplexAudio(app)   // B-07
         controller = VoiceController(
             // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our
             // tekyerema-ghen-tiny) via sherpa-onnx are the OFFLINE path — Twi always stays on-device. For
@@ -141,6 +144,10 @@ object VoiceEngine {
             // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
             // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
             bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
+            // …and the reply itself on the voice-communication path while that mic listens, so the echo canceller has
+            // our voice as its reference (DuplexAudio). Only when barge-in is on (below).
+            duplexBegin = { duplex.begin() },
+            duplexEnd = { duplex.end() },
             verbosity = { settings.verbosity },   // B-13
             // C-10: long tasks keep working (time on the user never counts); check-ins + notification cover the wait.
             agentTimeoutMs = com.tekyerema.core.config.AppConfig.long("agent.limits.maxTaskMs", 600_000L),
@@ -218,6 +225,7 @@ object VoiceEngine {
 
     private fun applyVoiceSettings() {
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
+        ReadingPace.rate = when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }   // readings sized in seconds
         systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
     }
 
@@ -233,12 +241,11 @@ object VoiceEngine {
 
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */
     fun toggle() = controller.toggle()
-    /** C-12: starting a turn while a task runs is an interjection (stop / pause / continue / status / a correction). */
-    fun start() = when {
-        controller.canRespond -> controller.respond()   // the task is waiting on the user: this is the reply
-        AgentEngine.isBusy -> controller.interject()
-        else -> controller.start()
-    }
+    /** Talk: the reply to a waiting prompt, an interjection while a task runs (stop / pause / continue / status / a
+     *  correction, C-12), or a new turn — cutting our own reply short if it is still being read (see NewRequest). */
+    fun start() = controller.start()
+    /** The circle tapped while Tɛkyerɛma talks: stop talking and listen. While a task works it stays the kill switch. */
+    fun interrupt() = controller.interrupt()
     /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button). */
     fun respond() { if (initialized) controller.respond() }
     /** Listen once more after a reply so the conversation can continue; silence just rests (no nag). */
@@ -247,6 +254,8 @@ object VoiceEngine {
 
     /** Typed command → the same agent entry point as an ASR transcript (see VoiceController.submitText). */
     fun submitText(text: String): Boolean = controller.submitText(text)
+    /** Typed command with what happened to it (a notice for the screen when it went to a running task, etc.). */
+    fun submitTyped(text: String): VoiceController.TypedResult = controller.submitTyped(text)
     fun beginTyping() = controller.beginTyping()
     fun endTyping() = controller.endTyping()
 }
