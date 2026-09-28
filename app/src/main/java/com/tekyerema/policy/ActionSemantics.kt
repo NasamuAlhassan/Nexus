@@ -92,6 +92,18 @@ object ActionSemantics {
         if (verb != null && text.isNotBlank()) {
             return "${verb.replaceFirstChar { it.uppercaseChar() }} “${text.take(60)}”?"
         }
+        // Consent and money: someone who can't see the screen must hear what pressing it MEANS, not just its caption.
+        if (text.isNotBlank()) {
+            val shown = "Tap “${text.take(60)}”?"
+            when (TargetSemantics.consentKind(text, target, anchoredOk = target == null || (target.clickable && !target.editable))) {
+                TargetSemantics.Consent.ACCOUNT -> return "$shown This signs you in, makes an account, or shares your account with this app."
+                TargetSemantics.Consent.INSTALL -> return "$shown This installs or turns on something on your phone."
+                TargetSemantics.Consent.PERMISSION -> return "$shown This gives a permission or approves a request."
+                TargetSemantics.Consent.REMOVE -> return "$shown This removes data or turns a protection off, and may not be undone."
+                null -> {}
+            }
+            if (TargetSemantics.isSpendCaption(text, target)) return "$shown This may charge you money."
+        }
         // An UNLABELLED control can't be named, and "Tap element 5?" means nothing to someone who can't see the
         // screen — say what it may do instead (the gate only fires for one in a compose context).
         if (primitive == "tap" && text.isBlank()) {
