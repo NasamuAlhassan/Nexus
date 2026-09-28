@@ -87,14 +87,19 @@ class WakeWordService : Service() {
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
                 if (now - hb >= 10_000) {                          // heartbeat: the tuning window into live scores
-                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]}")
+                    // frames = 80 ms frames scored in these ~10 s (125 = keeping up with real time); ms = scorer time
+                    // per frame (must stay under 80); full = frames that needed the full recompute (the peak changed).
+                    val st = scorer.takeStats()
+                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]} " +
+                        "frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} full=${st[3]} incremental=${scorer.incremental} ${scorer.takeReasons()}")
                     hb = now; top = 0f
                 }
                 // A turn owns the mic — except while a task is working with the mic free, when the wake word keeps
                 // listening so the user can interject ("Hey Tɛkyerɛma… pause / what are you doing / send it to Kofi").
                 if (handling || (VoiceEngine.isRunning && !VoiceEngine.canInterject)) { release(); delay(250); continue }
                 if (rec == null) {
-                    rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 8))
+                    // ~2.5 s of buffering (32 frames): a slow scoring frame is absorbed instead of dropping audio.
+                    rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 32))
                     if (rec == null) { delay(1000); continue }
                     gate.reset(); scorer.reset()                     // fresh listen: no audio from before the pause
                 }
