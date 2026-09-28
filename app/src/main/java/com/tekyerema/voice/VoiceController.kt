@@ -749,8 +749,7 @@ class VoiceController(
             fail(VoiceStage.EXECUTION, "The assistant took too long to respond.", "Sorry, that took too long. Try again, or ask for one step at a time."); return null
         }
         val resultText = finalState.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text
-        val steps = finalState.lastResult?.let { try { org.json.JSONObject(it).optInt("steps") } catch (_: Throwable) { 0 } } ?: 0
-        return Outcome(finalState.status, spokenFor(finalState.status, resultText, steps))
+        return Outcome(finalState.status, spokenFor(finalState.status, resultText))
     }
 
     /**
@@ -791,7 +790,8 @@ class VoiceController(
     /**
      * K-02 — a blind user gets nothing from the thinking animation, and the two opening fillers end after a few
      * seconds. Past that, speak a short progress line every `ux.progress.intervalMs` while the agent is working
-     * (never while it asks or waits on the user), with the step number, up to `ux.progress.maxLines` times.
+     * (never while it asks or waits on the user), up to `ux.progress.maxLines` times. Never the step number — the
+     * owner heard "step 4… step 5…" on every long task (2026-09-28); steps are the agent's bookkeeping, not news.
      */
     private suspend fun progressLoop(goal: String) {
         val cfg = com.tekyerema.core.config.AppConfig
@@ -804,14 +804,11 @@ class VoiceController(
             val working = st.status == AgentStatus.THINKING || st.status == AgentStatus.ACTING
             if (working && _state.value.state == VoiceState.EXECUTING) {
                 fillers?.stop()
-                val step = st.log.lastOrNull { it.kind == LogEntry.Kind.PLAN }?.text
-                    ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
                 val lang = forceLanguage() ?: sessionLanguage()
                 val twi = lang == Lang.TWI
-                // B-13 "detailed": say what it's doing right now ("I'm opening an app, on step 3…"), not just "still working".
+                // B-13 "detailed": say what it's doing right now ("I'm opening an app…"), not just "still working".
                 val line = if (verbosity() == "detailed" && !twi) agent.statusLine()
-                    else if (step != null && !twi) Phrases.get("progress", false, "Still working on it — step {step}.", "step" to step)
-                    else Phrases.get(if (twi) "progress" else "progressNoStep", twi, if (twi) "Mereyɛ ho adwuma da." else "Still working on it.")
+                    else Phrases.get("progress", twi, if (twi) "Mereyɛ ho adwuma da." else "Still working on it.")
                 cues.progress()
                 // B-13: "brief" users get the progress tick only — no spoken line.
                 if (verbosity() != "brief")
@@ -823,14 +820,13 @@ class VoiceController(
     }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
-    private fun spokenFor(status: AgentStatus, resultText: String?, steps: Int = 0): String {
+    private fun spokenFor(status: AgentStatus, resultText: String?): String {
         // B-13: "brief" keeps the first sentence of the reply; the honesty tail is added AFTER trimming, never dropped.
+        // ("detailed" no longer adds "That took N steps." — no spoken step numbers, owner 2026-09-28.)
         val text = resultText?.let { if (verbosity() == "brief") SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
-        // B-13: "detailed" also says how much work it took.
-        val detail = if (verbosity() == "detailed" && steps > 1) " That took $steps steps." else ""
         return when (status) {
-            AgentStatus.COMPLETED -> (text ?: "Done.") + detail
-            AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it." + detail
+            AgentStatus.COMPLETED -> text ?: "Done."
+            AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it."
             AgentStatus.CANNOT_DO -> text ?: "I can't do that."
             AgentStatus.FAILED -> text ?: "That didn't work."
             AgentStatus.STOPPED -> if (declinedByVoice) "" else "Stopped."   // a voice "no" was already acknowledged

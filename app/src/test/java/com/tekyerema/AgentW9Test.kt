@@ -127,4 +127,16 @@ class AgentW9Test {
         assertNull("a rule can't reach anything outside the fast path", RouterRules.match("send money", rules))
         assertNull(RouterRules.match("something else", rules))
     }
+
+    /** Owner, on the A20e: "it keeps mentioning the step number when performing an action". */
+    @Test fun spoken_progress_never_says_a_step_number() {
+        val dir = listOf(java.io.File("src/main/assets/config"), java.io.File("app/src/main/assets/config")).first { it.isDirectory }
+        try {
+            com.tekyerema.core.config.AppConfig.loadFrom(dir.listFiles { f -> f.name.endsWith(".json") }!!.map { "config/${it.name}" to it.readText() })
+            for (twi in listOf(false, true)) {
+                val line = com.tekyerema.voice.Phrases.get("progress", twi, "Still working on it.")
+                assertFalse(line, Regex("(?i)step|\\{").containsMatchIn(line))
+            }
+        } finally { com.tekyerema.core.config.AppConfig.loadFrom(emptyList()) }
+    }
 }

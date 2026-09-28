@@ -281,12 +281,11 @@ object AgentEngine {
     /** C-13: the user's answer to an ask_user question (null = no answer / cancelled). */
     fun answer(text: String?) { answerChannel.trySend(text?.trim()?.ifBlank { null }) }
 
-    /** C-12: "what are you doing?" — the goal, the step and the current action in plain words. */
+    /** C-12: "what are you doing?" — the goal and the current action in plain words (no step numbers: owner, 2026-09-28). */
     fun statusLine(): String {
         val st = _state.value
         if (!isBusy) return "I'm not working on anything right now."
         val plan = st.log.lastOrNull { it.kind == LogEntry.Kind.PLAN }?.text.orEmpty()
-        val step = Regex("^Step (\\d+)").find(plan)?.groupValues?.get(1)
         val tool = Regex("^Step \\d+: ([a-z_]+)\\(").find(plan)?.groupValues?.get(1)
         val doing = when (tool) {
             null -> "thinking"
@@ -296,7 +295,7 @@ object AgentEngine {
             "web_search" -> "searching the web"; else -> tool.replace('_', ' ')
         }
         val where = if (st.status == AgentStatus.PAUSED) "I'm paused" else "I'm $doing"
-        return "$where${step?.let { ", on step $it" } ?: ""}, working on: ${st.goal ?: "your request"}."
+        return "$where, working on: ${st.goal ?: "your request"}."
     }
 
     /** N-04: warm the cloud brain's connection while the user is still speaking (called when the mic opens). */

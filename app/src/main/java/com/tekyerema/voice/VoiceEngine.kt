@@ -181,11 +181,7 @@ object VoiceEngine {
         AgentStatus.SECURE_INPUT -> "Secure step — finish it on the phone yourself, then say \"done\"."
         AgentStatus.ASKING -> "Waiting for your answer: " + (st.pendingQuestion ?: "").take(120)
         AgentStatus.PAUSED -> "Paused — say \"continue\" when you're ready."
-        else -> {
-            val step = st.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.PLAN }?.text
-                ?.let { Regex("^Step (\\d+)").find(it)?.groupValues?.get(1) }
-            if (step != null) "Working on it — step $step." else "Working on your request."
-        }
+        else -> "Working on your request."   // no step numbers — TalkBack reads this line too (owner, 2026-09-28)
     }
 
     /** N-08: under memory pressure, drop the on-device ASR models when no voice turn is using them (they reload on
