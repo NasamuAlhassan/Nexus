@@ -101,7 +101,8 @@ class WakeWordService : Service() {
                 // listening so the user can interject ("Hey Tɛkyerɛma… pause / what are you doing / send it to Kofi").
                 // (`handling` stays true for the whole wake-started turn, so it must not block this — seen on the A20e:
                 // the mic was released for an entire task and "Hey Tɛkyerɛma, stop" could not be heard.)
-                if (interjecting || ((handling || VoiceEngine.isRunning) && !VoiceEngine.canInterject)) { release(); delay(250); continue }
+                // Listen while a task works with the mic free (interjection) or waits on a reply nobody is listening for.
+                if (interjecting || ((handling || VoiceEngine.isRunning) && !VoiceEngine.canInterject && !VoiceEngine.canRespond)) { release(); delay(250); continue }
                 if (rec == null) {
                     // ~2.5 s of buffering (32 frames): a slow scoring frame is absorbed instead of dropping audio.
                     rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 32))
@@ -208,10 +209,11 @@ class WakeWordService : Service() {
 
     /** A wake match: hand the mic to a voice turn, then resume wake listening only once it's fully done. */
     private fun onWake() {
-        if (VoiceEngine.isRunning) {
-            // C-12: a task is working — this wake is an interjection, heard on the answer mic while the task runs on.
+        if (VoiceEngine.isRunning || VoiceEngine.canRespond) {
+            // C-12: a task is working — this wake is an interjection, heard on the answer mic while the task runs on;
+            // or the task waits on the user — this wake is the reply (VoiceEngine.start routes it to respond()).
             // Checked BEFORE [handling]: a task started by an earlier wake keeps `handling` set until it ends.
-            if (!VoiceEngine.canInterject || interjecting) return
+            if (!(VoiceEngine.canInterject || VoiceEngine.canRespond) || interjecting) return
             interjecting = true
             scope.launch {
                 try { withContext(Dispatchers.Main) { VoiceEngine.start() }; delay(1_500) } finally { interjecting = false }

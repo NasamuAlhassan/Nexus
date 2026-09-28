@@ -126,7 +126,14 @@ class VoiceController(
     private var followUpChain = 0
     private val maxFollowUps = 10
 
-    val isRunning: Boolean get() = job?.isActive == true || confirmJob?.isActive == true
+    /** A voice turn, or a listen for a pending prompt's reply (both hold the microphone). */
+    val isRunning: Boolean get() = job?.isActive == true || confirmJob?.isActive == true ||
+        askJob?.isActive == true || secureJob?.isActive == true
+
+    /** The task is waiting on the user (a confirmation, a question, the secure step) and nothing is listening for the
+     *  reply — "Hey Tɛkyerɛma", the panel's Answer button or opening Tɛkyerɛma should reopen the mic for it ([respond]). */
+    val canRespond: Boolean get() = agent.state.value.status in PROMPTS &&
+        askJob?.isActive != true && confirmJob?.isActive != true && secureJob?.isActive != true
 
     /** C-12: a task is working and nothing is using the microphone — the wake word may listen and interject now. */
     val canInterject: Boolean get() = agent.busy && _state.value.state == VoiceState.EXECUTING &&
@@ -141,6 +148,7 @@ class VoiceController(
         // voice turn, typed text or ADB — and stops the moment the agent moves on (e.g. a button).
         observerScope.launch {
             var lastPrompt: String? = null
+            var lastQuestion: String? = null   // asked once per question; after that the user reopens it (respond)
             agent.state.collect { st ->
                 when (st.status) {
                     AgentStatus.WAITING_CONFIRMATION -> {
@@ -162,13 +170,17 @@ class VoiceController(
                     // C-13: the task asked a question — say it, listen for the answer, hand it back to the run.
                     AgentStatus.ASKING -> {
                         val q = st.pendingQuestion
-                        if (q != null && askJob?.isActive != true) askJob = observerScope.launch { askByVoice(q) }
+                        if (q != null && q != lastQuestion && askJob?.isActive != true) {
+                            lastQuestion = q
+                            askJob = observerScope.launch { askByVoice(q) }
+                        }
                     }
                     else -> {
                         lastPrompt = null
+                        lastQuestion = null
                         if (confirmJob?.isActive == true) confirmJob?.cancel()
                         if (secureJob?.isActive == true) secureJob?.cancel()
-                        if (askJob?.isActive == true) { askJob?.cancel(); hideAsking() }
+                        if (askJob?.isActive == true) askJob?.cancel()   // the prompt panel follows the agent's state
                         if (_state.value.confirmPhase != ConfirmPhase.NONE)
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                     }
@@ -209,10 +221,14 @@ class VoiceController(
         }
     }
 
-    /** C-13: speak the task's question and listen (patiently) for the answer; two silences = no answer. */
+    /**
+     * C-13: speak the task's question and listen (patiently) for the answer. Two silences no longer end the task
+     * (owner, 2026-09-28: "when it needs feedback, sometimes the thing doesn't appear for you to talk back") — the
+     * question stays open on the prompt panel until the engine's own timeout, and "Hey Tɛkyerɛma", the panel's
+     * Answer button or opening Tɛkyerɛma listens again ([respond]).
+     */
     private suspend fun askByVoice(question: String) {
         val lang = forceLanguage() ?: sessionLanguage()
-        showAsking(question)
         try {
             fillers?.stop()
             if (speakAloud()) try { tts.speak(Verbalize.apply(question), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
@@ -231,10 +247,25 @@ class VoiceController(
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) {}
             }
-            agent.answer(null)
+            if (speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mɛtwɛn. Sɛ woawie a, ka 'Hey Tɛkyerɛma'."
+                else "I'll wait. Say \"Hey Tɛkyerɛma\" or tap Answer when you're ready.", lang) }
+                catch (c: CancellationException) { throw c } catch (_: Exception) {}
         } finally {
-            hideAsking()
             _state.update { it.copy(speechDetected = false) }
+        }
+    }
+
+    /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer, "Hey Tɛkyerɛma", opening
+     *  Tɛkyerɛma). A confirmation still needs an explicit yes — silence or an unclear answer declines, as before. */
+    fun respond() {
+        val st = agent.state.value
+        interjectJob?.cancel()
+        when (st.status) {
+            AgentStatus.ASKING -> st.pendingQuestion?.let { q -> if (askJob?.isActive != true) askJob = observerScope.launch { askByVoice(q) } }
+            AgentStatus.WAITING_CONFIRMATION -> if (confirmJob?.isActive != true)
+                confirmJob = observerScope.launch { confirmByVoice(st.pendingConfirmation ?: "Should I go ahead?", st.pendingConfirmationTwi) }
+            AgentStatus.SECURE_INPUT -> if (secureJob?.isActive != true) secureJob = observerScope.launch { secureInputByVoice() }
+            else -> {}
         }
     }
 
@@ -309,6 +340,7 @@ class VoiceController(
 
     private val ACTIVE = setOf(AgentStatus.THINKING, AgentStatus.ACTING, AgentStatus.WAITING_CONFIRMATION,
         AgentStatus.SECURE_INPUT, AgentStatus.ASKING, AgentStatus.PAUSED)
+    private val PROMPTS = setOf(AgentStatus.WAITING_CONFIRMATION, AgentStatus.ASKING, AgentStatus.SECURE_INPUT)
 
     /**
      * Ask the pending question aloud, listen for a spoken yes/no, and answer the agent.
@@ -732,6 +764,7 @@ class VoiceController(
                     }
                     AgentStatus.THINKING, AgentStatus.ACTING ->
                         if (_state.value.state != VoiceState.EXECUTING) set(VoiceState.EXECUTING, "Working on it…")
+                    AgentStatus.ASKING, AgentStatus.SECURE_INPUT -> fillers?.stop()   // a question is about to be spoken
                     else -> {}
                 }
             }

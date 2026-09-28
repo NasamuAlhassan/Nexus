@@ -278,8 +278,12 @@ object AgentEngine {
         log(LogEntry.Kind.USER, "(while working) $t")
     }
 
-    /** C-13: the user's answer to an ask_user question (null = no answer / cancelled). */
-    fun answer(text: String?) { answerChannel.trySend(text?.trim()?.ifBlank { null }) }
+    /** C-13: the user's answer to an ask_user question (null = no answer / cancelled). Only while a question is
+     *  waiting — a late answer must not be taken as the reply to the NEXT question. */
+    fun answer(text: String?) {
+        if (_state.value.status != AgentStatus.ASKING) return
+        answerChannel.trySend(text?.trim()?.ifBlank { null })
+    }
 
     /** C-12: "what are you doing?" — the goal and the current action in plain words (no step numbers: owner, 2026-09-28). */
     fun statusLine(): String {
@@ -305,16 +309,27 @@ object AgentEngine {
         com.tekyerema.core.Http.prewarm(s.groqBaseUrl.trimEnd('/') + "/models")
     }
 
-    fun confirm(approved: Boolean) { confirmChannel.trySend(if (approved) ConfirmReply.Approve else ConfirmReply.Decline) }
+    /** A yes/no counts only for a confirmation that is waiting NOW. The channel is conflated: a stray "yes" (a Yes
+     *  button left on screen, a late tap) used to sit in it and silently approve the NEXT confirmation. */
+    fun confirm(approved: Boolean) {
+        if (_state.value.status != AgentStatus.WAITING_CONFIRMATION) {
+            log(LogEntry.Kind.INFO, "Ignored a ${if (approved) "yes" else "no"}: nothing is waiting for confirmation.")
+            return
+        }
+        confirmChannel.trySend(if (approved) ConfirmReply.Approve else ConfirmReply.Decline)
+    }
 
     /** A spoken reply to a pending confirmation that is NOT a plain yes/no — a correction, a changed
      *  recipient/app/message, or a different request. The pending action is not executed; the brain
      *  re-plans with this instruction and the prior proposal in conversation memory (§8/§9/§13/§14). */
-    fun revise(text: String) { val t = text.trim(); if (t.isNotEmpty()) confirmChannel.trySend(ConfirmReply.Revise(t)) }
+    fun revise(text: String) {
+        val t = text.trim()
+        if (t.isNotEmpty() && _state.value.status == AgentStatus.WAITING_CONFIRMATION) confirmChannel.trySend(ConfirmReply.Revise(t))
+    }
 
     /** The user has finished the secure step (entered their MoMo PIN) and said "done". Resumes observation
      *  ONLY after re-checking that we are no longer on a credential screen (§9/§10). */
-    fun secureInputDone() { secureChannel.trySend(true) }
+    fun secureInputDone() { if (_state.value.status == AgentStatus.SECURE_INPUT) secureChannel.trySend(true) }
 
     fun stop() {
         paused.value = false
@@ -868,12 +883,12 @@ object AgentEngine {
                                 stats = stats.copy(confirmations = stats.confirmations + 1)
                                 log(LogEntry.Kind.CONFIRM, prompt)
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
+                                drain(confirmChannel)   // only a reply to THIS prompt counts
                                 _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = prompt, pendingConfirmationTwi = promptTwi) }
-                                // Also float the same Approve/Decline over whatever app is in front,
-                                // so the user needn't switch back to Tɛkyerɛma. Both routes call confirm().
-                                OverlayConfirm.show(ctxApp, prompt)
+                                // The reply panel (Yes / No over whatever app is in front) follows this state — VoiceEngine
+                                // shows it. It must be GONE before the approved action runs, or the tap lands on the panel.
                                 val reply = confirmChannel.receive()
-                                OverlayConfirm.hide(ctxApp)
+                                OverlayConfirm.hideAndWait(ctxApp)
                                 _state.update { it.copy(pendingConfirmation = null, pendingConfirmationTwi = null) }
                                 when (reply) {
                                     is ConfirmReply.Decline -> {
@@ -1237,16 +1252,21 @@ object AgentEngine {
     private suspend fun askUser(question: String, spoken: String): String? {
         log(LogEntry.Kind.CONFIRM, "Asking: $spoken")
         pushConvo("Tɛkyerɛma asked: $question")
+        drain(answerChannel)
         _state.update { it.copy(status = AgentStatus.ASKING, pendingQuestion = spoken) }
         val ans = kotlinx.coroutines.withTimeoutOrNull(
             com.tekyerema.core.config.AppConfig.long("agent.askUser.timeoutMs", 120_000L)) { answerChannel.receive() }
         _state.update { it.copy(pendingQuestion = null) }
+        appContext?.let { OverlayConfirm.hideAndWait(it) }   // the question panel is gone before the next action
         if (ans.isNullOrBlank()) return null
         setStatus(AgentStatus.THINKING)
         log(LogEntry.Kind.USER, ans)
         pushConvo("User: $ans")
         return ans
     }
+
+    /** Throw away a reply left over from an earlier prompt. */
+    private fun <T> drain(ch: Channel<T>) { while (ch.tryReceive().isSuccess) { /* stale */ } }
 
     /** W8: what [finish] needs to know about the run in flight. */
     private class RunCtx(
@@ -1322,6 +1342,7 @@ object AgentEngine {
      * Returns false if cancelled/stopped (never resumes observation in that case).
      */
     private suspend fun awaitSecureInput(reason: String = "momo_pin"): Boolean {
+        drain(secureChannel)
         _state.update { it.copy(status = AgentStatus.SECURE_INPUT, handoffReason = reason) }
         val done = secureChannel.receive()
         _state.update { it.copy(handoffReason = null) }

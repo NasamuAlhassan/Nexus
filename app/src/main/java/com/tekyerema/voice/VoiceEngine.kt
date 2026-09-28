@@ -13,6 +13,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -50,6 +52,8 @@ object VoiceEngine {
     val isRunning: Boolean get() = controller.isRunning
     /** C-12: a task is working with the mic free — "Hey Tɛkyerɛma" then interjects (pause, status, a correction). */
     val canInterject: Boolean get() = initialized && controller.canInterject
+    /** The task waits on the user and nothing is listening for the reply — a wake or a tap should answer it. */
+    val canRespond: Boolean get() = initialized && controller.canRespond
 
     fun init(app: Application) {
         if (initialized) return
@@ -136,6 +140,13 @@ object VoiceEngine {
         )
         scope.launch { combine(mic.level, answerMic.level) { a, b -> maxOf(a, b) }.collect { _level.value = it } }
         HistoryStore.init(app)
+        // The reply panel follows the task: whenever it waits on the user (a confirmation, a question, the secure step)
+        // a panel over any app shows what it's waiting for, with buttons that fit (PromptSurface).
+        scope.launch(Dispatchers.Main) {
+            AgentEngine.state.map { PromptSurface.of(it.status, it.pendingConfirmation, it.pendingQuestion) }
+                .distinctUntilChanged()
+                .collect { p -> if (p == null) com.tekyerema.ui.OverlayConfirm.hidePrompt(app) else com.tekyerema.ui.OverlayConfirm.showPrompt(app, p) }
+        }
         com.tekyerema.core.Health.logStartup(app)   // N-16: why the process last ended, current issues
         applyVoiceSettings()
         scope.launch { settings.changes.collect { applyVoiceSettings() } }
@@ -211,7 +222,13 @@ object VoiceEngine {
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */
     fun toggle() = controller.toggle()
     /** C-12: starting a turn while a task runs is an interjection (stop / pause / continue / status / a correction). */
-    fun start() = if (AgentEngine.isBusy) controller.interject() else controller.start()
+    fun start() = when {
+        controller.canRespond -> controller.respond()   // the task is waiting on the user: this is the reply
+        AgentEngine.isBusy -> controller.interject()
+        else -> controller.start()
+    }
+    /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button). */
+    fun respond() { if (initialized) controller.respond() }
     /** Listen once more after a reply so the conversation can continue; silence just rests (no nag). */
     fun followUp() = controller.followUp()
     fun cancel() = controller.cancel()

@@ -181,7 +181,10 @@ fun HomeContent(
                         modifier = Modifier.padding(top = if (phrase.isEmpty()) 0.dp else 10.dp))
                 }
                 // Buttons stay as a quiet parallel path (a helper, TalkBack, a noisy room); voice is primary.
-                AnimatedVisibility(visible = presence == Presence.CONFIRMING || presence == Presence.CONFIRM_LISTENING, enter = fadeIn(), exit = fadeOut()) {
+                // Yes / No only for a real confirmation: an open question or the secure step is answered by voice (or on
+                // the reply panel), and a stray "Yes" must never be offered where it means nothing.
+                AnimatedVisibility(visible = (presence == Presence.CONFIRMING || presence == Presence.CONFIRM_LISTENING) &&
+                        agent.status == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION, enter = fadeIn(), exit = fadeOut()) {
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         BigButton("No", onClick = { AgentEngine.confirm(false) }, modifier = Modifier.weight(1f), filled = false,
                             contentDescription = "No, don't do it")

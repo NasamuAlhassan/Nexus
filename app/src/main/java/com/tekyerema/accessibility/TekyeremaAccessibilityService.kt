@@ -72,6 +72,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         super.onServiceConnected()
         connected = true
         lastEventTime = SystemClock.uptimeMillis()
+        live = this
         AgentEngine.attachController(this)
         // System accessibility button (navigation bar / floating shortcut) → the voice experience.
         if (Build.VERSION.SDK_INT >= 26) {
@@ -129,8 +130,16 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun onInterrupt() {}
 
+    companion object {
+        /** The connected service, for windows it must own: the reply panel is a TYPE_ACCESSIBILITY_OVERLAY (no
+         *  "display over other apps" permission, and not hidden by Settings or permission screens). */
+        @Volatile var live: TekyeremaAccessibilityService? = null
+            private set
+    }
+
     override fun onUnbind(intent: Intent?): Boolean {
         connected = false
+        if (live === this) live = null
         AgentEngine.detachController()
         triggerJob?.cancel()
         TriggerBubble.hide(this)

@@ -60,7 +60,7 @@ object Phrases {
         Presence.LISTENING -> v.partialHint.ifBlank { "I'm listening." }
         Presence.THINKING -> "Thinking…"
         Presence.ACTING -> acting(a)
-        Presence.CONFIRMING, Presence.CONFIRM_LISTENING -> a.pendingConfirmation ?: v.partialHint.ifBlank { "Do you want me to go ahead?" }
+        Presence.CONFIRMING, Presence.CONFIRM_LISTENING -> a.pendingConfirmation ?: a.pendingQuestion ?: v.partialHint.ifBlank { "Do you want me to go ahead?" }
         Presence.SPEAKING -> v.partialHint.ifBlank { v.spoken }
         Presence.DONE -> v.spoken.ifBlank { "Done." }
         Presence.ERROR -> v.error.ifBlank { "Something went wrong." }

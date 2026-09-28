@@ -84,10 +84,12 @@ class AndroidTts(context: Context) : TtsProvider {
                     }
                     override fun onDone(utteranceId: String?) { if (utteranceId == ids.last() && cont.isActive) cont.resume(true) }
                     // Flushed by a newer utterance or stop(): end this one instead of leaving the caller suspended.
-                    override fun onStop(utteranceId: String?, interrupted: Boolean) { if (cont.isActive) cont.resume(false) }
+                    // Only for OUR ids: this listener replaced the previous call's, so the flushed earlier line's onStop
+                    // lands here too — taking it as ours ended a question's speech at once and opened the mic over it.
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) { if (utteranceId in ids && cont.isActive) cont.resume(false) }
                     @Deprecated("deprecated in API 21")
-                    override fun onError(utteranceId: String?) { if (cont.isActive) cont.resume(false) }
-                    override fun onError(utteranceId: String?, errorCode: Int) { if (cont.isActive) cont.resume(false) }
+                    override fun onError(utteranceId: String?) { if (utteranceId in ids && cont.isActive) cont.resume(false) }
+                    override fun onError(utteranceId: String?, errorCode: Int) { if (utteranceId in ids && cont.isActive) cont.resume(false) }
                 })
                 for ((i, c) in chunks.withIndex()) {
                     val rc = engine.speak(c, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, ids[i])
