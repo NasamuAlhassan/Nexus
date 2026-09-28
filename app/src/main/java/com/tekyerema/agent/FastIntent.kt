@@ -356,7 +356,9 @@ object FastIntentClassifier {
     // "accept"/"take" only with "call" (a bare "accept" is more likely a dialog button than a ringing phone).
     private val RE_ANSWER = Regex("^(?:please\\s+)?(?:(?:answer|pick up|pickup)(?:\\s+(?:the|this|my))?(?:\\s+(?:phone|call))?|(?:accept|take)\\s+(?:the |this |my )?call)(?:\\s+please)?$|^gye (?:frɛ|fre) no$")
     private val RE_END_CALL = Regex("^(?:please\\s+)?(?:hang up|end (?:the |this )?call|end it|cut (?:the |this )?call|reject (?:the |this )?call|decline (?:the |this )?call|drop (?:the |this )?call)(?:\\s+please)?$")
-    private val RE_CALL_HISTORY = Regex("\\b(?:who (?:just )?called(?: me)?|missed calls?|any (?:missed )?calls|recent calls|call history|call log|did anyone call)\\b")
+    // "who did I call last" / "who I called last" (A20e trace: missed, and the model wandered into Settings).
+    private val RE_CALL_HISTORY = Regex("\\b(?:who (?:just )?called(?: me)?|missed calls?|any (?:missed )?calls|recent calls|call history|call log|did anyone call|" +
+        "who (?:did )?i (?:just |last )?call(?:ed)?|my last call|(?:last|latest) (?:person|number) i (?:called|dialled|dialed))\\b")
     // SMS only — "texts", "sms", "text message(s)" or "my (last) text"; "read the text on the screen" is not an SMS.
     private val RE_LAST_SMS = Regex("\\b(?:read|check|what(?:'s| is| was)|any)\\b.*\\b(?:text messages?|texts|sms|my (?:last |latest |new )?text)\\b|^(?:my )?(?:last|latest|new) (?:text|sms|text message)s?$")
     private val RE_WHERE_AM_I = Regex("\\b(?:where am i|where i am|what(?:'s| is) my (?:current )?location|my current location|what street am i on)\\b")
@@ -409,7 +411,12 @@ object FastIntentClassifier {
     private val RE_HOME = Regex("^home$|\\bgo\\s+home\\b|\\bhome\\s+screen\\b|\\bhome\\s+button\\b|\\bk[ɔo]\\s+fie\\b|\\bfie\\b")
     private val RE_BACK = Regex("^back$|\\bgo\\s+back\\b|\\bback\\s+button\\b|\\bprevious\\s+screen\\b|\\bsan\\s+k[ɔo]\\b")
 
-    // "open/launch/start X" — X is the last group. Existing AppResolver does the actual name matching.
-    private val RE_OPEN = Regex("^(?:please\\s+|can\\s+you\\s+|could\\s+you\\s+|kindly\\s+|i\\s+want\\s+to\\s+)?(?:open|launch|start|go\\s+to|goto|bring\\s+up|pull\\s+up|put\\s+on|bue\\S*|bua\\S*)\\s+(?:the\\s+)?(.+)$")
+    // "open/launch/start X" — X is the last group. Existing AppResolver does the actual name matching. "opening the
+    // calculator." missed this on the A20e (2026-09-28) and went to the cloud model, which paged the home screen
+    // left and right hunting for the icon — so -ing forms, stacked polite lead-ins, "up", "my" and a trailing
+    // "app"/"please" are accepted. "opening hours …" is not an app.
+    private val RE_OPEN = Regex("^(?:(?:please|kindly|can you|could you|would you|will you|i want to|i'd like to|i would like to|help me)\\s+)*" +
+        "(?:open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s+to|goto|bring\\s+up|pull\\s+up|put\\s+on|bue\\S*|bua\\S*)\\s+" +
+        "(?!hours?\\b|times?\\b)(?:up\\s+)?(?:the\\s+|my\\s+)?(.+?)(?:\\s+app)?(?:\\s+(?:please|for me))?$")
     private val RE_APP_HAS_VERB = Regex("\\b(send|message|reply|forward|dial|text|call|find|search|tell|saying|then)\\b")
 }

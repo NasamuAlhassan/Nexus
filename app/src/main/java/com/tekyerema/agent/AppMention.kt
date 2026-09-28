@@ -12,9 +12,11 @@ package com.tekyerema.agent
  */
 object AppMention {
     private const val NAME = "([a-z0-9][\\w'.&+-]*(?:\\s+[a-z0-9][\\w'.&+-]*){0,2}?)"
+    private const val LEADIN = "(?:(?:please|kindly|can you|could you|would you|will you|i want to|i'd like to|i would like to|help me)\\s+)*"
+    private const val OPEN = "(?:open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s+to)\\s+(?!hours?\\b|times?\\b)(?:up\\s+)?(?:the\\s+|my\\s+)?"
     private val PATTERNS = listOf(
-        // "open whatsapp and …", "launch the youtube app then …"
-        Regex("^(?:please\\s+)?(?:open|launch|start|go\\s+to)\\s+(?:the\\s+|my\\s+)?$NAME(?:\\s+app)?\\s*(?:,|\\band\\b|\\bthen\\b)"),
+        // "open whatsapp and …", "can you please open the youtube app then …"
+        Regex("^$LEADIN$OPEN$NAME(?:\\s+app)?\\s*(?:,|\\band\\b|\\bthen\\b)"),
         // "search chrome for …", "look up youtube for …"
         Regex("\\b(?:search|look\\s+up|check)\\s+(?:the\\s+|my\\s+)?$NAME(?:\\s+app)?\\s+for\\b"),
         // "… in settings", "… on youtube", "… using chrome" — at the end, or before a comma
@@ -29,6 +31,17 @@ object AppMention {
             .filter { it.isNotEmpty() && it !in NOT_APPS }
             .distinct()
     }
+
+    private val SINGLE_OPEN = Regex("^$LEADIN$OPEN$NAME(?:\\s+app)?(?:\\s+(?:please|for me))?$")
+
+    /** The app a whole goal asks to open ("opening the calculator." → "calculator"), or null. */
+    fun openTarget(goal: String): String? {
+        val g = goal.trim().lowercase().trimEnd('.', '!', '?').replace(Regex("\\s+"), " ")
+        return SINGLE_OPEN.find(g)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() && it !in NOT_APPS }
+    }
+
+    /** The app a goal is about, whether it only opens it or opens it and does more. */
+    fun named(goal: String): String? = candidates(goal).firstOrNull() ?: openTarget(goal)
 
     /** Phrases the patterns can catch that are never an app ("on my phone", "in the morning"). */
     private val NOT_APPS = setOf("my phone", "phone screen", "the phone", "the screen", "my screen", "screen", "it", "this",

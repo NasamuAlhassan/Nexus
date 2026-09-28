@@ -139,4 +139,39 @@ class AgentW9Test {
             }
         } finally { com.tekyerema.core.config.AppConfig.loadFrom(emptyList()) }
     }
+
+    /** A20e: the model swiped the home screen left, right and up hunting for an icon instead of calling open_app. */
+    @Test fun launcher_guard_stops_icon_hunting_on_the_home_screen() {
+        val g = com.tekyerema.agent.LauncherGuard
+        fun chk(tool: String, onHome: Boolean = true, labelMissing: Boolean = false, goal: String = "opening the calculator.",
+                named: String? = "calculator", tried: Boolean = false, missing: String? = null) =
+            g.check(tool, onHome, labelMissing, goal, named, tried, missing)
+        assertTrue(chk("swipe")!!.contains("open_app({\"app\":\"calculator\"})"))
+        assertTrue(chk("scroll")!!.contains("open_app"))
+        assertTrue(chk("tap", labelMissing = true)!!.contains("open_app"))
+        assertNull("a visible icon may be tapped", chk("tap"))
+        assertNull("inside an app, scrolling is fine", chk("scroll", onHome = false))
+        assertNull("the user asked to swipe", chk("swipe", goal = "swipe left on the home screen"))
+        assertNull(chk("open_app"))
+        assertTrue(chk("swipe", tried = true, missing = "calculator")!!.contains("ask_user"))
+        assertTrue(chk("swipe", named = null)!!.contains("open_app"))
+    }
+
+    @Test fun app_mention_finds_the_app_in_polite_and_ing_phrasings() {
+        val m = com.tekyerema.agent.AppMention
+        assertEquals("calculator", m.named("opening the calculator."))
+        assertEquals("whatsapp", m.named("can you please open whatsapp and message kofi"))
+        assertEquals("youtube", m.openTarget("Could you open the YouTube app please"))
+        assertNull(m.openTarget("open whatsapp and message kofi"))
+        assertNull(m.openTarget("opening hours of Melcom"))
+    }
+
+    @Test fun not_installed_is_a_question_for_the_user_not_a_dead_end() {
+        val k = com.tekyerema.agent.Recovery.classify(isAccelerator = true, success = false, recoverable = false, needsUser = true)
+        assertEquals(com.tekyerema.agent.Recovery.Kind.ASK_USER, k)
+        val hint = com.tekyerema.agent.Recovery.hint("open_app", k)
+        assertTrue(hint, hint.contains("ask_user") && !hint.contains("on-screen UI"))
+        val dead = com.tekyerema.agent.Recovery.hint("call_log", com.tekyerema.agent.Recovery.Kind.DEAD_END)
+        assertTrue("a missing permission is the user's to grant", dead.contains("never open Settings"))
+    }
 }

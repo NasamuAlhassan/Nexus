@@ -221,4 +221,19 @@ class FastIntentClassifierTest {
         assertEquals(FastIntent.LockQuery, c("Is my phone locked?"))
         assertNull(c("Send a text to Ama and call Kofi"))                  // compound → agent
     }
+
+    /** A20e: "opening the calculator." went to the cloud model, which paged the home screen looking for the icon. */
+    @Test fun open_app_phrasings_stay_on_the_fast_path() {
+        for ((s, app) in listOf("opening the calculator." to "calculator", "Can you please open the calculator" to "calculator",
+                "open up WhatsApp" to "whatsapp", "Open my gallery app" to "gallery", "launching YouTube please" to "youtube",
+                "I'd like to open Chrome" to "chrome", "bue WhatsApp" to "whatsapp"))
+            assertEquals(s, FastIntent.OpenApp(app), c(s))
+        assertNull(c("open WhatsApp and send Kofi hi"))                     // compound → agent
+        assertTrue(c("opening hours of Melcom") !is FastIntent.OpenApp)     // not an app
+    }
+
+    @Test fun who_did_i_call_last_is_call_history() {
+        for (s in listOf("Can you tell me who I called last", "Who did I call last?", "my last call"))
+            assertEquals(s, FastIntent.CallHistory(missedOnly = false), c(s))
+    }
 }

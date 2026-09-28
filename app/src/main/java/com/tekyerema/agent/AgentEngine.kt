@@ -450,6 +450,10 @@ object AgentEngine {
         var injectionSource: String? = null        // J-06: where instruction-like untrusted text was seen, if anywhere
         val denyApps = com.tekyerema.policy.PolicyConfig.denyApps()
         val guideOnlyApps = com.tekyerema.policy.PolicyConfig.guideOnlyApps()
+        // LauncherGuard inputs: the home app, the app the goal is about, and an app open_app couldn't find.
+        val launcherPkg = com.tekyerema.tools.defaultLauncherPackage(ctxApp)
+        val namedApp = AppMention.named(goal)
+        var notInstalledApp: String? = null
         try {
             val maxSteps = com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60)   // G-15
             for (step in 1..maxSteps) {
@@ -632,15 +636,23 @@ object AgentEngine {
                         }
                         // G-12: several failed steps in a row — ask the user how to go on instead of burning steps (once per task).
                         if (!unattended && decision.name != "cannot_do" && loopGuard.shouldEscalate(failStreak)) {
-                            val ans = askUser("I'm having trouble with this.",
-                                "I'm having trouble with this — the last few tries didn't work. Should I keep trying another way, or stop?")
+                            // An app that isn't installed is the likely snag: ask about THAT, not "keep trying?" (which read
+                            // as permission to hunt the home screen and the launcher search on the A20e).
+                            val missing = notInstalledApp
+                            val ans = if (missing != null) askUser("I couldn't find $missing.",
+                                    "I couldn't find an app called $missing on this phone. Which app did you mean — or should I stop?")
+                                else askUser("I'm having trouble with this.",
+                                    "I'm having trouble with this — the last few tries didn't work. Should I keep trying another way, or stop?")
                             if (ans == null || LoopGuard.wantsStop(ans)) {
                                 log(LogEntry.Kind.RESULT, "Okay, I stopped.")
                                 pushConvo("Tɛkyerɛma: I stopped because it wasn't working.")
                                 finish(AgentStatus.STOPPED, stats); return
                             }
-                            history.add("You were stuck, so the user was asked whether to keep going; they said: \"$ans\". Follow that — " +
-                                "use a DIFFERENT route from what failed (Back, the app's own search, another menu, vision).")
+                            history.add(if (missing != null) "open_app found no app called '$missing'. The user was asked which app they " +
+                                    "meant and said: \"$ans\". Open that with open_app; if it's still not installed, tell them (cannot_do)."
+                                else "You were stuck, so the user was asked whether to keep going; they said: \"$ans\". Follow that — " +
+                                    "use a DIFFERENT route from what failed (Back, the app's own search, another menu, vision).")
+                            if (missing != null) notInstalledApp = null
                             failStreak = 0
                             visionNext = true
                             continue
@@ -720,6 +732,15 @@ object AgentEngine {
                                 }
                                 is ResolveOutcome.OnlyWeak, is ResolveOutcome.NotFound -> { /* label may be revealed by scrolling at execute time */ }
                             }
+                        }
+                        // The home screen is not searched for icons (LauncherGuard): open_app, or ask the user.
+                        val huntRefusal = LauncherGuard.check(decision.name, onHome = launcherPkg != null && before.appPackage == launcherPkg,
+                            labelMissing = target != null && resolved == null, goal = goal, named = namedApp,
+                            openAppTried = "open_app" in usedTools, notInstalled = notInstalledApp)
+                        if (huntRefusal != null) {
+                            log(LogEntry.Kind.POLICY, "Refused ${decision.name} on the home screen: icon hunting")
+                            history.add("${decision.name}(${shortArgs(decision.args)}) → refused; $huntRefusal")
+                            continue
                         }
 
                         // ---- preflight: can this action proceed at all? (side-effect free, BEFORE any confirmation) ----
@@ -1163,7 +1184,9 @@ object AgentEngine {
                         // back to the General Operator UI) from a general-operator primitive failure (re-observe
                         // and try another approach) from a genuine dead-end. This is generic: it keys on
                         // tool.isAccelerator + result.recoverable, never on any app. ----
-                        val recKind = Recovery.classify(tool.isAccelerator, result.success, result.recoverable)
+                        val recKind = Recovery.classify(tool.isAccelerator, result.success, result.recoverable, result.needsDisambiguation)
+                        // The app it just failed to find: the launcher guard turns any icon hunt after this into ask_user.
+                        if (!result.success) result.data?.optString("notInstalled")?.takeIf { it.isNotBlank() }?.let { notInstalledApp = it }
                         if (Recovery.isAcceleratorMiss(recKind)) stats = stats.copy(acceleratorMisses = stats.acceleratorMisses + 1)
                         val recovery = Recovery.hint(decision.name, recKind)
                         if (recovery.isNotEmpty()) log(LogEntry.Kind.INFO, "recovery:${recovery}")

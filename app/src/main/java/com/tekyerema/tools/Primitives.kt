@@ -419,7 +419,7 @@ object KeyEventTool : Tool {
 }
 
 /** The device's default home app (launcher), resolved from the system — no hardcoded OEM launcher names. */
-private fun defaultLauncherPackage(ctx: android.content.Context): String? = try {
+internal fun defaultLauncherPackage(ctx: android.content.Context): String? = try {
     ctx.packageManager.resolveActivity(
         android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME),
         android.content.pm.PackageManager.MATCH_DEFAULT_ONLY

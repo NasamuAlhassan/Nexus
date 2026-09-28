@@ -62,7 +62,7 @@ object OpenAppTool : Tool {
                     "It isn't installed, or the name was misheard. Ask the user which app they meant (ask_user)" +
                     (if (close.isNotEmpty()) " — closest installed: ${close.joinToString(", ")}" else "") +
                     ". Do NOT open an app store, sign in or install anything unless the user asked to install an app.",
-                    recoverable = false)
+                    JSONObject().put("notInstalled", query), needsDisambiguation = true, recoverable = false)
             }
         }
         val intent = AppResolver.launchIntent(ctx.appContext, app.packageName)

@@ -411,7 +411,8 @@ class LocalBrain : AgentBrain {
         // §6.2 — the command verb need NOT be sentence-initial: allow up to two leading words (a Twi
         // vocative/name or filler, e.g. "Bagyo frɛ 0552093690") before the (optional) polite lead-in.
         private const val PREVERB = "(?:\\S+\\s+){0,2}?"
-        private val RE_OPEN = Regex("^\\s*$PREVERB$LEADIN(open|launch|start|go\\s*to|goto|bring\\s*up|pull\\s*up|show\\s*me|take\\s*me\\s*to|put\\s*on|bue\\S*|bua\\S*)\\s+(the\\s+)?(.+)$", RegexOption.IGNORE_CASE)
+        // -ing forms too ("opening the calculator." went to the cloud, which paged the home screen hunting the icon).
+        private val RE_OPEN = Regex("^\\s*$PREVERB$LEADIN(open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s*to|goto|bring\\s*up|pull\\s*up|show\\s*me|take\\s*me\\s*to|put\\s*on|bue\\S*|bua\\S*)\\s+(?!hours?\\b|times?\\b)(?:up\\s+)?(the\\s+|my\\s+)?(.+?)(?:\\s+app)?$", RegexOption.IGNORE_CASE)
         private val RE_CALL = Regex("^\\s*$PREVERB$LEADIN(call|phone|dial|ring|get\\s+me|reach|call\\s+up|phone\\s+up|frɛ\\S*)\\s+(.+)$", RegexOption.IGNORE_CASE)
         // §6.1/§6.6 — read notifications / messages. Requires a read/check verb + messages/nkra, OR the word
         // "notifications", OR a bare "nkra" — so "send prince a message" (a send, not a read) does NOT match.
