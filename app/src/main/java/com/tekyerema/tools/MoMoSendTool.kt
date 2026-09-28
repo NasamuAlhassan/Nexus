@@ -105,7 +105,8 @@ object MoMoSendTool : Tool {
             val dlg = awaitUssd(ctrl, lastText, timeoutMs = if (idx == 0) 25_000L else 18_000L)
                 ?: return ToolResult(false, "The Mobile Money menu didn't respond in time. Nothing was sent — please try again.", recoverable = false)
             lastText = dlg.text
-            Log.i(TAG, "[MOMO] screen ${idx + 1}: ${dlg.text.take(160).replace("\n", " | ")}")
+            // J-15: a USSD screen carries names, numbers and balances — words in logcat only where content logging is allowed.
+            Log.i(TAG, "[MOMO] screen ${idx + 1}: ${com.tekyerema.core.Privacy.content(dlg.text.take(160).replace("\n", " | "))}")
             // SAFETY: never type into a PIN/credential screen. If it shows (early or on cue), stop for the user.
             if (isPinScreen(dlg)) return pinStop(amount, number)
             respond(ctrl, dlg, value, label)
@@ -113,7 +114,7 @@ object MoMoSendTool : Tool {
         }
         // Sequence fired — the next screen should be the PIN. Log it for verification, then hand off.
         awaitUssd(ctrl, lastText, timeoutMs = 18_000L)?.let {
-            Log.i(TAG, "[MOMO] final screen: ${it.text.take(160).replace("\n", " | ")}")
+            Log.i(TAG, "[MOMO] final screen: ${com.tekyerema.core.Privacy.content(it.text.take(160).replace("\n", " | "))}")
         }
         return pinStop(amount, number)
     }
@@ -184,7 +185,7 @@ object MoMoSendTool : Tool {
 
     /** Type [value] into the dialog input and press Send (falls back to the field's own submit action). */
     private suspend fun respond(ctrl: AccessibilityController, dlg: Ussd, value: String, step: String) {
-        Log.i(TAG, "[MOMO] → '$value'  ($step)")
+        Log.i(TAG, "[MOMO] → '${com.tekyerema.core.Privacy.content(value)}'  ($step)")   // J-15: number, amount, reference
         val id = dlg.inputId
         if (id == null) { Log.w(TAG, "[MOMO] no input field for '$step'"); return }
         val sid = dlg.sendId

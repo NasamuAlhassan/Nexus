@@ -68,6 +68,13 @@ class HybridAsr(
     override val name = "hybrid(local=${onDevice.name})"
 
     override suspend fun transcribe(wav: ByteArray, sessionLanguage: String, forceLanguage: String?): Transcript {
+        // J-15 Secure Input Mode: the mic is open only to hear "done" while the user types a PIN / password / code, and
+        // a screen reader may be speaking those digits. That audio never leaves the phone — on-device or nothing (the
+        // panel's Done button still works), and no online leg or fallback is ever tried.
+        if (com.tekyerema.core.Privacy.secureStep) {
+            if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage)
+            throw AsrException("Secure step: speech is only recognised on the phone here — tap Done when you've finished.")
+        }
         val lang = forceLanguage ?: this.forceLanguage()          // effective language (null = both/unknown)
 
         // §C.6 — on-device→LID→escalate two-pass for AUTO mode, used ONLY when there is no DIRECT online auto
@@ -81,7 +88,7 @@ class HybridAsr(
                 val localTr = try { local.transcribe(wav, sessionLanguage, null) } catch (e: AsrException) { null }
                 val det = localTr?.let { Lid.detect(it.raw) }
                 val isTwi = det != null && det.lang == Lang.TWI && det.confidence >= 0.5
-                Log.i("Tekyerema", "[ASR] two-pass auto: local='${localTr?.raw?.take(40)}' lid=${det?.lang}/${det?.confidence} -> ${if (isTwi) "escalate TWI→online" else "keep on-device/Gh-EN"}")
+                Log.i("Tekyerema", "[ASR] two-pass auto: local='${com.tekyerema.core.Privacy.content(localTr?.raw?.take(40))}' lid=${det?.lang}/${det?.confidence} -> ${if (isTwi) "escalate TWI→online" else "keep on-device/Gh-EN"}")
                 if (isTwi) {
                     try { return twiOnline.transcribe(wav, sessionLanguage, Lang.TWI).copy(fallbackUsed = false) }
                     catch (e: AsrException) {

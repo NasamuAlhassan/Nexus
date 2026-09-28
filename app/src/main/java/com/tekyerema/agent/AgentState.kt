@@ -61,6 +61,9 @@ data class AgentUiState(
     /** §A.1 — a Twi rendering of the SAME confirmation (template with verbatim name + digit-by-digit number),
      *  present only for actions we can render structurally (call/money/airtime/message). Null ⇒ speak English. */
     val pendingConfirmationTwi: String? = null,
+    /** J-02: which confirmation [pendingConfirmation] is (a new number for each one). A yes must name it — see
+     *  [com.tekyerema.policy.ConfirmGate] — so a yes given to an earlier question can't approve this one. */
+    val confirmationSeq: Long = 0L,
     /** G-13: why the agent handed the screen to the user in SECURE_INPUT — "momo_pin" | "pin" | "password" | "otp" |
      *  "captcha" — so the spoken instruction matches the screen instead of always saying "MoMo PIN". */
     val handoffReason: String? = null,

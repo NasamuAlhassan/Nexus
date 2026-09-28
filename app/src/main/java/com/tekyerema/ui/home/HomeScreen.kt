@@ -186,9 +186,11 @@ fun HomeContent(
                 AnimatedVisibility(visible = (presence == Presence.CONFIRMING || presence == Presence.CONFIRM_LISTENING) &&
                         agent.status == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION, enter = fadeIn(), exit = fadeOut()) {
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        BigButton("No", onClick = { AgentEngine.confirm(false) }, modifier = Modifier.weight(1f), filled = false,
+                        // J-02: the buttons answer the confirmation this card is showing, not whatever is pending at tap time.
+                        val seq = agent.confirmationSeq
+                        BigButton("No", onClick = { AgentEngine.confirm(false, seq) }, modifier = Modifier.weight(1f), filled = false,
                             contentDescription = "No, don't do it")
-                        BigButton("Yes, do it", onClick = { AgentEngine.confirm(true) }, modifier = Modifier.weight(1.4f))
+                        BigButton("Yes, do it", onClick = { AgentEngine.confirm(true, seq) }, modifier = Modifier.weight(1.4f))
                     }
                 }
             }

@@ -66,7 +66,7 @@ class RoutingBrain(
         // C-01: with the local_brain tier switched off, every request goes to the cloud operator the same way.
         val skipLocal = !RouterTiers.enabled(RouterTiers.LOCAL)
         if (!stickyCloud && (cloudFirst() || skipLocal) && cloud != null && isOnline() && (skipLocal || !isWeak())) {
-            android.util.Log.i("Tekyerema", "[ROUTE] cloud-first: all requests → cloud brain '${ctx.goal.take(60)}'")
+            android.util.Log.i("Tekyerema", "[ROUTE] cloud-first: all requests → cloud brain '${com.tekyerema.core.Privacy.content(ctx.goal.take(60))}'")
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = goalForCloud?.invoke(ctx.goal)?.takeIf { it.isNotBlank() }
         }
@@ -99,7 +99,7 @@ class RoutingBrain(
                 }
             }
             if (!stickyCloud)   // log the escalation ONCE per task so it's visible live during the demo
-                android.util.Log.i("Tekyerema", "[ROUTE] local ${d.reasonClass} '${ctx.goal.take(60)}' → escalating to cloud brain")
+                android.util.Log.i("Tekyerema", "[ROUTE] local ${d.reasonClass} '${com.tekyerema.core.Privacy.content(ctx.goal.take(60))}' → escalating to cloud brain")
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
             return cloud.decide(cloudCtx(ctx))

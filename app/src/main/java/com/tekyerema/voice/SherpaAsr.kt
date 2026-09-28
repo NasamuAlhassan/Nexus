@@ -162,7 +162,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             s.acceptWaveform(samples, sr)
             r.decode(s)
             val out = guardRepetition(depua(r.getResult(s).text).trim())   // §3.10 stop runaway loops
-            Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms -> '${out.take(60)}'")
+            Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
             out.ifEmpty { null }
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa decode failed: ${t.message}"); null

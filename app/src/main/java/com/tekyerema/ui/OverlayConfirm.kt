@@ -74,7 +74,7 @@ object OverlayConfirm {
     fun canShow(ctx: Context): Boolean = TekyeremaAccessibilityService.live != null || canDraw(ctx)
 
     /** The panel for what the task is waiting on now. */
-    fun showPrompt(ctx: Context, p: PromptSurface.Prompt) = render(ctx, p.text, p.kind, engine = true)
+    fun showPrompt(ctx: Context, p: PromptSurface.Prompt) = render(ctx, p.text, p.kind, engine = true, seq = p.seq)
 
     /** The task stopped waiting: take down the panel it put up (not a card someone else showed). */
     fun hidePrompt(ctx: Context) { main.post { if (byEngine) hideNow() } }
@@ -85,9 +85,14 @@ object OverlayConfirm {
     fun show(ctx: Context, prompt: String, asking: Boolean = false) =
         render(ctx, prompt, if (asking) PromptSurface.Kind.QUESTION else PromptSurface.Kind.CONFIRM, engine = false)
 
-    private fun render(ctx: Context, prompt: String, kind: PromptSurface.Kind, engine: Boolean) {
+    /** @param seq the confirmation this panel's Yes answers (J-02); a panel not drawn for a pending confirmation
+     *  ([show], the debug hook) gets [ConfirmGate.NO_CONFIRMATION], so its Yes can never approve anything. */
+    private fun render(ctx: Context, prompt: String, kind: PromptSurface.Kind, engine: Boolean,
+                       seq: Long = com.tekyerema.policy.ConfirmGate.NO_CONFIRMATION) {
         main.post {
             hideNow()
+            // J-02 tapjacking guard: the Yes only counts once the panel has been up for a moment (ConfirmGate.armed).
+            val shownAt = android.os.SystemClock.uptimeMillis()
             val svc = TekyeremaAccessibilityService.live
             if (svc == null && !canDraw(ctx)) return@post
             val host: Context = svc ?: ctx
@@ -148,7 +153,7 @@ object OverlayConfirm {
 
             // The buttons: a parallel path to the voice (a helper, TalkBack, a noisy room), always there to answer on.
             val buttons = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
-            fun btn(label: String, description: String, filled: Boolean, hides: Boolean, onClick: () -> Unit) = Button(host).apply {
+            fun btn(label: String, description: String, filled: Boolean, hides: Boolean, guarded: Boolean = false, onClick: () -> Unit) = Button(host).apply {
                 text = label
                 contentDescription = description
                 isAllCaps = false
@@ -160,15 +165,19 @@ object OverlayConfirm {
                     cornerRadius = dp(24).toFloat()
                     if (filled) setColor(Color.parseColor(TEXT)) else { setColor(Color.TRANSPARENT); setStroke(dp(1), Color.parseColor(INK3)) }
                 }
-                setOnClickListener { onClick(); if (hides) hideNow() }
+                setOnClickListener {
+                    // A guarded (approving) button ignores a tap that lands before the panel has been up for a moment.
+                    if (guarded && !com.tekyerema.policy.ConfirmGate.armed(shownAt, android.os.SystemClock.uptimeMillis())) return@setOnClickListener
+                    onClick(); if (hides) hideNow()
+                }
             }
             val (left, right) = PromptSurface.buttons(kind)
             val leftBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(left, "No, don't do it", filled = false, hides = true) { AgentEngine.confirm(false) }
+                PromptSurface.Kind.CONFIRM -> btn(left, "No, don't do it", filled = false, hides = true) { AgentEngine.confirm(false, seq) }
                 else -> btn(left, "Stop the task", filled = false, hides = true) { VoiceEngine.cancel() }
             }
             val rightBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(right, "Yes, do it", filled = true, hides = true) { AgentEngine.confirm(true) }
+                PromptSurface.Kind.CONFIRM -> btn(right, "Yes, do it", filled = true, hides = true, guarded = true) { AgentEngine.confirm(true, seq) }
                 // Reopens the microphone for this question; the panel stays until it is answered.
                 PromptSurface.Kind.QUESTION -> btn(right, "Answer by voice", filled = true, hides = false) { VoiceEngine.respond() }
                 PromptSurface.Kind.SECURE -> btn(right, "Done — I've finished the secure step", filled = true, hides = true) { AgentEngine.secureInputDone() }

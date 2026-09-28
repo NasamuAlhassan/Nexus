@@ -168,14 +168,67 @@ object TargetSemantics {
         if (lower != null && consequential.containsMatchIn(lower) && looksLikeControlCaption(label!!)) {
             return Classification(RiskTier.TIER2, null, "target '$label' is a consequential control")
         }
+        // Consent: signing in / up, SSO and OAuth ("Continue as Ama Mensah"), installing, granting a permission.
+        if (lower != null) consentKind(label!!, target, anchoredOk = target == null || (target.clickable && !target.editable))?.let { k ->
+            return Classification(RiskTier.TIER2, null, "target '$label' gives consent (${k.name.lowercase()})")
+        }
         return Classification.NONE
     }
 
+    /**
+     * What a consent control does, for the read-back the user hears (see [ActionSemantics]).
+     *  ACCOUNT — signs in, signs up, links a device, or shares the user's account with an app (SSO / OAuth);
+     *  INSTALL — installs or activates something (an app, a device-admin, a profile);
+     *  PERMISSION — grants a permission, approves a request, pairs a device;
+     *  REMOVE — wipes an app's data or turns a protection off.
+     */
+    enum class Consent { ACCOUNT, INSTALL, PERMISSION, REMOVE }
+
+    /**
+     * Consent vocabulary (generic UI words, no app names). An agent must hand these back to the person: Anthropic's
+     * computer-use guidance asks for a human on "any tasks requiring affirmative consent, such as … agreeing to terms",
+     * OpenAI's agents confirm before state-changing actions and hand logins back, and Play's AccessibilityService policy
+     * forbids granting access or changing settings without the user's knowledge. "accept", "agree", "allow" and
+     * "uninstall" are already [consequential]; money words ("subscribe", "upgrade", "free trial") are TIER3 spend.
+     */
+    private val CONSENT: List<Pair<Consent, String>> = listOf(
+        Consent.ACCOUNT to "sign[- ]?in|log[- ]?in|sign[- ]?up|register|create (?:an |a new |new |your |my )?account|" +
+            "continue as|continue with|use (?:this|another|my) account|link (?:a |this |new |another )?device|link (?:your |my )?account",
+        Consent.INSTALL to "install|activate",
+        Consent.PERMISSION to "grant|authori[sz]e|approve|permit|while using (?:the )?app|only this time|pair",
+        Consent.REMOVE to "deactivate|clear (?:data|storage|all data)"
+    )
+    private val consentAny = Regex(CONSENT.joinToString("|", "\\b(?:", ")\\b") { it.second }, RegexOption.IGNORE_CASE)
+    private val consentLead = Regex(CONSENT.joinToString("|", "^\\s*(?:", ")\\b") { it.second }, RegexOption.IGNORE_CASE)
+
+    /**
+     * The consent class of a control caption, or null. A short caption (≤ 4 words, ≤ 30 chars) counts when it CONTAINS a
+     * consent word ("Sign in with Google", "Install"); a longer one only when it LEADS with one and [anchoredOk] — a real
+     * control, or a label the model asked to tap — so "Continue as Prince Nasamu Alhassan" is caught but a message row
+     * that merely mentions installing is not.
+     */
+    fun consentKind(label: String, target: UiElement? = null, anchoredOk: Boolean = target != null && target.clickable && !target.editable): Consent? {
+        val t = label.trim()
+        if (t.isEmpty()) return null
+        val hit = when {
+            looksLikeControlCaption(t) -> consentAny.find(t)
+            anchoredOk && t.length <= 60 -> consentLead.find(t)
+            else -> null
+        } ?: return null
+        val word = hit.value.trim()
+        return CONSENT.firstOrNull { (_, words) -> Regex("^(?:$words)$", RegexOption.IGNORE_CASE).matches(word) }?.first
+    }
+
+    /** True when [text] names a consent action at all (used for app-defined node actions, G-03). */
+    fun isConsent(text: String): Boolean = consentAny.containsMatchIn(text)
+
     /** J-03: generic purchase/payment vocabulary (no app names); `policy.financialWords` can add more, never remove. */
-    // "subscribe" stays: on Ghanaian networks a Subscribe button often starts an airtime-billed service.
+    // "subscribe" stays: on Ghanaian networks a Subscribe button often starts an airtime-billed service. A free trial,
+    // an upgrade or a renewal starts a billed subscription too (it converts unless cancelled), so it is read back as a spend.
     private const val SPEND_WORDS = "buy|buy now|purchase|checkout|check out|pay|pay now|place order|order now|book now|reserve now|" +
         "subscribe|top ?up|recharge|donate|withdraw|cash ?out|add money|send money|continue to payment|proceed to (?:pay|payment|checkout)|" +
-        "confirm (?:payment|purchase|order|transfer|booking)|complete (?:purchase|order|payment)"
+        "confirm (?:payment|purchase|order|transfer|booking)|complete (?:purchase|order|payment)|" +
+        "upgrade|renew|pre-?order|start (?:your |my |a )?(?:\\d+[- ]day )?free trial|free trial|try (?:it )?(?:for )?free|go premium|get premium"
 
     private fun spendRegex(anchored: Boolean): Regex {
         val extra = com.tekyerema.core.config.AppConfig.stringList("policy.financialWords", emptyList())

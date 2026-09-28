@@ -265,6 +265,8 @@ object AgentEngine {
     private val paused = kotlinx.coroutines.flow.MutableStateFlow(false)
     private val steerQueue = java.util.concurrent.ConcurrentLinkedQueue<String>()
     @Volatile private var answerChannel: Channel<String?> = Channel(Channel.CONFLATED)
+    /** J-02: numbers each confirmation (see [confirm]); never reused within the process. */
+    @Volatile private var confirmSeq = 0L
 
     val isBusy: Boolean get() = currentJob?.isActive == true
 
@@ -313,10 +315,15 @@ object AgentEngine {
     }
 
     /** A yes/no counts only for a confirmation that is waiting NOW. The channel is conflated: a stray "yes" (a Yes
-     *  button left on screen, a late tap) used to sit in it and silently approve the NEXT confirmation. */
-    fun confirm(approved: Boolean) {
-        if (_state.value.status != AgentStatus.WAITING_CONFIRMATION) {
-            log(LogEntry.Kind.INFO, "Ignored a ${if (approved) "yes" else "no"}: nothing is waiting for confirmation.")
+     *  button left on screen, a late tap) used to sit in it and silently approve the NEXT confirmation.
+     *  @param forSeq the confirmation the user was answering ([AgentUiState.confirmationSeq] of the prompt they saw or
+     *  heard). A yes to an earlier one is refused (J-02, [com.tekyerema.policy.ConfirmGate]); null only for the ADB hook. */
+    fun confirm(approved: Boolean, forSeq: Long? = null) {
+        val st = _state.value
+        val waiting = st.status == AgentStatus.WAITING_CONFIRMATION
+        if (!com.tekyerema.policy.ConfirmGate.accepts(approved, waiting, st.confirmationSeq, forSeq)) {
+            log(LogEntry.Kind.INFO, if (!waiting) "Ignored a ${if (approved) "yes" else "no"}: nothing is waiting for confirmation."
+                else "Ignored a yes given to an earlier question — this one still needs its own answer.")
             return
         }
         confirmChannel.trySend(if (approved) ConfirmReply.Approve else ConfirmReply.Decline)
@@ -555,7 +562,7 @@ object AgentEngine {
                 }
                 // J-11: an app on the user's deny list is never shown to the cloud model and never operated.
                 if (before.appPackage != null && before.appPackage in denyApps) {
-                    before = before.copy(elements = emptyList(), screenTitle = null)
+                    before = com.tekyerema.policy.ScreenPrivacy.blank(before)
                     if (history.lastOrNull()?.startsWith("DENIED APP") != true)
                         history.add("DENIED APP: ${before.appName ?: before.appPackage} is on the user's deny list — you cannot see or " +
                             "operate it. Go Back or Home, or call cannot_do.")
@@ -803,14 +810,10 @@ object AgentEngine {
                         if (untrusted) log(LogEntry.Kind.POLICY, "provenance: ${Provenance.describe(tags)}")
                         if (cls.tier != null) log(LogEntry.Kind.POLICY, "target semantics: ${cls.reason} → ${cls.tier}")
                         val pd = policy.evaluate(tool, decision.args, hasUntrustedParams = untrusted, targetTier = cls.tier, hardBlock = cls.block)
-                        // J-11: nothing is operated inside a denied app; a guide-only app is read and explained, never acted on.
-                        val fgPkg = before.appPackage
-                        val appRule = when {
-                            fgPkg != null && fgPkg in denyApps && tool.grounded -> "this app is on the user's deny list"
-                            fgPkg != null && fgPkg in guideOnlyApps && tool.grounded && mutating ->
-                                "this app is guide-only — tell the user what to tap instead of tapping it"
-                            else -> null
-                        }
+                        // J-11: nothing is operated OR READ inside a denied app (read_state / read_all return screen text,
+                        // which would reach the cloud model); a guide-only app is read and explained, never acted on.
+                        val appRule = com.tekyerema.policy.ScreenPrivacy.appRule(decision.name, tool.grounded, mutating,
+                            before.appPackage, denyApps, guideOnlyApps)
                         if (appRule != null) {
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "Blocked: $appRule")
@@ -847,7 +850,8 @@ object AgentEngine {
                                 continue
                             }
                             PolicyOutcome.CONFIRM -> {
-                              if (moneyOpApproved && isDialerNavigation(before) && moneyApproval.covers(decision.name, decision.args)) {
+                              if (moneyOpApproved && isDialerNavigation(before) &&
+                                  moneyApproval.covers(decision.name, decision.args, resolved?.element?.label ?: requestedLabel)) {
                                 // The transfer (recipient + amount) was already approved once; the user chose guided
                                 // navigation, so don't re-ask at every USSD menu step (it would time out). The PIN is
                                 // still hard-blocked by TargetSemantics, and the brain is told to stop at the PIN.
@@ -911,7 +915,9 @@ object AgentEngine {
                                 log(LogEntry.Kind.CONFIRM, prompt)
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
                                 drain(confirmChannel)   // only a reply to THIS prompt counts
-                                _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = prompt, pendingConfirmationTwi = promptTwi) }
+                                val seq = ++confirmSeq   // J-02: every surface's yes must name this number
+                                _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = prompt,
+                                    pendingConfirmationTwi = promptTwi, confirmationSeq = seq) }
                                 // The reply panel (Yes / No over whatever app is in front) follows this state — VoiceEngine
                                 // shows it. It must be GONE before the approved action runs, or the tap lands on the panel.
                                 val reply = confirmChannel.receive()
@@ -1454,8 +1460,10 @@ object AgentEngine {
      */
     private suspend fun awaitSecureInput(reason: String = "momo_pin"): Boolean {
         drain(secureChannel)
+        // J-15: while the user types the secret, no speech reaches logcat or a cloud recogniser (see Privacy.secureStep).
+        com.tekyerema.core.Privacy.secureStep = true
         _state.update { it.copy(status = AgentStatus.SECURE_INPUT, handoffReason = reason) }
-        val done = secureChannel.receive()
+        val done = try { secureChannel.receive() } finally { com.tekyerema.core.Privacy.secureStep = false }
         _state.update { it.copy(handoffReason = null) }
         if (done) setStatus(AgentStatus.THINKING)
         return done

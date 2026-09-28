@@ -31,7 +31,8 @@ object PolicyConfig {
         // G-03: an app-defined action that sounds consequential ("Delete", "Archive", "Send") is confirmed.
         if (tool.name == "node_action") {
             val custom = args.optString("custom").trim()
-            return if (custom.isNotEmpty() && TargetSemantics.consequential.containsMatchIn(custom)) RiskTier.TIER2 else null
+            return if (custom.isNotEmpty() && (TargetSemantics.consequential.containsMatchIn(custom) || TargetSemantics.isConsent(custom)))
+                RiskTier.TIER2 else null
         }
         if (tool.name != "run_ussd") return null
         val code = args.optString("code").replace(Regex("\\s"), "")

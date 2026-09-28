@@ -461,6 +461,9 @@ object ReadStateTool : Tool {
         if (raw != null && (com.tekyerema.policy.TargetSemantics.isCredentialScreen(raw) || com.tekyerema.policy.TargetSemantics.isHumanCheckScreen(raw)))
             return ToolResult(true, "This is a private screen (a PIN, password or code) — it is not read. Tell the user to finish it themselves.",
                 data = JSONObject().put("vision", false).put("secure", true), channel = "none")
+        // J-11: a denied app's screen never reaches the model — this result goes into the step history.
+        if (raw != null && com.tekyerema.policy.ScreenPrivacy.isDenied(raw.appPackage))
+            return ToolResult(true, "This app is on the user's deny list — its screen is not read.", data = JSONObject().put("vision", false), channel = "none")
         val snap = Perception.observe(ctrl, vision, args.str("reason"))
         val data = JSONObject().put("vision", vision).put("route", snap.perception.source)
         // §1.20 — a protected (FLAG_SECURE) screen with nothing readable must not be reported as "empty".
@@ -508,6 +511,9 @@ object ReadScreenTool : Tool {
             com.tekyerema.agent.ScreenReadCursor.next(key)?.let { return ToolResult(true, it, channel = "none") }
         val snap = Perception.observe(ctrl, false, "read the screen")
         if (private(snap)) { com.tekyerema.agent.ScreenReadCursor.clear(); return ToolResult(true, PRIVATE, channel = "none") }
+        // J-11 again on what was actually observed: the raw read above can fail (null) or the app in front can change.
+        if (com.tekyerema.policy.ScreenPrivacy.isDenied(snap.appPackage))
+            return ToolResult(true, "That app is on your do-not-read list, so I won't read it.", channel = "none")
         if (snap.secureWindow && snap.elements.none { !it.label.isNullOrBlank() })
             return ToolResult(true, SECURE_SCREEN, JSONObject().put("secure", true), channel = "none")
         val parts = com.tekyerema.agent.ScreenReadout.compose(snap)

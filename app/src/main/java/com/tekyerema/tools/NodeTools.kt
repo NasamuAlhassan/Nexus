@@ -152,9 +152,17 @@ object ReadAllTool : Tool {
         val maxChars = AppConfig.int("perception.document.maxChars", 2500)
         val seen = LinkedHashSet<String>()
         var snap = ctrl.buildSnapshot()
+        // Same privacy rules as read_screen (this result goes to the model): never a PIN / password / code / robot-check
+        // screen, never an app on the user's deny list — checked on every page, since scrolling can reveal either.
+        if (com.tekyerema.policy.ScreenPrivacy.isPrivate(snap))
+            return ToolResult(true, ReadScreenTool.PRIVATE, JSONObject().put("secure", true), channel = "none")
+        if (com.tekyerema.policy.ScreenPrivacy.isDenied(snap.appPackage))
+            return ToolResult(true, "That app is on your do-not-read list, so I won't read it.", channel = "none")
         var lastSig = ""
         for (page in 0 until maxPages) {
-            snap.elements.mapNotNull { it.label?.trim() }.filter { it.length > 1 }.forEach { seen.add(it) }
+            if (com.tekyerema.policy.ScreenPrivacy.isPrivate(snap) || com.tekyerema.policy.ScreenPrivacy.isDenied(snap.appPackage)) break
+            // J-10: a one-time code in the text is hidden before it reaches the model.
+            snap.elements.mapNotNull { it.label?.trim() }.filter { it.length > 1 }.forEach { seen.add(com.tekyerema.core.Redact.secrets(it) ?: it) }
             if (seen.sumOf { it.length } >= maxChars) break
             val sig = snap.signature()
             if (sig == lastSig) break

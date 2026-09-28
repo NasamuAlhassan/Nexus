@@ -27,6 +27,8 @@ interface AgentBridge {
     fun stop()
     /** Answer a pending Tier-2 confirmation. Only ever called with an explicit, fresh user answer. */
     fun confirm(approved: Boolean) {}
+    /** J-02: answer confirmation number [seq] (the one that was spoken) — a yes to an earlier one is refused. */
+    fun confirmFor(seq: Long, approved: Boolean) = confirm(approved)
     /** A spoken reply to a pending confirmation that is NOT yes/no — a correction or a different
      *  request. The agent re-plans against the pending proposal instead of running it (§8/§9/§13/§14). */
     fun revise(text: String) {}
@@ -49,6 +51,7 @@ object AgentEngineBridge : AgentBridge {
     override fun submitGoal(goal: String) = AgentEngine.submitGoal(goal)
     override fun stop() = AgentEngine.stop()
     override fun confirm(approved: Boolean) = AgentEngine.confirm(approved)
+    override fun confirmFor(seq: Long, approved: Boolean) = AgentEngine.confirm(approved, seq)
     override fun revise(text: String) = AgentEngine.revise(text)
     override fun secureInputDone() = AgentEngine.secureInputDone()
     override fun prewarm() = AgentEngine.prewarm()
@@ -153,11 +156,14 @@ class VoiceController(
                 when (st.status) {
                     AgentStatus.WAITING_CONFIRMATION -> {
                         if (secureJob?.isActive == true) secureJob?.cancel()
-                        val prompt = st.pendingConfirmation ?: "Should I go ahead?"
-                        if (confirmJob?.isActive != true && prompt != lastPrompt) {
+                        // J-02: no prompt = the answer was already given (the engine is acting on it) — never ask a
+                        // "Should I go ahead?" about nothing, whose yes would be queued for the next confirmation.
+                        val prompt = st.pendingConfirmation
+                        if (prompt != null && confirmJob?.isActive != true && prompt != lastPrompt) {
                             lastPrompt = prompt
                             val twi = st.pendingConfirmationTwi          // §A.1 structured Twi variant, or null
-                            confirmJob = observerScope.launch { confirmByVoice(prompt, twi) }
+                            val seq = st.confirmationSeq                 // the yes names the question it answers
+                            confirmJob = observerScope.launch { confirmByVoice(prompt, twi, seq) }
                         }
                     }
                     // Secure Input Mode: the agent went blind for the MoMo PIN. Speak the secure instruction
@@ -262,8 +268,8 @@ class VoiceController(
         interjectJob?.cancel()
         when (st.status) {
             AgentStatus.ASKING -> st.pendingQuestion?.let { q -> if (askJob?.isActive != true) askJob = observerScope.launch { askByVoice(q) } }
-            AgentStatus.WAITING_CONFIRMATION -> if (confirmJob?.isActive != true)
-                confirmJob = observerScope.launch { confirmByVoice(st.pendingConfirmation ?: "Should I go ahead?", st.pendingConfirmationTwi) }
+            AgentStatus.WAITING_CONFIRMATION -> if (confirmJob?.isActive != true) st.pendingConfirmation?.let { p ->
+                confirmJob = observerScope.launch { confirmByVoice(p, st.pendingConfirmationTwi, st.confirmationSeq) } }
             AgentStatus.SECURE_INPUT -> if (secureJob?.isActive != true) secureJob = observerScope.launch { secureInputByVoice() }
             else -> {}
         }
@@ -347,7 +353,7 @@ class VoiceController(
      * One repeat on an unclear answer; then a safe decline. Buttons remain a parallel path — if
      * the agent moves on for any reason the observer cancels this job.
      */
-    private suspend fun confirmByVoice(prompt: String, promptTwi: String? = null) {
+    private suspend fun confirmByVoice(prompt: String, promptTwi: String? = null, seq: Long = 0L) {
         if (!voiceConfirmation() || !speakAloud()) return
         declinedByVoice = false
         cues.needsOk()
@@ -382,7 +388,7 @@ class VoiceController(
                         val tr = try { asr.transcribe(cap.wav, sessionLanguage(), forceLanguage()) }
                         catch (c: CancellationException) { throw c } catch (_: Exception) { null }
                         val heard = tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() }
-                        Log.i("Tekyerema", "[VOICE] confirmation heard='${tr?.raw}' → ${Confirmation.interpret(heard)}")
+                        Log.i("Tekyerema", "[VOICE] confirmation heard='${com.tekyerema.core.Privacy.content(tr?.raw)}' → ${Confirmation.interpret(heard)}")   // J-15
                         // §8/§9/§13/§14 — a coherent reply that isn't yes/no ("send it to Kofi instead",
                         // "make it shorter", "actually call Ama") is a CORRECTION, not a decline. Hand the
                         // words to the brain, which re-plans against the pending proposal; the run continues
@@ -401,14 +407,14 @@ class VoiceController(
                 }
                 when (answer) {
                     Confirmation.Answer.YES -> {
-                        agent.confirm(true)
+                        agent.confirmFor(seq, true)   // J-02: approves only the confirmation that was spoken
                         _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                         try { tts.speak(if (lang == Lang.TWI) "Yoo." else "Okay.", lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         return
                     }
                     Confirmation.Answer.NO -> {
                         declinedByVoice = true
-                        agent.confirm(false)
+                        agent.confirmFor(seq, false)
                         _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                         try { tts.speak(if (lang == Lang.TWI) "Yoo, merenyɛ." else "Okay, I won't.", lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         return
@@ -430,7 +436,7 @@ class VoiceController(
             }
             // Two unclear answers: the safe default is to do nothing, and to say so.
             declinedByVoice = true
-            agent.confirm(false)
+            agent.confirmFor(seq, false)
             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
             try { tts.speak(Confirmation.DECLINED_UNCLEAR, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
         } catch (c: CancellationException) {
