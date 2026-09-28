@@ -22,6 +22,8 @@ fun defaultTools(): List<Tool> = listOf(
     OpenAppTool,
     // Honest stop (a decision, intercepted by the engine — never executed)
     CannotDoTool,
+    // D-02 tool search (intercepted by the engine): loads tools the current step's subset left out
+    FindTool,
     // Native accelerators (justified case-by-case in the plan's §14 table)
     ReadNotificationsTool,
     SearchContactsTool,

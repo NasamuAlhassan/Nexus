@@ -18,10 +18,11 @@ class ToolRegistry(
 
     fun get(name: String): Tool? = byName[name]?.takeIf(available)
 
-    /** Gemini-style functionDeclarations describing every tool to the model. */
-    fun functionDeclarations(): JSONArray {
+    /** Gemini-style functionDeclarations describing every tool to the model — or only [subset] (D-02). */
+    fun functionDeclarations(subset: Collection<String>? = null): JSONArray {
         val arr = JSONArray()
         for (t in all) {
+            if (subset != null && t.name !in subset) continue
             val decl = JSONObject()
                 .put("name", t.name)
                 .put("description", t.description)
@@ -43,9 +44,9 @@ class ToolRegistry(
         return arr
     }
 
-    /** OpenAI/Groq tools format: [{ "type":"function", "function": <declaration> }]. */
-    fun openAiTools(): JSONArray {
-        val decls = functionDeclarations()
+    /** OpenAI/Groq tools format: [{ "type":"function", "function": <declaration> }] — optionally a [subset] (D-02). */
+    fun openAiTools(subset: Collection<String>? = null): JSONArray {
+        val decls = functionDeclarations(subset)
         val arr = JSONArray()
         for (i in 0 until decls.length()) {
             val d = decls.getJSONObject(i)

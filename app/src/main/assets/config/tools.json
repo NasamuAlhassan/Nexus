@@ -29,6 +29,7 @@
     "play_music": {"feature": "E-14"},
     "open_setting": {"feature": "E-11", "idempotent": true},
     "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
-    "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true}
+    "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
+    "find_tool": {"feature": "D-02", "idempotent": true}
   }
 }

@@ -13,7 +13,7 @@ internal data class CatalogFeature(
     val status: String
 )
 
-/** Catalog features that have code in this build (136). */
+/** Catalog features that have code in this build (137). */
 internal val BUILT_FEATURES: List<CatalogFeature> = listOf(
     CatalogFeature("A-03", "Accessibility button and shortcut launch", 26, listOf("android.permission.RECORD_AUDIO"), true, false, "implemented"),
     CatalogFeature("A-07", "On-device wake word", 26, listOf("android.permission.RECORD_AUDIO"), true, false, "partial"),
@@ -48,6 +48,7 @@ internal val BUILT_FEATURES: List<CatalogFeature> = listOf(
     CatalogFeature("C-21", "Adaptive reasoning effort", 26, emptyList(), false, false, "partial"),
     CatalogFeature("C-22", "Conversational reference resolution", 26, emptyList(), false, false, "partial"),
     CatalogFeature("D-01", "Self-describing tool manifests", 26, emptyList(), false, false, "implemented"),
+    CatalogFeature("D-02", "Deferred loading and tool search", 26, emptyList(), false, false, "implemented"),
     CatalogFeature("D-06", "Strict schema validation", 26, emptyList(), false, false, "implemented"),
     CatalogFeature("D-10", "Tool result compaction", 26, emptyList(), false, false, "partial"),
     CatalogFeature("D-14", "Intent and deep-link templates", 26, listOf("android.permission.CALL_PHONE"), false, false, "partial"),

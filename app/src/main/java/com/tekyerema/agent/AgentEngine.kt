@@ -250,8 +250,9 @@ object AgentEngine {
         // package after that do we fall back to HOME. Generic: keyed on our own package, no app logic.
         if (forcedBrain == null) ensureOffOwnUi(ctxApp)
 
-        val geminiTools = registry.functionDeclarations()
-        val openAiTools = registry.openAiTools()
+        // D-02: the tool schema is chosen per step (core primitives + needed groups + used + discovered).
+        val usedTools = LinkedHashSet<String>()
+        val discoveredTools = LinkedHashSet<String>()
         val history = ArrayList<String>()
         var stats = RunStats()
         // Completion gating (plan §11 hardening): a Done is only COMPLETED if the goal's
@@ -330,6 +331,10 @@ object AgentEngine {
                 taskMemory.noteScreen(before.appPackage, before.screenTitle)   // Phase II P0: track current app/screen
                 setStatus(AgentStatus.THINKING)
 
+                val toolNames = ToolSelector.select(
+                    goal + " " + convo.takeLast(2).joinToString(" "), usedTools, discoveredTools, registry.all.map { it.name })
+                val openAiTools = registry.openAiTools(toolNames)
+                val geminiTools = registry.functionDeclarations(toolNames)
                 val t0 = SystemClock.uptimeMillis()
                 val decision = brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo, progress = taskMemory.render()))
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
@@ -399,6 +404,17 @@ object AgentEngine {
                             history.add("Tried unknown tool ${decision.name}")
                             continue
                         }
+                        // D-02: tool search — load the best matches for the next step instead of executing anything.
+                        if (decision.name == "find_tool") {
+                            val q = decision.args.optString("query")
+                            val hits = ToolSelector.search(q, registry.all.filter { it.name !in toolNames })
+                            discoveredTools += hits.map { it.name }
+                            log(LogEntry.Kind.ACTION, "find_tool(\"$q\") → ${hits.joinToString { it.name }.ifEmpty { "nothing new" }}")
+                            history.add("find_tool(\"$q\") → " + if (hits.isEmpty()) "no other tool matches; use the screen primitives or cannot_do."
+                                else "now available: " + hits.joinToString("; ") { it.name + " — " + it.description.take(90) })
+                            continue
+                        }
+                        usedTools += decision.name
                         // D-06: malformed or schema-violating arguments never reach a tool — the model gets the reason.
                         val argProblem = decision.argError ?: com.tekyerema.tools.ToolArgs.validate(tool, decision.args)
                         if (argProblem != null) {

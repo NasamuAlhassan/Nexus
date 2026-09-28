@@ -14,11 +14,38 @@ import org.junit.Test
  */
 class PromptBudgetTest {
     @Test fun fixed_prompt_stays_within_budget() {
-        val tools = ToolRegistry(defaultTools()).openAiTools().toString().length
+        // The FULL compiled schema (every tool available), independent of flags/API gates.
+        val tools = ToolRegistry(defaultTools()) { true }.openAiTools().toString().length
+        assertTrue("schema measured empty — the registry hid every tool", tools > 1_000)
         val system = BrainPrompts.SYSTEM.length
         println("[PROMPT-BUDGET] tools=$tools chars (~${tools / 4} tok), system=$system chars (~${system / 4} tok), " +
             "fixed total ~${(tools + system) / 4} tok/step")
-        assertTrue("tool schema grew to $tools chars", tools <= 16_000)
+        // D-02: the model never receives the whole schema any more (per-step subsets, below); this caps the compiled set.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 26_000)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
+    }
+
+    /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */
+    @Test fun per_step_tool_subset_is_small_and_relevant() {
+        val reg = ToolRegistry(defaultTools()) { true }
+        val all = reg.all.map { it.name }
+        fun sel(goal: String) = com.tekyerema.agent.ToolSelector.select(goal, emptySet(), emptySet(), all)
+        val open = sel("open chrome")
+        val openChars = reg.openAiTools(open).toString().length
+        val fullChars = reg.openAiTools().toString().length
+        println("[PROMPT-BUDGET] subset 'open chrome' = ${open.size} tools, $openChars chars (full $fullChars)")
+        assertTrue("per-step core subset grew to $openChars chars", openChars <= 9_000)
+        assertTrue("subset should be well under the full schema", openChars < fullChars * 0.65)
+        assertTrue("momo_send" !in open && "make_call" !in open)
+        assertTrue("find_tool" in open && "tap" in open)
+        assertTrue("momo_send" in sel("send 5 cedis to 0241234567 on momo"))
+        assertTrue("make_call" in sel("call Ama"))
+        assertTrue("set_alarm" in sel("wake me at 6"))
+        // Used and discovered tools stay loaded.
+        assertTrue("set_timer" in com.tekyerema.agent.ToolSelector.select("open chrome", setOf("set_timer"), emptySet(), all))
+        assertTrue("pinch" in com.tekyerema.agent.ToolSelector.select("open chrome", emptySet(), setOf("pinch"), all))
+        // find_tool search finds by description words.
+        val hits = com.tekyerema.agent.ToolSelector.search("alarm clock", defaultTools())
+        assertTrue(hits.any { it.name == "set_alarm" })
     }
 }

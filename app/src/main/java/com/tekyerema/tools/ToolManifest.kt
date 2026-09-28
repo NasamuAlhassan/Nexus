@@ -55,7 +55,8 @@ object ToolManifest {
      *  gaps are NOT a blocker: tools handle a denied permission themselves (e.g. a dial-pad fallback). */
     fun blocker(tool: Tool, sdk: Int = Build.VERSION.SDK_INT): String? {
         val m = meta(tool.name)
-        if (sdk < m.minApi) return "needs API ${m.minApi} (device is $sdk)"
+        // sdk 0 = no platform (JVM unit tests): the API gate can't be judged, so it doesn't hide anything.
+        if (sdk in 1 until m.minApi) return "needs API ${m.minApi} (device is $sdk)"
         val f = m.feature ?: return null
         if (CapabilityRegistry.get(f) == null) {
             // Unregistered feature: the flag alone decides.
