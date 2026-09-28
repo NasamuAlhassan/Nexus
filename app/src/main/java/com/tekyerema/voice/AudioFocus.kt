@@ -12,8 +12,15 @@ import com.tekyerema.core.config.AppConfig
  * LISTENS, music pauses (transient-exclusive) so the recognizer hears the user and not the song. Released as soon as
  * the utterance or capture ends, so the user's media resumes on its own.
  */
-class AudioFocus(context: Context) {
+class AudioFocus(context: Context, private val onLost: () -> Unit = {}) {
     enum class Kind { SPEAK, LISTEN }
+
+    companion object {
+        /** Another app took the audio outright (a ringing call, an alarm, a voice note) — not a short duck (a
+         *  notification sound, TalkBack), which we speak under. Pure, unit-tested. */
+        fun mustStop(change: Int): Boolean =
+            change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+    }
 
     private val am = context.applicationContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val app = context.applicationContext
@@ -43,7 +50,8 @@ class AudioFocus(context: Context) {
         val gain = if (kind == Kind.SPEAK) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
         val req = AudioFocusRequest.Builder(gain)
             .setAudioAttributes(attributes(kind))
-            .setOnAudioFocusChangeListener { }
+            // A reply kept talking over an incoming call's ringtone: stop it when the audio is taken from us.
+            .setOnAudioFocusChangeListener { change -> if (kind == Kind.SPEAK && mustStop(change)) try { onLost() } catch (_: Throwable) {} }
             .build()
         try { if (manager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { held = req; return req } } catch (_: Throwable) {}
         return null

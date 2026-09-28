@@ -185,4 +185,12 @@ class AgentW9Test {
                 FastIntent.CallHistory(missedOnly = false)))
             assertFalse(i.name, sa.forFast(i))
     }
+
+    /** A reply must stop for a ringing call (focus taken), not for a notification sound or TalkBack (a duck). */
+    @Test fun a_reply_stops_when_a_call_takes_the_audio() {
+        assertTrue(com.tekyerema.voice.AudioFocus.mustStop(android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT))
+        assertTrue(com.tekyerema.voice.AudioFocus.mustStop(android.media.AudioManager.AUDIOFOCUS_LOSS))
+        assertFalse(com.tekyerema.voice.AudioFocus.mustStop(android.media.AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK))
+        assertFalse(com.tekyerema.voice.AudioFocus.mustStop(android.media.AudioManager.AUDIOFOCUS_GAIN))
+    }
 }

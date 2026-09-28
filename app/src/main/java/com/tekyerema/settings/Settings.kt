@@ -8,13 +8,33 @@ class Settings(context: Context) {
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    /** J-15 (safety audit): an API key the user types in is kept ENCRYPTED (SecureStore — a Keystore AES-GCM key that
+     *  never leaves the phone), not as plain text in the preferences file. An old plain value is re-saved encrypted the
+     *  first time it's read. If the Keystore can't be used the key is kept as before, so the app keeps working. */
+    private fun putSecret(key: String, value: String) {
+        val v = value.trim()
+        val enc = if (v.isEmpty()) "" else com.tekyerema.core.SecureStore.encrypt(v.toByteArray(Charsets.UTF_8))
+            ?.let { ENC + android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
+        prefs.edit().putString(key, enc ?: v).apply()
+    }
+
+    private fun getSecret(key: String): String {
+        val raw = prefs.getString(key, "").orEmpty()
+        if (raw.isEmpty()) return ""
+        if (!raw.startsWith(ENC)) { putSecret(key, raw); return raw }
+        return try {
+            com.tekyerema.core.SecureStore.decrypt(android.util.Base64.decode(raw.removePrefix(ENC), android.util.Base64.NO_WRAP))
+                ?.toString(Charsets.UTF_8).orEmpty()
+        } catch (_: Throwable) { "" }
+    }
+
     /** Only what the user typed in the app (may be blank). */
-    val storedApiKey: String get() = prefs.getString(KEY_API, "").orEmpty()
+    val storedApiKey: String get() = getSecret(KEY_API)
 
     /** Effective key: a user-entered key overrides the build-time default. */
     var geminiApiKey: String
         get() = storedApiKey.ifBlank { BuildConfig.DEFAULT_GEMINI_KEY }
-        set(v) { prefs.edit().putString(KEY_API, v.trim()).apply() }
+        set(v) = putSecret(KEY_API, v)
 
     var model: String
         get() = prefs.getString(KEY_MODEL, null) ?: com.tekyerema.core.config.AppConfig.string("models.gemini.model", DEFAULT_MODEL)
@@ -23,11 +43,11 @@ class Settings(context: Context) {
     val hasKey: Boolean get() = geminiApiKey.isNotBlank()
 
     // --- Groq / OpenAI-compatible provider (default agent brain when a key is present) ---
-    val storedGroqKey: String get() = prefs.getString(KEY_GROQ, "").orEmpty()
+    val storedGroqKey: String get() = getSecret(KEY_GROQ)
 
     var groqApiKey: String
         get() = storedGroqKey.ifBlank { BuildConfig.DEFAULT_GROQ_KEY }
-        set(v) { prefs.edit().putString(KEY_GROQ, v.trim()).apply() }
+        set(v) = putSecret(KEY_GROQ, v)
 
     /** All configured Groq keys, in priority order, for rate-limit (429) rotation. The primary key
      *  (possibly user-overridden in prefs) first, then the extra build-time keys. Distinct + non-blank. */
@@ -242,6 +262,7 @@ class Settings(context: Context) {
         private const val KEY_REDUCE_MOTION = "reduce_motion"
         private const val KEY_FLOATING = "floating_trigger"
         private const val KEY_ONBOARDED = "onboarding_done"
+        private const val ENC = "enc1:"
         private const val KEY_API = "gemini_api_key"
         private const val KEY_MODEL = "model"
         private const val KEY_GROQ = "groq_api_key"

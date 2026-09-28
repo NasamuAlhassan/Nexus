@@ -101,7 +101,7 @@ class AndroidTts(context: Context) : TtsProvider {
 
     private val utterances = Utterances()
 
-    private val focus = AudioFocus(context)
+    private val focus = AudioFocus(context, onLost = { stop() })   // a call rings → the reply stops
 
     /** Q-01: time from speak() to the first audible chunk of the last utterance (ms), or -1. */
     @Volatile var lastFirstAudioMs: Long = -1; private set
