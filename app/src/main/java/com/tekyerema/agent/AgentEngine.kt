@@ -823,7 +823,8 @@ object AgentEngine {
                                 continue
                             }
                             PolicyOutcome.CONFIRM -> {
-                              if (moneyOpApproved && isDialerNavigation(before) && moneyApproval.covers(decision.name, decision.args)) {
+                              if (moneyOpApproved && isDialerNavigation(before) &&
+                                  moneyApproval.covers(decision.name, decision.args, resolved?.element?.label ?: requestedLabel)) {
                                 // The transfer (recipient + amount) was already approved once; the user chose guided
                                 // navigation, so don't re-ask at every USSD menu step (it would time out). The PIN is
                                 // still hard-blocked by TargetSemantics, and the brain is told to stop at the PIN.
