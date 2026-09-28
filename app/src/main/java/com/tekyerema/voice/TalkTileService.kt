@@ -19,6 +19,7 @@ class TalkTileService : TileService() {
         refresh()
     }
 
+    @android.annotation.SuppressLint("StartActivityAndCollapseDeprecated")   // the Intent form only runs below API 34
     override fun onClick() {
         super.onClick()
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-08", true)) return
@@ -28,7 +29,12 @@ class TalkTileService : TileService() {
         } else {
             Log.i("Tekyerema", "[TRIGGER] quick settings tile → talk")
             val i = Intent(this, com.tekyerema.ui.VoiceActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            try { startActivityAndCollapse(i) } catch (t: Throwable) { Log.w("Tekyerema", "[TRIGGER] tile launch failed: ${t.message}") }
+            // Android 14 (targetSdk 34) throws for the Intent form — the tile silently did nothing there (lint).
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 34) startActivityAndCollapse(
+                    android.app.PendingIntent.getActivity(this, 0, i, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT))
+                else @Suppress("DEPRECATION") startActivityAndCollapse(i)
+            } catch (t: Throwable) { Log.w("Tekyerema", "[TRIGGER] tile launch failed: ${t.message}") }
         }
         refresh()
     }

@@ -12,6 +12,10 @@
          removes our own voice (DuplexAudio). A NORMAL install-time permission — no runtime prompt. -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- Calls/SMS/phone state are used where the phone has them; tablets and Chromebooks without a radio still install
+         the app (the features explain themselves when missing). -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+
     <!-- Tier-2 capabilities (requested at runtime). -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />

@@ -725,7 +725,10 @@ class LocalFastRouter(
         FastOutcome("BLUETOOTH_QUERY", if (a.isEnabled) "Bluetooth is on." else "Bluetooth is off.")
     } catch (t: Throwable) { null }
 
+    // Android 12+ refuses without BLUETOOTH_CONNECT (not requested) and 13+ refuses apps outright: the SecurityException
+    // / false is caught and the Quick Settings tile does it instead.
     @Suppress("DEPRECATION")
+    @android.annotation.SuppressLint("MissingPermission")
     private suspend fun toggleBluetooth(on: Boolean): FastOutcome? {
         val a = BluetoothAdapter.getDefaultAdapter() ?: return null
         return try {

@@ -476,6 +476,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun lastScreenshotFailure(): String? = lastScreenshotError
 
+    @android.annotation.SuppressLint("NewApi")   // guarded on the next line; lint can't follow it into the callback
     override suspend fun captureScreenshot(): Bitmap? {
         if (Build.VERSION.SDK_INT < 30) return null
         // Never continuous: the platform rate-limits, and so do we.
@@ -550,7 +551,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             }
             node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
         } catch (t: Throwable) { false }
-        if (set && submit) {
+        if (set && submit && Build.VERSION.SDK_INT >= 30) {   // ACTION_IME_ENTER is API 30
             try {
                 node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
             } catch (t: Throwable) { /* best-effort — text was still set */ }
