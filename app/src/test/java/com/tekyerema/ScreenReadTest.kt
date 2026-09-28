@@ -96,4 +96,9 @@ class ScreenReadTest {
     @Test fun an_empty_screen_says_so() {
         assertEquals("You're in Messages, on Ama. ${ScreenReadout.NOTHING}", ScreenReadout.compose(snap(el(0, null), el(1, "  ")))[0])
     }
+
+    @Test fun the_app_name_is_said_once() {
+        val s = UiSnapshot("com.android.settings", "Settings", listOf(el(0, "Settings"), el(1, "Search"), el(2, "Apps")), 0L, appName = "Settings")
+        assertEquals("You're in Settings. Search. Apps.", ScreenReadout.compose(s)[0])
+    }
 }

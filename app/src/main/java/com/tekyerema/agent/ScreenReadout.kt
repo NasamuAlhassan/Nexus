@@ -41,7 +41,8 @@ object ScreenReadout {
 
     /** The reading in parts of about [maxChars]; every part but the last ends with [MORE]. */
     fun compose(snap: UiSnapshot, maxChars: Int = 480): List<String> {
-        val items = items(snap)
+        // "You're in Settings. Settings." (A20e): the page's own title repeats the app name — say it once.
+        val items = items(snap).dropWhile { snap.appName != null && it.equals(snap.appName, ignoreCase = true) }
         val where = snap.appName?.takeIf { it.isNotBlank() }?.let { name ->
             // The title is named only when the reading doesn't start with it anyway.
             val title = snap.screenTitle?.takeIf { it.isNotBlank() && !it.equals(name, true) && it.length <= 60 &&
