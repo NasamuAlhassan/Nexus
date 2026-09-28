@@ -89,8 +89,7 @@ object AgentEngine {
     private const val TAG = "Tekyerema"
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
-    private val READING_TOOLS = setOf("read_notifications", "read_sms", "search_messages", "web_search", "call_log", "calendar",
-        "find_contact", "location", "read_all", "read_screen")
+    private val READING_TOOLS = BrainPrompts.READING_TOOLS
     /** G-21: reads that can show whether an uncertain send / call went through (not `wait`, not the web). */
     private val CHECK_TOOLS = setOf("read_state", "read_all", "read_sms", "call_log", "read_notifications", "search_messages")
     private fun resultLimit(tool: String): Int =

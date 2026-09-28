@@ -236,8 +236,12 @@ class LocalBrain : AgentBrain {
                 val l = o.optString("label").trim()
                 if (l.length !in 2..40) continue
                 val flags = o.optJSONArray("flags")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
-                val control = "editable" in flags || "checkable" in flags ||
-                    ("clickable" in flags && Regex("(?i)button|imageview|fab").containsMatchIn(o.optString("role")))
+                // The listing names what a control can DO in `actions` (type = editable, tap = clickable); older
+                // listings put that in `flags` too — accept either.
+                val acts = o.optJSONArray("actions")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                val control = "editable" in flags || "type" in acts || "checkable" in flags ||
+                    (("clickable" in flags || "tap" in acts) && o.optString("source") != "vision" &&
+                        Regex("(?i)button|imageview|fab").containsMatchIn(o.optString("role")))
                 if (control && controls.size < 4 && controls.none { it.equals(l, true) }) controls.add(l)
                 else if (!control && labels.size < 6 && labels.none { it.equals(l, true) }) labels.add(l)
             }
