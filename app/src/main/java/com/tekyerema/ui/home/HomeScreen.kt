@@ -102,9 +102,10 @@ fun HomeContent(
     val stopEverything = { VoiceEngine.cancel(); AgentEngine.stop() }
 
     // Typed input (diagnostic / alternative input): the text enters the agent through the same
-    // entry point as an ASR transcript. A brief notice covers the one case it is refused: busy.
+    // entry point as an ASR transcript. It is never dropped: typed while a task works it goes to that task, typed while a
+    // reply is read it stops the reading (C-12). A brief notice says so when it went somewhere other than a new turn.
     var notice by remember { mutableStateOf("") }
-    LaunchedEffect(notice) { if (notice.isNotEmpty()) { delay(2500); notice = "" } }
+    LaunchedEffect(notice) { if (notice.isNotEmpty()) { delay(4000); notice = "" } }
     DisposableEffect(Unit) { onDispose { VoiceEngine.endTyping() } }
 
     val phrase = Phrases.forState(presence, voice, agent).ifBlank {
@@ -119,6 +120,7 @@ fun HomeContent(
         Presence.ERROR -> "Tap to try again"
         Presence.CONFIRMING -> ""
         Presence.CONFIRM_LISTENING -> com.tekyerema.voice.Confirmation.LISTEN_HINT
+        Presence.SPEAKING -> "Tap to interrupt"
         else -> "Tap to stop"
     } }
     val (label, stateText) = when (presence) {
@@ -128,7 +130,7 @@ fun HomeContent(
         Presence.ACTING -> "Stop" to phrase.ifBlank { "Working" }
         Presence.CONFIRMING -> "Cancel" to "Asking for your answer"
         Presence.CONFIRM_LISTENING -> "Cancel" to "Listening for yes or no"
-        Presence.SPEAKING -> "Stop" to "Speaking"
+        Presence.SPEAKING -> "Stop talking and listen" to "Speaking"
         Presence.DONE -> "Talk to Tɛkyerɛma" to "Done"
         Presence.ERROR -> "Try again" to "Something went wrong"
     }
@@ -150,6 +152,9 @@ fun HomeContent(
                 onTap = {
                     when (presence) {
                         Presence.IDLE, Presence.DONE, Presence.ERROR -> startListening()
+                        // Tapping while it reads a reply means "stop, I want to talk" (Gemini-style) — it used to cancel
+                        // and need a second tap. While a task works this is still the kill switch (see interrupt()).
+                        Presence.SPEAKING -> if (Perms.mic(context)) { focusManager.clearFocus(); VoiceEngine.interrupt() } else stopEverything()
                         else -> stopEverything()
                     }
                 },
@@ -177,8 +182,10 @@ fun HomeContent(
                 )
                 if (hint.isNotEmpty()) {
                     Text(hint, style = MaterialTheme.typography.bodyMedium,
-                        color = if (presence == Presence.CONFIRM_LISTENING) Tk.Attention else Tk.TextSecondary, textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(top = if (phrase.isEmpty()) 0.dp else 10.dp))
+                        color = if (presence == Presence.CONFIRM_LISTENING || notice.isNotEmpty()) Tk.Attention else Tk.TextSecondary, textAlign = TextAlign.Center,
+                        // A notice about a typed request (sent to the running task, waiting for yes/no) is announced.
+                        modifier = Modifier.padding(top = if (phrase.isEmpty()) 0.dp else 10.dp)
+                            .semantics { if (notice.isNotEmpty()) liveRegion = LiveRegionMode.Polite })
                 }
                 // Buttons stay as a quiet parallel path (a helper, TalkBack, a noisy room); voice is primary.
                 // Yes / No only for a real confirmation: an open question or the secure step is answered by voice (or on
@@ -195,9 +202,9 @@ fun HomeContent(
         }
         CommandField(
             onSubmit = { text ->
-                val accepted = VoiceEngine.submitText(text)
-                if (!accepted && text.isNotBlank()) notice = "Still busy — tap the circle to stop first"
-                accepted
+                val r = VoiceEngine.submitTyped(text)
+                notice = r.notice
+                r.accepted
             },
             onFocusChanged = { focused -> if (focused) VoiceEngine.beginTyping() else VoiceEngine.endTyping() },
             modifier = Modifier.padding(horizontal = PageMargin, vertical = 6.dp)

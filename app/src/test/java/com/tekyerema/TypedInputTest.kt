@@ -188,13 +188,18 @@ class TypedInputTest {
         vc.shutdown()
     }
 
-    @Test fun typed_input_is_refused_while_a_turn_is_running() = runTest {
+    @Test fun typed_input_during_a_voice_turn_replaces_it_and_is_never_lost() = runTest {
+        // C-12 (was: refused). A turn still listening has acted on nothing yet: the newest, explicit request wins —
+        // one turn at a time, never two stacked, and never a silent drop.
         val agent = RecordingAgent("done")
-        val vc = controller(this, agent, CountingAsr(), LogTts())
-        vc.start()                                              // a voice turn is in flight
-        assertFalse("must not stack a second turn onto a running one", vc.submitText("open settings"))
+        val asr = CountingAsr()
+        val vc = controller(this, agent, asr, LogTts(), mic = OpenRecorder())
+        vc.start(); advanceUntilIdle()                          // a voice turn is listening
+        assertTrue(vc.submitText("open settings"))
         advanceUntilIdle()
-        assertNull(agent.submitted.firstOrNull { it == "open settings" })
+        assertEquals(listOf("open settings"), agent.submitted)
+        assertEquals("the abandoned listen was never transcribed", 0, asr.calls)
+        assertNull(agent.submitted.firstOrNull { it == "spoken text" })
         vc.shutdown()
     }
 }

@@ -54,6 +54,8 @@ object VoiceEngine {
     val canInterject: Boolean get() = initialized && controller.canInterject
     /** The task waits on the user and nothing is listening for the reply — a wake or a tap should answer it. */
     val canRespond: Boolean get() = initialized && controller.canRespond
+    /** Only our own reply is in the way — opening Tɛkyerɛma stops it and listens (C-12). */
+    val canPreempt: Boolean get() = initialized && controller.canPreempt
 
     fun init(app: Application) {
         if (initialized) return
@@ -221,12 +223,11 @@ object VoiceEngine {
 
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */
     fun toggle() = controller.toggle()
-    /** C-12: starting a turn while a task runs is an interjection (stop / pause / continue / status / a correction). */
-    fun start() = when {
-        controller.canRespond -> controller.respond()   // the task is waiting on the user: this is the reply
-        AgentEngine.isBusy -> controller.interject()
-        else -> controller.start()
-    }
+    /** Talk: the reply to a waiting prompt, an interjection while a task runs (stop / pause / continue / status / a
+     *  correction, C-12), or a new turn — cutting our own reply short if it is still being read (see NewRequest). */
+    fun start() = controller.start()
+    /** The circle tapped while Tɛkyerɛma talks: stop talking and listen. While a task works it stays the kill switch. */
+    fun interrupt() = controller.interrupt()
     /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button). */
     fun respond() { if (initialized) controller.respond() }
     /** Listen once more after a reply so the conversation can continue; silence just rests (no nag). */
@@ -235,6 +236,8 @@ object VoiceEngine {
 
     /** Typed command → the same agent entry point as an ASR transcript (see VoiceController.submitText). */
     fun submitText(text: String): Boolean = controller.submitText(text)
+    /** Typed command with what happened to it (a notice for the screen when it went to a running task, etc.). */
+    fun submitTyped(text: String): VoiceController.TypedResult = controller.submitTyped(text)
     fun beginTyping() = controller.beginTyping()
     fun endTyping() = controller.endTyping()
 }

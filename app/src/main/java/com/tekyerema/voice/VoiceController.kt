@@ -139,6 +139,27 @@ class VoiceController(
     val canInterject: Boolean get() = agent.busy && _state.value.state == VoiceState.EXECUTING &&
         interjectJob?.isActive != true && askJob?.isActive != true && confirmJob?.isActive != true && secureJob?.isActive != true
 
+    /** Only our own reply (or the idle tail of a finished turn) is in the way: opening Tɛkyerɛma or tapping the circle
+     *  stops it and listens ([start] / [interrupt]) instead of doing nothing until the reading ends. */
+    val canPreempt: Boolean get() = route() == NewRequest.Route.PREEMPT && _state.value.state in NewRequest.TALKING_OR_RESTING
+
+    private fun route(): NewRequest.Route =
+        NewRequest.route(agent.state.value.status, agent.busy, job?.isActive == true, _state.value.state)
+
+    /**
+     * Start a voice turn once the previous one has fully let go. Cancelling a job is cooperative: the old capture used
+     * to read one more frame on the SAME recorder and VAD while the new one opened (two AudioRecords, one Silero state),
+     * and its "Cancelled." landed on top of the new turn's "Listening". A turn that is still talking is cut here.
+     */
+    private fun launchTurn(block: suspend () -> Unit) {
+        val previous = job?.takeIf { !it.isCompleted }
+        if (previous != null) { previous.cancel(); tts.stop(); fillers?.stop() }
+        job = scope.launch {
+            previous?.join()
+            block()
+        }
+    }
+
     // The confirmation observer outlives any single turn, so it is not a child of the caller's scope
     // (a test scope would otherwise wait on it forever); shutdown() cancels it.
     private val observerScope = CoroutineScope(scope.coroutineContext + SupervisorJob())
@@ -209,16 +230,18 @@ class VoiceController(
             cues.captured()
             val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
             if (text.isBlank()) return@launch
-            val twi = lang == Lang.TWI
-            val line = when (ControlVerbs.classify(text)) {
-                ControlVerbs.Verb.STOP -> { agent.stop(); if (twi) "Magyae." else "Stopped." }
-                ControlVerbs.Verb.PAUSE -> { agent.pause(); if (twi) "Matwɛn. Ka kɔ so na mɛtoa so." else "Paused. Say continue when you're ready." }
-                ControlVerbs.Verb.RESUME -> { agent.resume(); if (twi) "Yoo, mɛtoa so." else "Carrying on." }
-                ControlVerbs.Verb.STATUS -> agent.statusLine()
-                ControlVerbs.Verb.STEER -> { agent.steer(text); if (twi) "Yoo, mɛsesa." else "Got it, I'll change that." }
-            }
+            val line = applyInterjection(text, lang == Lang.TWI)
             try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
         }
+    }
+
+    /** C-12: act on words said (or typed) while a task runs, and return the line that tells the user what happened. */
+    private fun applyInterjection(text: String, twi: Boolean): String = when (ControlVerbs.classify(text)) {
+        ControlVerbs.Verb.STOP -> { agent.stop(); if (twi) "Magyae." else "Stopped." }
+        ControlVerbs.Verb.PAUSE -> { agent.pause(); if (twi) "Matwɛn. Ka kɔ so na mɛtoa so." else "Paused. Say continue when you're ready." }
+        ControlVerbs.Verb.RESUME -> { agent.resume(); if (twi) "Yoo, mɛtoa so." else "Carrying on." }
+        ControlVerbs.Verb.STATUS -> agent.statusLine()
+        ControlVerbs.Verb.STEER -> { agent.steer(text); if (twi) "Yoo, mɛsesa." else "Got it, I'll change that." }
     }
 
     /**
@@ -269,10 +292,36 @@ class VoiceController(
         }
     }
 
+    /**
+     * The user asked to talk (mic button, opening Tɛkyerɛma, a trigger). Routed by [NewRequest]: the answer to a waiting
+     * prompt, an interjection while a task works, or a fresh turn — cutting our own reply short if it is still being read
+     * (it used to do nothing until a 30-second reading ended). Already listening, or working out what was just said: the
+     * request is already being heard, so nothing more is started.
+     */
     fun start() {
-        if (isRunning) return
+        when (route()) {
+            NewRequest.Route.ANSWER -> respond()
+            NewRequest.Route.INTERJECT -> interject()
+            NewRequest.Route.START -> { followUpChain = 0; launchTurn { runOnce() } }
+            NewRequest.Route.PREEMPT -> if (_state.value.state in NewRequest.TALKING_OR_RESTING) {
+                Log.i("Tekyerema", "[VOICE] new request while ${_state.value.state} — stopping the reply to listen")
+                followUpChain = 0
+                launchTurn { runOnce() }
+            }
+            NewRequest.Route.WAIT -> Log.i("Tekyerema", "[VOICE] start ignored: the turn is acting on what was just said")
+        }
+    }
+
+    /**
+     * The circle tapped while Tɛkyerɛma is talking: stop talking and listen (C-12 v1.1 — stopping speech and cancelling a
+     * task are separate). Silence then just rests, like a follow-up, so a tap meant as "be quiet" costs nothing. While a
+     * task is working the tap stays the kill switch ([cancel]).
+     */
+    fun interrupt() {
+        if (!canPreempt) { cancel(); return }
+        Log.i("Tekyerema", "[VOICE] reply interrupted by a tap — listening")
         followUpChain = 0
-        job = scope.launch { runOnce() }
+        launchTurn { runOnce(quiet = true) }
     }
 
     /**
@@ -284,26 +333,95 @@ class VoiceController(
      * string of isolated commands.
      */
     fun followUp() {
-        if (isRunning) return
-        job = scope.launch { runOnce(quiet = true) }
+        // Never over a running task or a waiting prompt: a new goal would be refused by the busy engine and this turn
+        // would then wait on it for the whole task budget.
+        if (isRunning || agent.busy || agent.state.value.status in PROMPTS) return
+        launchTurn { runOnce(quiet = true) }
     }
+
+    /** What happened to a typed request — [accepted] clears the field; [notice] is shown (and announced) to the user. */
+    data class TypedResult(val route: NewRequest.Route?, val accepted: Boolean, val notice: String = "")
 
     /**
      * Typed input. The text enters the agent through [runTurn] — the SAME function the ASR
      * transcript goes through — as if ASR had produced exactly this text. It never touches ASR,
      * LID or normalization, which is the point: a typed instruction is the experimental control
-     * for the voice pipeline. Returns false (and does nothing) for blank text or while a turn or a
-     * confirmation is in progress.
+     * for the voice pipeline. Returns false only for blank text: a request typed while Tɛkyerɛma is busy is never
+     * dropped any more (it was, silently, while a reply was being read) — see [submitTyped].
      */
-    fun submitText(text: String): Boolean {
+    fun submitText(text: String): Boolean = submitTyped(text).accepted
+
+    /** Typed input, routed like any new request ([NewRequest]); see [submitText]. */
+    fun submitTyped(text: String): TypedResult = submitTyped(text, allowWait = true)
+
+    private fun submitTyped(text: String, allowWait: Boolean): TypedResult {
         val t = text.trim()
-        // C-13: typing while the task waits on a question answers it.
-        if (t.isNotEmpty() && agent.state.value.status == AgentStatus.ASKING) { askJob?.cancel(); hideAsking(); agent.answer(t); return true }
-        if (t.isEmpty() || isRunning) return false
-        followUpChain = 0
+        if (t.isEmpty()) return TypedResult(null, accepted = false)
         val language = forceLanguage() ?: sessionLanguage()
-        job = scope.launch { runTurn(Transcript(raw = t, canonical = t, language = language, reason = "typed"), InputSource.TYPED) }
-        return true
+        val route = route().let { if (it == NewRequest.Route.WAIT && !allowWait) NewRequest.Route.PREEMPT else it }
+        return when (route) {
+            NewRequest.Route.ANSWER -> answerTyped(t)
+            NewRequest.Route.INTERJECT -> {
+                // Typed while a task works: the same verbs as a spoken interjection — "stop", "pause", "what are you
+                // doing?", or a correction the running task folds in (C-19). A voice interjection still listening is superseded.
+                interjectJob?.cancel()
+                cues.captured()
+                val line = applyInterjection(t, language == Lang.TWI)
+                if (speakAloud()) interjectJob = observerScope.launch {
+                    try { tts.speak(Verbalize.apply(line), language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                }
+                TypedResult(route, accepted = true, notice = line)
+            }
+            NewRequest.Route.WAIT -> {
+                // The turn may be changing a setting this very instant (the fast path): let it finish, then route again —
+                // it will be speaking (preempted) or handing over to the agent (an interjection) by then.
+                scope.launch {
+                    var waited = 0L
+                    while (route() == NewRequest.Route.WAIT && waited < WAIT_MAX_MS) { kotlinx.coroutines.delay(100); waited += 100 }
+                    submitTyped(t, allowWait = false)
+                }
+                TypedResult(route, accepted = true, notice = "One moment…")
+            }
+            NewRequest.Route.START, NewRequest.Route.PREEMPT -> {
+                if (route == NewRequest.Route.PREEMPT) {
+                    Log.i("Tekyerema", "[VOICE] typed request while ${_state.value.state} — stopping that to handle it")
+                    cues.captured()   // heard: the reply stops because of what you typed, not by accident
+                }
+                followUpChain = 0
+                launchTurn { runTurn(Transcript(raw = t, canonical = t, language = language, reason = "typed"), InputSource.TYPED) }
+                TypedResult(route, accepted = true)
+            }
+        }
+    }
+
+    /**
+     * Typed text while the task waits on the user. A question takes it as the answer (C-13). A confirmation reads it
+     * exactly as a spoken reply ([confirmByVoice]): a correction re-plans, a clear yes/no answers — typing "yes" is as
+     * explicit and fresh as tapping Yes; anything else leaves the question waiting (never a yes). A typed YES must be
+     * short ("yes", "go ahead"): a new request typed without noticing the question ("ok call mum") contains an
+     * affirmative word and must never approve the action that is waiting. The secure step only listens for "done": any
+     * other text is dropped unread and unlogged — it may be the PIN typed into the wrong box.
+     */
+    private fun answerTyped(t: String): TypedResult {
+        val route = NewRequest.Route.ANSWER
+        return when (agent.state.value.status) {
+            AgentStatus.ASKING -> { askJob?.cancel(); hideAsking(); cues.captured(); agent.answer(t); TypedResult(route, accepted = true) }
+            AgentStatus.WAITING_CONFIRMATION -> when {
+                Confirmation.looksLikeRevision(t) -> { confirmJob?.cancel(); cues.captured(); agent.revise(t); TypedResult(route, accepted = true) }
+                else -> when (Confirmation.interpret(t)) {
+                    Confirmation.Answer.YES -> if (t.split(Regex("\\s+")).size > 2)
+                        TypedResult(route, accepted = false, notice = "Something is waiting for your OK. Type yes or no — or use the buttons")
+                    else { confirmJob?.cancel(); cues.captured(); agent.confirm(true); TypedResult(route, accepted = true) }
+                    Confirmation.Answer.NO -> { confirmJob?.cancel(); declinedByVoice = true; cues.captured(); agent.confirm(false); TypedResult(route, accepted = true) }
+                    // No speech here: the voice confirmation may be listening, and our own words must never be its answer.
+                    else -> TypedResult(route, accepted = false, notice = "Type yes or no — or use the buttons")
+                }
+            }
+            AgentStatus.SECURE_INPUT ->
+                if (Confirmation.isCompletion(t)) { secureJob?.cancel(); cues.captured(); agent.secureInputDone(); TypedResult(route, accepted = true) }
+                else TypedResult(route, accepted = true, notice = "Finish the secure step on the phone, then type done")
+            else -> TypedResult(route, accepted = false)
+        }
     }
 
     /**
@@ -341,6 +459,8 @@ class VoiceController(
     private val ACTIVE = setOf(AgentStatus.THINKING, AgentStatus.ACTING, AgentStatus.WAITING_CONFIRMATION,
         AgentStatus.SECURE_INPUT, AgentStatus.ASKING, AgentStatus.PAUSED)
     private val PROMPTS = setOf(AgentStatus.WAITING_CONFIRMATION, AgentStatus.ASKING, AgentStatus.SECURE_INPUT)
+    /** How long a typed request waits for the turn in front of it to finish acting before it cuts in anyway. */
+    private val WAIT_MAX_MS = 4_000L
 
     /**
      * Ask the pending question aloud, listen for a spoken yes/no, and answer the agent.
@@ -740,6 +860,19 @@ class VoiceController(
     private data class Outcome(val status: AgentStatus, val spoken: String)
 
     private suspend fun runAgent(goal: String): Outcome? {
+        if (agent.busy) {
+            // A task is already running (a scheduled one, or one that started while this was being heard). The engine
+            // refuses a second goal, and this turn used to wait for its own goal until the whole task budget ran out —
+            // then "took too long" and stopped the OTHER task. Stop / pause / status apply to the running task (C-12);
+            // a new request is not folded into a task the user may not know about — say so instead of dropping it.
+            val twi = (forceLanguage() ?: sessionLanguage()) == Lang.TWI
+            val line = if (ControlVerbs.classify(goal) != ControlVerbs.Verb.STEER) applyInterjection(goal, twi)
+                else Phrases.get("busyOtherTask", twi, "I'm still working on another task. Say stop to end it, or ask me again when it's done.")
+            Log.i("Tekyerema", "[VOICE] a task is already running — request not started as a new task")
+            say(line)
+            idle("")
+            return null
+        }
         agent.submitGoal(goal)
         set(VoiceState.EXECUTING, "Working on it…")
         // Instant, offline "thinking" backchannel while the brain works: a blind user gets nothing from the
