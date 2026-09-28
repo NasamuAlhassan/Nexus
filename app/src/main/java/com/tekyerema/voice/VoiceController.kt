@@ -312,7 +312,7 @@ class VoiceController(
         val lang = forceLanguage() ?: sessionLanguage()
         // §A.1 — in a Twi session, ask the confirmation in TWI when we have a structured Twi rendering
         // (name verbatim, number digit-by-digit); otherwise fall back to the English question. The Twi text
-        // is spoken in Lang.TWI (Khaya voice if available, else the system voice reads the Twi words — the
+        // is spoken in Lang.TWI (an online Twi voice if one is configured, else the system voice reads the Twi words — the
         // words are Twi even when the voice is not), never MT'd at runtime.
         val useTwi = lang == Lang.TWI && !promptTwi.isNullOrBlank()
         val askLang = if (useTwi) Lang.TWI else Lang.GH_EN

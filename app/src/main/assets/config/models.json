@@ -2,7 +2,12 @@
   "schema_version": 1,
   "providers": {
     "groq": {"baseUrl": "https://api.groq.com/openai/v1"},
-    "gemini": {"baseUrl": "https://generativelanguage.googleapis.com/v1beta"}
+    "gemini": {"baseUrl": "https://generativelanguage.googleapis.com/v1beta"},
+    "speech": {
+      "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. The UG HCI Lab ASR/TTS clients register their ids when they exist.",
+      "tts": {"english": ["system"], "twi": ["system"], "ghEnglish": []},
+      "asr": {"online": {"twi": [], "gh_en": [], "auto": []}}
+    }
   },
   "models": {
     "planner": {
@@ -10,6 +15,7 @@
       "model": "openai/gpt-oss-120b",
       "fallbacks": ["openai/gpt-oss-20b"],
       "fastModel": "openai/gpt-oss-20b",
+      "chain": ["groq", "gemini"],
       "temperature": 0.2,
       "requestTokens": 4800,
       "timeouts": {"connectSec": 8, "callSec": 35}
@@ -19,6 +25,11 @@
       "model": "meta-llama/llama-prompt-guard-2-86m",
       "role": "guard",
       "_note": "O-14: separate free-tier quota bucket; used by J-19 (flag off until verified on device)"
+    },
+    "vision": {
+      "provider": "gemini",
+      "model": "gemini-3.6-flash",
+      "_note": "N-06/P-01: camera descriptions; defaults to the Gemini brain model when absent"
     },
     "gemini": {
       "provider": "gemini",

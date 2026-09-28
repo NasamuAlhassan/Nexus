@@ -41,7 +41,10 @@ data class Transcript(
     val isBlank: Boolean get() = canonical.isBlank()
 }
 
-/** Transcribe captured audio to a canonical goal. May be online (proxy) or a future on-device model. */
+/** Distinguishes an ASR-layer failure so the controller can label the failed stage honestly (§29). */
+class AsrException(message: String) : Exception(message)
+
+/** Transcribe captured audio to a canonical goal: the on-device model, or an online provider (the UG HCI Lab API). */
 interface AsrProvider {
     /**
      * @param wav a complete 16 kHz mono PCM16 WAV (header + data).

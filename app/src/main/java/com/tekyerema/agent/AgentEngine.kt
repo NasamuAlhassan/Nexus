@@ -347,9 +347,13 @@ object AgentEngine {
             // Cloud fallback CHAIN — use every credential: Groq (keys rotated inside OpenAiCompatBrain)
             // first, then Gemini, so a drained free-tier quota isn't a dead end (demo-readiness fix).
             val cloudChain = if (!RouterTiers.enabled(RouterTiers.CLOUD)) emptyList() else buildList {   // C-01
-                if (set.hasGroqKey) add(OpenAiCompatBrain(set))
-                // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
-                if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
+                // N-06: provider order for the planner role from config (models.planner.chain).
+                for (id in ModelRoles.plannerChain()) when (id) {
+                    ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set))
+                    // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
+                    ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
+                    else -> Log.w(TAG, "[BRAIN] models.planner.chain: unknown provider '$id' — skipped")
+                }
             }
             val cloud: AgentBrain? = when (cloudChain.size) {
                 0 -> null; else -> FallbackBrain(cloudChain)   // even one brain gets the network-blip retry
@@ -372,8 +376,10 @@ object AgentEngine {
             }
         }
         val cloudName = buildList {
-            if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
-            if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
+            for (id in ModelRoles.plannerChain()) when (id) {
+                ModelRoles.GROQ -> if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
+                ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
+            }
         }.joinToString(" → ").ifEmpty { "none" }
         val brainLabel = forcedLabel ?: "Hybrid on-device" +
             (if (online && cloudName != "none") " + cloud:$cloudName" else " (offline${if (cloudName == "none") ", no cloud key" else ""})")

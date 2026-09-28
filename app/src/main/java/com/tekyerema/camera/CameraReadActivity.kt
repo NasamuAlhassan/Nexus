@@ -410,7 +410,7 @@ class CameraReadActivity : ComponentActivity() {
                 FrameConvert.nv21ToJpeg(nv21, width, height, rotation, AppConfig.int("camera.describe.maxSide", 1024), 80)
             }
             val result = if (jpeg == null) VisionResult.Failed("encode")
-            else GeminiVision.describe(jpeg, settings.geminiApiKey, settings.model)
+            else GeminiVision.describe(jpeg, settings.geminiApiKey, com.tekyerema.agent.ModelRoles.model("vision", settings.model))   // N-06
             if (closing) return@launch
             when (result) {
                 is VisionResult.Described -> deliver(result.text)

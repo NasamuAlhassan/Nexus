@@ -110,6 +110,8 @@ object FastIntentClassifier {
     fun classify(raw: String): FastIntent? {
         val g = raw.trim().lowercase().replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
         if (g.isEmpty()) return null
+        // X-03: phrasings from the per-locale rule files come first (config, not code).
+        if (com.tekyerema.core.config.FeatureFlags.isEnabled("X-03", true)) RouterRules.match(g)?.let { return it }
         // W7, before the compound check: a schedule's goal may itself be compound (the trigger re-checks what may run).
         scheduleIntent(g, raw)?.let { return it }
         if (RE_LIST_SCHEDULES.containsMatchIn(g)) return FastIntent.ListSchedules

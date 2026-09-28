@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "router": {
+    "rules": [
+      {"locale": "en", "pattern": "^how much (?:charge|power|battery) (?:do i have|have i got|is left)$", "intent": "BATTERY"},
+      {"locale": "en", "pattern": "^is my (?:phone|screen) locked$", "intent": "LOCK_QUERY"},
+      {"locale": "en", "pattern": "^(?:is|am i) (?:my )?(?:internet|data|phone) (?:working|on|connected|online)$", "intent": "CONNECTIVITY"},
+      {"locale": "en", "pattern": "^what(?:'s| is) this song$", "intent": "NOW_PLAYING"}
+    ],
+    "_rules_note": "X-03: add phrasings per locale here (\"en\", \"tw\"). Twi rules should come from the language team's verified phrase list, not guesses."
+  }
+}

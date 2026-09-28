@@ -114,17 +114,6 @@ class RunGoalReceiver : BroadcastReceiver() {
             com.tekyerema.voice.VoiceDebug.setAsrOnline(context.applicationContext, url)
             return
         }
-        // Phase 8: set/clear the Khaya key (activates natural-Twi ASR + Twi voice). Key stays in app prefs.
-        //   adb ... --es set_khaya <your-khaya-key>   |   --es set_khaya off
-        intent.getStringExtra("set_khaya")?.let { key ->
-            com.tekyerema.voice.VoiceDebug.setKhaya(context.applicationContext, key)
-            return
-        }
-        // §2 Abena: set the key on device.  --es set_abena <key> | off
-        intent.getStringExtra("set_abena")?.let { key ->
-            com.tekyerema.voice.VoiceDebug.setAbena(context.applicationContext, key)
-            return
-        }
         // Repoint the cloud brain at a relay/endpoint.  --es set_brain <url>|off [--es model <m>]
         intent.getStringExtra("set_brain")?.let { url ->
             com.tekyerema.voice.VoiceDebug.setBrain(context.applicationContext, url, intent.getStringExtra("model"))

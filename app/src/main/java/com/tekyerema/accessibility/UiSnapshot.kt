@@ -104,7 +104,12 @@ data class UiSnapshot(
 
     val actionableCount: Int get() = elements.count { it.interactive }
 
-    fun toCompactJson(maxElements: Int = 45): JSONObject {
+    /** F-03: a short id for this reading of the screen (same screen content ⇒ same id), so steps can say which one they saw. */
+    val snapshotId: String get() = Integer.toHexString(signature().hashCode())
+
+    /** F-03: caps from config (`perception.tree.maxElements`, `perception.tree.labelMax`). */
+    fun toCompactJson(maxElements: Int = com.tekyerema.core.config.AppConfig.int("perception.tree.maxElements", 45).coerceIn(10, 150),
+                      labelMax: Int = com.tekyerema.core.config.AppConfig.int("perception.tree.labelMax", 64).coerceIn(16, 400)): JSONObject {
         // Interactive tree elements first, then labelled static text, then vision elements last —
         // so a busy screen never hides its controls and the model sees which grounding it is using.
         val tree = elements.filter { it.source == ElementSource.TREE }
@@ -117,7 +122,7 @@ data class UiSnapshot(
             val o = JSONObject()
             o.put("id", e.id)
             o.put("role", e.role)
-            if (!e.label.isNullOrBlank()) o.put("label", e.label.take(64))
+            if (!e.label.isNullOrBlank()) o.put("label", e.label.take(labelMax))
             // Mark only vision elements (they need x,y grounding); "tree" is the default, so omit it — this
             // JSON is sent for up to 45 elements on every step, so per-element bytes dominate the request.
             if (e.source == ElementSource.VISION) o.put("source", "vision")
@@ -147,20 +152,24 @@ data class UiSnapshot(
             if (e.source == ElementSource.VISION) o.put("bounds", e.bounds.toJson())
             arr.put(o)
         }
-        val truncated = ordered.size > maxElements
+        val listCut = ordered.size > maxElements
+        val focus = elements.firstOrNull { it.focused && it.source == ElementSource.TREE }?.id
         return JSONObject()
             .put("app", appPackage ?: "unknown")
             .apply { if (!appName.isNullOrBlank()) put("appName", appName) }
             .apply { if (!screenTitle.isNullOrBlank()) put("screen", screenTitle) }
+            .put("snap", snapshotId)                                                            // F-03
+            .apply { if (focus != null) put("focus", focus) }                                   // F-03 input focus
             .put("elementCount", elements.size)
             .put("perception", JSONObject().put("source", perception.source).put("reason", perception.reason))
             .apply { if (secureWindow) put("secureWindow", true) }
             .apply { if (windowType != null) put("window", windowType) }                       // F-13
             .apply { if (announcements.isNotEmpty()) put("announced", JSONArray(announcements)) }  // F-17
-            .apply { if (truncated) put("longScreen", "only part of this screen was read — scroll for more") }   // F-01
+            // F-01: the service's traversal hit its node cap (not the listing cap below).
+            .apply { if (this@UiSnapshot.truncated) put("longScreen", "only part of this screen was read — scroll for more") }
             .put("elements", arr)
             .apply {
-                if (truncated) put(
+                if (listCut) put(
                     "note",
                     "${ordered.size - maxElements} more elements exist on this screen but aren't shown here — " +
                         "scroll, or use the app's own search to reach something not listed rather than assuming it's absent."

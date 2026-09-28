@@ -1,32 +1,12 @@
 package com.tekyerema.voice
 
-import android.content.Context
 import android.util.Log
-import java.io.File
-import java.security.MessageDigest
 
 /**
- * Provider-agnostic voice plumbing: an on-disk TTS cache and the fallback composites that try providers in
- * order. Extracted from the old AbenaVoice.kt when the Abena/Khaya integrations were removed (2026-09-27),
- * so the seams survive for the next provider (e.g. the UG HCI Lab ASR/TTS API).
+ * Provider-agnostic voice plumbing: composites that try providers in order. [SpeechProviders] builds them from
+ * config (B-18), so a second vendor per role — the UG HCI Lab ASR/TTS API, then the on-device engine — is a
+ * config change, not a code change.
  */
-
-/** Persistent on-disk cache of synthesized WAVs, keyed by (text, voice, speed). Fixed strings are
- *  synthesized ONCE and reused forever, so confirmations/errors/prompts never re-hit a network TTS. */
-object TtsCache {
-    private fun dir(ctx: Context) = File(ctx.filesDir, "tts_cache").apply { mkdirs() }
-    private fun key(text: String, voice: String, speed: Double): String {
-        val md = MessageDigest.getInstance("SHA-256").digest("$voice|$speed|$text".toByteArray(Charsets.UTF_8))
-        return md.joinToString("") { "%02x".format(it) }
-    }
-    fun get(ctx: Context, text: String, voice: String, speed: Double): ByteArray? {
-        val f = File(dir(ctx), key(text, voice, speed) + ".wav")
-        return if (f.exists() && f.length() > 44) f.readBytes() else null
-    }
-    fun put(ctx: Context, text: String, voice: String, speed: Double, wav: ByteArray) {
-        try { File(dir(ctx), key(text, voice, speed) + ".wav").writeBytes(wav) } catch (_: Throwable) {}
-    }
-}
 
 /** Try TTS providers in order; the first that speaks wins. Degrades to the system engine (never silent). */
 class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider {
@@ -52,5 +32,40 @@ class FallbackAsr(private val chain: List<AsrProvider>) : AsrProvider {
             catch (e: Exception) { Log.w("Tekyerema", "[ASR] ${p.name} failed → next: ${e.message}"); last = e }
         }
         throw AsrException(last?.message ?: "no ASR provider available")
+    }
+}
+
+/**
+ * B-18 — which speech providers fill each role, from config `providers.speech.*` instead of code:
+ *
+ *   "tts": { "english": ["system"], "twi": ["system"], "ghEnglish": [] }   tried in order; the system engine is
+ *                                                                          always the last resort (never silent)
+ *   "asr": { "online": { "twi": [], "gh_en": [], "auto": [] } }            online ids per language; empty ⇒ on-device
+ *
+ * Known ids today: "system" (the phone's TTS engine). The UG HCI Lab ASR/TTS clients register their ids in the
+ * registries VoiceEngine passes in; an id with no client is skipped and logged, never guessed.
+ */
+object SpeechProviders {
+    /** Pure: the configured ids that have a registered provider, in order (unknown ids dropped). */
+    fun <T> resolve(ids: List<String>, registry: Map<String, T>, unknown: (String) -> Unit = {}): List<T> =
+        ids.map { it.trim().lowercase() }.distinct().mapNotNull { id -> registry[id] ?: run { unknown(id); null } }
+
+    fun ttsIds(role: String, default: List<String>): List<String> =
+        com.tekyerema.core.config.AppConfig.stringList("providers.speech.tts.$role", default)
+
+    fun onlineAsrIds(lang: String?): List<String> =
+        com.tekyerema.core.config.AppConfig.stringList("providers.speech.asr.online.${lang ?: "auto"}", emptyList())
+
+    /** A TTS role from config, ending in [fallback] so the chain can never be silent. */
+    fun tts(role: String, registry: Map<String, TtsProvider>, fallback: TtsProvider, default: List<String> = listOf("system")): TtsProvider {
+        val chain = resolve(ttsIds(role, default), registry) { Log.w("Tekyerema", "[VOICE] tts.$role: no provider '$it' — skipped") }
+        val full = if (fallback in chain) chain else chain + fallback
+        return if (full.size == 1) full[0] else FallbackTts(full)
+    }
+
+    /** The online ASR for a language from config, or null (⇒ on-device). */
+    fun onlineAsr(lang: String?, registry: Map<String, AsrProvider>): AsrProvider? {
+        val chain = resolve(onlineAsrIds(lang), registry) { Log.w("Tekyerema", "[VOICE] asr.online.$lang: no provider '$it' — skipped") }
+        return when (chain.size) { 0 -> null; 1 -> chain[0]; else -> FallbackAsr(chain) }
     }
 }

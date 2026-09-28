@@ -38,48 +38,16 @@ class LocalAsrProvider(
 }
 
 /**
- * Online/offline ASR router (§14/§34): prefer the on-device model when it's ready (works offline), else
- * the online provider when connected, else an honest error the controller speaks aloud. Never silently
- * fails and never fabricates a transcript. Today `onDevice.ready` is false (no bundled model / no device
- * validation), so this is effectively "online when connected, clear message when offline" — the truth.
- *
- * Cross-device note: the on-device model is an OPTIONAL enhancement, not a per-phone lock-in. When bundled it
- * must be RAM-adaptive (choose model size by device, ship the native lib for multiple ABIs); on any phone that
- * can't host it, `onDevice.ready` stays false and this router simply uses online ASR — so the app runs
- * everywhere (minSdk 26+), never tuned exclusively for one device.
- */
-class RoutingAsr(
-    private val onDevice: SpeechToRaw,
-    private val online: AsrProvider,
-    private val isOnline: () -> Boolean,
-    sessionLanguage: () -> String = { Lang.GH_EN }
-) : AsrProvider {
-    private val local = LocalAsrProvider(onDevice, sessionLanguage)
-    override val name = "routing(local=${onDevice.name}; online=${online.name})"
-    override suspend fun transcribe(wav: ByteArray, sessionLanguage: String, forceLanguage: String?): Transcript {
-        if (isOnline()) {
-            try { return online.transcribe(wav, sessionLanguage, forceLanguage) }            // Groq Whisper: fast + accurate
-            catch (e: AsrException) {
-                android.util.Log.w("Tekyerema", "[ASR] online failed → on-device fallback: ${e.message}")
-                if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage)
-                throw e
-            }
-        }
-        if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage)      // offline: on-device
-        throw AsrException("You're offline and the on-device voice model isn't available.")
-    }
-}
-
-/**
  * Phase 8 HYBRID ASR router — language-aware, offline-first, observable (§12/§13). Implements the
  * provisional routing policy from PHASE2_ASR_DELIVERY.md:
  *
  *   Twi           → on-device Twi model. NOTE: the currently-deployed tekyerema-whisper-tiny-twi is
  *                    DISQUALIFIED (2026-09-19 audit: GOLD was in its training set ×20 — its "1.000 on GOLD"
  *                    was memorisation, not recognition; NC-tainted lineage). Replace with the v2 base int8
- *                    export (Phase 9.1). Online Twi = Khaya (Phase 3.x); network is used for Twi via Khaya.
- *   Gh-EN/unknown → the strong ONLINE Gh-EN model (whisper-large-v3-turbo-tekyerema-eng, 0.894) WHEN a
- *                    real endpoint is configured AND we're connected; otherwise the on-device Gh-EN tiny.
+ *                    export (Phase 9.1). Online Twi = the UG HCI Lab ASR API once its client is registered
+ *                    ([SpeechProviders], `providers.speech.asr.online.twi`).
+ *   Gh-EN/unknown → an online Gh-EN provider WHEN one is configured AND we're connected; otherwise the
+ *                    on-device Gh-EN tiny.
  *
  * Offline safety: when no endpoint is configured or there's no network, the online leg is NEVER attempted
  * (isOnlineConfigured() is false) — so basic device control never hangs waiting on a cloud API, and an
@@ -89,9 +57,9 @@ class RoutingAsr(
 class HybridAsr(
     private val onDevice: SpeechToRaw,
     /** The online provider to use for a given effective language, or null to stay on-device. This is
-     *  language-aware (§12/§13): Twi → Khaya (natural-Twi ASR) when a key is set; Gh-EN → the strong
-     *  whisper endpoint when configured; either returns null ⇒ on-device. Callers also fold network
-     *  state in here (return null when offline), so the online leg is never attempted without a network. */
+     *  language-aware (§12/§13): each language gets the provider configured for it (the HCI Lab API);
+     *  null ⇒ on-device. Callers also fold network state in here (return null when offline), so the
+     *  online leg is never attempted without a network. */
     private val onlineFor: (lang: String?) -> AsrProvider?,
     private val forceLanguage: () -> String? = { null },
     private val sessionLanguage: () -> String = { Lang.GH_EN }
@@ -103,21 +71,21 @@ class HybridAsr(
         val lang = forceLanguage ?: this.forceLanguage()          // effective language (null = both/unknown)
 
         // §C.6 — on-device→LID→escalate two-pass for AUTO mode, used ONLY when there is no DIRECT online auto
-        // provider (i.e. no code-switch-capable recogniser like Abena's "twi-en"). It transcribes on-device,
-        // detects the language, and escalates a confident-Twi utterance to Khaya — so English audio is never
-        // sent to the Twi-only Khaya ASR. When Abena is configured, onlineFor(null) is non-null and we skip
-        // straight to it (Abena handles code-switching itself). A forced language also skips this.
+        // provider (i.e. no code-switch-capable recogniser). It transcribes on-device, detects the language, and
+        // escalates a confident-Twi utterance to the online Twi provider — so English audio is never sent to a
+        // Twi-only recogniser. When a code-switching provider is configured, onlineFor(null) is non-null and we
+        // skip straight to it. A forced language also skips this.
         if (lang == null && onDevice.ready && onlineFor(null) == null) {
             val twiOnline = onlineFor(Lang.TWI)
             if (twiOnline != null) {
                 val localTr = try { local.transcribe(wav, sessionLanguage, null) } catch (e: AsrException) { null }
                 val det = localTr?.let { Lid.detect(it.raw) }
                 val isTwi = det != null && det.lang == Lang.TWI && det.confidence >= 0.5
-                Log.i("Tekyerema", "[ASR] two-pass auto: local='${localTr?.raw?.take(40)}' lid=${det?.lang}/${det?.confidence} -> ${if (isTwi) "escalate TWI→Khaya" else "keep on-device/Gh-EN"}")
+                Log.i("Tekyerema", "[ASR] two-pass auto: local='${localTr?.raw?.take(40)}' lid=${det?.lang}/${det?.confidence} -> ${if (isTwi) "escalate TWI→online" else "keep on-device/Gh-EN"}")
                 if (isTwi) {
                     try { return twiOnline.transcribe(wav, sessionLanguage, Lang.TWI).copy(fallbackUsed = false) }
                     catch (e: AsrException) {
-                        // §10.3 — on-device Twi is disqualified; a Khaya failure fails honestly, not to garbage.
+                        // §10.3 — on-device Twi is disqualified; an online-Twi failure fails honestly, not to garbage.
                         throw AsrException("The Twi voice service is unavailable right now, and there isn't a trusted offline Twi model yet.")
                     }
                 }
@@ -144,10 +112,10 @@ class HybridAsr(
             // timeout on the primary provider still reaches the on-device fallback / honest-outage path below.
             catch (e: Exception) {
                 // §10.3 — for Twi, the on-device model is DISQUALIFIED (contaminated; Phase 9.1 pending), so a
-                // Khaya 403/429/quota failure must NOT silently degrade to it and speak confident garbage.
+                // an online 403/429/quota failure must NOT silently degrade to it and speak confident garbage.
                 // Surface the outage honestly instead.
                 if (lang == Lang.TWI) {
-                    Log.w("Tekyerema", "[ASR] Twi online (Khaya) failed and on-device Twi is disqualified — failing honestly: ${e.message}")
+                    Log.w("Tekyerema", "[ASR] Twi online provider failed and on-device Twi is disqualified — failing honestly: ${e.message}")
                     throw AsrException("The Twi voice service is unavailable right now, and there isn't a trusted offline Twi model yet.")
                 }
                 Log.w("Tekyerema", "[ASR] online failed → on-device fallback: ${e.message}")

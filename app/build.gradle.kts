@@ -33,12 +33,7 @@ val defaultGroqReasoningEffort: String = localProps.getProperty("GROQ_REASONING_
 val defaultAsrOnlineUrl: String = localProps.getProperty("ASR_ONLINE_URL", "")
 val defaultAsrOnlineKey: String = localProps.getProperty("ASR_ONLINE_KEY", "")
 val defaultAsrOnlineModel: String = localProps.getProperty("ASR_ONLINE_MODEL", "")
-// Ghana NLP Khaya key — online Twi ASR + TTS. Blank ⇒ Twi stays on-device. Never committed.
-val defaultKhayaKey: String = localProps.getProperty("KHAYA_API_KEY", "")
-val defaultKhayaUrl: String = localProps.getProperty("KHAYA_BASE_URL", "")
-// Abena AI (Mobobi) — PRIMARY online voice provider (ASR + TTS, both languages). Blank ⇒ falls back to Khaya.
-val defaultAbenaKey: String = localProps.getProperty("ABENA_API_KEY", "")
-val defaultAbenaUrl: String = localProps.getProperty("ABENA_BASE_URL", "")
+// The Khaya / Abena speech keys were removed with their clients (2026-09-28): the UG HCI Lab ASR/TTS API is required.
 
 android {
     namespace = "com.tekyerema"
@@ -62,10 +57,6 @@ android {
         buildConfigField("String", "DEFAULT_ASR_ONLINE_URL", "\"$defaultAsrOnlineUrl\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_KEY", "\"$defaultAsrOnlineKey\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_MODEL", "\"$defaultAsrOnlineModel\"")
-        buildConfigField("String", "DEFAULT_KHAYA_KEY", "\"$defaultKhayaKey\"")
-        buildConfigField("String", "DEFAULT_KHAYA_URL", "\"$defaultKhayaUrl\"")
-        buildConfigField("String", "DEFAULT_ABENA_KEY", "\"$defaultAbenaKey\"")
-        buildConfigField("String", "DEFAULT_ABENA_URL", "\"$defaultAbenaUrl\"")
     }
 
     buildTypes {

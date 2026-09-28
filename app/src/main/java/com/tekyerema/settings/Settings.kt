@@ -102,25 +102,8 @@ class Settings(context: Context) {
      *  attempts the network — offline device control keeps working with zero online dependency. */
     val hasOnlineAsr: Boolean get() = asrOnlineBaseUrl.isNotBlank() && asrOnlineKey.isNotBlank()
 
-    // --- Khaya (Ghana NLP) — the online path for NATURAL Twi speech (ASR + TTS), purpose-built for Twi.
-    //     One key powers both. BLANK by default → Twi stays fully on-device (tiny model). Set KHAYA_API_KEY
-    //     in local.properties (gitignored). When set + online, natural Twi transcribes far better and the
-    //     response is spoken in a real Twi voice; offline still falls back to the on-device tiny model. ---
-    var khayaApiKey: String
-        get() = prefs.getString(KEY_KHAYA, null)?.ifBlank { null } ?: BuildConfig.DEFAULT_KHAYA_KEY
-        set(v) = put { putString(KEY_KHAYA, v.trim()) }
-    /** Ghana NLP Khaya API origin (ASR: /asr/v1/transcribe, TTS: /tts/v1/synthesize). */
-    val khayaBaseUrl: String get() = BuildConfig.DEFAULT_KHAYA_URL.ifBlank { DEFAULT_KHAYA_URL }
-    val hasKhaya: Boolean get() = khayaApiKey.isNotBlank()
-
-    // --- Abena AI (Mobobi) — PRIMARY online voice provider (ASR + TTS, both languages). Ships
-    //     Ghanaian-accented ENGLISH voices (akua_eng/kwabena_eng) plus Twi (abena_twi_high/lite). Khaya
-    //     drops to fallback. Set ABENA_API_KEY in local.properties (gitignored). ---
-    var abenaApiKey: String
-        get() = prefs.getString(KEY_ABENA, null)?.ifBlank { null } ?: BuildConfig.DEFAULT_ABENA_KEY
-        set(v) = put { putString(KEY_ABENA, v.trim()) }
-    val abenaBaseUrl: String get() = BuildConfig.DEFAULT_ABENA_URL.ifBlank { DEFAULT_ABENA_URL }
-    val hasAbena: Boolean get() = abenaApiKey.isNotBlank()
+    // The Khaya (Ghana NLP) and Abena (Mobobi) speech keys were removed 2026-09-28 with their clients (owner-
+    // approved): the UG HCI Lab ASR/TTS API is the required provider and plugs in through SpeechProviders (B-18).
 
     // ---- Wake word (on-device: trained "Hey Tɛkyerɛma" openWakeWord heads; no account/key) ----
     /** Owner toggle for hands-free wake-word activation. ON by default now that a TRAINED model is wired
@@ -130,17 +113,6 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_WAKE, true)
         set(v) = put { putBoolean(KEY_WAKE, v) }
     val wakeWordActive: Boolean get() = wakeWordEnabled
-
-    /** Ghanaian-English voice: akua_eng (female, default) or kwabena_eng (male). */
-    var abenaEnglishVoice: String
-        get() = prefs.getString(KEY_ABENA_EN_VOICE, null)?.ifBlank { null } ?: "akua_eng"
-        set(v) = put { putString(KEY_ABENA_EN_VOICE, v.trim()) }
-    /** Last-seen Abena ASR credit balance (from responses); -1 = unknown. §2.2/§2.3 budget guard. */
-    var abenaCredits: Int
-        get() = prefs.getInt(KEY_ABENA_CREDITS, -1)
-        set(v) = put { putInt(KEY_ABENA_CREDITS, v) }
-    /** Stop spending Abena ASR credits on non-live paths once the balance drops below this. */
-    val abenaCreditReserve: Int get() = 10
 
     /** Session language context (§11). Persisted so the user need not re-pick each utterance;
      *  confidence-aware LID may flip it per-utterance but low-signal input falls back to this. */
@@ -286,12 +258,6 @@ class Settings(context: Context) {
         private const val KEY_ASR_KEY = "asr_online_key"
         private const val KEY_ASR_MODEL = "asr_online_model"
         const val DEFAULT_ASR_ONLINE_MODEL = "whisper-large-v3-turbo-tekyerema-eng"
-        private const val KEY_KHAYA = "khaya_api_key"
-        const val DEFAULT_KHAYA_URL = "https://translation-api.ghananlp.org"
-        private const val KEY_ABENA = "abena_api_key"
-        private const val KEY_ABENA_EN_VOICE = "abena_english_voice"
-        private const val KEY_ABENA_CREDITS = "abena_credits_remaining"
-        const val DEFAULT_ABENA_URL = "https://abena.mobobi.com/playground/api/v1"
         private const val KEY_WAKE = "wake_word_enabled"
     }
 }

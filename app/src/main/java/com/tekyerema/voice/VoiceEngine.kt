@@ -36,6 +36,13 @@ object VoiceEngine {
     /** DEBUG QA: play every filler clip of a language in order so the owner can vet the audio. */
     fun auditionFillers(language: String) { fillerPlayer?.audition(language) }
 
+    /** B-18: online ASR clients by config id. Empty until the UG HCI Lab ASR client exists. */
+    private val asrRegistry: Map<String, AsrProvider> = emptyMap()
+
+    /** The configured online ASR for [lang] while online, else null (⇒ on-device). */
+    fun onlineAsrFor(lang: String?): AsrProvider? =
+        if (!com.tekyerema.core.NetworkMonitor.isOnline()) null else SpeechProviders.onlineAsr(lang, asrRegistry)
+
     /** Live microphone level 0..1 — drives the living voice visual while listening (either mic). */
     val level: StateFlow<Float> get() = _level
     private val _level = kotlinx.coroutines.flow.MutableStateFlow(0f)
@@ -50,16 +57,18 @@ object VoiceEngine {
         mic = MicCapture(appContext = app, defaultStrategy = { VadStrategy.named(settings.vadStrategy) })   // B-03
         answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
         systemTts = AndroidTts(app)
-        // Voice output = the phone's own TTS engine (offline-capable, never silent). The Ghanaian-accented
-        // cloud voices (Abena/Mobobi + Khaya/Ghana NLP) and Khaya English→Twi MT were removed 2026-09-27; the
-        // UG HCI Lab TTS API drops into this same RoutingTts seam later. Until then everything uses the system
-        // engine, and a Twi reply is spoken from its text (no MT) rather than in a dedicated Twi voice.
+        // B-18: which voice fills each role comes from config (providers.speech.tts.*), always ending in the phone's
+        // own engine so the assistant is never silent. The Khaya/Abena clients are gone (2026-09-28); the UG HCI Lab
+        // TTS client registers its id in ttsRegistry when it exists. Until then everything is the system engine, and
+        // a Twi reply is spoken from its text (no MT).
+        val ttsRegistry = mapOf("system" to systemTts)
         val tts = RoutingTts(
-            english = systemTts,
-            twi = systemTts,
-            enToTw = { null },                 // no on-device MT; a Twi voice + MT slot in with the HCI Lab API
-            ghEnglish = systemTts,
-            isOnline = { false }
+            english = SpeechProviders.tts("english", ttsRegistry, systemTts),
+            twi = SpeechProviders.tts("twi", ttsRegistry, systemTts),
+            enToTw = { null },                 // no on-device MT; MT slots in with the HCI Lab API
+            ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
+                .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
+            isOnline = { com.tekyerema.core.NetworkMonitor.isOnline() }
         )
         val sherpa = SherpaAsr(app).also { this.sherpa = it }
         // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
@@ -77,13 +86,11 @@ object VoiceEngine {
             // locally on the raw text for every path. Offline/no-endpoint ⇒ the network is never touched.
             asr = HybridAsr(
                 onDevice = sherpa,
-                // Language-aware online routing, network folded in (offline ⇒ null ⇒ on-device, no hang):
-                //  Twi   → Khaya (natural-Twi ASR) when a key is set;
-                //  Gh-EN → the strong whisper endpoint when configured.
-                // Phase II language cleanup: NO cloud ASR in the active runtime (Groq Whisper, Khaya and Abena
-                // all removed). English and Twi both transcribe ON-DEVICE via sherpa; the UG HCI Lab ASR API
-                // will later slot into this `onlineFor` seam as the online provider. null everywhere ⇒ on-device.
-                onlineFor = { null },
+                // Language-aware online routing, network folded in (offline ⇒ null ⇒ on-device, no hang). B-18: the
+                // provider per language comes from config (providers.speech.asr.online.<lang>); the UG HCI Lab ASR
+                // client registers in asrRegistry. None is registered yet, so English and Twi both transcribe
+                // ON-DEVICE via sherpa.
+                onlineFor = { lang -> onlineAsrFor(lang) },
                 forceLanguage = { settings.forcedLanguage },
                 sessionLanguage = { settings.sessionLanguage }
             ),

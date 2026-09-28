@@ -27,7 +27,7 @@ object VoiceDebug {
     /**
      * `--es transcribe_wav <name.wav> [--es lang gh_en|twi|auto]` — reads the WAV from the app's
      * external files dir (adb push to /sdcard/Android/data/com.tekyerema/files/<name.wav>), runs the
-     * real [ProxyAsrProvider], logs raw/canonical/entities, then submits the canonical goal to the agent.
+     * on-device ASR, logs raw/canonical/entities, then submits the canonical goal to the agent.
      */
     fun transcribeFileAndRun(ctx: Context, name: String, lang: String?) {
         val settings = Settings(ctx)
@@ -119,13 +119,11 @@ object VoiceDebug {
         val s = Settings(ctx)
         val networkOnline = com.tekyerema.core.NetworkMonitor.isOnline()
         val eff = lang?.takeIf { it == Lang.GH_EN || it == Lang.TWI } ?: s.forcedLanguage
-        // Language-aware: Twi → Khaya (when a key is set); Gh-EN/unknown → the whisper endpoint (when set).
-        val configured = if (eff == Lang.TWI) s.hasKhaya else s.hasOnlineAsr
-        val provider = if (eff == Lang.TWI) "khaya" else "whisper(${s.asrOnlineModel})"
-        val useOnline = networkOnline && configured
-        Log.i("Tekyerema", "[ASR-ROUTE] lang=${eff ?: "auto"} networkOnline=$networkOnline " +
-            "onlineConfigured=$configured provider=$provider hasKhaya=${s.hasKhaya} hasWhisper=${s.hasOnlineAsr} " +
-            "-> ${if (useOnline) "ONLINE($provider)" else "ON-DEVICE"}")
+        // B-18: the online provider ids configured for this language (providers.speech.asr.online.<lang>).
+        val ids = SpeechProviders.onlineAsrIds(eff)
+        val useOnline = networkOnline && ids.isNotEmpty() && VoiceEngine.onlineAsrFor(eff) != null
+        Log.i("Tekyerema", "[ASR-ROUTE] lang=${eff ?: "auto"} networkOnline=$networkOnline configured=$ids " +
+            "-> ${if (useOnline) "ONLINE($ids)" else "ON-DEVICE"}")
     }
 
     /**
@@ -142,30 +140,6 @@ object VoiceDebug {
             s.asrOnlineBaseUrl = url
             if (s.asrOnlineKey.isBlank()) s.asrOnlineKey = "debug-placeholder-key"
             Log.i("Tekyerema", "[ASR-ROUTE] online endpoint set url='$url' hasOnlineAsr=${s.hasOnlineAsr}")
-        }
-    }
-
-    /**
-     * `--es set_khaya <key>|off` — DEBUG: store the Ghana NLP Khaya API key on the device (prefs), so
-     * natural-Twi ASR + the real Twi voice activate without rebuilding or pasting the key anywhere else.
-     * `off` clears it (Twi back to on-device). The key is stored only in the app's private prefs.
-     */
-    fun setKhaya(ctx: Context, key: String?) {
-        val s = Settings(ctx)
-        if (key == null || key.equals("off", true) || key.isBlank()) {
-            s.khayaApiKey = ""; Log.i("Tekyerema", "[ASR-ROUTE] Khaya key CLEARED — Twi back to on-device")
-        } else {
-            s.khayaApiKey = key; Log.i("Tekyerema", "[ASR-ROUTE] Khaya key set (len=${key.length}) hasKhaya=${s.hasKhaya} — Twi now routes to Khaya online")
-        }
-    }
-
-    /** `--es set_abena <key>|off` — set/clear the Abena AI key (primary online voice). Stored in private prefs. */
-    fun setAbena(ctx: Context, key: String?) {
-        val s = Settings(ctx)
-        if (key == null || key.equals("off", true) || key.isBlank()) {
-            s.abenaApiKey = ""; Log.i("Tekyerema", "[ABENA] key CLEARED — voice falls back to Khaya")
-        } else {
-            s.abenaApiKey = key; Log.i("Tekyerema", "[ABENA] key set (len=${key.length}) hasAbena=${s.hasAbena} — PRIMARY voice = Abena")
         }
     }
 
