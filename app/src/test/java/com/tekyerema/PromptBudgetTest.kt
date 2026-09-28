@@ -38,6 +38,8 @@ class PromptBudgetTest {
         assertTrue("subset should be well under the full schema", openChars < fullChars * 0.65)
         assertTrue("momo_send" !in open && "make_call" !in open)
         assertTrue("find_tool" in open && "tap" in open)
+        // The prompt says "not sure of a fact? web_search it" — so it is there even when no keyword names the web.
+        assertTrue("web_search" in sel("I meant mimics, mimics export max"))
         assertTrue("momo_send" in sel("send 5 cedis to 0241234567 on momo"))
         assertTrue("make_call" in sel("call Ama"))
         assertTrue("set_alarm" in sel("wake me at 6"))

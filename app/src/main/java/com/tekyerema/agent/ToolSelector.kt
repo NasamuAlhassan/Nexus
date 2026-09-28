@@ -12,13 +12,17 @@ import com.tekyerema.tools.Tool
  * `find_tool`. Groups and keywords are data (`tools.search.*`) with the defaults below. Flag D-02 off = all tools.
  */
 object ToolSelector {
+    /** `web_search` is core: the system prompt tells the model to look up any fact it isn't sure of. Loaded only by
+     *  keyword, it was missing on a follow-up ("I meant mimics…", A20e 2026-09-28) — the model said "there's no
+     *  web_search tool" and spent a step on find_tool. Its schema is ~60 tokens. */
     val DEFAULT_CORE = listOf("read_state", "wait", "tap", "long_press", "swipe", "scroll", "type", "key_event",
-        "open_app", "cannot_do", "find_tool", "ask_user")
+        "open_app", "cannot_do", "find_tool", "ask_user", "web_search")
 
     private data class Group(val tools: List<String>, val keywords: Regex)
 
     private val DEFAULT_GROUPS = linkedMapOf(
-        // I-02 / I-03: time-sensitive questions load the web search tool.
+        // I-02 / I-03: time-sensitive questions load the web search tool (already core by default; this keeps it for a
+        // config that trims `tools.search.core`).
         "web" to Group(
             listOf("web_search"),
             Regex("(?i)\\b(news|headlines|latest|today|tonight|tomorrow|this week|weekend|price|prices|exchange rate|rate|weather|" +
