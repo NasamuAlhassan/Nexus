@@ -23,29 +23,41 @@ class AudioFocus(context: Context) {
      *  platform treats it as accessibility audio) instead of the assistant stream. */
     fun attributes(kind: Kind): AudioAttributes = AudioAttributes.Builder()
         .setUsage(
-            if (kind == Kind.SPEAK && ScreenReader.active(app)) AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
-            else AudioAttributes.USAGE_ASSISTANT
+            when {
+                kind == Kind.SPEAK && ScreenReader.active(app) -> AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
+                else -> AudioAttributes.USAGE_ASSISTANT
+            }
         )
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
 
-    fun acquire(kind: Kind) {
-        val manager = am ?: return
-        if (!AppConfig.bool("speech.audioFocus.enabled", true)) return
-        if (kind == Kind.LISTEN && !AppConfig.bool("speech.audioFocus.pauseMediaWhileListening", true)) return
+    /** Request focus for [kind]; returns the request so the caller can release exactly its own ([release]). */
+    fun acquire(kind: Kind): AudioFocusRequest? {
+        val manager = am ?: return null
+        if (!AppConfig.bool("speech.audioFocus.enabled", true)) return null
+        if (kind == Kind.LISTEN && !AppConfig.bool("speech.audioFocus.pauseMediaWhileListening", true)) return null
         release()
         val gain = if (kind == Kind.SPEAK) AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK else AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
         val req = AudioFocusRequest.Builder(gain)
             .setAudioAttributes(attributes(kind))
             .setOnAudioFocusChangeListener { }
             .build()
-        try { if (manager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) held = req } catch (_: Throwable) {}
+        try { if (manager.requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) { held = req; return req } } catch (_: Throwable) {}
+        return null
     }
 
+    /** Abandon the focus we hold now. */
     fun release() {
         val req = held ?: return
         held = null
         try { am?.abandonAudioFocusRequest(req) } catch (_: Throwable) {}
+    }
+
+    /** Abandon [token] only if it is still the request we hold — an older utterance ending must not take the focus of
+     *  the newer one that replaced it (the music came back up under the reply). */
+    fun release(token: AudioFocusRequest?) {
+        if (token == null || held !== token) return
+        release()
     }
 }
 
