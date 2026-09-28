@@ -67,7 +67,10 @@ class RunGoalReceiver : BroadcastReceiver() {
         intent.getStringExtra("ping")?.let {
             AgentEngine.refreshReadiness()
             val s = AgentEngine.state.value
-            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()}")
+            // voice= / voiceBusy= let scripts/device_suite.py wait until a reply has been read aloud (a request typed
+            // while the voice layer is busy is dropped). "?" when the voice layer isn't initialised yet.
+            val voice = try { "${com.tekyerema.voice.VoiceEngine.state.value.state} voiceBusy=${com.tekyerema.voice.VoiceEngine.isRunning}" } catch (_: Throwable) { "? voiceBusy=?" }
+            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()} voice=$voice")
             return
         }
         // Deterministic infrastructure scenario, zero LLM cost — see TestBrain.
@@ -186,7 +189,8 @@ class RunGoalReceiver : BroadcastReceiver() {
         // TYPED command through the FULL voice pipeline (TTS + ask-card + Twi translation) — mirrors typing in
         // the command field. Use for validating the typed demo. --es type_text "<command>"
         intent.getStringExtra("type_text")?.let { t ->
-            if (t.isNotBlank()) com.tekyerema.voice.VoiceEngine.submitText(t.trim())
+            // accepted=false: dropped because a turn was still running — the device suite waits and resends. No words logged.
+            if (t.isNotBlank()) Log.i("Tekyerema", "[TYPE_TEXT] accepted=${com.tekyerema.voice.VoiceEngine.submitText(t.trim())} len=${t.trim().length}")
             return
         }
         // Show/hide the confirmation overlay directly, to verify it appears (Telegram-confirm-bug repro).
