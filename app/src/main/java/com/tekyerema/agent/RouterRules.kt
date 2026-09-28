@@ -31,7 +31,7 @@ object RouterRules {
             FastIntent.Back, FastIntent.Home, FastIntent.Recents, FastIntent.ScrollUp, FastIntent.ScrollDown,
             FastIntent.LockScreen, FastIntent.Notifications, FastIntent.AnswerCall, FastIntent.EndCall,
             FastIntent.LastSms, FastIntent.WhereAmI, FastIntent.Connectivity, FastIntent.NowPlaying, FastIntent.ShowAlarms,
-            FastIntent.Screenshot, FastIntent.PowerMenu, FastIntent.TakePhoto, FastIntent.CalendarToday, FastIntent.LockQuery,
+            FastIntent.Screenshot, FastIntent.PowerMenu, FastIntent.TakePhoto, FastIntent.TakeSelfie, FastIntent.CalendarToday, FastIntent.LockQuery,
             FastIntent.WhatChanged, FastIntent.ListSchedules, FastIntent.Undo, FastIntent.MemoryQuery
         ).associateBy { it.name }
     }
@@ -79,6 +79,8 @@ object RouterRules {
         "CAMERA" -> arg?.takeIf { it in setOf("text", "color", "describe") }?.let { FastIntent.Camera(it) }
         "MAGNIFY" -> arg?.takeIf { it in setOf("in", "out", "reset") }?.let { FastIntent.Magnify(it) }
         "RINGER" -> arg?.takeIf { it in setOf("silent", "vibrate", "normal") }?.let { FastIntent.Ringer(it) }
+        // E-14: a locale rule for "play …" — the arg is what to play (blank = the user's music).
+        "PLAY_MUSIC" -> FastIntent.PlayMusic(arg?.trim()?.takeIf { it.isNotEmpty() })
         else -> null
     }
 

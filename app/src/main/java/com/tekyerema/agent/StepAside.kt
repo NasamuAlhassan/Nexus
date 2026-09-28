@@ -15,8 +15,8 @@ object StepAside {
     fun forFast(intent: FastIntent): Boolean = when (intent) {
         FastIntent.Back, FastIntent.Home, FastIntent.ScrollUp, FastIntent.ScrollDown, FastIntent.Screenshot,
         FastIntent.Recents, FastIntent.Notifications, FastIntent.LockScreen, FastIntent.PowerMenu, FastIntent.TakePhoto,
-        FastIntent.ShowAlarms, FastIntent.WhatChanged -> true
-        is FastIntent.OpenApp, is FastIntent.Magnify -> true
+        FastIntent.ShowAlarms, FastIntent.WhatChanged, FastIntent.TakeSelfie -> true
+        is FastIntent.OpenApp, is FastIntent.Magnify, is FastIntent.PlayMusic, is FastIntent.AskApp -> true
         else -> false
     }
 }

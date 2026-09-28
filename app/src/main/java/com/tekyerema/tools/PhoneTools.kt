@@ -189,7 +189,7 @@ object SmsFilter {
 object SendSmsTool : Tool {
     override val name = "send_sms"
     override val description =
-        "Send an SMS text to a contact name or phone number. Without SMS permission it opens Messages with the text ready for the user to tap Send."
+        "Send a text to a contact name or phone number by SMS, or WhatsApp with via=whatsapp. Sends it and checks it went."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER2
     override val isAccelerator = true
@@ -197,11 +197,17 @@ object SendSmsTool : Tool {
     override val params = listOf(
         ToolParam("contact", "string", "Contact name to text.", required = false),
         ToolParam("number", "string", "Phone number to text (digits).", required = false),
-        ToolParam("message", "string", "The text to send, exactly as the user wants it.")
+        ToolParam("message", "string", "The text to send, exactly as the user wants it."),
+        ToolParam("via", "string", "Default sms.", required = false, enumValues = listOf("sms", "whatsapp"))
     )
 
     private const val EXTRA_PART = "com.tekyerema.extra.SMS_PART"
     private const val PENDING = Int.MIN_VALUE
+    /** Set by [preflight]: who the contact resolved to, so the confirmation names the person AND the number. */
+    private const val ARG_TO = "_to"
+    private val WHATSAPP_PKGS = listOf("com.whatsapp", "com.whatsapp.w4b")
+
+    private fun viaWhatsApp(args: JSONObject) = args.str("via")?.trim()?.lowercase()?.contains("whatsapp") == true
 
     private sealed class Recipient {
         class Ok(val number: String, val name: String?) : Recipient()
@@ -235,7 +241,24 @@ object SendSmsTool : Tool {
      *  wrong person. */
     override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
         if (args.str("message").isNullOrBlank()) return ToolResult(false, "What should the message say?")
-        return (recipient(args, ctx) as? Recipient.Problem)?.result
+        if (viaWhatsApp(args) && WHATSAPP_PKGS.none { isInstalled(ctx.appContext, it) })
+            return ToolResult(false, "WhatsApp isn't installed on this phone. I can send it as an ordinary text (SMS) instead, " +
+                "or install WhatsApp.", recoverable = false)
+        return when (val r = recipient(args, ctx)) {
+            is Recipient.Problem -> r.result
+            is Recipient.Ok -> {
+                // The confirmation reads back the RESOLVED person and number, not just the name as heard.
+                args.put(ARG_TO, recipientWords(r.name, r.number))
+                null
+            }
+        }
+    }
+
+    /** "Ama Mensah on 024 412 3456" / "024 412 3456" — pure, unit-tested. */
+    internal fun recipientWords(name: String?, number: String): String {
+        val spoken = CallLogFormat.spokenNumber(number)
+        return name?.trim()?.takeIf { it.isNotEmpty() && it.filter(Char::isDigit) != number.filter(Char::isDigit) }
+            ?.let { "$it on $spoken" } ?: spoken
     }
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
@@ -247,8 +270,9 @@ object SendSmsTool : Tool {
         }
         val who = target.name ?: CallLogFormat.spokenNumber(target.number)
         val app = ctx.appContext
-        if (!app.granted(Manifest.permission.SEND_SMS)) return openComposer(app, target.number, message, who)
-        val sms = smsManager(app) ?: return openComposer(app, target.number, message, who)
+        if (viaWhatsApp(args)) return sendWhatsApp(ctx, target.number, message, who)
+        if (!app.granted(Manifest.permission.SEND_SMS)) return openComposer(ctx, target.number, message, who)
+        val sms = smsManager(app) ?: return openComposer(ctx, target.number, message, who)
         return sendDirect(app, sms, target.number, message, who)
     }
 
@@ -258,20 +282,84 @@ object SendSmsTool : Tool {
         else SmsManager.getDefault()
     } catch (t: Throwable) { null }
 
-    /** No SEND_SMS: hand the draft to the Messages app. Honest — the text is NOT sent until the user taps Send. */
-    private fun openComposer(app: Context, number: String, message: String, who: String): ToolResult {
+    /**
+     * No SEND_SMS (the A20e): hand the draft to the Messages app, then — the user has ALREADY approved exactly this text
+     * to exactly this person — press Messages' own Send button and check the words left the box. Anything unexpected
+     * (a different draft already in the box, no Send button, the box still full afterwards) stops with the honest
+     * "it is not sent yet". `os.sms.pressSend=false` restores the old open-only behaviour.
+     */
+    private suspend fun openComposer(ctx: ToolContext, number: String, message: String, who: String): ToolResult {
+        // "sms_body" is what Samsung Messages and most SMS apps read; the current docs show EXTRA_TEXT — set both.
         val intent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number"))
             .putExtra("sms_body", message)
+            .putExtra(Intent.EXTRA_TEXT, message)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        return try {
-            app.startActivity(intent)
-            ToolResult(true, "Opened Messages with the text to $who ready — it is not sent yet; tap Send to send it.",
-                data = JSONObject().put("sent", false), channel = "intent")
+        val handler = try { intent.resolveActivity(ctx.appContext.packageManager)?.packageName } catch (_: Throwable) { null }
+        try {
+            ctx.appContext.startActivity(intent)
         } catch (e: ActivityNotFoundException) {
-            ToolResult(false, "No messaging app can open the text, and I don't have permission to send texts myself.", recoverable = false)
+            return ToolResult(false, "No messaging app can open the text, and I don't have permission to send texts myself.", recoverable = false)
         } catch (t: Throwable) {
-            ToolResult(false, "Couldn't open Messages: ${t.javaClass.simpleName}.", channel = "intent")
+            return ToolResult(false, "Couldn't open Messages: ${t.javaClass.simpleName}.", channel = "intent")
         }
+        val drafted = ToolResult(true, "Opened Messages with the text to $who ready — it is not sent yet; tap Send to send it.",
+            data = JSONObject().put("sent", false), channel = "intent")
+        val ctrl = ctx.controller
+        if (ctrl == null || !AppConfig.bool("os.sms.pressSend", true) || driveRefusal(handler) != null) return drafted
+        return pressSendInComposer(ctrl, setOfNotNull(handler?.takeIf { it != "android" }), message, who, appName = "Messages") ?: drafted
+    }
+
+    /**
+     * WhatsApp (E-04): open the chat with the text in the box via WhatsApp's official click-to-chat link (international
+     * digits, no '+' or leading 0 — wa.me FAQ), then press WhatsApp's Send. WhatsApp itself never auto-sends a link's text.
+     */
+    private suspend fun sendWhatsApp(ctx: ToolContext, number: String, message: String, who: String): ToolResult {
+        val pkg = WHATSAPP_PKGS.firstOrNull { isInstalled(ctx.appContext, it) }
+            ?: return ToolResult(false, "WhatsApp isn't installed on this phone.", recoverable = false)
+        val url = "https://api.whatsapp.com/send?phone=${IntentTemplates.ghanaIntl(number)}&text=" + Uri.encode(message)
+        try {
+            ctx.appContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (t: Throwable) {
+            return ToolResult(false, "Couldn't open WhatsApp: ${t.javaClass.simpleName}.", channel = "intent")
+        }
+        val drafted = ToolResult(true, "Opened WhatsApp with the message to $who ready — it is not sent yet; tap Send to send it.",
+            data = JSONObject().put("sent", false), channel = "intent")
+        val ctrl = ctx.controller ?: return drafted
+        if (driveRefusal(pkg) != null) return drafted
+        return pressSendInComposer(ctrl, setOf(pkg), message, who, appName = "WhatsApp") ?: drafted
+    }
+
+    /**
+     * Wait for [pkgs] to show a box holding exactly [message], press the Send next to it, and confirm the box emptied
+     * and the words now show as a message. Returns a definite result, or null when the draft never appeared as expected
+     * (the caller then reports the honest "opened, not sent yet").
+     */
+    private suspend fun pressSendInComposer(
+        ctrl: com.tekyerema.accessibility.AccessibilityController, pkgs: Set<String>, message: String, who: String, appName: String
+    ): ToolResult? {
+        val screen = awaitScreen(ctrl, AppConfig.long("os.sms.composerWaitMs", 8_000L)) { s ->
+            (pkgs.isEmpty() || s.appPackage in pkgs) && (ComposerSend.composerWith(s, message) != null || ComposerSend.notOnWhatsApp(s))
+        }
+        if (screen == null) {
+            // The box may hold our text PLUS an old draft, or the app opened somewhere else: never send that.
+            Log.i(TAG, "[SEND] $appName draft not found as expected — leaving it for the user")
+            return null
+        }
+        if (ComposerSend.notOnWhatsApp(screen))
+            return ToolResult(false, "$who's number isn't on WhatsApp. I can send it as an ordinary text (SMS) instead.",
+                data = JSONObject().put("sent", false), recoverable = false, channel = "a11y")
+        val box = ComposerSend.composerWith(screen, message)!!
+        val send = ComposerSend.sendButton(screen, box) ?: return ToolResult(true,
+            "Opened $appName with the message to $who ready, but I couldn't find its Send button — it is not sent yet; tap Send.",
+            data = JSONObject().put("sent", false), channel = "a11y")
+        val sent = pressElement(ctrl, send, screen) {
+            awaitScreen(ctrl, AppConfig.long("os.sms.sentWaitMs", 5_000L)) { s -> ComposerSend.looksSent(s, message) } != null
+        }
+        // Not recoverable either way: a retry could send the words twice.
+        return if (sent) ToolResult(true, "Sent your message to $who on $appName.",
+            data = JSONObject().put("sent", true).put("app", appName), channel = "a11y")
+        else ToolResult(false, "I pressed Send in $appName but the message to $who still looks unsent — check $appName before trying again.",
+            data = JSONObject().put("sent", false), recoverable = false, channel = "a11y")
     }
 
     /**
@@ -370,21 +458,25 @@ object SendSmsTool : Tool {
     override suspend fun verify(
         args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult
     ): VerificationResult = when {
-        result.data?.optBoolean("sent", false) == true ->
+        result.data?.optBoolean("sent", false) == true && result.channel == "native" ->
             VerificationResult(true, "the radio reported every part of the SMS as sent (RESULT_OK)")
+        result.data?.optBoolean("sent", false) == true ->
+            VerificationResult(true, "the message left the ${result.data.optString("app", "app")} box and shows in the chat after Send was pressed")
         result.success ->
-            VerificationResult(false, "Messages was opened with the text ready; it is not sent until the user taps Send")
+            VerificationResult(false, "the app was opened with the text ready; it is not sent until Send is tapped")
         else -> VerificationResult(false, result.message)
     }
 
     override fun confirmationPrompt(args: JSONObject): String {
         val contact = args.str("contact")?.trim()?.takeIf { it.isNotEmpty() }
         val number = args.str("number")?.takeIf { n -> n.count { it.isDigit() } >= 3 }?.let { CallLogFormat.spokenNumber(it) }
-        val who = when {
+        // [ARG_TO] (set by preflight) is the RESOLVED person + number — what will actually be texted.
+        val who = args.str(ARG_TO) ?: when {
             contact != null && number != null -> "$contact on $number"   // the number is what will actually be texted
             else -> contact ?: number ?: "this number"
         }
-        return "Text $who: \"${args.str("message").orEmpty()}\"?"
+        return if (viaWhatsApp(args)) "WhatsApp $who: \"${args.str("message").orEmpty()}\"?"
+        else "Text $who: \"${args.str("message").orEmpty()}\"?"
     }
 }
 

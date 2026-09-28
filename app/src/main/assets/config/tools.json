@@ -28,6 +28,10 @@
     "make_call": {"feature": "E-02", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"]},
     "reply_to_notification": {"feature": "E-16", "callers": ["planner", "local"]},
     "play_music": {"feature": "E-14"},
+    "install_app": {"feature": "E-01", "callers": ["planner", "local"], "untrusted_output": true},
+    "take_photo": {"feature": "E-21", "callers": ["planner", "local"]},
+    "ask_app": {"feature": "E-20", "callers": ["planner", "local"], "untrusted_output": true},
+    "google_sign_in": {"feature": "G-13", "callers": ["planner"]},
     "open_setting": {"feature": "E-11", "idempotent": true},
     "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
     "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true,
@@ -52,6 +56,14 @@
     "scroll_to_find": {"feature": "G-18", "idempotent": true},
     "wait_for_element": {"feature": "G-18", "idempotent": true},
     "read_all": {"feature": "F-15", "idempotent": true, "untrusted_output": true},
-    "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true}
+    "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true},
+    "search": {
+      "groups": {
+        "apps": {
+          "tools": ["install_app", "take_photo", "ask_app", "google_sign_in", "play_music"],
+          "keywords": "\\b(install|reinstall|download|play ?store|google play|app store|selfie|photo|picture|pic|camera|chat ?gpt|gemini|claude|copilot|perplexity|assistant|sign ?in|sign ?up|log ?in|login|continue with google|google account|youtube music|yt music|spotify|boomplay|audiomack|song|songs|music|artist|album|playlist|track|skip|next song|pause|resume)\\b"
+        }
+      }
+    }
   }
 }

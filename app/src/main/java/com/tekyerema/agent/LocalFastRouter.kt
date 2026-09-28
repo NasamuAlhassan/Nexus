@@ -97,8 +97,14 @@ class LocalFastRouter(
         FastIntent.MediaPlay -> media(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, intent, "Playing.")
         FastIntent.MediaPause -> media(KeyEvent.KEYCODE_MEDIA_PAUSE, intent, "Paused.")
         FastIntent.MediaStop -> media(KeyEvent.KEYCODE_MEDIA_STOP, intent, "Stopped.")
-        FastIntent.MediaNext -> media(KeyEvent.KEYCODE_MEDIA_NEXT, intent, "Next.")
-        FastIntent.MediaPrevious -> media(KeyEvent.KEYCODE_MEDIA_PREVIOUS, intent, "Previous.")
+        // E-14: the play_music tool skips AND says what plays now ("Skipped. Now playing …"); the bare key is the fallback.
+        FastIntent.MediaNext -> runTool("play_music", org.json.JSONObject().put("action", "next"), action = true)
+            ?: media(KeyEvent.KEYCODE_MEDIA_NEXT, intent, "Next.")
+        FastIntent.MediaPrevious -> runTool("play_music", org.json.JSONObject().put("action", "previous"), action = true)
+            ?: media(KeyEvent.KEYCODE_MEDIA_PREVIOUS, intent, "Previous.")
+        is FastIntent.PlayMusic -> runTool("play_music", org.json.JSONObject().apply {
+            intent.query?.let { put("query", it) }; intent.artist?.let { put("artist", it) }; intent.app?.let { put("app", it) }
+        }, action = true)
 
         FastIntent.Back -> global("back", intent, "Went back.")
         FastIntent.Home -> global("home", intent, "Home.")
@@ -125,7 +131,11 @@ class LocalFastRouter(
         is FastIntent.Ringer -> ringer(intent.mode)
         FastIntent.Screenshot -> global("screenshot", intent, "Screenshot taken.")
         FastIntent.PowerMenu -> global("power_menu", intent, "The power menu is open.")
-        FastIntent.TakePhoto -> openCamera()
+        // E-21: take the picture (countdown beeps, shutter), not just open the camera; opening it is the fallback.
+        FastIntent.TakePhoto -> runTool("take_photo", org.json.JSONObject().put("camera", "back"), action = true) ?: openCamera()
+        FastIntent.TakeSelfie -> runTool("take_photo", org.json.JSONObject().put("camera", "front"), action = true) ?: openCamera()
+        // E-20: an assistant app's answer, read back — no LLM of our own involved.
+        is FastIntent.AskApp -> runTool("ask_app", org.json.JSONObject().put("app", intent.app).put("question", intent.question))
         FastIntent.LockQuery -> lockState()
         is FastIntent.Preference -> preference(intent)
         is FastIntent.Camera -> openCameraReader(intent.mode)
@@ -182,7 +192,10 @@ class LocalFastRouter(
         is FastIntent.QuickToggle -> "turned ${intent.key.replace('_', ' ')} ${if (intent.on) "on" else "off"}"
         FastIntent.AnswerCall -> "answered the call"; FastIntent.EndCall -> "ended the call"
         is FastIntent.Ringer -> "put the phone on ${intent.mode}"
-        FastIntent.Screenshot -> "took a screenshot"; FastIntent.PowerMenu -> "opened the power menu"; FastIntent.TakePhoto -> "opened the camera"
+        FastIntent.Screenshot -> "took a screenshot"; FastIntent.PowerMenu -> "opened the power menu"; FastIntent.TakePhoto -> "took a photo"
+        FastIntent.TakeSelfie -> "took a selfie"
+        is FastIntent.PlayMusic -> "played ${intent.query ?: intent.artist ?: "music"}${intent.app?.let { " on $it" } ?: ""}"
+        is FastIntent.AskApp -> "asked ${intent.app} a question"
         is FastIntent.Preference -> "changed how I ${if (intent.key == "patience") "listen" else "speak"}"
         is FastIntent.Magnify -> "changed the screen magnification"
         is FastIntent.SetEmergencyContact -> "set your emergency contact"

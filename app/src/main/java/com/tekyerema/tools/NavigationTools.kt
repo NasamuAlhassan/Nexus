@@ -61,7 +61,8 @@ object OpenAppTool : Tool {
                 return ToolResult(false, "I couldn't find an app called ${spokenAppName(query)} on this phone. " +
                     "It isn't installed, or the name was misheard. Ask the user which app they meant (ask_user)" +
                     (if (close.isNotEmpty()) " — closest installed: ${close.joinToString(", ")}" else "") +
-                    ". Do NOT open an app store, sign in or install anything unless the user asked to install an app.",
+                    ". Do NOT open an app store, sign in or install anything unless the user asked to install an app — " +
+                    "if they did, use install_app (never drive the Play Store by hand).",
                     JSONObject().put("notInstalled", query), needsDisambiguation = true, recoverable = false)
             }
         }

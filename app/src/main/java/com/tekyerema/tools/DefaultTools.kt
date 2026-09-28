@@ -64,8 +64,13 @@ fun defaultTools(): List<Tool> = listOf(
     ReadAllTool,          // F-15
     WebSearchTool,        // I-03 current facts with sources (owner-approved web search)
     // §A.2 reopened offline intents
-    PlayMusicTool,
+    PlayMusicTool,        // E-14 play (in a named app, by artist) / pause / next / previous, checked against the media session
     OpenSettingTool,
+    // Real-world app tasks (loaded per step by the "apps" tool-search group, D-02)
+    InstallAppTool,       // E-01 Play Store install of a FREE app — TIER2, confirmed
+    TakePhotoTool,        // E-21 photo / selfie in the camera app, with an audible countdown
+    AskAppTool,           // E-20 ask ChatGPT / Gemini / Claude… and read the answer back
+    GoogleSignInTool,     // G-13 "Continue with Google" — TIER2, confirmed; stops at passwords and extra access
     MobileMoneyTool,
     // Deterministic *170# send-money driver (reads each screen, stops at the PIN). Owner-requested for the
     // demo; MUST be live-tested with a tiny amount before trusting it — never enters the PIN.

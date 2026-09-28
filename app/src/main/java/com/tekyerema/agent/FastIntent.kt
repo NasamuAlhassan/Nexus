@@ -54,7 +54,14 @@ sealed class FastIntent(val name: String) {
     object ShowAlarms : FastIntent("SHOW_ALARMS")
     object Screenshot : FastIntent("SCREENSHOT")
     object PowerMenu : FastIntent("POWER_MENU")
+    /** E-21: take a photo now with the back camera (the camera app saves it). */
     object TakePhoto : FastIntent("TAKE_PHOTO")
+    /** E-21: take a selfie now with the front camera. */
+    object TakeSelfie : FastIntent("TAKE_SELFIE")
+    /** E-14: play [query] (or an [artist]'s songs), in [app] when named; all null = "play some music". */
+    data class PlayMusic(val query: String?, val artist: String? = null, val app: String? = null) : FastIntent("PLAY_MUSIC")
+    /** E-20: ask an AI assistant app ([app], e.g. ChatGPT) [question] and read back its answer. */
+    data class AskApp(val app: String, val question: String) : FastIntent("ASK_APP")
     object CalendarToday : FastIntent("CALENDAR_TODAY")
     object LockQuery : FastIntent("LOCK_QUERY")
     /** H-08: a preference set by voice — key "rate" (slower|faster|normal), "verbosity" (brief|detailed|normal),
@@ -127,6 +134,9 @@ object FastIntentClassifier {
         if (RE_FORGET_ALL.matches(g)) return FastIntent.Forget("all")
         if (RE_CLEAR_HISTORY.matches(g)) return FastIntent.ClearHistory
         RE_FORGET_PERSON.matchEntire(g)?.let { m -> return FastIntent.Forget("person", watchName(raw, m.groupValues[1])) }
+        // E-20, before the compound check: "open ChatGPT and ask it …" is ONE deterministic action (the question may
+        // itself contain "and").
+        askApp(g, raw)?.let { return it }
         // Compound / multi-step → the agent (the fast path is single deterministic action only).
         if (RE_MULTISTEP.containsMatchIn(g)) return null
 
@@ -165,6 +175,8 @@ object FastIntentClassifier {
             RE_BT_ON.containsMatchIn(g) -> FastIntent.BluetoothOn
             RE_BT_OFF.containsMatchIn(g) -> FastIntent.BluetoothOff
 
+            // E-14: "play Sarkodie on YouTube Music", "play songs by Stonebwoy" — before the bare transport words.
+            playMusic(g) != null -> playMusic(g)
             RE_MEDIA_NEXT.containsMatchIn(g) -> FastIntent.MediaNext
             RE_MEDIA_PREV.containsMatchIn(g) -> FastIntent.MediaPrevious
             RE_MEDIA_PAUSE.containsMatchIn(g) -> FastIntent.MediaPause
@@ -194,6 +206,7 @@ object FastIntentClassifier {
             RE_SHOW_ALARMS.containsMatchIn(g) -> FastIntent.ShowAlarms
             RE_SCREENSHOT.containsMatchIn(g) -> FastIntent.Screenshot
             RE_POWER_MENU.containsMatchIn(g) -> FastIntent.PowerMenu
+            RE_SELFIE.containsMatchIn(g) -> FastIntent.TakeSelfie
             RE_TAKE_PHOTO.containsMatchIn(g) -> FastIntent.TakePhoto
             RE_CALENDAR_TODAY.containsMatchIn(g) -> FastIntent.CalendarToday
             RE_LOCK_QUERY.containsMatchIn(g) -> FastIntent.LockQuery
@@ -367,7 +380,41 @@ object FastIntentClassifier {
     private val RE_SHOW_ALARMS = Regex("\\b(?:show|open|list|check)\\b.*\\balarms\\b|^(?:my )?alarms$|\\bwhat alarms\\b")
     private val RE_SCREENSHOT = Regex("\\b(?:take|capture|grab|save)\\b.*\\bscreenshot\\b|^screenshot$")
     private val RE_POWER_MENU = Regex("\\b(?:power (?:menu|options)|power button menu|restart menu|shut ?down menu)\\b")
-    private val RE_TAKE_PHOTO = Regex("\\btake (?:a |me a )?(?:photo|picture|pic|selfie)\\b|^open (?:the )?camera$")
+    // "open the camera" is no longer a photo: it only opens the Camera app (OpenApp), while "take a photo" now TAKES one.
+    private val RE_TAKE_PHOTO = Regex("\\b(?:take|snap) (?:a |me a |my )?(?:photo|picture|pic)\\b")
+    private val RE_SELFIE = Regex("\\b(?:take|snap|capture) (?:a |me a |my )?selfie\\b|^selfie(?: please)?$|\\b(?:photo|picture|pic) of (?:me|myself)\\b")
+
+    // ---- E-14 music: "play X on <music app>", "play songs by X", "play X's songs", "play some music" ----
+    private const val MUSIC_APPS = "youtube music|yt music|you tube music|spotify|boomplay|boom play|audiomack|samsung music|apple music|deezer"
+    private val RE_PLAY_BY = Regex("^(?:please )?play (?:me )?(?:some )?(?:songs|music|tracks|hits) (?:by|from) (.+?)(?: (?:on|in|with|using) ($MUSIC_APPS))?(?: please)?$")
+    private val RE_PLAY_POSSESSIVE = Regex("^(?:please )?play (?:me )?(?:some )?(?:of )?(.+?)'s (?:songs|music|tracks|hits)(?: (?:on|in|with|using) ($MUSIC_APPS))?(?: please)?$")
+    private val RE_PLAY_ON = Regex("^(?:please )?play (?:me )?(.+?) (?:on|in|with|using|from) ($MUSIC_APPS)(?: please)?$")
+    private val RE_PLAY_ANY = Regex("^(?:please )?play (?:some |my )?music(?: please)?$")
+
+    private fun playMusic(g: String): FastIntent.PlayMusic? {
+        RE_PLAY_BY.matchEntire(g)?.let { m -> return FastIntent.PlayMusic(null, m.groupValues[1].trim(), m.groupValues[2].ifBlank { null }) }
+        RE_PLAY_POSSESSIVE.matchEntire(g)?.let { m -> return FastIntent.PlayMusic(null, m.groupValues[1].trim(), m.groupValues[2].ifBlank { null }) }
+        RE_PLAY_ON.matchEntire(g)?.let { m ->
+            val what = m.groupValues[1].trim()
+            // "play some music on Spotify" = just play there; "play Sarkodie on YouTube Music" = that search.
+            val q = what.takeUnless { Regex("^(?:some |my )?(?:music|songs)$").matches(it) }
+            return FastIntent.PlayMusic(q, null, m.groupValues[2])
+        }
+        if (RE_PLAY_ANY.matches(g)) return FastIntent.PlayMusic(null)
+        return null
+    }
+
+    // ---- E-20 assistants: "ask ChatGPT what …", "open ChatGPT and ask it …" ----
+    private const val ASSISTANTS = "chatgpt|chat gpt|gemini|claude|copilot|perplexity"
+    private val RE_ASK_APP = Regex("^(?:please |can you |could you )?(?:open ($ASSISTANTS) and )?(?:ask|tell) ($ASSISTANTS|it|him|her)(?: to)?[,:]? (.{3,})$")
+
+    private fun askApp(g: String, raw: String): FastIntent.AskApp? {
+        val m = RE_ASK_APP.matchEntire(g) ?: return null
+        val named = m.groupValues[1].ifBlank { null } ?: m.groupValues[2].takeUnless { it in setOf("it", "him", "her") } ?: return null
+        val app = if (named.replace(" ", "") == "chatgpt") "ChatGPT" else named.replaceFirstChar { it.uppercaseChar() }
+        return FastIntent.AskApp(app, watchName(raw, m.groupValues[3]).trimEnd('.', '!', '?').trim().ifEmpty { return null } +
+            if (raw.trim().endsWith("?")) "?" else "")
+    }
     private val RE_CALENDAR_TODAY = Regex("\\b(?:what(?:'s| is) on my (?:calendar|schedule|agenda)|my (?:schedule|agenda|calendar) (?:for )?today|do i have (?:any )?(?:meetings|appointments|events)|what do i have (?:on )?today)\\b")
     private val RE_LOCK_QUERY = Regex("^is (?:my )?(?:phone|screen) locked$")
     private val RE_RINGER = Regex("\\b(?:put|set|switch|turn|change)\\b(?:.*\\b(?:phone|ringer|sound)\\b)?.*\\b(?:on|to|into)\\s+(vibrate|vibration|silent|ring|ringing|sound|normal)(?:\\s+mode)?$|^(vibrate|silent|ring)\\s+mode(?:\\s+on)?$")
