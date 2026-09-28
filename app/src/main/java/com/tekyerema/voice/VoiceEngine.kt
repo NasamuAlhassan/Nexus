@@ -86,6 +86,7 @@ object VoiceEngine {
             "online ASR: OFF (Phase II — on-device only; HCI Lab API plugs into onlineFor) | " +
             "TTS: system engine | cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
+        val duplex = DuplexAudio(app)   // B-07
         controller = VoiceController(
             // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our
             // tekyerema-ghen-tiny) via sherpa-onnx are the OFFLINE path — Twi always stays on-device. For
@@ -131,6 +132,10 @@ object VoiceEngine {
             // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
             // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
             bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
+            // …and the reply itself on the voice-communication path while that mic listens, so the echo canceller has
+            // our voice as its reference (DuplexAudio). Only when barge-in is on (below).
+            duplexBegin = { duplex.begin() },
+            duplexEnd = { duplex.end() },
             verbosity = { settings.verbosity },   // B-13
             // C-10: long tasks keep working (time on the user never counts); check-ins + notification cover the wait.
             agentTimeoutMs = com.tekyerema.core.config.AppConfig.long("agent.limits.maxTaskMs", 600_000L),

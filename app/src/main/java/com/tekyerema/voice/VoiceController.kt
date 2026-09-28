@@ -103,6 +103,10 @@ class VoiceController(
     /** B-07: echo-cancelled mic that listens while a reply plays (null = no barge-in, e.g. tests). */
     private val bargeMic: Recorder? = null,
     private val bargeInEnabled: () -> Boolean = { false },
+    /** B-07: put the reply and the barge-in mic on the voice-communication path for one reply ([DuplexAudio]); true when
+     *  entered. [duplexEnd] always follows. No-ops in tests. */
+    private val duplexBegin: () -> Boolean = { false },
+    private val duplexEnd: () -> Unit = {},
     /** B-13: "brief" | "normal" | "detailed". */
     private val verbosity: () -> String = { "normal" },
     /** N-16: a one-time spoken health notice (screen control off, background restricted), or null. */
@@ -833,6 +837,13 @@ class VoiceController(
                 set(VoiceState.TRANSCRIBING, "Transcribing…")
                 val next = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+                // "Stop" / "that's enough" said over the reply: it has stopped, and that is all (checked before the echo
+                // guard — a reading that contains the word "stop" must not swallow the user's own "stop").
+                if (next != null && ReadingPace.isEnough(next.canonical)) {
+                    Log.i("Tekyerema", "[VOICE] barge-in: the user stopped the reply")
+                    cues.captured()
+                    idle(""); return
+                }
                 // Seen on the A20e: the echo canceller let our OWN voice through. That is never a new request —
                 // finish the reply from the sentence it was cut in, and don't start a turn from our own words.
                 if (next != null && SelfEcho.isEcho(next.canonical, outcome.spoken)) {
@@ -889,15 +900,22 @@ class VoiceController(
         val barge = bargeMic
         if (barge == null || !bargeInEnabled() || !hasMicPermission() || text.length < cfg.int("speech.bargeIn.minChars", 60))
             return tts.speak(text, lang) to null
-        return kotlinx.coroutines.coroutineScope {
-            val interrupted = java.util.concurrent.atomic.AtomicBoolean(false)
-            val listen = async {
-                barge.captureWith(VadStrategy.NORMAL, onListening = {}, onSpeechStart = { interrupted.set(true); tts.stop() })
+        // The reply on the voice-communication path, so the echo canceller has our own voice as its reference (the A20e's
+        // AEC let media-stream TTS straight through). Entered BEFORE the mic opens and the reply starts: both must be on it.
+        val duplex = duplexBegin()
+        try {
+            return kotlinx.coroutines.coroutineScope {
+                val interrupted = java.util.concurrent.atomic.AtomicBoolean(false)
+                val listen = async {
+                    barge.captureWith(VadStrategy.NORMAL, onListening = {}, onSpeechStart = { interrupted.set(true); tts.stop() })
+                }
+                val ok = try { tts.speak(text, lang) } catch (c: CancellationException) { listen.cancel(); throw c }
+                if (!interrupted.get()) { listen.cancel(); return@coroutineScope ok to null }
+                val cap = listen.await()
+                false to (cap as? CaptureResult.Success)?.wav
             }
-            val ok = try { tts.speak(text, lang) } catch (c: CancellationException) { listen.cancel(); throw c }
-            if (!interrupted.get()) { listen.cancel(); return@coroutineScope ok to null }
-            val cap = listen.await()
-            false to (cap as? CaptureResult.Success)?.wav
+        } finally {
+            if (duplex) duplexEnd()
         }
     }
 

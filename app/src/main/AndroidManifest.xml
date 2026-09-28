@@ -8,6 +8,9 @@
 
     <!-- Phase 2 voice input: capture speech from the microphone (requested at runtime). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- B-07 barge-in: switch to the voice-communication audio mode + loudspeaker for one reply so the echo canceller
+         removes our own voice (DuplexAudio). A NORMAL install-time permission — no runtime prompt. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- Tier-2 capabilities (requested at runtime). -->
     <uses-permission android:name="android.permission.CALL_PHONE" />

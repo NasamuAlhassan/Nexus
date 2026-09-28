@@ -20,10 +20,13 @@ class AudioFocus(context: Context) {
     @Volatile private var held: AudioFocusRequest? = null
 
     /** K-07: when a screen reader drives the phone, speak on the ACCESSIBILITY stream (TalkBack's volume, and the
-     *  platform treats it as accessibility audio) instead of the assistant stream. */
+     *  platform treats it as accessibility audio) instead of the assistant stream. B-07: while a barge-in reply plays
+     *  full-duplex ([DuplexAudio]), speak on the VOICE-COMMUNICATION usage — the only playback the platform echo
+     *  canceller takes as its reference, so the listening mic doesn't hear our own voice as the user. */
     fun attributes(kind: Kind): AudioAttributes = AudioAttributes.Builder()
         .setUsage(
             when {
+                kind == Kind.SPEAK && DuplexAudio.active -> AudioAttributes.USAGE_VOICE_COMMUNICATION
                 kind == Kind.SPEAK && ScreenReader.active(app) -> AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
                 else -> AudioAttributes.USAGE_ASSISTANT
             }
