@@ -71,7 +71,8 @@ enum class FailureKind {
     UNAVAILABLE
 }
 
-class ProviderFailure(val kind: FailureKind, message: String, val retryAfterMs: Long? = null) : Exception(message)
+/** [window]: "day" / "week" when the API said that quota window is spent (the [QuotaLedger] then stops asking). */
+class ProviderFailure(val kind: FailureKind, message: String, val retryAfterMs: Long? = null, val window: String? = null) : Exception(message)
 
 /**
  * Circuit breaker for one API account (a quota group). QUOTA and AUTH rest the provider at once; TRANSIENT and

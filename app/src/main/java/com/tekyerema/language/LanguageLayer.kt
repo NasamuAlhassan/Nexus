@@ -61,7 +61,8 @@ object LanguageLayer {
         secrets: Map<String, String>,
         transport: SpeechTransport,
         sink: () -> AudioSink,
-        health: (String) -> ProviderHealth = { ProviderHealthRegistry.of(it) }
+        health: (String) -> ProviderHealth = { ProviderHealthRegistry.of(it) },
+        ledger: QuotaLedger = QuotaLedger()
     ): Registries {
         clients ?: return Registries.EMPTY
         val asr = LinkedHashMap<String, AsrProvider>()
@@ -76,22 +77,31 @@ object LanguageLayer {
             if (spec == null) { skipped[id] = "unknown kind '${o.optString("kind")}'"; continue }
             val unusable = HttpSpeech.unusableReason(spec, secrets)
             if (unusable != null) { skipped[id] = unusable; continue }
+            if (!spec.limits.isEmpty) Log.i(TAG, "[LANG] $id quota: ${ledger.usage(id, spec.limits)}")
             // Backstop a little past the HTTP call timeout; the transport's own timeouts normally fire first.
             val guard = ProviderGuard(health(spec.quotaGroup), spec.connectMs + spec.callMs + 1_000L)
             val s = { secrets }
             when (spec.kind) {
-                HttpSpeechSpec.Kind.ASR -> asr[id] = HttpAsrProvider(spec, s, transport, guard)
-                HttpSpeechSpec.Kind.TTS -> tts[id] = HttpTtsProvider(spec, s, transport, guard, sink())
+                HttpSpeechSpec.Kind.ASR -> asr[id] = HttpAsrProvider(spec, s, transport, guard, ledger)
+                HttpSpeechSpec.Kind.TTS -> tts[id] = HttpTtsProvider(spec, s, transport, guard, sink(), ledger)
                 HttpSpeechSpec.Kind.MT -> mt[id] = HttpTranslationProvider(spec, s, transport, guard)
             }
         }
         return Registries(asr, tts, mt, skipped)
     }
 
+    /** Quota counts survive a restart (the HCI Lab plan's day and week are small). Only counts — no content. */
+    private class PrefsStore(app: Context) : QuotaLedger.Store {
+        private val p = app.getSharedPreferences("tekyerema_speech_quota", Context.MODE_PRIVATE)
+        override fun get(key: String) = p.getLong(key, 0L)
+        override fun put(key: String, value: Long) { p.edit().putLong(key, value).apply() }
+    }
+
     /** The app's registries from the loaded config and local.properties. */
     fun build(app: Context): Registries {
         val r = try {
-            build(AppConfig.obj("providers.speech.clients"), secrets(), OkHttpSpeechTransport, { MediaAudioSink(app) })
+            build(AppConfig.obj("providers.speech.clients"), secrets(), OkHttpSpeechTransport, { MediaAudioSink(app) },
+                ledger = QuotaLedger(PrefsStore(app)))
         } catch (t: Throwable) {
             Log.w(TAG, "[LANG] language layer failed to build — on-device only: ${t.message}"); Registries.EMPTY
         }

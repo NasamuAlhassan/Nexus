@@ -5,42 +5,113 @@
       "_clientsNote": "Language layer (B-18/X-05, docs/agent/LANGUAGE_LAYER.md). REST clients by id; every one ships DISABLED with ${PLACEHOLDER} endpoints and keys that resolve from local.properties SPEECH_* entries (never committed). To turn one on: put its SPEECH_* values in local.properties, set enabled=true, then list its id under providers.speech.asr.online.<lang> / tts.<role> (models.json) or mt.<direction> (below). A client that is disabled, missing a key or not https is never built, so routing falls through to the on-device engines.",
       "clients": {
         "hcilab_asr": {
-          "_note": "UG HCI Lab (University of Ghana) speech recognition — REQUIRED for Twi once the lab issues access. The request/response shape here is a PLACEHOLDER (multipart file + language field, JSON {\"text\"}); copy the real field names from the lab's API docs. local.properties: SPEECH_HCILAB_ASR_URL, SPEECH_HCILAB_KEY.",
+          "_note": "UG HCI Lab Speech Gateway, Akan/Twi recogniser (docs: https://lab-subscription-platform.vercel.app/dashboard/documentation). POST multipart `file` (wav, ≤120 s, ≤10 MB) with a Bearer token → a transcript. The gateway URL is public; the TOKEN goes in local.properties as SPEECH_HCILAB_TOKEN=speech_live_… (never committed) — without it this client isn't built. Free plan (2026-09-28): 5/min, 10/day, 50/week, 30 min audio/week — counted on the phone (QuotaLedger), so a spent quota falls straight through to the on-device recogniser. Routed for Twi only (models.json asr.online.twi).",
           "kind": "asr",
-          "enabled": false,
-          "quotaGroup": "hcilab",
-          "endpoint": "${SPEECH_HCILAB_ASR_URL}",
-          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_HCILAB_KEY}"},
-          "languages": {"twi": "twi"},
+          "enabled": true,
+          "quotaGroup": "hcilab_asr",
+          "endpoint": "https://lab-subscription-platform.vercel.app/api/v1/asr",
+          "auth": {
+            "header": "Authorization",
+            "prefix": "Bearer ",
+            "key": "${SPEECH_HCILAB_TOKEN}"
+          },
+          "languages": {
+            "twi": "twi"
+          },
           "fixedLanguage": "twi",
-          "request": {"body": "multipart", "audioField": "file", "fileName": "speech.wav", "audioMime": "audio/wav", "language": "body", "languageField": "language"},
-          "response": {"kind": "json", "path": "text"},
-          "timeouts": {"connectMs": 5000, "callMs": 15000}
+          "request": {
+            "body": "multipart",
+            "audioField": "file",
+            "fileName": "speech.wav",
+            "audioMime": "audio/wav",
+            "language": "none"
+          },
+          "response": {
+            "kind": "json",
+            "_pathNote": "The docs don't show the ASR reply body yet: the first of these that holds text is used.",
+            "path": "transcript|text|transcription|result.transcript|result.text|data.transcript|data.text"
+          },
+          "limits": {
+            "perMinute": 5,
+            "perDay": 10,
+            "perWeek": 50,
+            "audioSecPerWeek": 1800
+          },
+          "timeouts": {
+            "connectMs": 6000,
+            "callMs": 25000
+          }
         },
         "hcilab_tts": {
-          "_note": "UG HCI Lab Twi voice. PLACEHOLDER shape: JSON {\"text\", \"language\"} in, audio bytes out. local.properties: SPEECH_HCILAB_TTS_URL, SPEECH_HCILAB_KEY.",
+          "_note": "UG HCI Lab Speech Gateway, Twi voice. POST JSON {text, model_type:\"ss\", speaker:\"PT\"} (≤250 characters) → audio/wav (errors come back as JSON — never played). Token as for hcilab_asr. Free plan: 5/min, 15/day, 70/week, 5,000 characters/week, counted on the phone. A reply longer than one request (maxParts) is left to the phone's voice so the day's requests go to the short Twi lines (confirmations, questions) that matter most; those are cached in memory.",
           "kind": "tts",
-          "enabled": false,
-          "quotaGroup": "hcilab",
-          "endpoint": "${SPEECH_HCILAB_TTS_URL}",
-          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_HCILAB_KEY}"},
-          "languages": {"twi": "twi"},
-          "request": {"body": "json", "textField": "text", "language": "body", "languageField": "language", "fields": {}},
-          "response": {"kind": "audio"},
-          "timeouts": {"connectMs": 5000, "callMs": 20000},
-          "cacheEntries": 48
+          "enabled": true,
+          "quotaGroup": "hcilab_tts",
+          "endpoint": "https://lab-subscription-platform.vercel.app/api/v1/tts",
+          "auth": {
+            "header": "Authorization",
+            "prefix": "Bearer ",
+            "key": "${SPEECH_HCILAB_TOKEN}"
+          },
+          "languages": {
+            "twi": "twi"
+          },
+          "request": {
+            "body": "json",
+            "textField": "text",
+            "language": "none",
+            "fields": {
+              "model_type": "ss",
+              "speaker": "PT"
+            },
+            "maxChars": 250,
+            "maxParts": 1
+          },
+          "response": {
+            "kind": "audio"
+          },
+          "limits": {
+            "perMinute": 5,
+            "perDay": 15,
+            "perWeek": 70,
+            "charsPerWeek": 5000
+          },
+          "timeouts": {
+            "connectMs": 6000,
+            "callMs": 25000
+          },
+          "cacheEntries": 64
         },
         "hcilab_mt": {
-          "_note": "UG HCI Lab translation, if offered. PLACEHOLDER shape: JSON {\"text\", \"source\", \"target\"} in, JSON {\"translation\"} out. local.properties: SPEECH_HCILAB_MT_URL, SPEECH_HCILAB_KEY.",
+          "_note": "The HCI Lab gateway offers ASR and TTS only (2026-09-28 docs) — no translation. Kept as a disabled shape for a future MT API.",
           "kind": "mt",
           "enabled": false,
           "quotaGroup": "hcilab",
           "endpoint": "${SPEECH_HCILAB_MT_URL}",
-          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_HCILAB_KEY}"},
-          "languages": {"gh_en": "en", "twi": "twi"},
-          "request": {"body": "json", "textField": "text", "language": "body", "fromField": "source", "toField": "target"},
-          "response": {"kind": "json", "path": "translation"},
-          "timeouts": {"connectMs": 5000, "callMs": 12000},
+          "auth": {
+            "header": "Authorization",
+            "prefix": "Bearer ",
+            "key": "${SPEECH_HCILAB_KEY}"
+          },
+          "languages": {
+            "gh_en": "en",
+            "twi": "twi"
+          },
+          "request": {
+            "body": "json",
+            "textField": "text",
+            "language": "body",
+            "fromField": "source",
+            "toField": "target"
+          },
+          "response": {
+            "kind": "json",
+            "path": "translation"
+          },
+          "timeouts": {
+            "connectMs": 5000,
+            "callMs": 12000
+          },
           "cacheEntries": 256
         },
         "openai_asr": {
@@ -48,12 +119,35 @@
           "kind": "asr",
           "enabled": false,
           "endpoint": "${ASR_ONLINE_URL}/audio/transcriptions",
-          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${ASR_ONLINE_KEY}"},
-          "languages": {"gh_en": "en"},
+          "auth": {
+            "header": "Authorization",
+            "prefix": "Bearer ",
+            "key": "${ASR_ONLINE_KEY}"
+          },
+          "languages": {
+            "gh_en": "en"
+          },
           "fixedLanguage": "gh_en",
-          "request": {"body": "multipart", "audioField": "file", "fileName": "speech.wav", "audioMime": "audio/wav", "language": "body", "languageField": "language", "fields": {"model": "${ASR_ONLINE_MODEL}", "response_format": "json"}},
-          "response": {"kind": "json", "path": "text"},
-          "timeouts": {"connectMs": 5000, "callMs": 15000}
+          "request": {
+            "body": "multipart",
+            "audioField": "file",
+            "fileName": "speech.wav",
+            "audioMime": "audio/wav",
+            "language": "body",
+            "languageField": "language",
+            "fields": {
+              "model": "${ASR_ONLINE_MODEL}",
+              "response_format": "json"
+            }
+          },
+          "response": {
+            "kind": "json",
+            "path": "text"
+          },
+          "timeouts": {
+            "connectMs": 5000,
+            "callMs": 15000
+          }
         }
       },
       "mt": {

@@ -256,18 +256,22 @@ class LanguageLayerTest {
         return dir.listFiles { f -> f.name.endsWith(".json") }!!.sortedBy { it.name }.map { "config/${it.name}" to it.readText() }
     }
 
-    @Test fun shipped_config_builds_no_network_client_even_with_keys_present() {
+    /** 2026-09-28: the owner has an HCI Lab gateway account — its ASR/TTS clients ship ENABLED but are only built when
+     *  the token is in local.properties; with no token the app stays fully on-device, and English never goes out. */
+    @Test fun shipped_config_builds_only_the_hcilab_clients_and_only_with_its_token() {
         AppConfig.loadFrom(shippedConfig())
         val clients = AppConfig.obj("providers.speech.clients")
-        assertNotNull("language.json ships the HCI Lab client templates", clients)
-        val keys = mapOf("SPEECH_HCILAB_ASR_URL" to "https://a.test", "SPEECH_HCILAB_TTS_URL" to "https://b.test",
-            "SPEECH_HCILAB_MT_URL" to "https://c.test", "SPEECH_HCILAB_KEY" to "k")
-        val r = LanguageLayer.build(clients, keys, FakeTransport { json(200, "{}") }, { FakeSink() })
-        assertTrue("every shipped client is disabled", r.asr.isEmpty() && r.tts.isEmpty() && r.mt.isEmpty())
-        assertEquals(setOf("disabled"), r.skipped.values.toSet())
-        // and routing stays on-device: nothing is configured for any language
-        assertNull(LanguageLayer.onlineAsr(Lang.TWI, r.asr, cloudAllowed = true))
-        assertTrue(AppConfig.stringList("providers.speech.asr.online.twi", listOf("x")).isEmpty())
+        assertNotNull("language.json ships the HCI Lab clients", clients)
+        val none = LanguageLayer.build(clients, emptyMap(), FakeTransport { json(200, "{}") }, { FakeSink() })
+        assertTrue("no token → no network client", none.asr.isEmpty() && none.tts.isEmpty() && none.mt.isEmpty())
+        assertNull(LanguageLayer.onlineAsr(Lang.TWI, none.asr, cloudAllowed = true))
+        val r = LanguageLayer.build(clients, mapOf("SPEECH_HCILAB_TOKEN" to "speech_live_x"), FakeTransport { json(200, "{}") }, { FakeSink() })
+        assertEquals(setOf("hcilab_asr"), r.asr.keys)
+        assertEquals(setOf("hcilab_tts"), r.tts.keys)
+        assertTrue("the gateway has no translation", r.mt.isEmpty())
+        assertEquals(listOf("hcilab_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
+        assertTrue("English stays on the phone", AppConfig.stringList("providers.speech.asr.online.gh_en", listOf("x")).isEmpty())
+        assertNull("never at a PIN screen / offline", LanguageLayer.onlineAsr(Lang.TWI, r.asr, cloudAllowed = false))
     }
 
     @Test fun enabled_clients_register_by_id_and_route_per_language() = runTest {

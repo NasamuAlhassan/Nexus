@@ -4,9 +4,9 @@
     "groq": {"baseUrl": "https://api.groq.com/openai/v1"},
     "gemini": {"baseUrl": "https://generativelanguage.googleapis.com/v1beta"},
     "speech": {
-      "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. The UG HCI Lab ASR/TTS clients register their ids when they exist.",
-      "tts": {"english": ["system"], "twi": ["system"], "ghEnglish": []},
-      "asr": {"online": {"twi": [], "gh_en": [], "auto": []}}
+      "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. Twi goes to the UG HCI Lab gateway (language.json hcilab_asr / hcilab_tts) when its token is in local.properties and its quota lasts; English stays on the phone.",
+      "tts": {"english": ["system"], "twi": ["hcilab_tts", "system"], "ghEnglish": []},
+      "asr": {"online": {"twi": ["hcilab_asr"], "gh_en": [], "auto": []}}
     }
   },
   "models": {

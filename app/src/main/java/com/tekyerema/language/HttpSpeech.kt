@@ -65,7 +65,13 @@ data class HttpSpeechSpec(
     val quotaGroup: String,
     /** Plain http is refused unless explicitly allowed (a LAN test server); keys never travel in clear by accident. */
     val allowHttp: Boolean,
-    val cacheEntries: Int
+    val cacheEntries: Int,
+    /** The plan's quotas, counted on the phone ([QuotaLedger]) so a spent quota costs no call. */
+    val limits: QuotaLedger.Limits = QuotaLedger.Limits(),
+    /** TTS: the most characters one request may carry (the HCI Lab gateway: 250); 0 = no limit. */
+    val maxChars: Int = 0,
+    /** TTS: a reply needing more than this many requests is left to the phone's own voice (saves a small quota). */
+    val maxParts: Int = 1
 ) {
     enum class Kind { ASR, TTS, MT }
 
@@ -110,7 +116,10 @@ data class HttpSpeechSpec(
                 callMs = t.optLong("callMs", if (kind == Kind.TTS) 20_000L else 15_000L),
                 quotaGroup = o.optString("quotaGroup").trim().ifBlank { id },
                 allowHttp = o.optBoolean("allowHttp", false),
-                cacheEntries = o.optInt("cacheEntries", if (kind == Kind.ASR) 0 else 48)
+                cacheEntries = o.optInt("cacheEntries", if (kind == Kind.ASR) 0 else 48),
+                limits = QuotaLedger.Limits.parse(o.optJSONObject("limits")),
+                maxChars = req.optInt("maxChars", 0).coerceAtLeast(0),
+                maxParts = req.optInt("maxParts", 1).coerceAtLeast(1)
             )
         }
 
@@ -237,10 +246,22 @@ object HttpSpeech {
     private val JSON = "application/json; charset=utf-8".toMediaType()
 
     /** Turn a non-2xx reply into a classified failure (null = success). */
-    fun failureOf(spec: HttpSpeechSpec, reply: HttpReply): ProviderFailure? {
+    fun failureOf(spec: HttpSpeechSpec, reply: HttpReply, now: Long = System.currentTimeMillis()): ProviderFailure? {
         val c = reply.code
         if (c in 200..299) return null
         val retry = reply.retryAfter?.trim()?.toLongOrNull()?.takeIf { it in 1..86_400 }?.times(1000)
+        // The HCI Lab gateway names the limit it hit: {"error":{"code":"weekly_quota_exceeded",…}}. Rest until THAT window
+        // can have reset — a spent day or week isn't worth retrying every 15 minutes (each try is a slow failed call).
+        val code = errorCode(reply)
+        if (code != null && ("quota" in code || "limit" in code || "rate" in code)) {
+            val window = when { "week" in code -> "week"; "day" in code || "daily" in code -> "day"; else -> null }
+            val rest = retry ?: when (window) {
+                "week" -> 12 * 60 * 60_000L
+                "day" -> msUntilUtcMidnight(now)
+                else -> 60_000L   // a per-minute rate limit
+            }
+            return ProviderFailure(FailureKind.QUOTA, "${spec.id} HTTP $c ($code)", rest, window)
+        }
         return when {
             c == 401 -> ProviderFailure(FailureKind.AUTH, "${spec.id} HTTP 401 (check the key in local.properties)")
             // Azure-APIM-style gateways (Khaya's, for one) answer an exhausted subscription with 403; either way the
@@ -251,6 +272,37 @@ object HttpSpeech {
         }
     }
 
+    /** `error.code` of a JSON error body, lower-cased, or null. */
+    fun errorCode(reply: HttpReply): String? = try {
+        (JSONTokener(reply.text().trim()).nextValue() as? JSONObject)?.optJSONObject("error")?.optString("code")
+            ?.trim()?.lowercase()?.ifBlank { null }
+    } catch (_: Exception) { null }
+
+    fun msUntilUtcMidnight(now: Long): Long {
+        val day = 24 * 60 * 60_000L
+        return (day - now.mod(day)).coerceAtLeast(60_000L)
+    }
+
+    /** A TTS text split into parts of at most [max] characters, at sentence ends, else between words. */
+    fun parts(text: String, max: Int): List<String> {
+        val t = text.trim()
+        if (max <= 0 || t.length <= max) return listOf(t)
+        val out = ArrayList<String>()
+        var cur = StringBuilder()
+        fun flush() { if (cur.isNotBlank()) out += cur.toString().trim(); cur = StringBuilder() }
+        for (sentence in t.split(Regex("(?<=[.!?…])\\s+"))) {
+            val pieces = if (sentence.length <= max) listOf(sentence) else sentence.split(Regex("\\s+"))
+            for (p in pieces) {
+                if (cur.isNotEmpty() && cur.length + 1 + p.length > max) flush()
+                if (cur.isNotEmpty()) cur.append(' ')
+                cur.append(if (p.length > max) p.take(max) else p)
+            }
+            if (sentence.length > max) flush()
+        }
+        flush()
+        return out
+    }
+
     /** The text answer (transcript / translation). Throws [ProviderFailure] BAD_RESPONSE when it isn't there. */
     fun parseText(spec: HttpSpeechSpec, reply: HttpReply): String {
         val raw = reply.text().trim()
@@ -259,11 +311,13 @@ object HttpSpeech {
             else -> {
                 val root = try { JSONTokener(raw).nextValue() } catch (e: Exception) { throw bad(spec, "reply is not JSON") }
                 if (root is String) return root.trim()   // a bare JSON string is a common MT answer
-                when (val v = at(root, spec.responsePath)) {
-                    is String -> v.trim()
-                    is JSONArray -> (0 until v.length()).mapNotNull { v.opt(it) as? String }.joinToString(" ").trim()
-                    else -> throw bad(spec, "no text at '${spec.responsePath}'")
+                // "a|b|c": the first path that holds text — for an API whose reply field isn't documented yet.
+                for (path in spec.responsePath.split('|').map { it.trim() }) when (val v = at(root, path)) {
+                    is String -> return v.trim()
+                    is JSONArray -> return (0 until v.length()).mapNotNull { v.opt(it) as? String }.joinToString(" ").trim()
+                    else -> {}
                 }
+                throw bad(spec, "no text at '${spec.responsePath}'")
             }
         }
     }

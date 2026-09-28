@@ -43,25 +43,34 @@ class HttpAsrProvider(
     val spec: HttpSpeechSpec,
     private val secrets: () -> Map<String, String>,
     private val transport: SpeechTransport,
-    private val guard: ProviderGuard
+    private val guard: ProviderGuard,
+    private val ledger: QuotaLedger = QuotaLedger()
 ) : AsrProvider, HealthAware {
     override val name = "http:${spec.id}"
-    override fun available() = guard.health.available()
+    /** Worth trying now: not resting after a failure, and the plan has a request left ([QuotaLedger]). */
+    override fun available() = guard.health.available() && ledger.refusal(spec.id, spec.limits, QuotaLedger.Units()) == null
 
     override suspend fun transcribe(wav: ByteArray, sessionLanguage: String, forceLanguage: String?): Transcript {
         val lang = forceLanguage ?: spec.fixedLanguage
         val code = HttpSpeech.languageCode(spec, lang)
         if (lang != null && code == null) throw AsrException("$name doesn't recognise ${Lang.label(lang)}")
+        val units = QuotaLedger.Units(audioSec = audioSeconds(wav))
+        ledger.refusal(spec.id, spec.limits, units)?.let {
+            Log.i("Tekyerema", "[ASR] $name skipped — $it; on-device instead")
+            throw AsrException("$name: quota")
+        }
         val t0 = SystemClock.elapsedRealtime()
         val reply = try {
             guard.run {
                 val r = transport.send(HttpSpeech.asrRequest(spec, secrets(), wav, code), spec.connectMs, spec.callMs)
+                if (r.code !in 500..599) ledger.record(spec.id, spec.limits, units)   // it reached the gateway's counter
                 HttpSpeech.failureOf(spec, r)?.let { throw it }
                 val text = HttpSpeech.parseText(spec, r)
                 text to HttpSpeech.parseLanguage(spec, r)
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) {
+            (e as? ProviderFailure)?.window?.let { ledger.exhaust(spec.id, spec.limits, it) }
             ProviderGuard.log("ASR", spec.id, e)
             // AsrException is what the controller labels as the ASR stage (§29); HybridAsr degrades on it.
             throw AsrException(e.message ?: "$name failed")
@@ -74,6 +83,16 @@ class HttpAsrProvider(
         val tr = LanguagePipeline.process(raw, sessionLanguage, lang ?: reported, backend = name, asrMs = ms)
         return if (lang == null && reported != null) tr.copy(reason = "provider-reported $reported") else tr
     }
+}
+
+/** Seconds of audio in a WAV (its header's byte rate), else 16 kHz 16-bit mono — what the quota counts. */
+internal fun audioSeconds(wav: ByteArray): Double {
+    if (wav.size > 44 && String(wav, 0, 4, Charsets.US_ASCII) == "RIFF") {
+        val rate = (wav[28].toInt() and 0xff) or ((wav[29].toInt() and 0xff) shl 8) or
+            ((wav[30].toInt() and 0xff) shl 16) or ((wav[31].toInt() and 0xff) shl 24)
+        if (rate > 0) return (wav.size - 44).toDouble() / rate
+    }
+    return wav.size / 32_000.0
 }
 
 /** Plays synthesized audio. Abstracted so the TTS client is testable without a speaker. */
@@ -94,26 +113,47 @@ class HttpTtsProvider(
     private val secrets: () -> Map<String, String>,
     private val transport: SpeechTransport,
     private val guard: ProviderGuard,
-    private val sink: AudioSink
+    private val sink: AudioSink,
+    private val ledger: QuotaLedger = QuotaLedger()
 ) : TtsProvider, HealthAware {
     override val name = "http:${spec.id}"
-    override fun available() = guard.health.available()
+    override fun available() = guard.health.available() &&
+        ledger.refusal(spec.id, spec.limits, QuotaLedger.Units(chars = 1)) == null
     private val cache: MutableMap<String, ByteArray> = lru(spec.cacheEntries.coerceIn(0, 256))
 
     override suspend fun speak(text: String, language: String): Boolean {
         val code = HttpSpeech.languageCode(spec, language) ?: return false
         val say = if (language == Lang.TWI) TwiText.canonical(text).trim() else text.trim()
         if (say.isEmpty() || !available()) return false
-        val key = "$code|$say"
-        val audio = cache[key] ?: try {
-            guard.run {
-                val r = transport.send(HttpSpeech.ttsRequest(spec, secrets(), say, code), spec.connectMs, spec.callMs)
-                HttpSpeech.failureOf(spec, r)?.let { throw it }
-                HttpSpeech.parseAudio(spec, r)
-            }.also { if (spec.cacheEntries > 0) cache[key] = it }
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ProviderGuard.log("TTS", spec.id, e); return false }
-        return sink.play(audio)
+        // The gateway takes at most spec.maxChars a request (HCI Lab: 250) — split, and leave a long reply to the phone's
+        // own voice rather than spend several of a small day's requests on one answer.
+        val parts = HttpSpeech.parts(say, spec.maxChars)
+        if (parts.size > spec.maxParts) {
+            Log.i("Tekyerema", "[TTS] $name: ${parts.size} parts (> ${spec.maxParts}) — the phone's voice says this one")
+            return false
+        }
+        val clips = ArrayList<ByteArray>(parts.size)
+        for (p in parts) {
+            val key = "$code|$p"
+            clips += cache[key] ?: run {
+                val units = QuotaLedger.Units(chars = p.length)
+                ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return false }
+                try {
+                    guard.run {
+                        val r = transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs)
+                        if (r.code !in 500..599) ledger.record(spec.id, spec.limits, units)
+                        HttpSpeech.failureOf(spec, r)?.let { throw it }
+                        HttpSpeech.parseAudio(spec, r)
+                    }.also { if (spec.cacheEntries > 0) cache[key] = it }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) {
+                    (e as? ProviderFailure)?.window?.let { ledger.exhaust(spec.id, spec.limits, it) }
+                    ProviderGuard.log("TTS", spec.id, e); return false
+                }
+            }
+        }
+        for (c in clips) if (!sink.play(c)) return false
+        return true
     }
 
     override fun stop() = sink.stop()
