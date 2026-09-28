@@ -6,5 +6,16 @@
       "minChars": 60,
       "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself. Turn on per device after checking; SelfEcho still guards against it."
     }
+  },
+  "ux": {
+    "fillers": {
+      "enabled": true,
+      "maxChain": 2,
+      "gapMs": 3500,
+      "en": ["One moment please.", "Let me check that for you.", "Alright, let me take a look.", "Okay, I'm on it.",
+             "Just a moment please.", "Let me find that for you.", "Hold on a moment.", "Sure, working on that now."],
+      "twi": [],
+      "_note": "Spoken in the reply voice (the phone's engine). Twi is empty on purpose: the old Twi phrasings were never verified by a native speaker and the English engine reads Twi badly, so a Twi session plays the progress tone. Add verified phrases here."
+    }
   }
 }

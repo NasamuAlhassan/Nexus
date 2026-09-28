@@ -1,122 +1,103 @@
 package com.tekyerema.voice
 
 import android.content.Context
-import android.media.MediaPlayer
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
-import com.tekyerema.R
+import com.tekyerema.core.config.AppConfig
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
- * Instant, offline "thinking" backchannel (conversational fillers). While the ASR + brain + TTS round-trips
- * run, a blind user hears NOTHING — the visual thinking animation is invisible to them, so silence reads as
- * "it didn't hear me". This plays a short, pre-synthesized filler ("Hmm.", "One moment.", "Ma me nhwɛ.") from
- * res/raw the instant a turn starts, randomized so it never gets repetitive, and keeps a gentle backchannel
- * going (bounded) until the real reply is ready — the same trick Siri/Alexa use to mask API latency.
+ * Instant "thinking" backchannel (conversational fillers). While the brain works, a blind user hears NOTHING — the
+ * visual thinking animation is invisible to them, so silence reads as "it didn't hear me". This says a short phrase
+ * ("One moment please.") the moment a task starts, randomized so it never gets repetitive, and at most one more on a
+ * long wait.
  *
- * Local playback only (bundled WAVs), never the network, so it lands in milliseconds and works even if
- * Abena/Khaya are down or out of credits. The clips are pre-synthesized ONCE with the Abena voice.
+ * It speaks in the SAME voice as the replies — the phone's own engine, offline — through its OWN TTS instance, so
+ * stopping a filler can never cut off a reply or a confirmation prompt. (The old pre-recorded Abena-voiced clips were
+ * removed on 2026-09-28 with the rest of the Abena integration.) Phrases come from config `ux.fillers.en`; a Twi session
+ * plays the soft progress tone instead unless verified Twi phrases are configured in `ux.fillers.twi` (the phone's
+ * English voice reads Twi badly). `ux.fillers.enabled` switches fillers off.
  *
- * SAFETY: every filler means "I'm working on it", NEVER "done" — a blind user must never mistake a filler for
- * a completed action (a money transfer, a sent message). It is stopped the instant a real reply or a
- * confirmation prompt is spoken. [owner: verify the Twi filler phrasings with a native Asante Twi speaker.]
+ * SAFETY: every filler means "I'm working on it", NEVER "done" — a blind user must never mistake a filler for a
+ * completed action (a money transfer, a sent message). It is stopped the instant a real reply or a confirmation
+ * prompt is spoken.
  */
-class FillerPlayer(private val appContext: Context) {
-    private val main = Handler(Looper.getMainLooper())
-    private val twi = intArrayOf(
-        R.raw.filler_twi_1, R.raw.filler_twi_2, R.raw.filler_twi_3, R.raw.filler_twi_4,
-        R.raw.filler_twi_5, R.raw.filler_twi_6, R.raw.filler_twi_7, R.raw.filler_twi_8
-    )
-    private val en = intArrayOf(
-        R.raw.filler_en_1, R.raw.filler_en_2, R.raw.filler_en_3, R.raw.filler_en_4,
-        R.raw.filler_en_5, R.raw.filler_en_6, R.raw.filler_en_7, R.raw.filler_en_8
-    )
-
+class FillerPlayer(
+    appContext: Context,
+    private val scope: CoroutineScope,
+    /** The non-speech progress tone, for sessions without spoken filler phrases. */
+    private val cue: () -> Unit = {},
+    /** Speech rate and pitch, matched to the reply voice. */
+    private val voice: () -> Pair<Float, Float> = { 1.0f to 1.0f }
+) {
+    private val tts by lazy { AndroidTts(appContext) }
+    private var job: Job? = null
     @Volatile private var active = false
-    private var mp: MediaPlayer? = null
-    private var lastRes = 0
-    private var played = 0
-    // Owner feedback: the backchannel was "too much" — 6 clips at 300ms apart is ~14s of near-constant
-    // chatter. Keep it to a brief reassurance: ONE filler up front, at most ONE more on a long wait, spaced
-    // well apart so silence (with the visual thinking animation) carries the rest.
-    private val maxChain = 2        // at most two "thinking" fillers per turn
-    private val gapMs = 3500L       // a generous pause between them, so it feels occasional, not chatty
+    private var last: String? = null
+
+    private fun maxChain() = AppConfig.int("ux.fillers.maxChain", 2)
+    private fun gapMs() = AppConfig.long("ux.fillers.gapMs", 3500L)
+
+    /** The phrases for [language], or empty when that language has none (⇒ the progress tone). */
+    fun phrases(language: String): List<String> = if (language == Lang.TWI)
+        AppConfig.stringList("ux.fillers.twi", emptyList())
+    else AppConfig.stringList("ux.fillers.en", DEFAULT_EN)
 
     /** Begin the backchannel for [language]. A fresh call restarts cleanly (used at the start of every turn). */
     fun start(language: String) {
-        main.post {
-            stopInternal()
-            active = true; played = 0
-            playNext(language)
+        stop()
+        if (!AppConfig.bool("ux.fillers.enabled", true)) return
+        active = true
+        job = scope.launch {
+            for (i in 0 until maxChain()) {
+                if (!active) return@launch
+                val pool = phrases(language)
+                if (pool.isEmpty()) { cue(); Log.i("Tekyerema", "[FILLER] tone #${i + 1} lang=$language") }
+                else {
+                    val line = pool.filter { it != last }.ifEmpty { pool }.random()
+                    last = line
+                    val (rate, pitch) = voice()
+                    tts.setRate(rate); tts.setPitch(pitch)
+                    Log.i("Tekyerema", "[FILLER] say #${i + 1} lang=$language")
+                    try { tts.speak(line, Lang.GH_EN) } catch (_: Throwable) {}
+                }
+                if (i < maxChain() - 1) delay(gapMs())
+            }
         }
     }
 
-    /** QA: play EVERY clip of [language] in order (ignores the random/maxChain logic), so the owner can audition
-     *  the set and flag any that sound wrong. Triggered over ADB (`--es play_fillers twi|en`). */
+    /** QA: say every phrase of [language] in order (`--es play_fillers twi|en`). */
     fun audition(language: String) {
-        main.post {
-            stopInternal(); active = true
-            val list = if (language == Lang.TWI) twi else en
-            auditionAt(list, 0, language)
+        stop()
+        active = true
+        job = scope.launch {
+            val pool = phrases(language)
+            if (pool.isEmpty()) { cue(); Log.i("Tekyerema", "[FILLER] audition lang=$language: no phrases — progress tone"); return@launch }
+            for ((i, line) in pool.withIndex()) {
+                if (!active) return@launch
+                Log.i("Tekyerema", "[FILLER] audition ${i + 1}/${pool.size} lang=$language")
+                try { tts.speak(line, Lang.GH_EN) } catch (_: Throwable) {}
+                delay(450)
+            }
         }
     }
 
-    private fun auditionAt(list: IntArray, idx: Int, language: String) {
-        if (!active || idx >= list.size) { active = false; return }
-        try {
-            val m = MediaPlayer.create(appContext, list[idx])
-            if (m == null) { auditionAt(list, idx + 1, language); return }
-            m.setOnCompletionListener { p ->
-                try { p.release() } catch (_: Throwable) {}; if (mp === p) mp = null
-                if (active) main.postDelayed({ auditionAt(list, idx + 1, language) }, 450)
-            }
-            m.setOnErrorListener { p, _, _ ->
-                try { p.release() } catch (_: Throwable) {}; if (mp === p) mp = null
-                if (active) main.postDelayed({ auditionAt(list, idx + 1, language) }, 450); true
-            }
-            mp = m; m.start()
-            Log.i("Tekyerema", "[FILLER] audition ${idx + 1}/${list.size} lang=$language dur=${m.duration}ms")
-        } catch (t: Throwable) { Log.w("Tekyerema", "[FILLER] audition failed: ${t.message}") }
-    }
-
-    /** Stop immediately — called the moment the real reply / confirmation is about to be spoken, and on cancel.
-     *  `active` is cleared SYNCHRONOUSLY so no further clip can chain in the window before the reply speaks. */
+    /** Stop immediately — the moment the real reply / confirmation is about to be spoken, and on cancel. Only this
+     *  player's own TTS instance is stopped. */
     fun stop() {
         active = false
-        main.post { stopInternal() }
+        job?.cancel(); job = null
+        try { tts.stop() } catch (_: Throwable) {}
     }
 
-    fun release() {
-        active = false
-        main.post { stopInternal() }
-    }
+    fun release() { stop(); try { tts.shutdown() } catch (_: Throwable) {} }
 
-    private fun playNext(language: String) {
-        if (!active || played >= maxChain) return
-        val pool = if (language == Lang.TWI) twi else en
-        // random, but never the same clip twice in a row (the "don't be boring" requirement)
-        val choices = pool.filter { it != lastRes }.ifEmpty { pool.toList() }
-        val res = choices.random()
-        lastRes = res; played++
-        try {
-            val m = MediaPlayer.create(appContext, res) ?: return
-            m.setOnCompletionListener { p ->
-                try { p.release() } catch (_: Throwable) {}
-                if (mp === p) mp = null
-                if (active) main.postDelayed({ playNext(language) }, gapMs)
-            }
-            m.setOnErrorListener { p, _, _ -> try { p.release() } catch (_: Throwable) {}; if (mp === p) mp = null; true }
-            mp = m
-            m.start()
-            Log.i("Tekyerema", "[FILLER] play #$played lang=$language dur=${m.duration}ms")
-        } catch (t: Throwable) {
-            Log.w("Tekyerema", "[FILLER] play failed: ${t.message}")
-        }
-    }
-
-    private fun stopInternal() {
-        main.removeCallbacksAndMessages(null)
-        mp?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }
-        mp = null
+    companion object {
+        val DEFAULT_EN = listOf(
+            "One moment please.", "Let me check that for you.", "Alright, let me take a look.", "Okay, I'm on it.",
+            "Just a moment please.", "Let me find that for you.", "Hold on a moment.", "Sure, working on that now."
+        )
     }
 }

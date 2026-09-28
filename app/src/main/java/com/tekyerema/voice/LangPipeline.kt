@@ -169,8 +169,10 @@ object Lid {
                          val twiTok: Int = 0, val engTok: Int = 0, val diac: Int = 0)
 
     fun detect(text: String?): Detection {
-        // (?U) → Unicode-aware \w so Twi tokens with diacritics (e.g. "sɛ", "frɛ") stay whole.
-        val toks = Regex("(?U)[^\\W\\d_]+").findAll((text ?: "").lowercase()).map { it.value }.toList()
+        // Unicode letters + combining marks, so Twi tokens with diacritics (e.g. "sɛ", "frɛ") stay whole. NOT "(?U)":
+        // Android's ICU regex rejects that flag ("Syntax error… near index 3") — it broke every spoken request on the
+        // A20e (2026-09-28) while the JVM unit tests, on Java's engine, passed.
+        val toks = Regex("[\\p{L}\\p{M}]+").findAll((text ?: "").lowercase()).map { it.value }.toList()
         if (toks.isEmpty()) return Detection(Lang.GH_EN, 0.0, 0.0, 0.0)
         val twi = toks.count { it in TWI_WORDS }
         val eng = toks.count { it in ENG_WORDS }

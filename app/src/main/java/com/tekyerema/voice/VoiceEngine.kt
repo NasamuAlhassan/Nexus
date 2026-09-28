@@ -79,6 +79,7 @@ object VoiceEngine {
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
             "online ASR: OFF (Phase II — on-device only; HCI Lab API plugs into onlineFor) | " +
             "TTS: system engine | cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
+        val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
         controller = VoiceController(
             // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our
             // tekyerema-ghen-tiny) via sherpa-onnx are the OFFLINE path — Twi always stays on-device. For
@@ -105,15 +106,18 @@ object VoiceEngine {
                     PackageManager.PERMISSION_GRANTED
             },
             mic = mic,
-            cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics }),
+            cues = cues,
             forceLanguage = { settings.forcedLanguage },
             speakAloud = { settings.speakAloud },
             answerMic = answerMic,
             // A visible "Tɛkyerɛma is asking…" card over any app while a follow-up question waits for an answer.
             showAsking = { q -> com.tekyerema.ui.OverlayConfirm.showQuestion(app, q) },
             hideAsking = { com.tekyerema.ui.OverlayConfirm.hide(app) },
-            // Instant offline "thinking" fillers (bundled Abena-voiced clips) played while the brain works.
-            fillers = FillerPlayer(app).also { fillerPlayer = it },
+            // "Thinking" fillers while the brain works — the reply voice (own TTS instance), or the progress tone in Twi.
+            fillers = FillerPlayer(app, scope, cue = { cues.progress() }, voice = {
+                (when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }) to
+                    (when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })
+            }).also { fillerPlayer = it },
             // LOCAL FAST PATH: deterministic device ops (time/battery/volume/open-app/back…) before the LLM.
             fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() },
             // Fast-path ACTION confirmations speak on the offline system engine so they're instant on any network.
