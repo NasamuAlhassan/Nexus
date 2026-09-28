@@ -137,7 +137,19 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
      *  learn the package: it is a synchronous binder round-trip INTO the foreground app, and while that app is
      *  cold-starting it blocks until the app's UI thread answers — seconds, on the caller's thread (often ours). */
     override fun foregroundPackage(): String? =
-        fgActivityPkg ?: try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null }
+        fgActivityPkg ?: topAppWindowPackage()?.also { fgActivityPkg = it }
+            ?: try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null }
+
+    /** Before the first activity event (e.g. the service bound after the last app switch): the topmost APPLICATION
+     *  window in z-order. Unlike the active window this never picks an overlay — our own floating bubble, the
+     *  keyboard or the shade (seen on-device: the eval read "fg=tekyerema" from the bubble). */
+    private fun topAppWindowPackage(): String? = try {
+        windows?.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+            ?.root?.packageName?.toString()
+    } catch (_: Throwable) { null }
+
+    override fun activeWindowPackage(): String? =
+        try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null } ?: foregroundPackage()
 
     @Volatile private var fgActivityPkg: String? = null
     private val activityClassCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
@@ -228,7 +240,8 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                             password = node.isPassword,
                             range = ri?.let { UiRange(it.min, it.max, it.current) },
                             viewId = try { node.viewIdResourceName } catch (t: Throwable) { null },
-                            collection = collectionHint(node)
+                            collection = collectionHint(node),
+                            hint = if (node.isEditable) try { node.hintText?.toString()?.takeIf { it.isNotBlank() } } catch (t: Throwable) { null } else null
                         )
                     )
                 } else if (label != null) {

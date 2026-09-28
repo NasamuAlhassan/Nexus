@@ -28,6 +28,10 @@ class RoutingBrain(
      *  LocalBrain fast path entirely. Used to make the relay (Claude) the brain for all requests, not just
      *  the escalated ones. Defaults false so normal local-first behaviour is unchanged. */
     private val cloudFirst: () -> Boolean = { false },
+    /** The installed app a compound goal is about, as (label, package) — or null. When the local brain defers a
+     *  task that names one, its FIRST step is to open it locally (no cloud round-trip); the cloud takes over
+     *  from inside the app. Injected (needs PackageManager) so this class stays Android-free. */
+    private val appForGoal: ((String) -> Pair<String, String>?)? = null,
     private val isOnline: () -> Boolean
 ) : AgentBrain {
 
@@ -57,26 +61,20 @@ class RoutingBrain(
 
         val needsNet = (d as AgentDecision.CannotDo).reasonClass == LocalBrain.NETWORK
         if (cloud != null && isOnline()) {
+            // Step one of a task about a named app: open it here — deterministic, ~0 ms instead of a round-trip.
+            if (!stickyCloud && ctx.history.isEmpty()) appForGoal?.invoke(ctx.goal)?.let { (label, pkg) ->
+                if (ctx.screen.optString("app") != pkg) {
+                    android.util.Log.i("Tekyerema", "[ROUTE] goal names $label → opening it locally first, then the cloud brain")
+                    stickyCloud = true
+                    if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
+                    return AgentDecision.CallTool("open_app", org.json.JSONObject().put("app", label), "local:goal names $label",
+                        expects = "foreground_is: $pkg")
+                }
+            }
             if (!stickyCloud)   // log the escalation ONCE per task so it's visible live during the demo
                 android.util.Log.i("Tekyerema", "[ROUTE] local ${d.reasonClass} '${ctx.goal.take(60)}' → escalating to cloud brain")
             stickyCloud = true
-            if (cloudGoal == null) {
-                val translated = goalForCloud?.invoke(ctx.goal)?.takeIf { it.isNotBlank() }
-                // §4.6 — do NOT replace the user's Twi with the machine translation. Khaya MT can mangle it
-                // (observed: "…tell Prince to come home" → "…asks print to clean houses"), and the LLM then
-                // plans off garbage. Instead give the model BOTH: its OWN reading of the Twi AND the rough
-                // translation as a hint, so a wrong translation can't fully mislead it. (Translation only fires
-                // for Twi, so `translated != null` ⇒ the goal is Twi.) If MT is unavailable but the goal is
-                // Twi, still send the raw Twi with an interpret hint (never type it verbatim into a search box).
-                cloudGoal = when {
-                    translated != null ->
-                        "The user spoke Asante Twi: \"${ctx.goal}\"\n" +
-                        "A rough machine translation (it can be WRONG — trust the Twi if they disagree): \"$translated\"\n" +
-                        "Interpret the Twi yourself and act on it; do NOT type it verbatim."
-                    looksTwi(ctx.goal) -> "Asante Twi (interpret and act, do not type verbatim): ${ctx.goal}"
-                    else -> null
-                }
-            }
+            if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
             return cloud.decide(cloudCtx(ctx))
         }
         // offline or no cloud brain configured — never silently do nothing (§A.4), and this is a FAILURE,
@@ -88,5 +86,22 @@ class RoutingBrain(
             if (needsNet) "I don't have internet, so I can't do that one right now."
             else "I'm offline and I don't know that command yet. Offline I can " + LocalBrain.offlineCapabilities() + "."
         )
+    }
+
+    /** The goal as the cloud should see it (computed once per task). §4.6 — do NOT replace the user's Twi with the
+     *  machine translation: Khaya MT can mangle it (observed: "…tell Prince to come home" → "…asks print to clean
+     *  houses") and the LLM then plans off garbage. Give the model BOTH its own reading of the Twi AND the rough
+     *  translation as a hint. (Translation only fires for Twi, so `translated != null` ⇒ the goal is Twi.) If MT is
+     *  unavailable but the goal is Twi, still send the raw Twi with an interpret hint. null ⇒ use the goal as-is. */
+    private suspend fun cloudGoalFor(goal: String): String? {
+        val translated = goalForCloud?.invoke(goal)?.takeIf { it.isNotBlank() }
+        return when {
+            translated != null ->
+                "The user spoke Asante Twi: \"$goal\"\n" +
+                "A rough machine translation (it can be WRONG — trust the Twi if they disagree): \"$translated\"\n" +
+                "Interpret the Twi yourself and act on it; do NOT type it verbatim."
+            looksTwi(goal) -> "Asante Twi (interpret and act, do not type verbatim): $goal"
+            else -> null
+        }
     }
 }

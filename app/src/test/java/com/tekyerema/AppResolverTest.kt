@@ -68,6 +68,15 @@ class AppResolverTest {
         assertEquals("Maps", (AppResolver.match(noGoogle, "google maps") as? Match.One)?.app?.label)
     }
 
+    @Test fun strict_mode_never_fuzzy_guesses() {
+        // Guessing an app out of free text must not use the ASR-mangling rescue ("yutu" → YouTube is fine
+        // when the user SAID an app name to open; not when we're extracting one from a sentence).
+        assertTrue(AppResolver.match(apps, "yutu", tolerant = false) is Match.None)
+        assertTrue(AppResolver.match(apps, "do not disturb", tolerant = false) is Match.None)
+        assertEquals("Chrome", (AppResolver.match(apps, "chrome", tolerant = false) as? Match.One)?.app?.label)
+        assertEquals("Settings", (AppResolver.match(apps, "settings", tolerant = false) as? Match.One)?.app?.label)
+    }
+
     @Test fun package_name_resolves() {
         assertEquals("Chrome", one("com.android.chrome"))
     }

@@ -19,16 +19,15 @@ import org.json.JSONObject
  */
 
 private val TARGET_PARAMS = listOf(
-    ToolParam("element_id", "integer", "Id of an element from the CURRENT screen listing.", required = false),
-    ToolParam("label", "string", "Visible text/label of the item (used when no element_id; scrolls to reveal it if needed).", required = false),
-    ToolParam("x", "integer", "Only for a listed source=vision element: x inside its bounds.", required = false),
-    ToolParam("y", "integer", "Only for a listed source=vision element: y inside its bounds.", required = false)
+    ToolParam("element_id", "integer", "Element id from the current screen.", required = false),
+    ToolParam("label", "string", "Item text, if no element_id (scrolls to find it).", required = false),
+    ToolParam("x", "integer", "source=vision elements only.", required = false),
+    ToolParam("y", "integer", "source=vision elements only.", required = false)
 )
 
 val EXPECTS_PARAM = ToolParam(
     "expects", "string",
-    "What you expect to observe if this works, e.g. 'element_present: Wi-Fi', 'new_element: I will call you', " +
-        "'field_empty: 3', 'foreground_is: settings', 'range_value: 50'. Not 'screen changes'.",
+    "The observable result if this works (grammar in VERIFY).",
     required = false
 )
 
@@ -65,7 +64,8 @@ private fun weakVerify(before: UiSnapshot?, after: UiSnapshot?, result: ToolResu
 
 object TapTool : Tool {
     override val name = "tap"
-    override val description = "Touch an item, by element_id (preferred), label, or x,y of a vision element."
+    override val description = "Touch an item, by element_id (preferred), label, or x,y of a vision element. A label that " +
+        "isn't listed yet is found by scrolling down automatically — no need to scroll first."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val params = TARGET_PARAMS + EXPECTS_PARAM
@@ -316,8 +316,21 @@ object TypeTool : Tool {
         val text = args.str("text").orEmpty()
         val submit = args.boolOrDefault("submit", false)
         val present = Verify.textPresent(after, text)
-        return if (!submit) VerificationResult(present, "field contains text=$present")
-        else VerificationResult(false, "submitted; text visible afterwards=$present — whether the submit had its effect is not independently confirmable from this alone")
+        if (!submit) return VerificationResult(present, "field contains text=$present")
+        // A submit that TOOK EFFECT moves the text out of the input box into page content — a results heading, a
+        // sent-message bubble, the results URL (…?q=cape+coast+castle). A no-op submit leaves it only in the field.
+        // So: the screen changed AND the text is now in a NON-editable element. (Seen on-device: a successful
+        // Chrome search was reported "…but I could not confirm it" because only the field was checked.)
+        val t = text.trim().lowercase()
+        val forms = listOf(t, t.replace(Regex("\\s+"), "+"), t.replace(Regex("\\s+"), "%20")).filter { it.length >= 2 }
+        val inContent = after?.elements?.any { e ->
+            !e.editable && e.label?.lowercase()?.let { l -> forms.any { l.contains(it) } } == true
+        } == true || forms.any { f -> after?.screenTitle?.lowercase()?.contains(f) == true }
+        val changed = Verify.screenChanged(before, after)
+        // Still sitting focused in the box with its text (e.g. a suggestion dropdown echoing it) = not submitted.
+        val stillEditing = after?.elements?.any { e -> e.editable && e.focused && e.label?.lowercase()?.contains(t) == true } == true
+        return if (changed && inContent && !stillEditing) VerificationResult(true, "submitted — the text now appears in the page content")
+        else VerificationResult(false, "submitted; screen changed=$changed, text in page content=$inContent — the submit's effect isn't confirmed")
     }
 
     override fun confirmationPrompt(args: JSONObject) =
@@ -354,18 +367,19 @@ object SetRangeTool : Tool {
 
 object KeyEventTool : Tool {
     override val name = "key_event"
-    override val description = "Press a system key: back/home/recents/volume_up/volume_down/volume_mute."
+    override val description = "Press a system key: back/home/recents/volume keys, or pull down quick_settings (the " +
+        "toggle tiles: Wi-Fi, Bluetooth, Do Not Disturb, Auto-rotate, Flashlight, Battery Saver…) or notifications."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val params = listOf(
-        ToolParam("key", "string", "The key.", enumValues = listOf("back", "home", "recents", "volume_up", "volume_down", "volume_mute"))
+        ToolParam("key", "string", "The key.", enumValues = listOf("back", "home", "recents", "quick_settings", "notifications", "volume_up", "volume_down", "volume_mute"))
     ) + EXPECTS_PARAM
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
         val key = args.str("key")?.lowercase() ?: return ToolResult(false, "No key.")
         val ok = when (key) {
-            "back", "home", "recents" -> ctrl.globalAction(key)
+            "back", "home", "recents", "quick_settings", "notifications" -> ctrl.globalAction(key)
             "volume_up", "volume_down", "volume_mute" -> ctrl.adjustVolume(key)
             else -> return ToolResult(false, "Unknown key '$key'.")
         }

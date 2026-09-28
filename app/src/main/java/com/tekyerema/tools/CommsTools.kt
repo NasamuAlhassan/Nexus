@@ -27,6 +27,19 @@ object MakeCallTool : Tool {
         ToolParam("number", "string", "Phone number to call (digits).", required = false)
     )
 
+    override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        val number = args.str("number")?.filter { it.isDigit() || it == '+' }
+        val contact = args.str("contact")?.trim()
+        if (!number.isNullOrBlank() || contact.isNullOrBlank()) return null
+        val matches = ContactResolver.resolve(ctx.appContext, contact)
+        return when {
+            matches.isEmpty() -> ToolResult(false, "I couldn't find $contact in your contacts.")
+            matches.size > 1 -> ToolResult(false, "More than one contact matches $contact: " +
+                matches.joinToString(", ") { it.name } + ". Which one?", needsDisambiguation = true)
+            else -> null
+        }
+    }
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         var number = args.str("number")?.filter { it.isDigit() || it == '+' }
         val contact = args.str("contact")

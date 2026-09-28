@@ -172,6 +172,43 @@ class OperatorLogicTest {
         assertEquals(RiskTier.TIER2, TargetSemantics.classify("tap", iconSend, null, false, snap(compose, iconSend)).tier)
         // ...but the same unlabelled icon tapped with no compose field present does NOT force a yes.
         assertNull(TargetSemantics.classify("tap", el(2, null), null, false, snap(el(9, "Home"), el(2, null))).tier)
+        // ...nor in a focused SEARCH box whose label is now just the typed query (on-device: Settings search).
+        val search = el(1, "Zorblax mode", editable = true, focused = true)
+            .copy(viewId = "com.google.android.settings.intelligence:id/search_src_text")
+        assertNull(TargetSemantics.classify("tap", iconSend, null, false, snap(search, iconSend)).tier)
+        // type+submit into a browser's address bar whose label is the PREVIOUS query is still a search, not a send…
+        val omnibox = el(4, "kakum national park", editable = true).copy(viewId = "com.android.chrome:id/url_bar")
+        assertNull(TargetSemantics.classify("type", omnibox, null, true).tier)
+        // …while a chat box with no search-ish id still confirms on submit.
+        val chat = el(4, "see you soon", editable = true).copy(viewId = "com.whatsapp:id/entry")
+        assertEquals(RiskTier.TIER2, TargetSemantics.classify("type", chat, null, true).tier)
+        // The spoken confirmation never says "element N": it describes the unlabelled control.
+        val c = com.tekyerema.policy.ActionSemantics.confirmation("tap", iconSend, null,
+            snap(el(1, "See you at the stadium tonight", editable = true, focused = true), iconSend))
+        assertEquals("Tap the unlabelled button next to “See you at the stadium tonight”? It may send it.", c)
+    }
+
+    @Test fun send_confirmation_names_the_real_recipient_and_message() {
+        val list = UiSnapshot("com.google.android.apps.messaging", "Messages", listOf(el(11, "Send to 5554")), 0L,
+            PerceptionRoute("tree", "t"), appName = "Messages")
+        // The conversation LIST: nothing composed, and "Messages" is the app, not a recipient.
+        assertEquals("Send to 5554?", com.tekyerema.policy.ActionSemantics.confirmation("tap", el(11, "Send to 5554"), null, list))
+        // A real chat: the recipient is the conversation title, the message is the composer's text.
+        val chat = UiSnapshot("com.google.android.apps.messaging", "Kofi", listOf(
+            el(1, "See you at six today", editable = true, focused = true), el(2, "Send SMS")), 0L,
+            PerceptionRoute("tree", "t"), appName = "Messages")
+        assertEquals("Send this message to Kofi?\n“See you at six today”",
+            com.tekyerema.policy.ActionSemantics.confirmation("tap", el(2, "Send SMS"), null, chat))
+        // The real Google Messages chat (on-device dump): window title = the app; the recipient is the app-bar heading.
+        val send = el(13, "Send SMS", bounds = Box(904, 2038, 1058, 2192))
+        val real = UiSnapshot("com.google.android.apps.messaging", "Messages", listOf(
+            el(18, "Back", bounds = Box(0, 66, 154, 220)), el(24, "5554", bounds = Box(190, 100, 420, 186)),
+            el(26, "Call", bounds = Box(800, 66, 940, 220)), el(29, "More", bounds = Box(940, 66, 1080, 220)),
+            el(1, "Texting with 5554 (SMS/MMS)", clickable = false, bounds = Box(312, 1939, 768, 1983)),
+            el(7, "see you at six today", editable = true, bounds = Box(154, 2038, 750, 2192)), send), 0L,
+            PerceptionRoute("tree", "t"), appName = "Messages")
+        assertEquals("Send this message to 5554?\n“see you at six today”",
+            com.tekyerema.policy.ActionSemantics.confirmation("tap", send, null, real))
     }
 
     @Test fun semantics_phone_number_row_and_dialer_keypad_confirm() {
@@ -244,6 +281,44 @@ class OperatorLogicTest {
         assertTrue(Expects.isVacuous(Expects.parse(null)))
         assertTrue(Expects.isVacuous(Expects.parse("something happens")))
         assertFalse(Expects.isVacuous(Expects.parse("Element Present: Send")))
+    }
+
+    @Test fun toggle_expectation_checks_the_switch_state_not_just_the_label() {
+        assertEquals(Expectation.Toggled("Do Not Disturb", true), Expects.parse("checked: Do Not Disturb"))
+        assertEquals(Expectation.Toggled("Wi-Fi", false), Expects.parse("unchecked: Wi-Fi"))
+        assertEquals(Expectation.Toggled("Auto-rotate", true), Expects.parse("is_on: Auto-rotate"))
+        assertTrue(Expects.isVacuous(Expects.parse("checked:")))
+        val weak = VerificationResult(false, "weak")
+        val on = UiElement(0, "Switch", "Do Not Disturb", Box(0, 0, 500, 80), ElementSource.TREE, clickable = true,
+            checkable = true, checked = true)
+        val off = on.copy(checked = false)
+        val textOnly = UiElement(1, "TextView", "Do Not Disturb", Box(0, 100, 500, 180), ElementSource.TREE)
+        val before = snap(off)
+        assertTrue(OutcomeVerifier.verify(Expects.parse("checked: do not disturb"), before, snap(on), true, weak, false).verified)
+        val still = OutcomeVerifier.verify(Expects.parse("checked: Do Not Disturb"), before, snap(off), true, weak, false)
+        assertFalse(still.verified); assertTrue(still.detail.contains("still off"))
+        assertTrue(OutcomeVerifier.verify(Expects.parse("unchecked: Do Not Disturb"), before, snap(off), true, weak, false).verified)
+        // A quick-settings tile carries its state in the label; a claim that copies the OLD state still checks the name.
+        val tileOn = on.copy(label = "Do Not Disturb, On")
+        assertTrue(OutcomeVerifier.verify(Expects.parse("checked: Do Not Disturb, Off"), before, snap(tileOn), true, weak, false).verified)
+        // A text row that merely MENTIONS the label proves nothing about the switch's state.
+        assertFalse(OutcomeVerifier.verify(Expects.parse("checked: Do Not Disturb"), before, snap(textOnly), true, weak, false).verified)
+    }
+
+    @Test fun type_submit_verifies_only_when_the_text_left_the_input() = kotlinx.coroutines.runBlocking {
+        val ctx = ToolContext(android.content.ContextWrapper(null), null, com.tekyerema.notifications.NotificationStore)
+        val args = JSONObject().put("text", "cape coast castle").put("submit", true).put("element_id", 1)
+        val ok = ToolResult(true, "typed")
+        val before = snap(el(1, "Search or type web address", editable = true, focused = true))
+        // Results page: the query is in page content (a heading) and the URL bar holds the encoded query.
+        val results = snap(el(1, "google.com/search?q=cape+coast+castle", editable = true),
+            el(2, "Cape Coast Castle - Wikipedia", clickable = true))
+        assertTrue(com.tekyerema.tools.TypeTool.verify(args, ctx, before, results, ok).verified)
+        // Still in the focused box with a suggestion echoing the text → NOT submitted.
+        val stuck = snap(el(1, "cape coast castle", editable = true, focused = true), el(2, "cape coast castle", clickable = true))
+        assertFalse(com.tekyerema.tools.TypeTool.verify(args, ctx, before, stuck, ok).verified)
+        // Nothing changed at all → NOT verified.
+        assertFalse(com.tekyerema.tools.TypeTool.verify(args, ctx, before, before, ok).verified)
     }
 
     // ---------------------------------------------------------------- OutcomeVerifier

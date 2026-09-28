@@ -230,6 +230,62 @@ class BrainLogicTest {
         override suspend fun decide(ctx: BrainContext): AgentDecision { calls++; return d }
     }
 
+    /** Returns each scripted decision in turn (last one repeats). */
+    private class ScriptBrain(vararg ds: AgentDecision) : AgentBrain {
+        private val q = ds.toList(); var calls = 0
+        override suspend fun decide(ctx: BrainContext): AgentDecision = q[minOf(calls++, q.size - 1)]
+    }
+
+    @Test fun fallback_retries_once_on_a_network_blip_then_succeeds() = runBlocking {
+        val dns = AgentDecision.Fail("LLM request failed: Unable to resolve host \"api.groq.com\": No address associated with hostname")
+        val groq = ScriptBrain(dns, AgentDecision.Done("done"))
+        val gemini = ScriptBrain(AgentDecision.Fail("Gemini request failed: Unable to resolve host"))
+        val d = com.tekyerema.agent.FallbackBrain(listOf(groq, gemini), networkRetryDelayMs = 1).decide(ctx("search chrome for waakye"))
+        assertEquals(AgentDecision.Done("done"), d)
+        assertEquals(2, groq.calls)
+    }
+
+    @Test fun fallback_network_down_is_an_honest_cannot_do_and_quota_is_not_retried() = runBlocking {
+        val dns = AgentDecision.Fail("LLM request failed: Unable to resolve host \"api.groq.com\"")
+        val down = com.tekyerema.agent.FallbackBrain(listOf(ScriptBrain(dns)), networkRetryDelayMs = 1).decide(ctx("x"))
+        assertTrue(down is AgentDecision.CannotDo)
+        assertEquals(com.tekyerema.agent.FallbackBrain.NETWORK_LOST, (down as AgentDecision.CannotDo).reasonClass)
+        assertTrue(down.detail.contains("internet"))
+        val quota = ScriptBrain(AgentDecision.Fail("HTTP 429 rate limit on all keys"))
+        val d = com.tekyerema.agent.FallbackBrain(listOf(quota), networkRetryDelayMs = 1).decide(ctx("x"))
+        assertTrue(d is AgentDecision.Fail)
+        assertEquals(1, quota.calls)   // not a network error → no retry
+    }
+
+    @Test fun app_mention_finds_the_app_a_compound_goal_is_about() {
+        fun c(g: String) = com.tekyerema.agent.AppMention.candidates(g)
+        assertEquals("chrome", c("search chrome for jollof rice").first())
+        assertEquals("whatsapp", c("open WhatsApp and send Kofi a message").first())
+        assertEquals("settings", c("turn on zorblax mode in settings").first())
+        assertEquals("youtube", c("play highlife music on YouTube").first())
+        assertTrue(c("make the text on my phone bigger").none { it == "my phone" })
+        assertTrue(c("set an alarm for 6 in the morning").isEmpty())
+    }
+
+    @Test fun router_opens_the_named_app_locally_then_hands_to_cloud() = runBlocking {
+        val cloud = FakeBrain(AgentDecision.Done("cloud handled"))
+        val apps = mapOf("chrome" to ("Chrome" to "com.android.chrome"))
+        val appFor: (String) -> Pair<String, String>? = { g -> com.tekyerema.agent.AppMention.candidates(g).firstNotNullOfOrNull { apps[it] } }
+        val r = RoutingBrain(LocalBrain(), cloud, appForGoal = appFor) { true }
+        val home = JSONObject().put("app", "com.google.android.apps.nexuslauncher").put("elements", JSONArray())
+        val d1 = r.decide(ctx("search chrome for waakye", home))
+        assertEquals("open_app", tool(d1).name)
+        assertEquals("Chrome", tool(d1).args.getString("app"))
+        assertEquals(0, cloud.calls)
+        // step 2 (history now has the open_app) → the cloud operator takes over, sticky
+        val d2 = r.decide(ctx("search chrome for waakye", JSONObject().put("app", "com.android.chrome"),
+            history = listOf("open_app({\"app\":\"Chrome\"}) → success [intent]; verified=true (foreground is com.android.chrome); Opened Chrome")))
+        assertTrue(d2 is AgentDecision.Done); assertEquals(1, cloud.calls)
+        // already in the app → no redundant local launch
+        val r2 = RoutingBrain(LocalBrain(), FakeBrain(AgentDecision.Done("x")), appForGoal = appFor) { true }
+        assertTrue(r2.decide(ctx("search chrome for waakye", JSONObject().put("app", "com.android.chrome"))) is AgentDecision.Done)
+    }
+
     @Test fun router_uses_local_fast_path_without_cloud() {
         val cloud = FakeBrain(AgentDecision.Fail("should not be called"))
         val r = RoutingBrain(LocalBrain(), cloud) { true }

@@ -72,6 +72,12 @@ interface Tool {
      *  when the model supplied no concrete expectation. */
     val verifiesOutcome: Boolean get() = false
 
+    /** Side-effect-free check that the action CAN proceed, run BEFORE the policy confirmation. Non-null = it can't
+     *  (e.g. make_call to a name that isn't in the contacts, or matches several people): the engine then skips the
+     *  confirmation and hands this failure to the brain, so a blind user is never asked to approve an action that
+     *  would only fail — or that would go to someone they didn't mean. Default: no preflight. */
+    suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? = null
+
     suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult
 
     suspend fun verify(

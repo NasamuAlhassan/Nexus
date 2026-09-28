@@ -45,8 +45,10 @@ object AppResolver {
 
     private fun compact(s: String) = s.lowercase().replace(Regex("[^a-z0-9]"), "")
 
-    /** Pure resolution core (unit-tested): [apps] = the launchable apps, [query] = the spoken name. */
-    internal fun match(apps: List<AppInfo>, query: String): Match {
+    /** Pure resolution core (unit-tested): [apps] = the launchable apps, [query] = the spoken name.
+     *  [tolerant]=false skips the fuzzy subsequence/edit-distance rescue — for GUESSING an app out of free text,
+     *  where only a confident name match may launch anything. */
+    internal fun match(apps: List<AppInfo>, query: String, tolerant: Boolean = true): Match {
         val raw = query.trim().lowercase()
         if (raw.isEmpty()) return Match.None
         apps.firstOrNull { it.packageName.equals(raw, true) }?.let { return Match.One(it) }
@@ -83,7 +85,7 @@ object AppResolver {
         // (2) else the closest label(s) by normalized edit distance. If the top two are within 0.1 of each
         //     other they are a real tie → report Ambiguous so the agent asks instead of guessing (§1.10).
         val qc = compact(q)
-        if (qc.length >= 3) {
+        if (tolerant && qc.length >= 3) {
             apps.filter { isSubsequence(qc, compact(it.label)) }
                 .minByOrNull { it.label.length }?.let { return Match.One(it) }
             val ranked = apps.map { it to similarity(qc, compact(it.label)) }

@@ -67,6 +67,18 @@ object TargetSemantics {
         return texts.any { credentialField.containsMatchIn(it) }   // e.g. "Enter MoMo PIN", "OTP", "password"
     }
 
+    /** A search / address box, recognised by its resource id or widget class — NOT its label: once text is in it,
+     *  the label IS that text (Chrome's omnibox showed "kakum national park" and a new search was gated as a
+     *  possible SEND). A box that ever receives a message has a comms id (compose, message, reply…), not these. */
+    fun isQueryBox(e: UiElement?): Boolean {
+        if (e == null || !e.editable) return false
+        val id = (e.viewId ?: "").substringAfter(":id/").lowercase()
+        return Regex("search|url|omnibox|query|location_bar").containsMatchIn(id) ||
+            Regex("(?i)SearchView|SearchAutoComplete").containsMatchIn(e.role) ||
+            // a web page's search input has no resource id; its placeholder says what it is ("Search", "Search Google…")
+            (e.hint != null && queryField.containsMatchIn(e.hint) && !communicationField.containsMatchIn(e.hint))
+    }
+
     fun classify(
         primitive: String,
         target: UiElement?,
@@ -85,7 +97,7 @@ object TargetSemantics {
             // label is often blank or an icon, so we can't rely on it saying "message". Default: any submit
             // needs confirmation; only wave it through when the field is CLEARLY a query/search box.
             if (submit) {
-                val benign = lower != null && queryField.containsMatchIn(lower)
+                val benign = (lower != null && queryField.containsMatchIn(lower)) || isQueryBox(target)
                 if (!benign) return Classification(
                     RiskTier.TIER2, null,
                     "type+submit fires the field's action (can send) on '${label ?: "an unlabelled field"}'"
@@ -113,7 +125,11 @@ object TargetSemantics {
 
         // §1.15 — an unlabelled icon tapped WHILE a message is being composed is very likely the Send
         // button. Scope it to a compose context so ordinary icon taps elsewhere don't all demand a yes.
-        val composing = screen?.elements?.any { it.editable && (it.focused || communicationField.containsMatchIn(it.label ?: "")) } == true
+        // A focused SEARCH/URL box is not a message composer (see [isQueryBox]). Seen on-device: tapping a
+        // Settings-search result asked "Tap element 5?".
+        val composing = screen?.elements?.any { f ->
+            f.editable && (f.focused || communicationField.containsMatchIn(f.label ?: "")) && !isQueryBox(f)
+        } == true
         if (primitive == "tap" && label.isNullOrBlank() && target?.clickable == true && composing)
             return Classification(RiskTier.TIER2, null, "an unlabelled control tapped while composing a message may send it")
 

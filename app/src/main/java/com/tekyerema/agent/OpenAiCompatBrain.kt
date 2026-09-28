@@ -30,7 +30,23 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         .readTimeout(35, TimeUnit.SECONDS)
         .build()
 
-    override suspend fun decide(ctx: BrainContext): AgentDecision = withContext(Dispatchers.IO) {
+    /** Groq limits are per MODEL per organization: when the primary model's DAILY quota is gone on every key, the
+     *  same keys still have a full, separate budget on the fallback model (seen: gpt-oss-120b 429 "tokens per day"
+     *  on every key while gpt-oss-20b answered fresh). The free Gemini tier is only 20 requests/day, so this is the
+     *  fallback that actually carries a multi-step task. */
+    override suspend fun decide(ctx: BrainContext): AgentDecision {
+        val models = (listOf(settings.groqModel) + FALLBACK_MODELS).distinct()
+        var last: AgentDecision = AgentDecision.Fail("no model configured")
+        for ((i, model) in models.withIndex()) {
+            last = decideWith(model, ctx)
+            if (!(last is AgentDecision.Fail && last.reason.contains(DAILY_MARKER))) return last
+            if (i < models.lastIndex)
+                android.util.Log.w("Tekyerema", "[LLM] $model: daily quota used up on every key → falling back to ${models[i + 1]}")
+        }
+        return last
+    }
+
+    private suspend fun decideWith(model: String, ctx: BrainContext): AgentDecision = withContext(Dispatchers.IO) {
         val keys = settings.groqApiKeys
         if (keys.isEmpty()) return@withContext AgentDecision.Fail("No Groq/OpenAI API key configured.")
         val url = settings.groqBaseUrl.trimEnd('/') + "/chat/completions"
@@ -47,6 +63,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         // when EVERY key is cooling we wait precisely until the soonest refills — so a long task glides under
         // the cap instead of erroring. Token refill is continuous (limit/60s), so a cool is the deficit only.
         var corrected = false
+        var emptyRetried = false
         var pacedWaits = 0
         while (true) {
             val now = System.currentTimeMillis()
@@ -54,10 +71,15 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             var chosen = -1
             for (n in keys.indices) {
                 val i = (lastGoodKey + n) % keys.size
-                if ((coolUntil[keys[i]] ?: 0L) <= now) { chosen = i; break }
+                if ((coolUntil["$model|${keys[i]}"] ?: 0L) <= now) { chosen = i; break }
             }
             if (chosen < 0) {
-                val soonest = keys.minOf { coolUntil[it] ?: 0L }
+                val soonest = keys.minOf { coolUntil["$model|$it"] ?: 0L }
+                // Every key is parked on a DAILY cap (minutes-to-hours away): pacing can't help — fail now so the
+                // fallback chain moves straight to the next provider instead of spinning 8 s waits.
+                if (soonest - now > 90_000L) return@withContext AgentDecision.Fail(
+                    "The AI service is rate-limited right now ($DAILY_MARKER). Please try again later."
+                )
                 val waitMs = (soonest - now).coerceIn(250L, 8000L)
                 if (++pacedWaits > 8) return@withContext AgentDecision.Fail(
                     "The AI service is rate-limited right now. Please try again in a moment."
@@ -68,8 +90,9 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             }
 
             val apiKey = keys[chosen]
+            val coolKey = "$model|$apiKey"   // limits are per model per org
             val body = JSONObject()
-                .put("model", settings.groqModel)
+                .put("model", model)
                 .put("messages", messages)
                 .put("tools", ctx.openAiTools)
                 .put("tool_choice", "auto")
@@ -101,9 +124,13 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             when {
                 // Rate-limited: cool THIS key until its own reset (precise), then the loop picks another or waits.
                 code == 429 -> {
-                    val cool = (retryMs ?: resetMs ?: parseRetrySeconds(text)?.times(1000L) ?: 4000L).coerceIn(500L, 60_000L)
-                    coolUntil[apiKey] = System.currentTimeMillis() + cool
-                    android.util.Log.w("Tekyerema", "[LLM] 429 on key #${chosen + 1}/${keys.size} → cooling ${cool}ms")
+                    // A tokens/requests-PER-DAY cap (Groq free tier: 200k tokens/day per organization) returns a
+                    // retry-after of minutes to hours; honour it in full, or the key is retried every minute for nothing.
+                    val daily = Regex("(?i)per day|\\(TPD\\)|\\(RPD\\)").containsMatchIn(text)
+                    val cool = (retryMs ?: resetMs ?: parseRetrySeconds(text)?.times(1000L) ?: 4000L)
+                        .coerceIn(500L, if (daily) 24 * 3_600_000L else 60_000L)
+                    coolUntil[coolKey] = System.currentTimeMillis() + cool
+                    android.util.Log.w("Tekyerema", "[LLM] 429 on key #${chosen + 1}/${keys.size} → cooling ${cool}ms${if (daily) " (daily quota)" else ""}")
                 }
                 code == 400 && text.contains("tool_use_failed") && !corrected -> {
                     // The model invented an invalid tool. Nudge it and retry once.
@@ -127,10 +154,20 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                         val refillPerMs = (limitTok ?: 8000) / 60_000.0
                         val deficitMs = if (refillPerMs > 0) ((ONE_REQUEST_TOKENS - rem) / refillPerMs).toLong() else (resetMs ?: 3000L)
                         val cool = minOf(deficitMs, resetMs ?: deficitMs).coerceIn(0L, 60_000L)
-                        if (cool > 0) coolUntil[apiKey] = System.currentTimeMillis() + cool else coolUntil.remove(apiKey)
-                    } else coolUntil.remove(apiKey)
+                        if (cool > 0) coolUntil[coolKey] = System.currentTimeMillis() + cool else coolUntil.remove(coolKey)
+                    } else coolUntil.remove(coolKey)
                     if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-RESP] ${text.take(4000)}")   // SEC-P1-4: debug-only
-                    return@withContext parseResponse(text)
+                    val d = parseResponse(text)
+                    // gpt-oss (seen with the 20b) sometimes ends a turn with reasoning only — no tool call, no text.
+                    // One nudged retry; otherwise the chain fell through to Gemini's 429 and the user heard
+                    // "too many requests" for what was really an empty reply.
+                    if (d is AgentDecision.Fail && d.reason.contains("neither a tool call nor text") && !emptyRetried) {
+                        emptyRetried = true
+                        messages.put(JSONObject().put("role", "user").put("content",
+                            "Your last reply was empty. Call exactly one tool now, or reply with one short sentence."))
+                        continue
+                    }
+                    return@withContext d
                 }
             }
         }
@@ -175,6 +212,10 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
          *  trim (~4.4k typical); the old 6000 padded ~1.5k over reality and cooled each key ~18s instead of
          *  ~7s between steps. A too-low value only risks an occasional 429, which the 4-key rotation absorbs. */
         private const val ONE_REQUEST_TOKENS = 4800
+
+        /** Tried in order after the configured model when its daily quota is exhausted on every key. */
+        private val FALLBACK_MODELS = listOf("openai/gpt-oss-20b")
+        private const val DAILY_MARKER = "daily quota on every key"
 
         /** Parse a Groq rate-limit reset duration ("547ms", "24.652s", "4m19.2s", "1m0s") to milliseconds. */
         fun parseDurationMs(s: String?): Long? {

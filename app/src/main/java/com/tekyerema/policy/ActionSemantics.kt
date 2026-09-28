@@ -36,6 +36,21 @@ object ActionSemantics {
         return null
     }
 
+    private val NAV_WORDS = Regex("^(back|navigate up|up|call|video call|voice call|more|more options|search|menu|options|" +
+        "info|close|cancel|done|settings|share|delete|archive|mute|add|new|edit)$")
+
+    /** The screen's heading — the top-left label of the top app bar, e.g. a chat's contact name — for when the window
+     *  title is only the app's name. Seen on-device: Google Messages' chat window title is "Messages" while the
+     *  recipient "5554" is the app-bar heading. Generic: position-based, navigation words skipped. */
+    fun screenHeading(s: UiSnapshot?): String? {
+        val els = s?.elements.orEmpty().filter { it.source == com.tekyerema.accessibility.ElementSource.TREE }
+        val bottom = els.maxOfOrNull { it.bounds.bottom }?.takeIf { it > 0 } ?: return null
+        return els.filter { !it.editable && it.bounds.top < bottom * 0.15 }
+            .sortedWith(compareBy({ it.bounds.top / 40 }, { it.bounds.left }))   // same row (±40 px) → left to right
+            .mapNotNull { it.label?.trim() }
+            .firstOrNull { l -> l.length in 2..40 && !NAV_WORDS.matches(l.lowercase()) && !l.equals(s?.appName, true) }
+    }
+
     /** A confirmation sentence, or null to fall back to the tool's own prompt. */
     fun confirmation(
         primitive: String, target: UiElement?, requestedLabel: String?, before: UiSnapshot?,
@@ -43,7 +58,14 @@ object ActionSemantics {
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
-        val recipient = before?.screenTitle?.trim()?.takeIf { it.isNotBlank() }
+        // WHO: the control's own "…to X" ("Send to 5554") beats the screen title, and a title that is just the APP's
+        // name ("Messages" on the conversation list) is not a recipient (seen on-device: "Send this message to Messages?").
+        val appName = before?.appName?.trim().orEmpty()
+        val labelRecipient = Regex("(?i)\\bto\\s+(.{1,40})$").find(text)?.groupValues?.get(1)?.trim()
+        fun notApp(t: String) = t.isNotBlank() && !(appName.isNotEmpty() && (t.equals(appName, true) || appName.contains(t, true)))
+        val recipient = labelRecipient
+            ?: before?.screenTitle?.trim()?.takeIf { notApp(it) }
+            ?: screenHeading(before)?.takeIf { notApp(it) }
 
         // Sending a message: tapping a Send control (message = composer's current text) OR
         // submitting into a communication field (message = the text being typed).
@@ -52,8 +74,12 @@ object ActionSemantics {
         if (isTapSend || isCommsType) {
             val msg = if (isCommsType) typedText?.trim()?.ifBlank { null } else composerText(before)
             val who = recipient?.let { " to $it" } ?: ""
-            return if (!msg.isNullOrBlank()) "Send this message$who?\n“$msg”"
-            else "Send this message$who?"
+            return when {
+                !msg.isNullOrBlank() -> "Send this message$who?\n“$msg”"
+                // nothing composed — don't claim "this message": name the control as it reads ("Send to 5554?")
+                isTapSend && labelRecipient != null -> "${text.trim().take(60).trimEnd('?', '.')}?"
+                else -> "Send this message$who?"
+            }
         }
         if (verb == "call") {
             val stripped = text.replaceFirst(Regex("(?i)^call\\s+"), "").trim()
@@ -62,6 +88,13 @@ object ActionSemantics {
         }
         if (verb != null && text.isNotBlank()) {
             return "${verb.replaceFirstChar { it.uppercaseChar() }} “${text.take(60)}”?"
+        }
+        // An UNLABELLED control can't be named, and "Tap element 5?" means nothing to someone who can't see the
+        // screen — say what it may do instead (the gate only fires for one in a compose context).
+        if (primitive == "tap" && text.isBlank()) {
+            val msg = composerText(before)
+            return if (msg != null) "Tap the unlabelled button next to “${msg.take(60)}”? It may send it."
+            else "Tap an unlabelled button? It may send or submit something."
         }
         return null
     }

@@ -9,6 +9,7 @@ sealed class FastIntent(val name: String) {
     object Date : FastIntent("DATE")
     object Day : FastIntent("DAY")
     object Battery : FastIntent("BATTERY")
+    object Storage : FastIntent("STORAGE")
     object VolumeUp : FastIntent("VOLUME_UP")
     object VolumeDown : FastIntent("VOLUME_DOWN")
     object VolumeMute : FastIntent("VOLUME_MUTE")
@@ -62,6 +63,7 @@ object FastIntentClassifier {
             RE_DAY.containsMatchIn(g) -> FastIntent.Day
             RE_DATE.containsMatchIn(g) -> FastIntent.Date
             RE_BATTERY.containsMatchIn(g) -> FastIntent.Battery
+            RE_STORAGE.containsMatchIn(g) && !RE_STORAGE_ACTION.containsMatchIn(g) -> FastIntent.Storage
 
             RE_VOL_QUERY.containsMatchIn(g) -> FastIntent.VolumeQuery
             RE_UNMUTE.containsMatchIn(g) -> FastIntent.VolumeUnmute
@@ -115,6 +117,11 @@ object FastIntentClassifier {
     private val RE_TIME = Regex("\\b(what(?:'?s| is)?\\s+(?:the\\s+)?time|what\\s+time\\s+is\\s+it|tell\\s+me\\s+(?:the\\s+)?time|current\\s+time|check\\s+the\\s+time|bere\\s+bɛn|bɛre\\s+bɛn)\\b")
     private val RE_DAY = Regex("\\bwhat\\s+day\\b|\\bwhich\\s+day\\b|\\bis\\s+today\\s+\\w+day\\b|\\btell\\s+me\\s+the\\s+day\\b|\\bday\\s+(?:of\\s+the\\s+week|is\\s+it|is\\s+today)\\b")
     private val RE_DATE = Regex("\\bdate\\b")
+    // A storage QUESTION ("how much storage is left", "do I have enough space") — not an action on storage
+    // ("free up space", "clear storage", "open storage settings"), which goes to the agent.
+    private val RE_STORAGE = Regex("\\b(how\\s+much|what'?s|what\\s+is|check|remaining|left|enough|available)\\b.*\\b(storage|space)\\b|" +
+        "\\b(storage|space)\\b.*\\b(left|remaining|available|do\\s+i\\s+have|is\\s+free)\\b")
+    private val RE_STORAGE_ACTION = Regex("\\b(free\\s+up|clear|clean|delete|remove|open|settings|manage|make)\\b")
     private val RE_BATTERY = Regex("\\bbattery\\b|\\bhow\\s+much\\s+(?:charge|power)\\b")
 
     private val RE_VOL_QUERY = Regex("\\bwhat(?:'?s| is)?\\s+(?:my\\s+|the\\s+)?volume(?:\\s+level)?\\b|\\bcheck\\s+(?:the\\s+|my\\s+)?volume\\b|\\bvolume\\s+level\\b|\\bhow\\s+loud\\b")

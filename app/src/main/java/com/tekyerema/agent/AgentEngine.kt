@@ -213,13 +213,24 @@ object AgentEngine {
                 if (set.geminiApiKey.isNotBlank()) add(GeminiBrain(set))
             }
             val cloud: AgentBrain? = when (cloudChain.size) {
-                0 -> null; 1 -> cloudChain[0]; else -> FallbackBrain(cloudChain)
+                0 -> null; else -> FallbackBrain(cloudChain)   // even one brain gets the network-blip retry
             }
             // Twi→English rewrite before the cloud operator was provided by Khaya MT, removed 2026-09-27.
             // Until the HCI Lab MT is wired into this seam there is no cloud Twi→English rewrite (null ⇒ goal
             // unchanged); LocalBrain still answers command-Twi in Twi, and English planning is unaffected.
             val twiToEn: (suspend (String) -> String?)? = null
-            RoutingBrain(LocalBrain(), cloud, twiToEn, cloudFirst = { set.brainCloudFirst }) { com.tekyerema.core.NetworkMonitor.isOnline() }
+            // The app a compound goal names ("search chrome for …") — resolved STRICTLY (no fuzzy guess) so the
+            // router can open it locally as step one.
+            val appForGoal: (String) -> Pair<String, String>? = { goal ->
+                val apps = com.tekyerema.android.AppResolver.launchable(ctxApp)
+                AppMention.candidates(goal).firstNotNullOfOrNull { q ->
+                    (com.tekyerema.android.AppResolver.match(apps, q, tolerant = false) as? com.tekyerema.android.AppResolver.Match.One)
+                        ?.app?.let { it.label to it.packageName }
+                }
+            }
+            RoutingBrain(LocalBrain(), cloud, twiToEn, cloudFirst = { set.brainCloudFirst }, appForGoal = appForGoal) {
+                com.tekyerema.core.NetworkMonitor.isOnline()
+            }
         }
         val cloudName = buildList {
             if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
@@ -252,6 +263,9 @@ object AgentEngine {
         var lastResultKey: String? = null
         var repeatCount = 0                      // REL-P2-1: consecutive identical (call,result) steps → break the no-progress loop
         var noProgressStreak = 0                 // REL-P2 stall: consecutive mutating steps that neither verified nor changed the screen
+        var lastReadSig: String? = null         // screen signature at the last read_state — a re-read of the SAME screen is a stall
+        var lastReadVision = false              // …unless the re-read adds vision the last one didn't have
+        val unmetLooks = HashMap<String, Int>()  // futility: how often each looked-for element FAILED to appear
         val taskMemory = TaskMemory()            // Phase II P0: compact structured progress state injected into the prompt
         var visionNext = false                  // the model asked for vision via read_state; carry it into the next observation
         var usedRead = false                    // §C.3 — did the run read the screen? (grounds a screen-derived answer)
@@ -343,6 +357,10 @@ object AgentEngine {
                     }
                     is AgentDecision.Fail -> {
                         log(LogEntry.Kind.ERROR, decision.reason)
+                        // RESULT is spoken: give the user the real class of problem, never the raw error text.
+                        val busy = Regex("(?i)429|rate.?limit|quota|too many|cooling").containsMatchIn(decision.reason)
+                        log(LogEntry.Kind.RESULT, if (busy) "I'm getting too many requests right now. Please try again in a minute."
+                            else "Something went wrong on my side, so I stopped.")
                         pushConvo("Tɛkyerɛma: I couldn't do that.")
                         finish(AgentStatus.FAILED, stats); return
                     }
@@ -384,6 +402,16 @@ object AgentEngine {
                                 }
                                 is ResolveOutcome.OnlyWeak, is ResolveOutcome.NotFound -> { /* label may be revealed by scrolling at execute time */ }
                             }
+                        }
+
+                        // ---- preflight: can this action proceed at all? (side-effect free, BEFORE any confirmation) ----
+                        val pre = try { tool.preflight(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = before)) }
+                            catch (t: Throwable) { null }
+                        if (pre != null) {
+                            log(LogEntry.Kind.ACTION, "${decision.name} → preflight: ${pre.message}")
+                            taskMemory.noteFailure("${decision.name} can't proceed: ${pre.message.take(70)}")
+                            history.add("${decision.name}(${shortArgs(decision.args)}) → fail [preflight]; verified=false (not attempted); ${pre.message.take(160)}")
+                            continue
                         }
 
                         // ---- policy: target semantics + provenance, keyed on the resolved target, not the tool name ----
@@ -428,7 +456,12 @@ object AgentEngine {
                                 // §1.12 — a blind user must hear WHO and WHICH NUMBER a call will go to
                                 // before it happens; resolve the contact now and name the concrete target +
                                 // number, not just the (possibly mis-heard) requested string.
+                                // Never "element 4" in a sentence a blind user hears: name the item, or describe it.
+                                // (an editable's label is its CONTENT, not its name — so a text field is "the text box")
+                                val itemName = if (resolved?.element?.editable == true) "the text box"
+                                    else resolved?.element?.label?.takeIf { it.isNotBlank() }?.let { "“${it.take(40)}”" } ?: "the selected item"
                                 val prompt = enrichCallConfirmation(decision.name, decision.args, basePrompt, ctxApp)
+                                    .replace(Regex("\\belement \\d+\\b"), itemName)
                                 // §A.1 — a Twi rendering of the SAME action, built from structure (verbatim
                                 // name + digit-by-digit number), for the core confirmable intents. Null for
                                 // anything we can't render structurally → the English line is used.
@@ -516,7 +549,10 @@ object AgentEngine {
                         }
                         // ---- stale-state check for EVERY grounded primitive (plan §10 step 2) ----
                         if (tool.grounded) {
-                            val livePkg = controller?.foregroundPackage()
+                            // The WINDOW the snapshot came from, not the activity under it: inside the Quick
+                            // Settings shade the activity is still the launcher (seen: every tap in the shade was
+                            // refused as "screen changed" when this compared against the activity).
+                            val livePkg = controller?.activeWindowPackage()
                             if (!Verify.screenStillCurrent(before, livePkg)) {
                                 stats = stats.copy(staleRefusals = stats.staleRefusals + 1)
                                 val msg = "Screen changed (was '${before.appPackage}', now '$livePkg') before this action executed — re-observe and retry."
@@ -526,6 +562,30 @@ object AgentEngine {
                                 continue
                             }
                         }
+
+                        // ---- redundant-observation guard: read_state on a screen whose signature is unchanged since the
+                        // last read_state returns nothing new (seen on-device: 4 consecutive vision reads of an empty
+                        // Settings page, ~10 s each, before any other move). The repeat guard misses it because each
+                        // call carries a differently-worded `reason`. Don't execute; tell the model plainly and count it
+                        // toward the same no-progress budget as a stalled action. ----
+                        val wantsVision = decision.args.optBoolean("vision", false)
+                        if (decision.name == "read_state" && lastReadSig != null && before.signature() == lastReadSig &&
+                            (!wantsVision || lastReadVision)) {
+                            noProgressStreak++
+                            stats = stats.copy(unnecessaryActions = stats.unnecessaryActions + 1)
+                            log(LogEntry.Kind.ACTION, "read_state → skipped: screen unchanged since the last read (stall $noProgressStreak)")
+                            history.add("read_state → skipped; the screen is EXACTLY as already described — reading it again shows " +
+                                "nothing new. If what you need isn't on this screen, it isn't here: go Back, take another route (e.g. the " +
+                                "quick-settings panel, the app's own search, a different menu), or call cannot_do.")
+                            if (noProgressStreak >= 5) {
+                                log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled steps) — stopping honestly.")
+                                log(LogEntry.Kind.RESULT, "I kept trying but the screen wasn't changing, so I stopped.")
+                                pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
+                                finish(AgentStatus.CANNOT_DO, stats); return
+                            }
+                            continue
+                        }
+                        if (decision.name == "read_state") { lastReadSig = before.signature(); lastReadVision = wantsVision }
 
                         // ---- execute (serialized) ----
                         setStatus(AgentStatus.ACTING)
@@ -568,7 +628,11 @@ object AgentEngine {
                                 var toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
                                 var v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
                                 var polls = 0
-                                while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < 3) {   // REL-P1-3: 5→3 re-polls
+                                // REL-P1-3: 3 re-polls normally; up to 8 while the screen is MID-TRANSITION (no package / no
+                                // elements — an app cold-starting after its icon was tapped). Seen on-device: "open Chrome"
+                                // by icon read as unverified at ~1.5 s, and the model then launched Chrome a second time.
+                                fun maxPolls(a: UiSnapshot) = if (a.appPackage.isNullOrBlank() || a.elements.isEmpty()) 8 else 3
+                                while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < maxPolls(after)) {
                                     kotlinx.coroutines.delay(500)
                                     after = observeForVerify(controller, before.perception.usedVision)
                                     if (TargetSemantics.isCredentialScreen(after)) break
@@ -599,6 +663,26 @@ object AgentEngine {
                         // is making no progress, even when the model varies its action each step (a dead Compose/WebView
                         // control). Conservative — requires BOTH signals so a state-only change (checkbox) or a verified
                         // step never false-aborts. Nudge at 3; soft-abort (honest CANNOT_DO) at 5, well before MAX_STEPS.
+                        // ---- FUTILITY (goal-level): the model keeps expecting the SAME element to appear and it never does,
+                        // across different actions (scroll, tap, another menu…). Seen on-device: "turn on zorblax mode" looked
+                        // for 'Zorblax mode' 10+ times until the 150 s budget ran out. The screen DOES change, so the stall
+                        // check never fires. After 3 misses tell the model it probably doesn't exist; after 5, stop honestly.
+                        val lookedFor = (expectation as? com.tekyerema.verifier.Expectation.ElementPresent)?.label
+                            ?: (expectation as? com.tekyerema.verifier.Expectation.NewElement)?.label
+                        if (mutating && lookedFor != null && !vr.verified) {
+                            val key = lookedFor.trim().lowercase()
+                            val n = (unmetLooks[key] ?: 0) + 1
+                            unmetLooks[key] = n
+                            if (n == 3) history.add("'$lookedFor' has not appeared after 3 different attempts. If the app's own search " +
+                                "didn't find it either, it most likely doesn't exist on this phone — say so with cannot_do instead of " +
+                                "searching further.")
+                            if (n >= 5) {
+                                log(LogEntry.Kind.INFO, "futility: '$lookedFor' never appeared after $n attempts — stopping honestly.")
+                                log(LogEntry.Kind.RESULT, "I looked, but I couldn't find “${lookedFor.take(50)}” on this phone.")
+                                pushConvo("Tɛkyerɛma: I couldn't find ${lookedFor.take(50)}.")
+                                finish(AgentStatus.CANNOT_DO, stats); return
+                            }
+                        }
                         if (mutating) {
                             val stalled = result.success && !vr.verified && afterSig != null && afterSig == before.signature()
                             if (stalled) noProgressStreak++ else noProgressStreak = 0
@@ -607,6 +691,7 @@ object AgentEngine {
                                 "try a fundamentally different route (scroll, the app's own search, Back, a different control), or call cannot_do.")
                             if (noProgressStreak >= 5) {
                                 log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled mutating steps) — stopping honestly.")
+                                log(LogEntry.Kind.RESULT, "I kept trying but the screen wasn't changing, so I stopped.")
                                 pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
                                 finish(AgentStatus.CANNOT_DO, stats); return
                             }

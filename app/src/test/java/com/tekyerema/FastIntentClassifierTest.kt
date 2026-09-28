@@ -36,6 +36,14 @@ class FastIntentClassifierTest {
             assertEquals(s, FastIntent.Battery, c(s))
     }
 
+    @Test fun storage_question_is_fast_but_storage_actions_are_not() {
+        for (s in listOf("How much storage space is left on my phone?", "How much storage do I have?", "Check my storage.",
+            "Do I have enough space?", "What's my storage?", "How much space is left?"))
+            assertEquals(s, FastIntent.Storage, c(s))
+        for (s in listOf("Free up some space.", "Clear storage for WhatsApp.", "Open storage settings.", "Delete old photos to make space."))
+            assertTrue(s, c(s) !is FastIntent.Storage)
+    }
+
     @Test fun volume_up() {
         for (s in listOf("Increase the volume.", "Turn up the volume.", "Make it louder.",
             "Raise the volume.", "Increase my volume.", "Turn the volume up."))

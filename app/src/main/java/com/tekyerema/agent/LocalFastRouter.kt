@@ -61,6 +61,7 @@ class LocalFastRouter(
         FastIntent.Date -> handled(intent, dateText())
         FastIntent.Day -> handled(intent, dayText())
         FastIntent.Battery -> handled(intent, batteryText())
+        FastIntent.Storage -> handled(intent, storageText())
 
         FastIntent.VolumeUp -> stepVolume(raise = true)
         FastIntent.VolumeDown -> stepVolume(raise = false)
@@ -107,6 +108,22 @@ class LocalFastRouter(
 
     private fun dayText(): String =
         "Today is " + SimpleDateFormat("EEEE", Locale.getDefault()).format(Date()) + "."
+
+    /** Free / total internal storage, straight from the filesystem (what Settings › Storage shows). */
+    private fun storageText(): String {
+        val stat = try { android.os.StatFs(android.os.Environment.getDataDirectory().path) } catch (_: Throwable) { null }
+            ?: return "I couldn't read your storage right now."
+        return "You have ${gb(stat.availableBytes)} free out of ${gb(stat.totalBytes)}."
+    }
+
+    private fun gb(bytes: Long): String {
+        val g = bytes / 1_000_000_000.0
+        return when {
+            g >= 10 -> "${Math.round(g)} gigabytes"
+            g >= 1 -> "${"%.1f".format(Locale.US, g)} gigabytes"
+            else -> "${Math.round(bytes / 1_000_000.0)} megabytes"
+        }
+    }
 
     private fun batteryText(): String {
         val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
@@ -238,6 +255,7 @@ class LocalFastRouter(
         val app = (match as? AppResolver.Match.One)?.app ?: return null   // ambiguous/none → let the agent ask
         val launch = AppResolver.launchIntent(appContext, app.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?: return null
+        val prevFg = controller()?.foregroundPackage()
         try { appContext.startActivity(launch) } catch (t: Throwable) { return null }
         // Say "is open" only once the app is actually in front. Without the accessibility service we can't
         // see the foreground, so announce the attempt instead of claiming the result. If it never comes up,
@@ -245,7 +263,7 @@ class LocalFastRouter(
         val c = controller() ?: return action("OPEN_APP", "Opening ${app.label}.")
         // Up to ~6 s: a cold start of a heavy app (Chrome, a bank app) on a low-end phone routinely takes 3–5 s,
         // and a slow launch is not a failure. Polling is cheap — foregroundPackage() reads event-tracked state.
-        val (ok, fg) = com.tekyerema.verifier.Verify.pollForegroundContains(c, app.packageName, attempts = 24, intervalMs = 250L)
+        val (ok, fg) = com.tekyerema.verifier.Verify.pollLaunched(c, app.packageName, prevFg)
         if (!ok) {
             Log.i(TAG, "[LOCAL_FAST_PATH] OPEN_APP ${app.packageName} not in front (fg=$fg) → agent")
             return null

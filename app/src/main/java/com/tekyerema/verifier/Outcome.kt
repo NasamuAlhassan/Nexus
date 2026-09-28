@@ -26,6 +26,8 @@ sealed class Expectation {
     data class FieldContains(val id: Int?, val text: String) : Expectation()
     data class RangeValue(val value: Double, val tolerance: Double) : Expectation()
     data class ForegroundIs(val token: String) : Expectation()
+    /** A switch/checkbox/toggle tile labelled [label] is ON ([on]=true) or OFF — the goal state of "turn X on/off". */
+    data class Toggled(val label: String, val on: Boolean) : Expectation()
     object ScreenChanged : Expectation()
     data class Unparsed(val raw: String) : Expectation()
 }
@@ -58,6 +60,10 @@ object Expects {
             }
             "foreground_is", "foreground", "app_is", "app" ->
                 arg.takeIf { it.isNotEmpty() }?.let { Expectation.ForegroundIs(it) } ?: Expectation.Unparsed(s)
+            "checked", "is_on", "switch_on", "toggled_on", "toggle_on", "on" ->
+                arg.takeIf { it.isNotEmpty() }?.let { Expectation.Toggled(it, true) } ?: Expectation.Unparsed(s)
+            "unchecked", "is_off", "switch_off", "toggled_off", "toggle_off", "off" ->
+                arg.takeIf { it.isNotEmpty() }?.let { Expectation.Toggled(it, false) } ?: Expectation.Unparsed(s)
             "screen_changed", "screen_changes", "changed" -> Expectation.ScreenChanged
             else -> Expectation.Unparsed(s)
         }
@@ -167,6 +173,21 @@ object OutcomeVerifier {
                 val ok = pkg.contains(e.token, true) || title.contains(e.token, true)
                 if (ok) VerificationResult(true, "foreground is $pkg${if (title.isNotEmpty()) " ($title)" else ""}")
                 else VerificationResult(false, "expected foreground '${e.token}', it is $pkg${if (title.isNotEmpty()) " ($title)" else ""}")
+            }
+            is Expectation.Toggled -> {
+                // Only CHECKABLE elements count: a plain text row that merely mentions the label says nothing about state.
+                // Quick-settings tiles put their state IN the label ("Do Not Disturb, Off" → "…, On" after the tap), and the
+                // model often copies it into the claim (seen on-device: "checked: Do Not Disturb, Off") — match the NAME.
+                val t = norm(e.label).replace(Regex("[,;:.]?\\s*\\b(on|off|enabled|disabled|checked|unchecked)$"), "").trim()
+                val toggles = after?.elements?.filter { it.checkable && it.label?.let { l -> norm(l).contains(t) } == true }.orEmpty()
+                val want = if (e.on) "on" else "off"
+                when {
+                    toggles.any { it.checked == e.on } ->
+                        VerificationResult(true, "'${toggles.first { it.checked == e.on }.label!!.take(50)}' is $want")
+                    toggles.isNotEmpty() ->
+                        VerificationResult(false, "'${toggles.first().label!!.take(50)}' is still ${if (e.on) "off" else "on"}")
+                    else -> VerificationResult(false, "no switch labelled '${e.label}' is visible to confirm it is $want")
+                }
             }
             is Expectation.ScreenChanged, is Expectation.Unparsed -> VerificationResult(false, "vacuous expectation")
         }

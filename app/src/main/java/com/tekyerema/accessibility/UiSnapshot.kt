@@ -46,7 +46,9 @@ data class UiElement(
     /** Internal durable selector (resource id). Never shown to the model. */
     val viewId: String? = null,
     /** Generic structure hint, e.g. "list 12 rows" or "row 3" — no app semantics. */
-    val collection: String? = null
+    val collection: String? = null,
+    /** An editable's placeholder hint ("Search", "Message") even when it holds text — internal (policy), never shown. */
+    val hint: String? = null
 ) {
     val interactive: Boolean
         get() = clickable || longClickable || editable || scrollable || checkable || range != null

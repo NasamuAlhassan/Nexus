@@ -31,6 +31,30 @@ object Verify {
         return (fg?.contains(token, ignoreCase = true) == true) to fg
     }
 
+    /**
+     * Did an app launch take effect? True as soon as [pkg] is in front — OR once a DIFFERENT screen than [prevFg] has
+     * held the foreground for [stablePolls] consecutive polls: launching resumes the app's TASK, whose top screen may
+     * belong to a helper package (Settings' search page is com.google.android.settings.intelligence; a sign-in step is
+     * GMS). Seen on-device: "open settings" landed on the search page and the package-equality check called it failed.
+     * A launch that did nothing leaves [prevFg] in front and still fails.
+     */
+    suspend fun pollLaunched(
+        controller: AccessibilityController?, pkg: String, prevFg: String?,
+        attempts: Int = 24, intervalMs: Long = 250L, stablePolls: Int = 3
+    ): Pair<Boolean, String?> {
+        var fg: String? = null
+        var sameOther = 0
+        repeat(attempts) {
+            fg = controller?.foregroundPackage()
+            val f = fg
+            if (f != null && f.contains(pkg, ignoreCase = true)) return true to f
+            // Only with a KNOWN prior screen can "something else came to front" be evidence of our launch.
+            if (f != null && prevFg != null && f != prevFg) { if (++sameOther >= stablePolls) return true to f } else sameOther = 0
+            delay(intervalMs)
+        }
+        return false to fg
+    }
+
     fun screenChanged(before: UiSnapshot?, after: UiSnapshot?): Boolean {
         if (before == null || after == null) return false
         return before.signature() != after.signature()

@@ -41,9 +41,11 @@ object OpenAppTool : Tool {
         val intent = AppResolver.launchIntent(ctx.appContext, app.packageName)
             ?: return ToolResult(false, "No launch intent for ${app.label}.")
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val prevFg = ctx.controller?.foregroundPackage()   // ACTIVITY-level, to compare like with like in verify()
         return try {
             ctx.appContext.startActivity(intent)
-            ToolResult(true, "Opened ${app.label}", JSONObject().put("package", app.packageName), channel = "intent")
+            ToolResult(true, "Opened ${app.label}", JSONObject().put("package", app.packageName).put("prevFg", prevFg ?: ""),
+                channel = "intent")
         } catch (t: Throwable) {
             ToolResult(false, "Failed to open ${app.label}: ${t.message}")
         }
@@ -54,7 +56,8 @@ object OpenAppTool : Tool {
     ): VerificationResult {
         val pkg = result.data?.optString("package").orEmpty()
         if (pkg.isEmpty()) return VerificationResult(false, result.message)
-        val (ok, fg) = Verify.pollForegroundContains(ctx.controller, pkg)
+        val prevFg = result.data?.optString("prevFg")?.ifBlank { null }
+        val (ok, fg) = Verify.pollLaunched(ctx.controller, pkg, prevFg = prevFg, attempts = 16, intervalMs = 300L)
         return VerificationResult(ok, if (ok) "foreground is $fg" else "foreground is $fg, expected $pkg")
     }
 }

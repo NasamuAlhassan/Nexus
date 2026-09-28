@@ -48,7 +48,12 @@ interface AccessibilityController {
     fun globalAction(action: String): Boolean
     /** "up" | "down" | "mute" — AudioManager, the generic hardware-key equivalent. */
     fun adjustVolume(direction: String): Boolean
+    /** The package of the ACTIVITY in front (event-tracked, cheap) — "is Chrome open?". */
     fun foregroundPackage(): String?
+    /** The package of the window that has focus right now — which can be the notification shade / Quick Settings
+     *  (systemui) OVER an activity. What a UiSnapshot reflects, so it's what the stale-screen check compares.
+     *  May do a binder round-trip: call off the main thread. */
+    fun activeWindowPackage(): String? = foregroundPackage()
     /** The last real app that owned the screen BEFORE Tɛkyerɛma's own UI came to front — so a handoff can
      *  return to the app the user was actually looking at (e.g. Messages) instead of slamming HOME. Null if
      *  we've only ever seen our own UI or the launcher. */
