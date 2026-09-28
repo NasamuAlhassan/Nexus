@@ -117,6 +117,13 @@ class FastIntentClassifierTest {
             assertEquals(s, FastIntent.FlashlightOn, c(s))
         for (s in listOf("Turn off the flashlight.", "Switch off the torch.", "Turn the torch off."))
             assertEquals(s, FastIntent.FlashlightOff, c(s))
+        for (s in listOf("Torch.", "Flashlight please", "Open the torch", "Torch on", "Can you turn on the torch?"))
+            assertEquals(s, FastIntent.FlashlightOn, c(s))
+        // C-02: a question is a query, never a switch; any other mention is not a torch command at all.
+        for (s in listOf("Is my torch on?", "Is the flashlight off?", "Check the torch", "What's the flashlight doing"))
+            assertEquals(s, FastIntent.FlashlightQuery, c(s))
+        for (s in listOf("Why is my torch app so slow", "Where are the flashlight settings", "My torch broke yesterday"))
+            assertTrue(s, c(s) != FastIntent.FlashlightOn && c(s) != FastIntent.FlashlightOff)
     }
 
     @Test fun wifi_bluetooth() {

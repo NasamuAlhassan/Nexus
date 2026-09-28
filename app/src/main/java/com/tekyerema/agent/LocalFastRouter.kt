@@ -75,6 +75,7 @@ class LocalFastRouter(
 
         FastIntent.FlashlightOn -> torch(on = true)
         FastIntent.FlashlightOff -> torch(on = false)
+        FastIntent.FlashlightQuery -> torchState()
 
         FastIntent.WifiQuery -> wifiState()
         FastIntent.WifiOn -> openWifiPanel(turnOn = true)
@@ -243,6 +244,29 @@ class LocalFastRouter(
     }
 
     // ---------------------------------------------------------------- flashlight / torch
+    /** Torch state per camera id, kept current by a TorchCallback (it fires once with the state on registration). */
+    private val torchOn = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    @Volatile private var torchWatching = false
+
+    private fun watchTorch(cm: CameraManager) {
+        if (torchWatching) return
+        torchWatching = true
+        try {
+            cm.registerTorchCallback(object : CameraManager.TorchCallback() {
+                override fun onTorchModeChanged(cameraId: String, enabled: Boolean) { torchOn[cameraId] = enabled }
+                override fun onTorchModeUnavailable(cameraId: String) { torchOn.remove(cameraId) }
+            }, android.os.Handler(android.os.Looper.getMainLooper()))
+        } catch (t: Throwable) { torchWatching = false }
+    }
+
+    private suspend fun torchState(): FastOutcome? {
+        val cm = appContext.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return null
+        watchTorch(cm)
+        if (torchOn.isEmpty()) kotlinx.coroutines.delay(150)   // first registration: let the initial callback land
+        if (torchOn.isEmpty()) return handled(FastIntent.FlashlightQuery, "I can't tell whether the flashlight is on right now.")
+        return handled(FastIntent.FlashlightQuery, if (torchOn.values.any { it }) "The flashlight is on." else "The flashlight is off.")
+    }
+
     private fun torch(on: Boolean): FastOutcome? {
         val cm = appContext.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: return null
         val id = try {
@@ -250,6 +274,7 @@ class LocalFastRouter(
                 cm.getCameraCharacteristics(it).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
             }
         } catch (t: Throwable) { null } ?: return action("FLASHLIGHT", "This phone doesn't have a flashlight I can reach.")
+        watchTorch(cm)
         return try {
             cm.setTorchMode(id, on)
             action(if (on) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF", if (on) "Flashlight on." else "Flashlight off.")

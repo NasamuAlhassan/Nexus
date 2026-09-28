@@ -21,6 +21,7 @@ sealed class FastIntent(val name: String) {
     data class BrightnessSet(val fraction: Float) : FastIntent("BRIGHTNESS_SET")
     object FlashlightOn : FastIntent("FLASHLIGHT_ON")
     object FlashlightOff : FastIntent("FLASHLIGHT_OFF")
+    object FlashlightQuery : FastIntent("FLASHLIGHT_QUERY")
     object WifiQuery : FastIntent("WIFI_QUERY")
     object WifiOn : FastIntent("WIFI_ON")
     object WifiOff : FastIntent("WIFI_OFF")
@@ -82,6 +83,9 @@ object FastIntentClassifier {
             RE_BRIGHT_UP.containsMatchIn(g) -> FastIntent.BrightnessUp
             RE_BRIGHT_DOWN.containsMatchIn(g) -> FastIntent.BrightnessDown
 
+            // C-02: a question about the torch is a query, never a switch; ON needs an on-command or the bare
+            // word; any other mention ("flashlight settings", "why is my torch app slow") goes to the agent.
+            RE_TORCH_QUERY.containsMatchIn(g) && !RE_REQUEST_VERB.containsMatchIn(g) -> FastIntent.FlashlightQuery
             RE_TORCH_OFF.containsMatchIn(g) -> FastIntent.FlashlightOff
             RE_TORCH_ON.containsMatchIn(g) -> FastIntent.FlashlightOn
 
@@ -170,7 +174,13 @@ object FastIntentClassifier {
     private val RE_BRIGHT_DOWN = Regex("\\b(?:decrease|lower|reduce|turn\\s+down|dim)\\b[^.]*\\bbright(?:ness|er)?\\b|\\bmake\\s+(?:the\\s+)?screen\\s+(?:darker|dimmer)\\b|\\b(?:darker|dimmer)\\b|\\bdim\\s+the\\s+screen\\b")
 
     private val RE_TORCH_OFF = Regex("\\b(?:flashlight|torch|flash\\s*light)\\b[^.]*\\boff\\b|\\boff\\b[^.]*\\b(?:flashlight|torch|flash\\s*light)\\b")
-    private val RE_TORCH_ON = Regex("\\b(?:flashlight|torch|flash\\s*light)\\b")
+    private const val TORCH = "(?:flashlight|torch|flash\\s*light)"
+    private val RE_TORCH_ON = Regex(
+        "\\b(?:turn|switch|put)\\s+on\\b[^.]*\\b$TORCH\\b|\\b$TORCH\\b[^.]*\\bon\\b" +
+            "|^(?:please\\s+)?(?:open|use|start)\\s+(?:the\\s+|my\\s+)?$TORCH(?:\\s+please)?$" +
+            "|^(?:the\\s+|my\\s+)?$TORCH(?:\\s+please)?$")
+    private val RE_TORCH_QUERY = Regex("^(?:is|are|was|what(?:'s| is)?|check)\\b[^.]*\\b$TORCH\\b")
+    private val RE_REQUEST_VERB = Regex("\\b(?:turn|switch|put|can you|could you|would you|please)\\b")
 
     private val RE_WIFI_QUERY = Regex("\\bis\\s+(?:my\\s+)?wi.?fi\\b|\\bcheck\\s+(?:my\\s+)?wi.?fi\\b|\\bwi.?fi\\s+status\\b")
     private val RE_WIFI_ON = Regex("\\b(?:turn|switch|put)\\s+on\\b[^.]*\\bwi.?fi\\b|\\benable\\s+wi.?fi\\b|\\bwi.?fi\\s+on\\b")
