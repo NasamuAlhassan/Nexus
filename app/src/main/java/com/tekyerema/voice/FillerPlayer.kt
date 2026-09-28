@@ -37,7 +37,11 @@ class FillerPlayer(
     @Volatile private var active = false
     private var last: String? = null
 
-    private fun maxChain() = AppConfig.int("ux.fillers.maxChain", 2)
+    // Owner (2026-09-28): "the fillers are not required always" — a quick answer doesn't need one. So a filler is only
+    // spoken when the wait is long enough to feel like silence ([delayMs] with no reply yet), and only one: longer
+    // waits are covered by the progress check-ins (K-02).
+    private fun delayMs() = AppConfig.long("ux.fillers.delayMs", 2500L)
+    private fun maxChain() = AppConfig.int("ux.fillers.maxChain", 1)
     private fun gapMs() = AppConfig.long("ux.fillers.gapMs", 3500L)
 
     /** The phrases for [language], or empty when that language has none (⇒ the progress tone). */
@@ -51,6 +55,7 @@ class FillerPlayer(
         if (!AppConfig.bool("ux.fillers.enabled", true)) return
         active = true
         job = scope.launch {
+            delay(delayMs())   // an answer that arrives first cancels this job: no filler at all
             for (i in 0 until maxChain()) {
                 if (!active) return@launch
                 val pool = phrases(language)

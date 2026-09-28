@@ -10,7 +10,8 @@
   "ux": {
     "fillers": {
       "enabled": true,
-      "maxChain": 2,
+      "delayMs": 2500,
+      "maxChain": 1,
       "gapMs": 3500,
       "en": ["One moment please.", "Let me check that for you.", "Alright, let me take a look.", "Okay, I'm on it.",
              "Just a moment please.", "Let me find that for you.", "Hold on a moment.", "Sure, working on that now."],

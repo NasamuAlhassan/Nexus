@@ -74,12 +74,22 @@ class VoiceActivity : ComponentActivity() {
         }
         super.onDestroy()
     }
+
+    companion object {
+        internal val closeRequests = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+
+        /** Step aside for an app the user asked to open (seen on the A20e: a fast-path launch stayed BEHIND this
+         *  screen, the "is it open?" check timed out after 6 s and the agent opened the app twice more). The voice
+         *  turn itself keeps going — the reply is still spoken. */
+        fun requestClose() { closeRequests.tryEmit(Unit) }
+    }
 }
 
 @Composable
 private fun Arrival(settings: Settings, onClose: () -> Unit) {
     var shown by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { shown = true }
+    LaunchedEffect(Unit) { VoiceActivity.closeRequests.collect { onClose() } }   // an app is being opened over us
     val scrim by animateFloatAsState(if (shown) 0.94f else 0f, tween(420, easing = FastOutSlowInEasing), label = "scrim")
     val scale by animateFloatAsState(if (shown) 1f else 0.86f, tween(520, easing = FastOutSlowInEasing), label = "scale")
 

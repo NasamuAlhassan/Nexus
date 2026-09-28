@@ -799,7 +799,13 @@ class LocalFastRouter(
         val app = (match as? AppResolver.Match.One)?.app ?: return null   // ambiguous/none → let the agent ask
         val launch = AppResolver.launchIntent(appContext, app.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?: return null
-        val prevFg = controller()?.foregroundPackage()
+        var prevFg = controller()?.foregroundPackage()
+        // Our own voice screen in front would keep the app BEHIND it: close it first (the reply is still spoken).
+        if (prevFg == appContext.packageName) {
+            com.tekyerema.ui.VoiceActivity.requestClose()
+            kotlinx.coroutines.delay(350)
+            prevFg = controller()?.foregroundPackage()
+        }
         try { appContext.startActivity(launch) } catch (t: Throwable) { return null }
         // Say "is open" only once the app is actually in front. Without the accessibility service we can't
         // see the foreground, so announce the attempt instead of claiming the result. If it never comes up,
