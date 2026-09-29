@@ -30,6 +30,8 @@ class TekyeremaApp : Application() {
         VoiceEngine.init(this)
         // D: the computer connection (MCP over adb) — idle until the user turns it on (OperatorPolicy.remoteControlEnabled).
         com.tekyerema.mcp.RemoteControl.init(this)
+        // Phone care: the low-battery alert listens to the battery (off unless the user switched it on).
+        try { com.tekyerema.phonecare.PhoneAlerts.init(this) } catch (_: Throwable) {}
     }
 
     /** N-08: release on-device models under memory pressure instead of being killed for them. */

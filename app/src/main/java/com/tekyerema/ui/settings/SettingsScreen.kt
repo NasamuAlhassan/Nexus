@@ -37,6 +37,7 @@ import com.tekyerema.ui.Perms
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessibilityNew
+import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
@@ -65,7 +66,9 @@ import com.tekyerema.ui.theme.TkMotion
 internal enum class Page {
     ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP, KEYBOARD, APPEARANCE,
     // WS-C: Control and its sub-pages.
-    CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT;
+    CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
+    // Phone care: "check my phone" and the event alerts (PhoneCarePage).
+    PHONE_CARE;
 
     /** Where Back goes. */
     val parent: Page get() = when (this) {
@@ -116,6 +119,12 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                     icon = Icons.Outlined.VerifiedUser, iconTint = Spectrum.Gold) { page = Page.PERMISSIONS }
                 SettingRow("Privacy", icon = Icons.Outlined.Lock, iconTint = Spectrum.Azure, divider = false) { page = Page.PRIVACY }
             }
+            // Phone care (A20e 2026-09-29): the self-test and the money / missed-call / battery alerts.
+            GlassGroup {
+                SettingRow("Phone care", value = remember(version) { phoneCareSummary(settings) },
+                    icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Mint, divider = false,
+                    description = "Check my phone, and alerts for money, missed calls and low battery.") { page = Page.PHONE_CARE }
+            }
             GlassGroup {
                 SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet) { page = Page.HELP }
                 // First-run voice welcome (voice/Welcome.kt): the questions and the practice text, by voice, again.
@@ -141,7 +150,14 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.USAGE -> UsagePage(settings) { page = Page.CONTROL }
         Page.DATA -> DataPage(settings, onBack = { page = Page.CONTROL }) { page = Page.AUDIT }
         Page.AUDIT -> AuditPage { page = Page.CONTROL }
+        Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
     } }
+}
+
+/** "Alerts off" / "2 alerts on" — the Phone care row's value (on screen only). */
+private fun phoneCareSummary(s: Settings): String {
+    val on = listOf(s.alertMoney, s.alertMissedCalls, s.alertBattery).count { it }
+    return if (on == 0) "Alerts off" else if (on == 1) "1 alert on" else "$on alerts on"
 }
 
 /** "Normal · cloud on" — the Control row's value. */

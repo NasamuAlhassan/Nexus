@@ -31,6 +31,8 @@ class TekyeremaNotificationListener : NotificationListenerService() {
             try { com.tekyerema.notifications.MessageIndex.add(rec) } catch (_: Throwable) {}
         // A-12: the user's own "tell me when Ama messages" rules — live posts only, never the reconnect backfill.
         try { com.tekyerema.agent.triggers.NotificationTriggers.onPosted(applicationContext, rec) } catch (_: Throwable) {}
+        // Phone care: money-received / missed-call alerts the user switched on — live posts only, on its own thread.
+        try { com.tekyerema.phonecare.PhoneAlerts.onPosted(applicationContext, rec, sbn?.notification) } catch (_: Throwable) {}
     }
 
     private fun put(sbn: StatusBarNotification): NotificationRecord? {

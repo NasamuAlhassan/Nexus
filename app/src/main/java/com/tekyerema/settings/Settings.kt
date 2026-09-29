@@ -320,6 +320,27 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("field_log", false)
         set(v) = put { putBoolean("field_log", v) }
 
+    // ---- Phone care alerts (phonecare/PhoneAlerts). A20e 2026-09-29: nothing told the user that money came in, who
+    // called or that the battery was going (docs/agent/research/openclaw.md §5.2). Each alert is OFF until the user
+    // switches it on (Settings › Phone care, or by voice). "Private alerts" starts ON — the stricter side: on the
+    // loudspeaker only "You have a money alert. Say 'read it'…" (assistive_tech_blind.md §8).
+    var alertMoney: Boolean
+        get() = prefs.getBoolean("alert_money", false)
+        set(v) = put { putBoolean("alert_money", v) }
+    /** Money alerts also say the balance. Off: a balance is never spoken unasked. */
+    var alertMoneyBalance: Boolean
+        get() = prefs.getBoolean("alert_money_balance", false)
+        set(v) = put { putBoolean("alert_money_balance", v) }
+    var alertMissedCalls: Boolean
+        get() = prefs.getBoolean("alert_missed_calls", false)
+        set(v) = put { putBoolean("alert_missed_calls", v) }
+    var alertBattery: Boolean
+        get() = prefs.getBoolean("alert_battery", false)
+        set(v) = put { putBoolean("alert_battery", v) }
+    var alertsPrivate: Boolean
+        get() = prefs.getBoolean("alerts_private", true)
+        set(v) = put { putBoolean("alerts_private", v) }
+
     companion object {
         const val PREFS_NAME = "tekyerema"
         private val sharedChanges = kotlinx.coroutines.flow.MutableStateFlow(0L)

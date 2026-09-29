@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "alerts": {
+    "_note": "Phone care event alerts (phonecare/PhoneAlerts). Each type is OFF until the user switches it on. Quiet hours come from triggers.quietHours.",
+    "minGapMs": 30000,
+    "maxPerHour": 12,
+    "busyRetryMs": 15000,
+    "busyRetries": 12,
+    "readItWindowMs": 180000,
+    "inboxTtlMs": 3600000,
+    "smsApps": ["com.samsung.android.messaging", "com.google.android.apps.messaging", "com.android.mms", "com.android.messaging"],
+    "money": {
+      "_note": "senders: SMS sender ids trusted as Mobile Money (compared without case, spaces or punctuation). apps: MoMo apps' own notifications (a trailing * = package prefix). extraPatterns: more 'received' regexes (case-insensitive; group 1 = amount, optional group 2 = payer), added to the code defaults. extraMistakePatterns: more 'sent by mistake' fraud phrasings.",
+      "_senders_note": "No bare 'MoMo': people save their MoMo agent's number under that name. When READ_SMS is granted the SMS's real sender address is checked, not the contact name. Telecel Cash's real sender id is unverified.",
+      "senders": ["MobileMoney", "MTN MoMo", "MTNMoMo", "Vodafone Cash", "Telecel Cash", "AirtelTigo Money", "AT Money"],
+      "apps": ["com.mtn.momo*", "com.mtn.mobilemoney*", "com.vodafone.cash*", "com.telecel.cash*"],
+      "extraPatterns": [],
+      "extraMistakePatterns": []
+    },
+    "missedCall": {
+      "packages": ["com.samsung.android.dialer", "com.google.android.dialer", "com.android.dialer", "com.android.server.telecom", "com.samsung.android.incallui", "com.android.phone"],
+      "logWindowMs": 300000
+    },
+    "battery": {
+      "thresholds": [15, 5]
+    }
+  },
+  "phonecare": {
+    "check": {
+      "internetMs": 8000
+    }
+  }
+}
