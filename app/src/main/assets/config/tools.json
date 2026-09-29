@@ -57,8 +57,13 @@
     "wait_for_element": {"feature": "G-18", "idempotent": true},
     "read_all": {"feature": "F-15", "idempotent": true, "untrusted_output": true},
     "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true},
+    "describe_screen": {"feature": "F-09", "idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
     "search": {
       "groups": {
+        "vision": {
+          "tools": ["describe_screen"],
+          "keywords": "\\b(describe|picture|pictures|photo|photos|image|images|icon|icons|what does it look like|looks like)\\b"
+        },
         "apps": {
           "tools": ["install_app", "take_photo", "ask_app", "google_sign_in", "play_music"],
           "keywords": "\\b(install|reinstall|download|play ?store|google play|app store|selfie|photo|picture|pic|camera|chat ?gpt|gemini|claude|copilot|perplexity|assistant|sign ?in|sign ?up|log ?in|login|continue with google|google account|youtube music|yt music|spotify|boomplay|audiomack|song|songs|music|artist|album|playlist|track|skip|next song|pause|resume)\\b"
