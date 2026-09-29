@@ -116,13 +116,37 @@ class VoiceBoundaryTest {
             override val caps = InputCaps(false, false, false, emptySet(), secureListen = secure, patientEndpointing = secure)
             override suspend fun listen(spec: ListenSpec, events: ListenEvents): Heard { heard += "$id/${spec.language}"; return Heard.NoSpeech }
         }
-        val routed = LanguageRoutedInput(english = Rec("google", secure = false), twi = Rec("hcilab", secure = true)) { lang }
+        val routed = LanguageRoutedInput(english = Rec("google", secure = false), twi = Rec("hcilab", secure = true), language = { lang })
         routed.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
         assertFalse("English: Google can't hear 'done' privately", routed.caps.secureListen)
         lang = Lang.TWI
         routed.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
         assertTrue("Twi: the captured path keeps a secure listen on the phone", routed.caps.secureListen)
         assertEquals(listOf("google/${Lang.GH_EN}", "hcilab/${Lang.TWI}"), heard)
+    }
+
+    /** A20e 2026-09-29, airplane mode: the phone's recognizer answered "error 13, no such language" to every English
+     *  listen (no offline pack). Offline, English goes to the on-device recognizer; online, a language/offline refusal
+     *  falls back to it within the same listen. */
+    @Test fun english_falls_back_to_the_on_device_recognizer_offline_or_when_the_phone_has_no_language_pack() = kotlinx.coroutines.runBlocking {
+        val heard = mutableListOf<String>()
+        class Rec(override val id: String, val answer: Heard) : VoiceInput {
+            override val caps = InputCaps(false, false, false, emptySet(), secureListen = false, patientEndpointing = false)
+            override suspend fun listen(spec: ListenSpec, events: ListenEvents): Heard { heard += id; return answer }
+        }
+        var online = false
+        val google = Rec("google", Heard.Unavailable(Heard.Cause.LANGUAGE, "error 13"))
+        val onDevice = Rec("on-device", Heard.NoSpeech)
+        val routed = LanguageRoutedInput(google, onDevice, language = { Lang.GH_EN }, isOnline = { online })
+        routed.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
+        assertEquals("offline: straight to the on-device recognizer", listOf("on-device"), heard)
+        heard.clear(); online = true
+        routed.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
+        assertEquals("online, no language pack: fall back in the same listen", listOf("google", "on-device"), heard)
+        heard.clear()
+        val ok = LanguageRoutedInput(Rec("google", Heard.NoSpeech), onDevice, language = { Lang.GH_EN }, isOnline = { true })
+        ok.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
+        assertEquals("online and working: Google only", listOf("google"), heard)
     }
 
     @Test fun the_voice_language_is_switched_by_saying_so() {

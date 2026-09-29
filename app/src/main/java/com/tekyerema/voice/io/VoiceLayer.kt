@@ -55,7 +55,7 @@ object VoiceLayer {
         fun systemInput(): VoiceInput
         fun capturedInput(onDevice: A, layer: L): VoiceInput
         /** [InputKind.MIXED]: one recognizer per language. The default routes everything to English (tests). */
-        fun mixedInput(english: VoiceInput, twi: VoiceInput): VoiceInput = LanguageRoutedInput(english, twi) { Lang.GH_EN }
+        fun mixedInput(english: VoiceInput, twi: VoiceInput): VoiceInput = LanguageRoutedInput(english, twi, language = { Lang.GH_EN })
     }
 
     class Built<A, L>(val plan: Plan, val input: VoiceInput, val onDevice: A?, val layer: L?)

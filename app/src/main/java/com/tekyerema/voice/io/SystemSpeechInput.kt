@@ -217,6 +217,7 @@ class SystemSpeechInput(
             var offlineRetries = 1
             var audioRetries = 1
             var languageRetries = 1
+            var fallbackThisListen = false   // offline: the fallback tag for this listen only (see below)
             var relistens = if (spec.patient) cfg.patientRelistens else 0
             var preferOffline = when (cfg.preferOffline.lowercase()) {
                 "always" -> true; "never" -> false; else -> !isOnline()
@@ -224,7 +225,7 @@ class SystemSpeechInput(
             var cue = true
             while (true) {
                 val request = RecognitionRequest(
-                    languageTag = tag(cfg), preferOffline = preferOffline,
+                    languageTag = if (fallbackThisListen && cfg.fallbackTag.isNotBlank()) cfg.fallbackTag else tag(cfg), preferOffline = preferOffline,
                     maxResults = if (spec.purpose == ListenPurpose.YES_NO) cfg.yesNoMaxResults else maxOf(cfg.maxResults, spec.maxAlternatives),
                     partials = cfg.partials && !spec.sensitive,
                     silenceMs = if (cfg.silenceExtras) Triple(cfg.completeSilenceMs, cfg.possiblyCompleteSilenceMs, cfg.minimumLengthMs) else null
@@ -249,9 +250,18 @@ class SystemSpeechInput(
                                 // capture may still be letting go: give it a moment.
                                 audioRetries--; delay(AUDIO_RETRY_MS); continue
                             }
-                            c in LANGUAGE_ERRORS && !useFallbackTag && cfg.fallbackTag.isNotBlank() && languageRetries > 0 -> {
-                                languageRetries--; useFallbackTag = true
-                                log("[VOICE] system speech: ${cfg.languageTag} refused — using ${cfg.fallbackTag} from now on")
+                            c in LANGUAGE_ERRORS && !useFallbackTag && !fallbackThisListen && cfg.fallbackTag.isNotBlank() && languageRetries > 0 -> {
+                                languageRetries--
+                                // Offline, "no such language" means no OFFLINE pack for it — not that en-GH is unsupported. Only an
+                                // online refusal switches for good (A20e 2026-09-29: one offline listen moved every later online
+                                // listen to en-US, losing the Ghanaian-English model until a restart).
+                                if (isOnline()) {
+                                    useFallbackTag = true
+                                    log("[VOICE] system speech: ${cfg.languageTag} refused — using ${cfg.fallbackTag} from now on")
+                                } else {
+                                    fallbackThisListen = true
+                                    log("[VOICE] system speech: ${cfg.languageTag} has no offline pack — trying ${cfg.fallbackTag} for this listen")
+                                }
                                 continue
                             }
                             (c == RecognizerErrors.SPEECH_TIMEOUT || c == RecognizerErrors.NO_MATCH) && relistens > 0 -> {
