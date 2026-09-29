@@ -84,7 +84,7 @@ class WakeWordService : Service() {
         val frame = FloatArray(WakeScorer.FRAME)
         val minBuf = AudioRecord.getMinBufferSize(WakeScorer.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
         var rec: AudioRecord? = null
-        fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null }
+        fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null; micOpen = false }
         var hb = 0L; var top = 0f
         try {
             while (currentCoroutineContext().isActive) {
@@ -102,11 +102,14 @@ class WakeWordService : Service() {
                 // (`handling` stays true for the whole wake-started turn, so it must not block this — seen on the A20e:
                 // the mic was released for an entire task and "Hey Tɛkyerɛma, stop" could not be heard.)
                 // Listen while a task works with the mic free (interjection) or waits on a reply nobody is listening for.
+                // voice/io: the phone's recognizer asked for the mic (handOver) — closed until it is done, plus a grace period.
+                if (handedOver()) { release(); delay(50); continue }
                 if (interjecting || ((handling || VoiceEngine.isRunning) && !VoiceEngine.canInterject && !VoiceEngine.canRespond)) { release(); delay(250); continue }
                 if (rec == null) {
                     // ~2.5 s of buffering (32 frames): a slow scoring frame is absorbed instead of dropping audio.
                     rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 32))
                     if (rec == null) { delay(1000); continue }
+                    micOpen = true
                     gate.reset(); scorer.reset()                     // fresh listen: no audio from before the pause
                 }
                 val got = rec!!.read(frame, 0, WakeScorer.FRAME, AudioRecord.READ_BLOCKING)
@@ -141,12 +144,27 @@ class WakeWordService : Service() {
                 AudioRecord(src, WakeScorer.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT, bufSize)
             } catch (_: Throwable) { null } ?: continue
             if (r.state == AudioRecord.STATE_INITIALIZED) {
-                try { r.startRecording(); return r } catch (_: Throwable) {}
+                try { r.startRecording(); watchSilencing(r); return r } catch (_: Throwable) {}
             }
             try { r.release() } catch (_: Throwable) {}
         }
         Log.w(TAG, "[WAKE] could not open the microphone")
         return null
+    }
+
+    /** voice/io device check (brief §A.3): Android 10+ silences one of two concurrent captures. Log when the wake mic is
+     *  the silenced one (e.g. the phone's recognizer or a call took the mic) — scores only, never audio. */
+    private fun watchSilencing(r: AudioRecord) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        try {
+            var last: Boolean? = null
+            r.registerAudioRecordingCallback({ it.run() }, object : android.media.AudioManager.AudioRecordingCallback() {
+                override fun onRecordingConfigChanged(configs: MutableList<android.media.AudioRecordingConfiguration>?) {
+                    val mine = configs?.firstOrNull { it.clientAudioSessionId == r.audioSessionId } ?: return
+                    if (mine.isClientSilenced != last) { last = mine.isClientSilenced; Log.i(TAG, "[WAKE] wake mic silenced=${mine.isClientSilenced}") }
+                }
+            })
+        } catch (_: Throwable) {}
     }
 
     // ---- Monitor mode ("what does it hear?") — debug only, OFF by default: --es wake_monitor 1|0 ----
@@ -293,6 +311,30 @@ class WakeWordService : Service() {
             if (!running) return
             running = false
             try { ctx.stopService(Intent(ctx, WakeWordService::class.java)) } catch (_: Throwable) {}
+        }
+
+        // ---- voice/io mic hand-over (the brief §A.4.3) ----
+        // SpeechRecognizer opens its own microphone in another process; two ordinary captures never both get audio on
+        // Android 10+ (one is silenced), and the loop above only polled VoiceEngine.isRunning every ≤ 250 ms. So the
+        // system recognizer asks for the mic explicitly and starts only once the wake loop has really let go.
+        @Volatile private var micOpen = false
+        private val holders = java.util.concurrent.atomic.AtomicInteger(0)
+        @Volatile private var reopenAfter = 0L
+        private fun handedOver() = holders.get() > 0 || android.os.SystemClock.uptimeMillis() < reopenAfter
+
+        /** Close the wake word's microphone and wait (≤ [timeoutMs]) until it is really released. Pair with [reclaim]. */
+        suspend fun handOver(timeoutMs: Long = 800): Boolean {
+            holders.incrementAndGet()
+            val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
+            while (micOpen && android.os.SystemClock.uptimeMillis() < deadline) delay(20)
+            if (micOpen) Log.w(TAG, "[WAKE] hand-over: the wake mic is still open after ${timeoutMs} ms")
+            return !micOpen
+        }
+
+        /** The recognizer is done with the mic: the wake word may re-arm after [graceMs]. */
+        fun reclaim(graceMs: Long = 300) {
+            reopenAfter = android.os.SystemClock.uptimeMillis() + graceMs
+            holders.updateAndGet { if (it > 0) it - 1 else 0 }
         }
 
         /** DEBUG/testing: simulate a detection (no audio) → activation path. */

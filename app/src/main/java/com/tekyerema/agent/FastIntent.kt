@@ -108,7 +108,8 @@ sealed class FastIntent(val name: String) {
     data class WhatDidYouDo(val today: Boolean) : FastIntent("WHAT_DID_YOU_DO")
     /** H-12: "what do you remember about me?" */
     object MemoryQuery : FastIntent("MEMORY_QUERY")
-    /** H-12: "forget that" ([scope] "last"), "forget everything" ("all"), "forget Ama" ("person", [who]). */
+    /** H-12: "forget that" ([scope] "last"), "forget everything" ("all"), "forget Ama" ("person", [who]); a remembered
+     *  site pick: "forget that choice" ("choice"), "forget my choices" ("choices"). */
     data class Forget(val scope: String, val who: String? = null) : FastIntent("FORGET")
     /** J-15: "clear my history" — the History list, the action audit, traces and telemetry. */
     object ClearHistory : FastIntent("CLEAR_HISTORY")
@@ -183,6 +184,8 @@ object FastIntentClassifier {
         if (RE_MEMORY_QUERY.matches(g)) return FastIntent.MemoryQuery
         if (RE_FORGET_LAST.matches(g)) return FastIntent.Forget("last")
         if (RE_FORGET_ALL.matches(g)) return FastIntent.Forget("all")
+        if (RE_FORGET_CHOICE.matches(g)) return FastIntent.Forget("choice")     // E: before "forget <person>"
+        if (RE_FORGET_CHOICES.matches(g)) return FastIntent.Forget("choices")
         if (RE_CLEAR_HISTORY.matches(g)) return FastIntent.ClearHistory
         RE_FORGET_PERSON.matchEntire(g)?.let { m -> return FastIntent.Forget("person", watchName(raw, m.groupValues[1])) }
         // E-20, before the compound check: "open ChatGPT and ask it …" is ONE deterministic action (the question may
@@ -430,6 +433,9 @@ object FastIntentClassifier {
     private val RE_MEMORY_QUERY = Regex("^what do you (?:remember|know)(?: about me)?$|^what have you (?:remembered|saved|kept)(?: about me)?$")
     private val RE_FORGET_LAST = Regex("^(?:forget (?:that|it|what i (?:just )?said)|scratch that)$")
     private val RE_FORGET_ALL = Regex("^(?:forget everything(?: about me)?|(?:clear|delete|erase|wipe) (?:your|my) memory)$")
+    // Workstream E (agent/research/ResolvedChoices): a remembered site pick — the last one, or all of them.
+    private val RE_FORGET_CHOICE = Regex("^(?:forget|clear|delete) (?:that|this|the|my|your) (?:choice|pick|site|website|link)$")
+    private val RE_FORGET_CHOICES = Regex("^(?:forget|clear|delete|erase) (?:my|your|all|all my|all your|all the) (?:saved )?(?:choices|picks|sites|websites)$")
     private val RE_FORGET_PERSON = Regex("^forget (?:everything about |all about |about )?(?!that$|it$|everything)([\\p{L}' .-]{2,40}?)(?:'s messages| messages)?$")
     private val RE_CLEAR_HISTORY = Regex("^(?:clear|delete|erase|wipe) (?:my |the |your )?(?:history|activity(?: log)?|action log)$")
 

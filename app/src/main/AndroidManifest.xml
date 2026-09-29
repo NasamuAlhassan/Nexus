@@ -63,6 +63,18 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- voice/io (builtin_en): Android 11 package visibility for the phone's own speech services, so
+         SpeechRecognizer.isRecognitionAvailable() and the TTS engine list keep working in a build without
+         QUERY_ALL_PACKAGES (a store build). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:name=".TekyeremaApp"
         android:allowBackup="false"

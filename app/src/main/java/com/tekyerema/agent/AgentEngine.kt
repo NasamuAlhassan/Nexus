@@ -597,6 +597,20 @@ object AgentEngine {
             finish(AgentStatus.CANNOT_DO, s, paused = reason)
         }
         try {
+            // ===== Workstream E: research before acting (LOCATE) — agent/research/TargetResearch.kt =====
+            // "open University of Ghana Sakai": a destination that isn't on the phone is recalled (a remembered pick) or
+            // found with ONE web search and opened (one clear official site), or the user picks from 2–3 options. Null =
+            // not that kind of request, an app matches, or offline → everything below runs unchanged.
+            val questions = com.tekyerema.agent.research.QuestionBudget()   // ≤ 1 per slot, ≤ 2 "which one" per task
+            val research = if (forcedBrain != null || direct || webFirst) null else com.tekyerema.agent.research.TargetResearch.planSafely(goal,
+                com.tekyerema.agent.research.TargetResearch.deps(ctxApp, online,
+                    ask = if (unattended) null else { q, spoken -> questions.note(q, true); askUser(q, spoken) }) { log(LogEntry.Kind.INFO, it) })
+            research?.note?.let { history.add(it) }
+            research?.open?.let { planned.add(it) }
+            research?.end?.let { e ->
+                log(LogEntry.Kind.RESULT, e.line); pushConvo("Tɛkyerɛma: ${e.line}")
+                finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats); return
+            }
             val maxSteps = com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60)   // G-15
             // WS-A: a resumed task counts on from its checkpoint, with at least `agent.resume.minSteps` more steps.
             val firstStep = (resumedFrom?.step ?: 0) + 1
@@ -856,8 +870,14 @@ object AgentEngine {
                         // C-13: ask the user and WAIT for the answer inside this task (it used to end the task with a question).
                         if (decision.name == "ask_user") {
                             val q = decision.args.optString("question").ifBlank { "Could you tell me a bit more?" }
-                            val opts = decision.args.optString("options").trim()
-                            val ans = if (unattended) null else askUser(q, if (opts.isNotEmpty()) "$q For example: $opts." else q)
+                            // E (agent/research/Options.kt): never the same question twice, ≤ 2 "which one" questions per task;
+                            // options read as "A, B, or C?" (≤ 3, most likely first) and noted so "the second one" resolves.
+                            val options = com.tekyerema.agent.research.SpokenOptions.split(decision.args.optString("options"))
+                            val refused = questions.refusal(q, options.size >= 2)
+                            if (refused != null) { history.add("ask_user(\"$q\") → not asked: $refused"); continue }
+                            questions.note(q, options.size >= 2)
+                            if (options.size >= 2) References.noteOptions(options)
+                            val ans = if (unattended) null else askUser(q, com.tekyerema.agent.research.SpokenOptions.withQuestion(q, options))
                             if (ans == null) {
                                 log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
                                 finish(AgentStatus.CANNOT_DO, stats); return
@@ -869,7 +889,9 @@ object AgentEngine {
                                 pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
                                 finish(AgentStatus.STOPPED, stats); return
                             }
-                            history.add("ask_user(\"$q\") → the user answered: \"$ans\"")
+                            val picked = (com.tekyerema.agent.research.OptionAnswer.parse(ans, options) as?
+                                com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.let { options[it.index] }
+                            history.add("ask_user(\"$q\") → the user answered: \"$ans\"" + (picked?.let { " (= $it)" } ?: ""))
                             continue
                         }
                         // G-12: several failed steps in a row — ask the user how to go on instead of burning steps (once per task).
@@ -1591,6 +1613,10 @@ object AgentEngine {
                         // A failed search leaves the queue empty, so the planner takes over with the failure in its history.
                         if (webFirst && decision.name == "web_search" && result.success)
                             WebFirst.spoken(result.data?.optString("answer"))?.let { planned.add(AgentDecision.Done(it)) }
+                        // E: a research-planned open that ran ends the task with its line ("Opening UG Sakai at …"); the pick
+                        // is remembered once the site verifiably came up. A failed open leaves the planner to carry on.
+                        if (decision.rationale == com.tekyerema.agent.research.TargetResearch.TAG)
+                            research?.after(result.success, vr.verified)?.let { planned.add(AgentDecision.Done(it)) }
                         // G-11: the chain goes on only if this step ran and did something (verified, or changed the screen).
                         if (decision.rationale?.startsWith(ActionChain.TAG) == true)
                             chainPrevOk = ActionChain.stepPassed(result.success, vr.verified, afterSig != null && afterSig != before.signature())
