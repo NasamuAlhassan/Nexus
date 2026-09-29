@@ -37,16 +37,23 @@ class LocalFastRouter(
     private val appContext: Context,
     private val controller: () -> AccessibilityController?
 ) {
+    /** The user's own controls (operator settings, money limits) answer before the fast path's own log line — log them the
+     *  same way, so the device suite, the trace and anyone debugging can see that "set my MoMo limit" was handled. */
+    private fun ownControl(o: FastOutcome): FastOutcome {
+        Log.i(TAG, "[LOCAL_FAST_PATH] intent=${o.intent} llm_called=false latency_ms=0 result='${com.tekyerema.core.Privacy.content(o.spoken.take(60))}'")
+        return o
+    }
+
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
         // WS-C: the user's own controls ("offline mode", "ask me before every step", "what do you keep about me",
         // "delete everything"…) come first and always work — they are how the user stays in charge (operator/).
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             com.tekyerema.operator.OperatorCommands.handle(appContext, text)
-        }?.let { return it }
+        }?.let { return ownControl(it) }
         // Money safety round 2 (money/MoneyCommands): the user's Mobile Money limits by voice ("set my MoMo limit to 200 cedis",
         // "what is my MoMo limit") — the user's own controls, so like the ones above they always work.
-        com.tekyerema.money.MoneyCommands.handle(text)?.let { return it }
+        com.tekyerema.money.MoneyCommands.handle(text)?.let { return ownControl(it) }
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
