@@ -283,6 +283,17 @@ class OperatorLogicTest {
         assertFalse(Expects.isVacuous(Expects.parse("Element Present: Send")))
     }
 
+    @Test fun field_contains_finds_the_text_after_the_ids_shift() {
+        // Samsung Contacts: typing opened the keyboard, the snapshot was re-numbered, and element 2 became a label
+        val weak = VerificationResult(false, "weak")
+        val label = UiElement(2, "TextView", "Phone", Box(0, 0, 500, 80), ElementSource.TREE)
+        val name = UiElement(3, "EditText", "Zz Tekyerema Test", Box(0, 100, 500, 180), ElementSource.TREE, editable = true)
+        val r = OutcomeVerifier.verify(Expects.parse("field_contains:2|Zz Tekyerema Test"), snap(label), snap(label, name), true, weak, false)
+        assertTrue(r.detail, r.verified)
+        val none = OutcomeVerifier.verify(Expects.parse("field_contains:2|Zz Tekyerema Test"), snap(label), snap(label), true, weak, false)
+        assertFalse(none.verified)
+    }
+
     @Test fun toggle_expectation_checks_the_switch_state_not_just_the_label() {
         assertEquals(Expectation.Toggled("Do Not Disturb", true), Expects.parse("checked: Do Not Disturb"))
         assertEquals(Expectation.Toggled("Wi-Fi", false), Expects.parse("unchecked: Wi-Fi"))

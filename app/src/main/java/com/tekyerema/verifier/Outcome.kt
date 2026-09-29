@@ -171,7 +171,9 @@ object OutcomeVerifier {
                 }
             }
             is Expectation.FieldContains -> {
-                val field = e.id?.let { after?.element(it) }
+                // Ids are re-numbered on every snapshot: once the keyboard opens (Samsung Contacts, 2026-09-29) the old id can
+                // name a different element, so a field holding the text anywhere on screen also counts.
+                val field = e.id?.let { after?.element(it) }?.takeIf { it.label?.contains(e.text, true) == true }
                     ?: after?.elements?.firstOrNull { it.editable && it.label?.contains(e.text, true) == true }
                 if (field != null && field.label?.contains(e.text, true) == true) VerificationResult(true, "field ${field.id} contains '${e.text}'")
                 else VerificationResult(false, "no editable field contains '${e.text}'")
