@@ -52,8 +52,10 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
                 com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini", null)
                 return@withContext AgentDecision.Fail("Gemini request failed: ${t.message}")
             }
-            com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini",
-                if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromGemini(text) else null)   // Q-03 / N-03
+            val usage = if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromGemini(text) else null
+            com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini", usage)   // Q-03 / N-03
+            // B / sovereignty: an answered call counts toward the operator's daily budget.
+            if (code in 200..299) com.tekyerema.operator.OperatorPolicy.recordUsage("gemini", (usage?.prompt ?: 0) + (usage?.completion ?: 0))
             // One line per call, like Groq's: a Gemini failure used to be invisible in the log (A20e 2026-09-29).
             android.util.Log.i("Tekyerema", "[LLM] gemini/${settings.model} http=$code" +
                 (if (code !in 200..299) " ${text.replace(Regex("\\s+"), " ").take(120)}" else ""))
@@ -77,10 +79,13 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
 
     private fun buildRequest(ctx: BrainContext): JSONObject {
         val system = JSONObject().put("parts", JSONArray().put(JSONObject().put("text", BrainPrompts.SYSTEM)))
-        val contents = JSONArray().put(
-            JSONObject().put("role", "user")
-                .put("parts", JSONArray().put(JSONObject().put("text", BrainPrompts.userText(ctx))))
-        )
+        // B / injection hardening (A/B flag, default OFF): the screen as a part of its own behind a random delimiter.
+        val parts = if (!BrainPrompts.screenInOwnMessage()) JSONArray().put(JSONObject().put("text", BrainPrompts.userText(ctx)))
+            else BrainPrompts.nonce().let { n ->
+                JSONArray().put(JSONObject().put("text", BrainPrompts.userText(ctx, screenSeparate = true, nonce = n)))
+                    .put(JSONObject().put("text", BrainPrompts.screenBlock(ctx, n)))
+            }
+        val contents = JSONArray().put(JSONObject().put("role", "user").put("parts", parts))
         val tools = JSONArray().put(JSONObject().put("functionDeclarations", ctx.geminiTools))
         return JSONObject()
             .put("systemInstruction", system)

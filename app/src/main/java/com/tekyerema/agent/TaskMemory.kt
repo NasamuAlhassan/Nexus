@@ -13,6 +13,15 @@ class TaskMemory {
     private val knownEntities = LinkedHashMap<String, String>()
     private val recentFailures = ArrayDeque<String>()
 
+    /** B: the explicit plan (subgoals + statuses), rendered each step; persisted through TaskJournal by the engine. */
+    val plan = com.tekyerema.agent.plan.PlanTracker()
+
+    /** B: AndroidArena-style visit line for the current screen ("you've been here 3 times; tried tap 'X' ×2"), or null. */
+    var visitLine: String? = null
+
+    /** B: the goal looks multi-part and no plan came yet — nudge the model to include one (first steps only). */
+    var wantPlan: Boolean = false
+
     fun noteScreen(app: String?, screen: String?) {
         app?.takeIf { it.isNotBlank() }?.let { currentApp = it }
         screen?.takeIf { it.isNotBlank() }?.let { currentScreen = it }
@@ -31,9 +40,12 @@ class TaskMemory {
         while (recentFailures.size > 3) recentFailures.removeFirst()
     }
 
-    /** A short prompt block, or "" when there is nothing worth adding. */
+    /** A short prompt block, or "" when there is nothing worth adding. The plan block's one-shot notes (a subgoal just
+     *  done, REPLAN) are consumed — call once per planning call. */
     fun render(): String {
         val parts = mutableListOf<String>()
+        plan.promptBlock(hintMultiStep = wantPlan && !plan.hasPlan).takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        visitLine?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
         val loc = buildString {
             if (currentApp.isNotBlank()) append("app=").append(currentApp.substringAfterLast('.'))
             if (currentScreen.isNotBlank()) { if (isNotEmpty()) append(" · "); append("screen=").append(currentScreen) }

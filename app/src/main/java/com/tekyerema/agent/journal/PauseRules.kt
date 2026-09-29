@@ -52,7 +52,8 @@ object PauseRules {
         PauseReason.NETWORK -> AppConfig.string("agent.resume.phrases.network", "the internet dropped")
         PauseReason.QUOTA -> AppConfig.string("agent.resume.phrases.quota", "I've used up my AI allowance for now")
         PauseReason.NO_CAPABLE_MODEL -> AppConfig.string("agent.resume.phrases.noModel", "no AI that can do this safely is free right now")
-        PauseReason.BUDGET -> AppConfig.string("agent.resume.phrases.budget", "it reached the limit set for one task")
+        // (merge A+B: B's budget_exhausted is the operator's DAILY cloud budget — OperatorPolicy.dailyCloudCallCap/dailyTokenCap.)
+        PauseReason.BUDGET -> AppConfig.string("agent.resume.phrases.budget", "the AI usage limit set for today has been reached")
         PauseReason.USER -> "you asked me to"
         PauseReason.PROCESS_DEATH -> AppConfig.string("agent.resume.phrases.processDeath", "the app was closed")
         null -> "it was interrupted"

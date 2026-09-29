@@ -429,20 +429,23 @@ object AgentEngine {
         // online. Offline with no local match → an honest refusal, never a silent cloud call or a
         // fabricated answer. This means the operator ALWAYS has a working brain, even with no key/network.
         val online = com.tekyerema.core.NetworkMonitor.isOnline()
+        // B: quota-aware routing — one route per task: the pinned model, the weak-model policy and budgets (OperatorPolicy).
+        val route = com.tekyerema.agent.routing.TaskRoute(unattended = unattended)
         val brain: AgentBrain = forcedBrain ?: run {
             // Cloud fallback CHAIN — use every credential: Groq (keys rotated inside OpenAiCompatBrain)
             // first, then Gemini, so a drained free-tier quota isn't a dead end (demo-readiness fix).
             val cloudChain = if (!RouterTiers.enabled(RouterTiers.CLOUD)) emptyList() else buildList {   // C-01
-                // N-06: provider order for the planner role from config (models.planner.chain).
-                for (id in ModelRoles.plannerChain()) when (id) {
-                    ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set))
+                // N-06: provider order for the planner role from config (models.planner.chain); B: only what the operator
+                // allows (OperatorPolicy.cloudAllowed / providers — cloud off means on-device only).
+                for (id in ModelRoles.plannerChainAllowed()) when (id) {
+                    ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set, route))
                     // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
                     ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
                     else -> Log.w(TAG, "[BRAIN] models.planner.chain: unknown provider '$id' — skipped")
                 }
             }
             val cloud: AgentBrain? = when (cloudChain.size) {
-                0 -> null; else -> FallbackBrain(cloudChain)   // even one brain gets the network-blip retry
+                0 -> null; else -> FallbackBrain(cloudChain, route = route)   // even one brain gets the network-blip retry
             }
             // Twi→English rewrite before the cloud operator was provided by Khaya MT, removed 2026-09-27.
             // Until the HCI Lab MT is wired into this seam there is no cloud Twi→English rewrite (null ⇒ goal
@@ -462,7 +465,7 @@ object AgentEngine {
             }
         }
         val cloudName = buildList {
-            for (id in ModelRoles.plannerChain()) when (id) {
+            for (id in ModelRoles.plannerChainAllowed()) when (id) {
                 ModelRoles.GROQ -> if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
                 ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
             }
@@ -525,7 +528,8 @@ object AgentEngine {
             else -> null
         }
         runCtx.journal = taskRun
-        val effects = com.tekyerema.agent.journal.EffectGate(taskRun?.id ?: "run-${System.nanoTime()}", { com.tekyerema.agent.journal.JournalBoot.world })
+        val effectsTaskId = taskRun?.id ?: "run-${System.nanoTime()}"   // the ledger's task id for this run (B's Backtracker reads it too)
+        val effects = com.tekyerema.agent.journal.EffectGate(effectsTaskId, { com.tekyerema.agent.journal.JournalBoot.world })
         val resumedFrom = taskRun?.resumedFrom
         var resumeLookPending = resumedFrom != null   // the first look after "carry on" says whether the phone is where it was
         val discoveredTools = LinkedHashSet<String>()
@@ -596,6 +600,23 @@ object AgentEngine {
                 "about the connection now. \"carry on\" resumes it.)")
             finish(AgentStatus.CANNOT_DO, s, paused = reason)
         }
+        // ---- B (agenticness: planning, recovery, routing) — per-task state; logic lives in agent/plan/* and agent/recovery/*.
+        // (merge A+B: ONE journal record per run — WS-A's `taskRun` above; B's plan and pinned model ride on it.)
+        val runStartMs = System.currentTimeMillis()
+        val taskRecovery = com.tekyerema.agent.recovery.RecoveryCoordinator(
+            backtracker = com.tekyerema.agent.recovery.Backtracker(effectsSince = { t ->
+                com.tekyerema.agent.journal.EffectLedger.all().any { it.at >= maxOf(t, runStartMs) && (it.taskId == null || it.taskId == effectsTaskId) }
+            }),
+            locateGate = { s, used -> com.tekyerema.agent.recovery.VisionLocate.gate(com.tekyerema.operator.OperatorPolicy.cloudAllowed,
+                set.allowGeminiBackup, set.geminiApiKey.isNotBlank(), com.tekyerema.core.NetworkMonitor.isOnline(),
+                com.tekyerema.policy.ScreenPrivacy.isPrivate(s), com.tekyerema.policy.ScreenPrivacy.isDenied(s.appPackage),
+                com.tekyerema.core.Privacy.secureStep, com.tekyerema.tools.DescribeScreenTool.recentCode(), used) })
+        var ladderAsk = false                     // the recovery ladder reached "ask the user"
+        // (merge A+B: "carry on" brings the plan back from the journal record — subgoals settled before the pause stay settled.)
+        if (resume != null) taskMemory.plan.restore(resume.plan)
+        taskMemory.wantPlan = !direct && forcedBrain == null && com.tekyerema.agent.plan.PlanTracker.looksMultiStep(goal)
+        /** B: the plan (and the model pinned for this task) onto this run's journal record (WS-A's; none = not journaled). */
+        fun journalCheckpoint() { taskRun?.notePlan(taskMemory.plan.toSubgoals(), route.pinnedName) }
         try {
             // ===== Workstream E: research before acting (LOCATE) — agent/research/TargetResearch.kt =====
             // "open University of Ghana Sakai": a destination that isn't on the phone is recalled (a remembered pick) or
@@ -612,7 +633,9 @@ object AgentEngine {
                 log(LogEntry.Kind.RESULT, e.line); pushConvo("Tɛkyerɛma: ${e.line}")
                 finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats); return
             }
-            val maxSteps = com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60)   // G-15
+            // G-15; B: never more than the operator's per-task step budget (OperatorPolicy.maxStepsPerTask).
+            val maxSteps = minOf(com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60),
+                com.tekyerema.operator.OperatorPolicy.maxStepsPerTask.coerceIn(1, 60))
             // WS-A: a resumed task counts on from its checkpoint, with at least `agent.resume.minSteps` more steps.
             val firstStep = (resumedFrom?.step ?: 0) + 1
             val lastStep = if (resumedFrom == null) maxSteps
@@ -726,6 +749,15 @@ object AgentEngine {
                 log(LogEntry.Kind.PERCEIVE, "source=${before.perception.source} reason=${before.perception.reason}" +
                     (if (before.strippedHiddenText > 0) " strippedHidden=${before.strippedHiddenText}" else "") +
                     (if (before.secureWindow) " secureWindow=true" else ""))
+                // B: count the visit, keep the first screen as a checkpoint, carry vision-located elements, and run a vision
+                // locate the recovery ladder asked for — only here, after the Secure Input boundary and the deny list; the
+                // locate re-checks privacy/consent before and after its one screenshot (agent/recovery/VisionLocate).
+                if (!directStep) {
+                    before = taskRecovery.onObserved(before)
+                    before = runPendingLocate(taskRecovery, ctxApp, before, history)
+                    taskMemory.visitLine = taskRecovery.visits.line(before)
+                    if (step > 2) taskMemory.wantPlan = false   // the "include a plan" nudge is for the first steps only
+                }
                 stats = stats.copy(steps = step, perceptionRoutes = bump(stats.perceptionRoutes, before.perception.source))
                 taskMemory.noteScreen(before.appPackage, before.screenTitle)   // Phase II P0: track current app/screen
                 futility.observed(before)      // a looked-for label that turned up (even a step late) exists after all
@@ -756,7 +788,9 @@ object AgentEngine {
                     } else {
                         val next = chain.first()
                         if (next.name == "type" && !next.args.has("element_id")) {
-                            val field = ActionChain.typeTarget(before)
+                            // B: after a vision tap aimed at a field, only the field it FOCUSED (VisionLocate.typeViaTap).
+                            val field = ActionChain.typeTarget(before,
+                                focusedOnly = next.rationale?.contains(com.tekyerema.agent.recovery.VisionLocate.FOCUS_TAG) == true)
                             if (field != null) next.args.put("element_id", field)
                             else if (chainTypeWaits++ < 3) {
                                 // The field the last tap opens may still be appearing: look again from the top of the loop
@@ -779,6 +813,19 @@ object AgentEngine {
 
                 when (decision) {
                     is AgentDecision.Done -> {
+                        // B: completion gate — every plan subgoal must be done (checks re-run on this screen first) or
+                        // skipped with a reason; otherwise the model is told exactly what's missing (agent/plan/TaskPlan).
+                        val planGate = if (decision.summary.trim().endsWith("?")) com.tekyerema.agent.plan.PlanTracker.Gate.Accept
+                            else taskMemory.plan.gate(before)
+                        if (planGate is com.tekyerema.agent.plan.PlanTracker.Gate.Refuse) {
+                            log(LogEntry.Kind.INFO, "completion gate: plan subgoal(s) ${planGate.open.joinToString { it.id.toString() }} still open — not done yet")
+                            history.add(planGate.note)
+                            journalCheckpoint()
+                            continue
+                        }
+                        val planOpen = (planGate as? com.tekyerema.agent.plan.PlanTracker.Gate.Unverified)?.open
+                        // B: if a smaller backup model did part of the task, the spoken result says so (once).
+                        val spokenSummary = decision.summary + route.disclosure()
                         // G-21: a PARTIAL step (scrolled or tapped on to new content without meeting its claim yet) is
                         // navigation, not a failed state change — it doesn't dilute the ratio. It never counts as verified
                         // either: if it was the LAST state-changing step, lastMutatingVerified is false and the gate holds.
@@ -799,12 +846,13 @@ object AgentEngine {
                         // (because an earlier step didn't verify) both spoke a wrong "…but I couldn't confirm it"
                         // tail AND stopped the voice layer's ask-card/mic-reopen (which keys off a trailing "?").
                         val isQuestion = decision.summary.trim().endsWith("?")
-                        if (isQuestion || (!ungroundedRead && (mutatingCount == 0 || substantiveOk))) {
-                            log(LogEntry.Kind.RESULT, decision.summary)
+                        if (isQuestion || (planOpen == null && !ungroundedRead && (mutatingCount == 0 || substantiveOk))) {
+                            log(LogEntry.Kind.RESULT, spokenSummary)
                             pushConvo("Tɛkyerɛma: ${decision.summary}")
                             finish(AgentStatus.COMPLETED, stats); return
                         }
                         val why = when {
+                            planOpen != null -> "plan subgoal(s) never verified: " + planOpen.joinToString("; ") { "${it.id}. ${it.text.take(50)}" }
                             ungroundedRead -> "answer asserts detail not present on the observed screen"
                             lastMutatingVerified != true -> "the most recent state-changing action did not verify"
                             else -> "only $mutatingVerified of $assessed state-changing actions verified (ratio ${"%.2f".format(ratio)})"
@@ -813,7 +861,7 @@ object AgentEngine {
                         // spoken) stays a PLAIN sentence. VoiceController appends the honest "— but I couldn't
                         // confirm it" for COMPLETED_UNVERIFIED, so the user never hears the jargon prefix.
                         log(LogEntry.Kind.INFO, "unverified completion: $why (outcome not backed by observation)")
-                        log(LogEntry.Kind.RESULT, decision.summary)
+                        log(LogEntry.Kind.RESULT, spokenSummary)
                         pushConvo("Tɛkyerɛma: ${decision.summary}")
                         finish(AgentStatus.COMPLETED_UNVERIFIED, stats); return
                     }
@@ -826,13 +874,15 @@ object AgentEngine {
                             pauseRun(step, pauseFor, null, stats); return
                         }
                         // RESULT is what gets SPOKEN — the reason class is for developers, not the user's ears.
+                        // (merge A+B: a run with no journal record can't be resumed — B's "I've paused this" becomes "I stopped".)
+                        val detail = com.tekyerema.agent.routing.ModelRouting.notResumable(decision.detail)
                         log(LogEntry.Kind.INFO, "CANNOT DO [${decision.reasonClass}]")
-                        log(LogEntry.Kind.RESULT, decision.detail)
+                        log(LogEntry.Kind.RESULT, detail)
                         // A dropped connection is about THAT moment. Remembered word for word ("the internet isn't
                         // working"), the model refused the next request on a working link (A20e, 2026-09-29).
                         val netDrop = decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST
                         pushConvo(if (netDrop) "Tɛkyerɛma: (that request didn't run — the connection dropped for a moment; " +
-                            "this says nothing about the connection now)" else "Tɛkyerɛma: ${decision.detail}")
+                            "this says nothing about the connection now)" else "Tɛkyerɛma: $detail")
                         finish(AgentStatus.CANNOT_DO, stats); return
                     }
                     is AgentDecision.Fail -> {
@@ -862,6 +912,13 @@ object AgentEngine {
                         continue
                     }
                     is AgentDecision.CallTool -> {
+                        // B: a plan riding in this call (the first action of a multi-step goal, or a REPLAN) — already
+                        // stripped from the tool's arguments; the engine owns the subgoal statuses from here.
+                        decision.plan?.let { raw ->
+                            val change = taskMemory.plan.offer(raw)
+                            if (change != null) { log(LogEntry.Kind.PLAN, change); journalCheckpoint() }
+                            else log(LogEntry.Kind.INFO, "plan ignored (not 2–7 subgoals): ${raw.take(120)}")
+                        }
                         val tool = registry.get(decision.name)
                         if (tool == null) {
                             log(LogEntry.Kind.ERROR, "Unknown tool '${decision.name}'.")
@@ -896,7 +953,11 @@ object AgentEngine {
                             continue
                         }
                         // G-12: several failed steps in a row — ask the user how to go on instead of burning steps (once per task).
-                        if (!unattended && decision.name != "cannot_do" && loopGuard.shouldEscalate(failStreak)) {
+                        // B: …or the recovery ladder reached its "ask the user" rung (same once-per-task allowance).
+                        val ladderEscalates = ladderAsk && loopGuard.escalateNow()
+                        ladderAsk = false
+                        if (!unattended && decision.name != "cannot_do" && (ladderEscalates || loopGuard.shouldEscalate(failStreak))) {
+                            taskRecovery.ladder.markTried(com.tekyerema.agent.recovery.Rung.ASK_USER)
                             // An app that isn't installed is the likely snag: ask about THAT, not "keep trying?" (which read
                             // as permission to hunt the home screen and the launcher search on the A20e).
                             val missing = notInstalledApp
@@ -998,6 +1059,20 @@ object AgentEngine {
                                 }
                                 is ResolveOutcome.OnlyWeak, is ResolveOutcome.NotFound -> { /* label may be revealed by scrolling at execute time */ }
                             }
+                        }
+                        // B: `type` aimed at a vision element (OCR / vision locate) — no node to set text on: tap it, then
+                        // type into the field it FOCUSES. Two ordinary steps, each through this whole pipeline (policy gate,
+                        // Secure Input boundary, password check); the screen's vision elements are carried so the tap resolves.
+                        val viaTap = com.tekyerema.agent.recovery.VisionLocate.typeViaTap(decision, resolved?.element)
+                        if (viaTap != null) {
+                            taskRecovery.carried = com.tekyerema.agent.recovery.RecoveryCoordinator.visionOf(before)
+                            planned.addFirst(viaTap.first)
+                            chain.clear(); chain.add(viaTap.second)
+                            // chainPrevOk starts false: only the tap's own verified/changed result (end of its step) lets the
+                            // typing go ahead — a refused or failed tap stops the chain.
+                            chainTotal = 2; chainDone = 1; chainPrevOk = false; chainTypeWaits = 0
+                            log(LogEntry.Kind.PLAN, "Step $step: type into a vision-found field → tap it, then type into the field it focuses")
+                            continue
                         }
                         // The home screen is not searched for icons (LauncherGuard): open_app, or ask the user.
                         val huntRefusal = LauncherGuard.check(decision.name, onHome = launcherPkg != null && before.appPackage == launcherPkg,
@@ -1348,103 +1423,17 @@ object AgentEngine {
                         // Everything else is observed again, on the same route the decision used, and the
                         // claim is re-checked over a short window — a launched app or a sent message can
                         // take a moment to appear, and a single instant snapshot is a race (round 9 finding).
-                        var afterSig: String? = null   // REL-P2 stall: post-action screen signature (null on PERCEIVE/secure → not counted)
-                        var afterSnap: UiSnapshot? = null   // G-21: the verified-against screen (null on PERCEIVE/WEB/secure)
-                        var extraScrolls = 0                // G-21 goal-directed scroll: scrolls made after the model's one
-                        var listEnded = false               // …and whether the list stopped moving before the claim was met
-                        val passedScreens = ArrayList<UiSnapshot>()   // …and the screens it scrolled past on the way
-                        val vr: com.tekyerema.verifier.VerificationResult
-                        if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE || tool.scope == com.tekyerema.policy.CapabilityScope.WEB) {
-                            vr = tool.verify(decision.args, toolCtx, before, before, result)
-                        } else {
-                            // G-10: wait for the screen to react to THIS action, then to go quiet — bounded (REL-P1-3: a long quiet
-                            // wait starves on animated screens); a dead tap costs reactMs, not a fixed sleep.
-                            controller?.waitForChange(actionMark,
-                                com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
-                                com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
-                            // SECURE INPUT BOUNDARY (verify path): a mutating action can LAND on a credential
-                            // screen — the MoMo PIN prompt appears as the RESULT of confirming the amount, so it
-                            // is first seen HERE as `after`, not at the top of the loop. observeForVerify inspects
-                            // the raw a11y tree BEFORE any screenshot/OCR (Perception.observe can auto-escalate to
-                            // a screenshot even when vision isn't requested) and never captures a credential
-                            // screen. If we land on one we suspend verification; the top-of-loop boundary enters
-                            // Secure Input Mode on the next iteration. Keeps a PIN/password out of screenshots+OCR.
-                            var after = observeForVerify(controller, before.perception.usedVision)
-                            if (TargetSemantics.isCredentialScreen(after)) {
-                                vr = com.tekyerema.verifier.VerificationResult(true,
-                                    "reached a secure-input screen — verification suspended, screen not observed")
-                            } else {
-                                var toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
-                                var v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
-                                var polls = 0
-                                // REL-P1-3: 3 re-polls normally; up to 8 while the screen is MID-TRANSITION (no package / no
-                                // elements — an app cold-starting after its icon was tapped). Seen on-device: "open Chrome"
-                                // by icon read as unverified at ~1.5 s, and the model then launched Chrome a second time.
-                                fun maxPolls(a: UiSnapshot) = if (a.appPackage.isNullOrBlank() || a.elements.isEmpty()) 8 else 3
-                                // A scroll/swipe lands at once: when the moved screen held still across a re-poll, waiting longer
-                                // can't make the claimed element appear (A20e: every unverified scroll sat through 3 polls, ~3 s).
-                                val landsAtOnce = decision.name == "scroll" || decision.name == "swipe"
-                                var lastPollSig = after.signature()
-                                while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < maxPolls(after)) {
-                                    kotlinx.coroutines.delay(500)
-                                    after = observeForVerify(controller, before.perception.usedVision)
-                                    if (TargetSemantics.isCredentialScreen(after)) break
-                                    toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
-                                    v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
-                                    polls++
-                                    val sig = after.signature()
-                                    if (landsAtOnce && sig == lastPollSig && sig != before.signature()) break
-                                    lastPollSig = sig
-                                }
-                                // G-21 goal-directed scroll (Progress.keepScrolling): the claim names what the model is scrolling
-                                // TOWARD, so keep scrolling the same way until it shows, the list stops moving, or the app changes —
-                                // one planning step instead of one per screenful (One UI's "About phone" is 3 screens down). Only an
-                                // allowed, non-consequential scroll; the credential check runs on every screen before any capture.
-                                val sought = Progress.soughtLabel(expectation)
-                                if (pd.outcome == PolicyOutcome.ALLOW && !consequential && !TargetSemantics.isCredentialScreen(after)) {
-                                    var prev = after
-                                    var moved = prev.signature() != before.signature()
-                                    while (Progress.keepScrolling(decision.name, result.success, v.verified, sought,
-                                            sameApp = prev.appPackage == before.appPackage, moved = moved, repeats = extraScrolls)) {
-                                        // Element ids are per snapshot: re-find the SAME list in the fresh one (no target → the tool
-                                        // takes the first scrollable, as the model's call did).
-                                        val again = resolved?.element?.let { (TargetResolver.reResolve(it, prev) as? ResolveOutcome.Found)?.target }
-                                        if (resolved != null && again == null) break
-                                        val mark = controller?.lastEventUptime() ?: 0L
-                                        val r2 = ActionQueue.run {
-                                            tool.execute(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = prev, resolvedTarget = again))
-                                        }
-                                        extraScrolls++
-                                        stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, r2.channel))
-                                        if (!r2.success) break
-                                        controller?.waitForChange(mark,
-                                            com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
-                                            com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
-                                        var next = observeForVerify(controller, before.perception.usedVision)
-                                        if (!TargetSemantics.isCredentialScreen(next) && next.signature() == prev.signature()) {
-                                            kotlinx.coroutines.delay(400)   // a slow fling: one more look before calling it the end
-                                            next = observeForVerify(controller, before.perception.usedVision)
-                                        }
-                                        after = next
-                                        if (TargetSemantics.isCredentialScreen(next)) break
-                                        moved = next.signature() != prev.signature()
-                                        if (!moved) listEnded = true
-                                        toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
-                                        v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
-                                        passedScreens.add(prev)   // scrolled past: "seen" for novelty, but never the final screen
-                                        prev = next
-                                    }
-                                    if (extraScrolls > 0) log(LogEntry.Kind.ACTION, "scroll → kept scrolling $extraScrolls more time" +
-                                        "${if (extraScrolls > 1) "s" else ""} toward '${sought?.take(50)}'" +
-                                        when { v.verified -> " — found it"; listEnded -> " — reached the end of the list"; else -> "" })
-                                }
-                                afterSig = after.signature()   // REL-P2 stall: capture the post-action screen signature
-                                if (!TargetSemantics.isCredentialScreen(after)) afterSnap = after
-                                vr = if (TargetSemantics.isCredentialScreen(after))
-                                    com.tekyerema.verifier.VerificationResult(true, "reached a secure-input screen — verification suspended, screen not observed")
-                                else if (polls > 0) v.copy(detail = v.detail + " (after ${polls} re-observation${if (polls > 1) "s" else ""})") else v
-                            }
-                        }
+                        // (The body is [verifyStep] — moved out of runTask at the A+E+B+D merge: the loop hit the JVM's 64 KB
+                        // method limit. Same code, same Secure Input boundary on the verify path.)
+                        val check = verifyStep(tool, decision, toolCtx, before, result, expectation, actionMark,
+                            allowScrollOn = pd.outcome == PolicyOutcome.ALLOW && !consequential, resolved = resolved, ctxApp = ctxApp)
+                        check.scrollChannels.forEach { stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, it)) }
+                        val vr = check.vr
+                        val afterSig = check.afterSig   // REL-P2 stall: post-action screen signature (null on PERCEIVE/secure → not counted)
+                        val afterSnap = check.afterSnap   // G-21: the verified-against screen (null on PERCEIVE/WEB/secure)
+                        val extraScrolls = check.extraScrolls   // G-21 goal-directed scroll: scrolls made after the model's one
+                        val listEnded = check.listEnded         // …and whether the list stopped moving before the claim was met
+                        val passedScreens = check.passedScreens // …and the screens it scrolled past on the way
                         // G-21: how far this step moved the task (Progress) — novelty is measured BEFORE this screen is noted.
                         val sameApp = afterSnap != null && afterSnap.appPackage == before.appPackage
                         passedScreens.forEach(exploration::note)
@@ -1610,6 +1599,25 @@ object AgentEngine {
                                 (if (untrustedOut) "$UNTRUSTED_MARK " else "") + "${result.message.take(resultLimit(decision.name))}${recovery}" +
                                 (if (entities.isEmpty()) "" else " [${com.tekyerema.core.TextEntities.summary(entities)}]")
                         )
+
+                        // ---- B: outcome class → plan ticks, checkpoints/barriers, then the class's own fix: close a popup,
+                        // backtrack from a wrong page, or the next recovery-ladder rung (agent/recovery/*, agent/plan/*;
+                        // the body is [recoverAfterStep]) ----
+                        val acts = recoverAfterStep(taskRecovery, com.tekyerema.agent.recovery.RecoveryCoordinator.Step(
+                            decision = decision, verdict = verdict, success = result.success, recoverable = result.recoverable,
+                            needsUser = result.needsDisambiguation, message = result.message,
+                            targetMissing = target != null && resolved == null, requestedLabel = requestedLabel,
+                            resolvedLabel = resolved?.element?.label,
+                            resolvedFromTree = resolved?.element?.source != com.tekyerema.accessibility.ElementSource.VISION,
+                            // (merge A+B: a step the effect ledger recorded — a GUI Send, type+submit into a chat — is
+                            // consequential here too: a backtrack barrier, and no recovery ladder after it fails.)
+                            expectation = expectation, before = before, after = afterSnap, consequential = consequential || effect != null,
+                            confirmed = pd.outcome == PolicyOutcome.CONFIRM, mutating = mutating,
+                            scrolled = extraScrolls > 0 || listEnded, launcherPkg = launcherPkg),
+                            canAsk = !unattended, taskMemory = taskMemory, history = history, planned = planned)
+                        if (acts.visionNext) visionNext = true
+                        if (acts.ask) ladderAsk = true
+                        journalCheckpoint()
                         // I-03 web-first: the search's own short answer IS the reply — no second planning call to restate it.
                         // A failed search leaves the queue empty, so the planner takes over with the failure in its history.
                         if (webFirst && decision.name == "web_search" && result.success)
@@ -1643,6 +1651,231 @@ object AgentEngine {
             log(LogEntry.Kind.ERROR, "Error: ${t.message}")
             finish(AgentStatus.FAILED, stats)
         }
+    }
+
+    // ---------------------------------------------------------------- pieces of the loop, moved out of runTask
+    // Integration note (A+E+B merge, 2026-09-29): runTask outgrew the JVM's 64 KB-per-method bytecode limit
+    // (MethodTooLargeException — every suspension point in a suspend fun spills all its live locals). The verify step and
+    // Workstream B's two largest blocks live here instead — same code, same order, called from the same places in the loop.
+
+    /** What observing again after an executed step showed ([verifyStep]). */
+    private class StepCheck(
+        val vr: com.tekyerema.verifier.VerificationResult,
+        /** REL-P2 stall: post-action screen signature (null on PERCEIVE/WEB/secure → not counted) */
+        val afterSig: String?,
+        /** G-21: the verified-against screen (null on PERCEIVE/WEB/secure) */
+        val afterSnap: UiSnapshot?,
+        /** G-21 goal-directed scroll: scrolls made after the model's one, whether the list stopped moving before the claim
+         *  was met, and the screens scrolled past on the way */
+        val extraScrolls: Int, val listEnded: Boolean, val passedScreens: List<UiSnapshot>,
+        /** each extra scroll's channel (each is one more action in the run's stats) */
+        val scrollChannels: List<String>
+    )
+
+    /**
+     * ---- observe again, verify the CLAIM against a fresh observation ----
+     * Perception-only tools don't change the device: their own observation stands. Everything else is observed again, on
+     * the same route the decision used, and the claim is re-checked over a short window — a launched app or a sent message
+     * can take a moment to appear, and a single instant snapshot is a race (round 9 finding).
+     * @param allowScrollOn the step was ALLOWED (not confirmed) and isn't consequential — only then may G-21 keep scrolling
+     */
+    private suspend fun verifyStep(
+        tool: com.tekyerema.tools.Tool, decision: AgentDecision.CallTool, toolCtx: ToolContext, before: UiSnapshot,
+        result: com.tekyerema.tools.ToolResult, expectation: com.tekyerema.verifier.Expectation?, actionMark: Long,
+        allowScrollOn: Boolean, resolved: ResolvedTarget?, ctxApp: Context
+    ): StepCheck {
+        var afterSig: String? = null
+        var afterSnap: UiSnapshot? = null
+        var extraScrolls = 0
+        var listEnded = false
+        val passedScreens = ArrayList<UiSnapshot>()
+        val scrollChannels = ArrayList<String>()
+        val vr: com.tekyerema.verifier.VerificationResult
+        if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE || tool.scope == com.tekyerema.policy.CapabilityScope.WEB) {
+            vr = tool.verify(decision.args, toolCtx, before, before, result)
+        } else {
+            // G-10: wait for the screen to react to THIS action, then to go quiet — bounded (REL-P1-3: a long quiet
+            // wait starves on animated screens); a dead tap costs reactMs, not a fixed sleep.
+            controller?.waitForChange(actionMark,
+                com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
+                com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
+            // SECURE INPUT BOUNDARY (verify path): a mutating action can LAND on a credential
+            // screen — the MoMo PIN prompt appears as the RESULT of confirming the amount, so it
+            // is first seen HERE as `after`, not at the top of the loop. observeForVerify inspects
+            // the raw a11y tree BEFORE any screenshot/OCR (Perception.observe can auto-escalate to
+            // a screenshot even when vision isn't requested) and never captures a credential
+            // screen. If we land on one we suspend verification; the top-of-loop boundary enters
+            // Secure Input Mode on the next iteration. Keeps a PIN/password out of screenshots+OCR.
+            var after = observeForVerify(controller, before.perception.usedVision)
+            if (TargetSemantics.isCredentialScreen(after)) {
+                vr = com.tekyerema.verifier.VerificationResult(true,
+                    "reached a secure-input screen — verification suspended, screen not observed")
+            } else {
+                var toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
+                var v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
+                var polls = 0
+                // REL-P1-3: 3 re-polls normally; up to 8 while the screen is MID-TRANSITION (no package / no
+                // elements — an app cold-starting after its icon was tapped). Seen on-device: "open Chrome"
+                // by icon read as unverified at ~1.5 s, and the model then launched Chrome a second time.
+                fun maxPolls(a: UiSnapshot) = if (a.appPackage.isNullOrBlank() || a.elements.isEmpty()) 8 else 3
+                // A scroll/swipe lands at once: when the moved screen held still across a re-poll, waiting longer
+                // can't make the claimed element appear (A20e: every unverified scroll sat through 3 polls, ~3 s).
+                val landsAtOnce = decision.name == "scroll" || decision.name == "swipe"
+                var lastPollSig = after.signature()
+                while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < maxPolls(after)) {
+                    kotlinx.coroutines.delay(500)
+                    after = observeForVerify(controller, before.perception.usedVision)
+                    if (TargetSemantics.isCredentialScreen(after)) break
+                    toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
+                    v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
+                    polls++
+                    val sig = after.signature()
+                    if (landsAtOnce && sig == lastPollSig && sig != before.signature()) break
+                    lastPollSig = sig
+                }
+                // G-21 goal-directed scroll (Progress.keepScrolling): the claim names what the model is scrolling
+                // TOWARD, so keep scrolling the same way until it shows, the list stops moving, or the app changes —
+                // one planning step instead of one per screenful (One UI's "About phone" is 3 screens down). Only an
+                // allowed, non-consequential scroll; the credential check runs on every screen before any capture.
+                val sought = Progress.soughtLabel(expectation)
+                if (allowScrollOn && !TargetSemantics.isCredentialScreen(after)) {
+                    var prev = after
+                    var moved = prev.signature() != before.signature()
+                    while (Progress.keepScrolling(decision.name, result.success, v.verified, sought,
+                            sameApp = prev.appPackage == before.appPackage, moved = moved, repeats = extraScrolls)) {
+                        // Element ids are per snapshot: re-find the SAME list in the fresh one (no target → the tool
+                        // takes the first scrollable, as the model's call did).
+                        val again = resolved?.element?.let { (TargetResolver.reResolve(it, prev) as? ResolveOutcome.Found)?.target }
+                        if (resolved != null && again == null) break
+                        val mark = controller?.lastEventUptime() ?: 0L
+                        val r2 = ActionQueue.run {
+                            tool.execute(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = prev, resolvedTarget = again))
+                        }
+                        extraScrolls++
+                        scrollChannels.add(r2.channel)
+                        if (!r2.success) break
+                        controller?.waitForChange(mark,
+                            com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
+                            com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
+                        var next = observeForVerify(controller, before.perception.usedVision)
+                        if (!TargetSemantics.isCredentialScreen(next) && next.signature() == prev.signature()) {
+                            kotlinx.coroutines.delay(400)   // a slow fling: one more look before calling it the end
+                            next = observeForVerify(controller, before.perception.usedVision)
+                        }
+                        after = next
+                        if (TargetSemantics.isCredentialScreen(next)) break
+                        moved = next.signature() != prev.signature()
+                        if (!moved) listEnded = true
+                        toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
+                        v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
+                        passedScreens.add(prev)   // scrolled past: "seen" for novelty, but never the final screen
+                        prev = next
+                    }
+                    if (extraScrolls > 0) log(LogEntry.Kind.ACTION, "scroll → kept scrolling $extraScrolls more time" +
+                        "${if (extraScrolls > 1) "s" else ""} toward '${sought?.take(50)}'" +
+                        when { v.verified -> " — found it"; listEnded -> " — reached the end of the list"; else -> "" })
+                }
+                afterSig = after.signature()   // REL-P2 stall: capture the post-action screen signature
+                if (!TargetSemantics.isCredentialScreen(after)) afterSnap = after
+                vr = if (TargetSemantics.isCredentialScreen(after))
+                    com.tekyerema.verifier.VerificationResult(true, "reached a secure-input screen — verification suspended, screen not observed")
+                else if (polls > 0) v.copy(detail = v.detail + " (after ${polls} re-observation${if (polls > 1) "s" else ""})") else v
+            }
+        }
+        return StepCheck(vr, afterSig, afterSnap, extraScrolls, listEnded, passedScreens, scrollChannels)
+    }
+
+    /** B: the vision locate the recovery ladder asked for, on [screen] (already past the Secure Input boundary and the deny
+     *  list — the locate re-checks privacy/consent before and after its one screenshot). Returns the screen, with the
+     *  located element added when one was found. */
+    private suspend fun runPendingLocate(rec: com.tekyerema.agent.recovery.RecoveryCoordinator, ctxApp: Context,
+                                         screen: UiSnapshot, history: MutableList<String>): UiSnapshot {
+        val want = rec.pendingLocate ?: return screen
+        rec.pendingLocate = null
+        var before = screen
+        when (val r = com.tekyerema.agent.recovery.VisionLocate.locate(controller, ctxApp, want, before, rec.locatesUsed)) {
+            is com.tekyerema.agent.recovery.VisionLocate.Result.Found -> {
+                rec.locatesUsed++
+                before = before.copy(elements = before.elements + r.element)
+                rec.carried = com.tekyerema.agent.recovery.RecoveryCoordinator.visionOf(before)
+                log(LogEntry.Kind.PERCEIVE, "vision locate: found '${want.take(40)}' → element ${r.element.id}")
+                history.add("VISION LOCATE: '${want.take(50)}' was found in a picture of the screen → element [${r.element.id}] " +
+                    "(source=vision). Tap it by element_id if it's what you need; to type into it, call type with that element_id.")
+            }
+            is com.tekyerema.agent.recovery.VisionLocate.Result.NotFound -> {
+                rec.locatesUsed++
+                log(LogEntry.Kind.PERCEIVE, "vision locate: '${want.take(40)}' not found")
+                history.add("VISION LOCATE: '${want.take(50)}' isn't visible in a picture of the screen either.")
+            }
+            is com.tekyerema.agent.recovery.VisionLocate.Result.Refused -> log(LogEntry.Kind.INFO, "vision locate not run: ${r.why}")
+        }
+        return before
+    }
+
+    /** B: after an executed step — its outcome class → plan ticks, checkpoints/barriers, then the class's own fix: close a
+     *  popup, backtrack from a wrong page, or the next recovery-ladder rung. History notes and engine-chosen steps are added
+     *  to [history] / [planned]; the caller applies the returned [Actions]' visionNext / ask. */
+    private suspend fun recoverAfterStep(
+        rec: com.tekyerema.agent.recovery.RecoveryCoordinator, first: com.tekyerema.agent.recovery.RecoveryCoordinator.Step,
+        canAsk: Boolean, taskMemory: TaskMemory, history: MutableList<String>, planned: ArrayDeque<AgentDecision>
+    ): com.tekyerema.agent.recovery.RecoveryCoordinator.Actions {
+        var bStep = first
+        val before = bStep.before
+        val decision = bStep.decision
+        var outcome = rec.classify(bStep)
+        // Only on a settled screen: a wrong app or a popup must still be there on a second look.
+        if (bStep.after != null && (outcome == com.tekyerema.agent.recovery.OutcomeClass.WRONG_PAGE ||
+                outcome == com.tekyerema.agent.recovery.OutcomeClass.DIALOG)) {
+            kotlinx.coroutines.delay(com.tekyerema.core.config.AppConfig.long("agent.recovery.settleMs", 500L))
+            val again = observeForVerify(controller, false)
+            if (!TargetSemantics.isCredentialScreen(again)) { bStep = bStep.copy(after = again); outcome = rec.classify(bStep) }
+        }
+        val acts = rec.afterStep(bStep, outcome, canAsk = canAsk)
+        if (outcome.failure) log(LogEntry.Kind.VERIFY, "outcome: ${outcome.name.lowercase()}")
+        acts.logs.forEach { log(LogEntry.Kind.INFO, it) }
+        val ticked = taskMemory.plan.onStep(com.tekyerema.agent.plan.PlanTracker.StepEvidence(
+            verified = bStep.verdict == Progress.Verdict.VERIFIED,
+            read = bStep.verdict == Progress.Verdict.OBSERVED && bStep.success,
+            failed = outcome.failure, before = before, after = bStep.after))
+        if (ticked.isNotEmpty()) {
+            rec.ladder.reset()   // a new subgoal starts a fresh ladder
+            log(LogEntry.Kind.PLAN, "subgoal done: " + ticked.joinToString("; ") { "${it.id}. ${it.text} (${it.evidence})" })
+        }
+        history.addAll(acts.notes)
+        acts.planned.forEach { planned.add(it) }
+        if (acts.backtrack) {
+            // Engine backtracking: Back until the last verified checkpoint matches (≤3), else relaunch + replay
+            // the verified navigation. Never on a credential screen, a phone session, over a typed draft, or
+            // across a consequential step (Backtracker barriers + the EffectLedger).
+            val bt = rec.backtracker.run(bStep.after ?: before, object : com.tekyerema.agent.recovery.Backtracker.Ops {
+                override suspend fun back(): Boolean = controller?.globalAction("back") == true
+                override suspend fun observe(): UiSnapshot? {
+                    controller?.waitForSettle(com.tekyerema.core.config.AppConfig.long("executor.launch.settleMs", 1200L))
+                    return observeForVerify(controller, false).takeIf { !TargetSemantics.isCredentialScreen(it) }
+                }
+            }, rec.typedTexts)
+            val how = com.tekyerema.agent.recovery.VisitCounter.actionKey(decision.name, decision.args, bStep.resolvedLabel)
+            val why = outcome.name.lowercase().replace('_', ' ')
+            when (bt) {
+                is com.tekyerema.agent.recovery.Backtracker.Result.Reached -> {
+                    log(LogEntry.Kind.ACTION, "backtrack → ${bt.presses} Back press(es) to ${bt.to.appName ?: bt.to.key.pkg}")
+                    history.add("BACKTRACK (engine): $how ended in a $why, so I pressed Back ${bt.presses} time(s) to the last " +
+                        "screen that worked (${bt.to.appName ?: bt.to.key.pkg}${bt.to.key.title?.let { " · $it" } ?: ""}). Don't take that route again.")
+                }
+                is com.tekyerema.agent.recovery.Backtracker.Result.Replay -> {
+                    log(LogEntry.Kind.ACTION, "backtrack → Back didn't find it; relaunch + replay ${bt.steps.size} verified step(s)")
+                    bt.steps.forEach { planned.add(it) }
+                    history.add("BACKTRACK (engine): $how ended in a $why and Back didn't reach the last good screen, so I'm " +
+                        "reopening ${bt.to.appName ?: "the app"} and replaying the route that worked (${bt.steps.size} steps). Then take a different route.")
+                }
+                is com.tekyerema.agent.recovery.Backtracker.Result.NotReached ->
+                    history.add("BACKTRACK: I couldn't get back to the last screen that worked (${bt.why}) — look where you are and take another route.")
+                is com.tekyerema.agent.recovery.Backtracker.Result.Refused ->
+                    history.add("BACKTRACK: not going back (${bt.why}) — go on from here by another route.")
+                com.tekyerema.agent.recovery.Backtracker.Result.AlreadyThere -> {}
+            }
+        }
+        return acts
     }
 
     /** C-13 / G-12: ask the user and WAIT for the answer inside the task. null = no answer in time, or the task was stopped. */

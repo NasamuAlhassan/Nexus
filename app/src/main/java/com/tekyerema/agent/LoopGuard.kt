@@ -69,6 +69,13 @@ class LoopGuard(
         return true
     }
 
+    /** B: the recovery ladder reached "ask the user" — true if the per-task escalation allowance isn't used up. */
+    fun escalateNow(): Boolean {
+        if (escalations >= maxEscalations) return false
+        escalations++
+        return true
+    }
+
     companion object {
         /** "try another way", "do it differently" — said while a task runs (G-12). */
         val ANOTHER_WAY = Regex("(?i)\\b(?:try (?:another|a different|some other) (?:way|route|approach)|try something else|do it (?:another|a different) way|that'?s not working)\\b")

@@ -67,6 +67,15 @@ class TaskRun private constructor(record: TaskRecord, val resumedFrom: Checkpoin
         TaskJournal.checkpoint(rec.copy(checkpoint = cp.toJson(), stepsDone = step, progress = progressLine()))
     }
 
+    /** Workstream B: the explicit plan and the model pinned for this task, on this run's record (one record per run).
+     *  Written only when something changed; the loop checkpoint ([save]) keeps them (it copies the stored record). */
+    fun notePlan(plan: List<Subgoal>, model: String?) {
+        val rec = TaskJournal.get(id) ?: return
+        val m = model ?: rec.model
+        if (rec.plan == plan && rec.model == m) return
+        TaskJournal.checkpoint(rec.copy(plan = plan, model = m))
+    }
+
     /** The cloud went away mid-task: PAUSED with its checkpoint. Returns the line the user hears. */
     fun pause(reason: PauseReason, resumeAfterMs: Long? = null, now: Long = System.currentTimeMillis()): String {
         paused = reason
