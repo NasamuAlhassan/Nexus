@@ -337,7 +337,9 @@ object SendSmsTool : Tool {
     private suspend fun pressSendInComposer(
         ctrl: com.tekyerema.accessibility.AccessibilityController, pkgs: Set<String>, message: String, who: String, appName: String
     ): ToolResult? {
-        val screen = awaitScreen(ctrl, AppConfig.long("os.sms.composerWaitMs", 8_000L)) { s ->
+        // 20 s, an upper bound: WhatsApp looks a number up on its server before opening the chat — on the campus Wi-Fi
+        // (A20e 2026-09-29) the draft appeared after ~13 s, the old 8 s gave up, and the planner had to press Send.
+        val screen = awaitScreen(ctrl, AppConfig.long("os.sms.composerWaitMs", 20_000L)) { s ->
             (pkgs.isEmpty() || s.appPackage in pkgs) &&
                 (ComposerSend.composerWith(s, message) != null || ComposerSend.notOnWhatsApp(s) || ComposerSend.cantConnect(s))
         }
