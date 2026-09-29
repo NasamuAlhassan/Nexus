@@ -95,6 +95,9 @@ class RoutingBrain(
          * looked at, so the confirmation is said BEFORE the PIN rather than after the Secure Input hand-off. Pure.
          */
         fun moneyEnd(history: List<String>): Pair<AgentStatus, String>? {
+            // Money safety round 2 (money/MoneyPlan): a send refused by the user's spending limit, and a guided bank step that
+            // failed or reached a payment confirmation / PIN, end here too.
+            com.tekyerema.money.MoneyPlan.end(history)?.let { return it }
             // The last STEP's line — the engine may add its own notes (recovery, plan) after it.
             val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
             if (!last.startsWith("momo_send(")) return null
@@ -141,6 +144,9 @@ class RoutingBrain(
         // Trust (2026-09-29): "call my helper" / "tell my helper what you did" are planned on the phone, online or offline,
         // whichever brain is in charge (agent/helper/TrustedHelper.kt); the engine's gate confirms the call or the text.
         com.tekyerema.agent.helper.HelperPlan.decide(ctx.goal, ctx.history)?.let { return it }
+        // Money safety round 2 (money/MoneyPlan): "try again" after a *170# timeout, "I sent money to the wrong number" and the
+        // guided bank menu are decided on the phone, online or offline — no model picks a money or bank-menu step.
+        com.tekyerema.money.MoneyPlan.decide(ctx.goal, ctx.history)?.let { return it }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
 
         // Cloud-first: hand EVERYTHING to the cloud brain (the relay = Claude), skipping LocalBrain. Sticky so

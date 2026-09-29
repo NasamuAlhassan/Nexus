@@ -78,5 +78,8 @@ fun defaultTools(): List<Tool> = listOf(
     MobileMoneyTool,
     // Deterministic *170# send-money driver (reads each screen, stops at the PIN). Owner-requested for the
     // demo; MUST be live-tested with a tiny amount before trusting it — never enters the PIN.
-    MoMoSendTool
+    MoMoSendTool,
+    // Money safety round 2: the guided bank USSD menu (verified codes only; the on-phone guide decides every step, the user
+    // confirms the payment and enters the PIN). Hidden from every model (no schema entry): only the guide calls it.
+    com.tekyerema.money.BankUssdTool
 )

@@ -208,7 +208,9 @@ object NumberCorrection {
     /** Which argument carries the number each confirmable action reaches (the ones whose read-back is grouped). */
     private val NUMBER_ARG = mapOf("momo_send" to "number", "mobile_money" to "_number", "make_call" to "number", "send_sms" to "number")
     /** Arguments a tool derived from the OLD number in its preflight (the read-back text) — dropped so they're rebuilt. */
-    private val DERIVED = mapOf("send_sms" to listOf("_to"))
+    private val DERIVED = mapOf("send_sms" to listOf("_to"),
+        // Money safety round 2: "you haven't sent money to this number before" was about the OLD number; preflight re-checks.
+        "momo_send" to listOf("_new_recipient"), "mobile_money" to listOf("_new_recipient"))
 
     /**
      * For a pending [tool] confirmation, the arguments with the number fixed by [utterance], or null when this tool has

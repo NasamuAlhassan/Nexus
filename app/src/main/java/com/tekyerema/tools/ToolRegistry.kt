@@ -28,6 +28,7 @@ class ToolRegistry(
         val arr = JSONArray()
         for (t in all) {
             if (subset != null && t.name !in subset) continue
+            if (t.hiddenFromModel) continue   // an on-phone guide's own tool (money/BankUssdTool): no model ever calls it
             val decl = JSONObject()
                 .put("name", t.name)
                 .put("description", describe(t))

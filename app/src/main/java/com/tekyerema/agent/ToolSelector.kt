@@ -109,7 +109,7 @@ object ToolSelector {
     fun search(query: String, candidates: List<Tool>, limit: Int = 4): List<Tool> {
         val words = query.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 3 }.toSet()
         if (words.isEmpty()) return emptyList()
-        return candidates.map { t ->
+        return candidates.filter { !it.hiddenFromModel }.map { t ->
             val hay = (t.name.replace('_', ' ') + " " + t.description).lowercase()
             t to words.count { w -> hay.contains(w) || (w.length > 4 && hay.contains(w.dropLast(1))) }
         }.filter { it.second > 0 }.sortedByDescending { it.second }.take(limit).map { it.first }

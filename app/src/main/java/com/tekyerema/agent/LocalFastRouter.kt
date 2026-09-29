@@ -44,6 +44,9 @@ class LocalFastRouter(
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             com.tekyerema.operator.OperatorCommands.handle(appContext, text)
         }?.let { return it }
+        // Money safety round 2 (money/MoneyCommands): the user's Mobile Money limits by voice ("set my MoMo limit to 200 cedis",
+        // "what is my MoMo limit") — the user's own controls, so like the ones above they always work.
+        com.tekyerema.money.MoneyCommands.handle(text)?.let { return it }
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null

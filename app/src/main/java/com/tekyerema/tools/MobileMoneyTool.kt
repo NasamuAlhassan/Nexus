@@ -102,6 +102,37 @@ object MobileMoneyTool : Tool {
         ToolParam("_number", "string", "Recipient number (for send_money).", required = false)
     )
 
+    /** A send (not airtime): the guided send-money menu. */
+    private fun isSend(args: JSONObject) = args.str("_kind") != "buy_airtime"
+
+    /**
+     * Money safety round 2 (2026-09-29), the guided send the same as momo_send: the user's spending limit is checked before
+     * the read-back (with a limit set, the amount must be known to check it), a number never paid before and a phone call
+     * in progress are said in the read-back. Airtime is not a send and is left as it was.
+     */
+    override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        if (!isSend(args)) return null
+        com.tekyerema.money.MoneyLimits.preflight(args.str("_amount"))?.let { (line, final) -> return ToolResult(false, line, recoverable = !final) }
+        val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
+        GhanaMobileMoney.network(tm?.simOperatorName?.ifBlank { tm.simOperator } ?: tm?.simOperator)
+            ?.let { args.put(com.tekyerema.money.GuidedSend.ARG_SIM, it) }
+        val number = args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
+        if (number != null && !com.tekyerema.money.KnownRecipients.isKnown(number)) args.put(MoMoSendTool.ARG_NEW_RECIPIENT, true)
+        else args.remove(MoMoSendTool.ARG_NEW_RECIPIENT)
+        if (MoneyPrivacy.onCall(ctx.appContext)) args.put(MoMoSendTool.ARG_ON_CALL, true) else args.remove(MoMoSendTool.ARG_ON_CALL)
+        return null
+    }
+
+    /** The read-back's warnings for a guided send (unknown prefix, first-time number, a call in progress), or null — the
+     *  structured (Twi) read-back can't carry them, so the English sentence is spoken when there is one. */
+    fun warning(args: JSONObject): String? {
+        if (!isSend(args)) return null
+        val net = args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
+            ?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it).second }
+        return listOfNotNull(net, MoMoSendTool.firstTimeWarning(args), MoneyPrivacy.callWarning(args.optBoolean(MoMoSendTool.ARG_ON_CALL)))
+            .joinToString(" ").ifEmpty { null }
+    }
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
             return ToolResult(false, "CALL_PHONE permission not granted, so I can't open Mobile Money. Grant it in the app.")
@@ -141,7 +172,8 @@ object MobileMoneyTool : Tool {
         // and an unknown prefix is said so the user checks it.
         val name = args.str("_recipient")?.trim()?.takeIf { it.isNotEmpty() }
         val number = args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
-        val (said, warn) = number?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it) } ?: (null to null)
+        val said = number?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it).first }
+        val warn = warning(args)   // round 2: + a first-time number and a call in progress
         val to = when {
             name != null && said != null && name.filter(Char::isDigit) != number.orEmpty().filter(Char::isDigit) -> " to $name on $said,"
             said != null -> " to $said,"

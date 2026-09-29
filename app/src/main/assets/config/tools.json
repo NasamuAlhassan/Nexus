@@ -37,6 +37,7 @@
     "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
     "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true,
       "examples": [{"number": "0244123456", "amount": "5", "reference": "lunch"}, {"number": "0551234567", "amount": "0.5", "reference": "test"}]},
+    "bank_ussd": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner"], "untrusted_output": true},
     "find_tool": {"feature": "D-02", "idempotent": true},
     "notification_action": {"feature": "E-17", "callers": ["planner", "local"]},
     "send_sms": {"feature": "E-03", "permissions": ["android.permission.SEND_SMS"], "callers": ["planner", "local"],

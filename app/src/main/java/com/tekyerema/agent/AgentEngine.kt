@@ -218,8 +218,12 @@ object AgentEngine {
         // from the words and the journal (no model call), only on the user's word (never an unattended trigger).
         if (currentJob?.isActive != true) resumeFor(goal, unattended, origin)?.let { rec -> launchResume(rec, goal.trim()); return }
         val g = goal.trim().let { raw ->
+            // Money safety round 2 (money/MoneyPlan): the phone user's "try again" → the timed-out send (read back again), "yes"
+            // → "call 100" after the wrong-number guide. Never a trigger's or a computer's words.
+            val money = if (!unattended && !com.tekyerema.mcp.RemoteGate.isRemote(origin)) com.tekyerema.money.MoneyPlan.rewrite(raw) else null
+            if (money != null) { log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$money\""); money }
             // D: a computer's "her" is not the phone user's "her" — its words are never resolved against their conversation.
-            if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true) || com.tekyerema.mcp.RemoteGate.isRemote(origin)) raw
+            else if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true) || com.tekyerema.mcp.RemoteGate.isRemote(origin)) raw
             else References.rewrite(raw)?.also { log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$it\"") } ?: raw
         }
         if (g.isEmpty()) return
@@ -760,6 +764,7 @@ object AgentEngine {
                     chain.clear()   // G-11: nothing queued before the secret was entered runs after it
                     // Deliberately log a SAFE label only — never the screen text.
                     log(LogEntry.Kind.POLICY, "SENSITIVE_INPUT_DETECTED ($reason) — Secure Input Mode: pausing observation, brain and logging until you finish.")
+                    com.tekyerema.money.GuidedSend.atPin(goal, reason)   // money safety round 2: a guided send reached its PIN
                     val resumed = awaitSecureInput(reason)
                     if (!resumed) { finish(AgentStatus.STOPPED, stats); return }
                     continue   // re-observe a FRESH screen; the boundary re-checks it before any brain call
@@ -1379,6 +1384,7 @@ object AgentEngine {
                                         if (decision.name == "mobile_money" || isDialerNavigation(before)) {
                                             moneyOpApproved = true
                                             moneyApproval.approve(decision.args)   // J-02: approval covers exactly these values
+                                            com.tekyerema.money.GuidedSend.approved(goal, decision.name, decision.args)   // round 2: limits/receipt at its PIN
                                         }
                                         // §safety (2026-09-27 audit) — the target was resolved BEFORE this multi-second
                                         // confirmation wait; the screen can reflow (new message, keyboard, scroll) while the
@@ -2209,8 +2215,8 @@ object AgentEngine {
             // Mobile Money (§A.2) carries confirmation slots so the readback names the resolved recipient
             // and amount in the user's language.
             "mobile_money" -> when (args.str("_kind")) {
-                "send_money" -> if (args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
-                        ?.let { NumberSpeech.moneyReadBack(it).second } != null) null   // "check the number" is English-only (see momo_send)
+                // "check the number" is English-only (see momo_send); round 2 adds the first-time-number and on-a-call lines.
+                "send_money" -> if (com.tekyerema.tools.MobileMoneyTool.warning(args) != null) null
                     else Spec(Spec.Kind.SEND_MONEY, name = args.str("_recipient"), number = args.str("_number"), amount = args.str("_amount"))
                 "buy_airtime" -> Spec(Spec.Kind.BUY_AIRTIME, amount = args.str("_amount"))
                 else -> null

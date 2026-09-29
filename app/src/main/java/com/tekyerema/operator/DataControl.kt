@@ -29,6 +29,8 @@ object DataControl {
             Item("Your schedules", safe { com.tekyerema.agent.triggers.ScheduledTasks.list(app).count { !it.id.startsWith("cfg:") } }, null, "schedules"),
             Item("Message alerts", safe { com.tekyerema.agent.triggers.NotificationTriggers.userRules(app).size }, null, "alerts"),
             Item("Words the Twi keyboard learned", safe { com.tekyerema.ime.LearnedWordStore.count(app) }, null, "words"),
+            // Money safety round 2: scrambled (salted hashes), never the numbers — only "have I paid this number before?".
+            Item("Numbers you've sent Mobile Money to, kept scrambled", safe { com.tekyerema.money.KnownRecipients.count() }, null, "numbers"),
             Item("Saved tasks to improve Tɛkyerɛma", safe { com.tekyerema.core.telemetry.Trajectories.count(app) },
                 "${com.tekyerema.core.Privacy.trajectoryDays()} days", "tasks"),
             Item("Step-by-step traces", safe { File(app.filesDir, "traces").listFiles()?.size ?: 0 },
@@ -80,6 +82,7 @@ object DataControl {
                 .forEach { com.tekyerema.agent.triggers.NotificationTriggers.removeRule(app, it.id) }
         }
         step("keyboard") { com.tekyerema.ime.LearnedWordStore.clear(app) }
+        step("paid numbers") { com.tekyerema.money.KnownRecipients.clear() }   // round 2: every number is "new" again (the safe way)
         step("history") { com.tekyerema.history.HistoryStore.clear() }
         step("undo") { com.tekyerema.audit.UndoLog.clear() }
         step("traces") { com.tekyerema.agent.AgentEngine.clearTraces() }

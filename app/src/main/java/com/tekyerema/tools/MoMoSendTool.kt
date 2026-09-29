@@ -63,6 +63,9 @@ object MoMoSendTool : Tool {
     internal const val ARG_SIM = "_sim"
     /** Set by [preflight]: the phone was on a call when the send was asked for (scam shield, [MoneyPrivacy]). */
     internal const val ARG_ON_CALL = "_on_call"
+    /** Set by [preflight]: the user has never sent Mobile Money to this number on this phone (money safety round 2,
+     *  money/KnownRecipients) — the read-back says so. */
+    internal const val ARG_NEW_RECIPIENT = "_new_recipient"
 
     private fun operatorOf(ctx: ToolContext): String? {
         val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
@@ -73,6 +76,9 @@ object MoMoSendTool : Tool {
      *  network it refuses BEFORE the confirmation, so the planner falls back to the guided mobile_money menu —
      *  it used to fire MTN's key sequence into AirtelTigo/Telecel's *110# menu. */
     override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        // Money safety round 2 (2026-09-29): the user's own spending limit is checked first — a send over it is never read
+        // back for a yes; the refusal ends the task (RoutingBrain.moneyEnd → money/MoneyPlan.limitEnd).
+        com.tekyerema.money.MoneyLimits.preflight(args.str("amount"))?.let { (line, final) -> return ToolResult(false, line, recoverable = !final) }
         numberProblem(args.str("number"))?.let { return ToolResult(false, it, recoverable = true) }
         val op = operatorOf(ctx)
         val net = GhanaMobileMoney.network(op)
@@ -82,6 +88,8 @@ object MoMoSendTool : Tool {
                 "Use mobile_money to open the menu and guide the user through it instead.", recoverable = true)
         args.put(ARG_SIM, net)   // the read-back says so when the number is on another network (money safety, 2026-09-29)
         if (MoneyPrivacy.onCall(ctx.appContext)) args.put(ARG_ON_CALL, true)   // the read-back warns about call-guided scams
+        // Round 2: a number never paid before says so (set or cleared — a corrected number is checked again).
+        if (com.tekyerema.money.KnownRecipients.isKnown(args.str("number"))) args.remove(ARG_NEW_RECIPIENT) else args.put(ARG_NEW_RECIPIENT, true)
         return null
     }
 
@@ -123,27 +131,48 @@ object MoMoSendTool : Tool {
         // now data (connectors.mobileMoney.networks.<net>.sendSequence), with the same default in code.
         val sequence = keys.mapIndexed { i, v -> v to "step ${i + 1}" }
         var lastText = ""
+        // Round 2 (2026-09-29): a new walk replaces any send waiting for "try again"; a TIMEOUT below keeps this one for it
+        // (never a Cancel or a mismatch — money/MoMoRetry). Nothing is ever retried without the user asking and confirming.
+        com.tekyerema.money.MoMoRetry.clear()
         for ((idx, s) in sequence.withIndex()) {
             val (value, label) = s
             // First screen gets longer (USSD initial connect can be slow); later round-trips settle faster.
             val dlg = awaitUssd(ctrl, lastText, timeoutMs = if (idx == 0) 25_000L else 18_000L)
-                ?: return ToolResult(false, "The Mobile Money menu didn't respond in time. Nothing was sent — please try again.", recoverable = false)
+                ?: return timedOut(number, amount, args.str("reference"), com.tekyerema.money.MoMoRetry.MENU_TIMEOUT)
             lastText = dlg.text
             // J-15: a USSD screen carries names, numbers and balances — words in logcat only where content logging is allowed.
             Log.i(TAG, "[MOMO] screen ${idx + 1}: ${com.tekyerema.core.Privacy.content(dlg.text.take(160).replace("\n", " | "))}")
             // SAFETY: never type into a PIN/credential screen. If it shows (early or on cue), MTN's confirmation is
             // checked against what the user confirmed before the PIN is handed over (atConfirmation).
             if (isPinScreen(dlg)) return atConfirmation(ctrl, dlg, amount, number, pinScreen = isPinPrompt(dlg), tip = pinTip(ctx))
+                .also { if (it.success) handedOff(ctx, amount, number) }
             respond(ctrl, dlg, value, label)
             delay(900)
         }
         // Sequence fired — the next screen should be MTN's confirmation + PIN prompt. It is READ and checked; with no
         // readable screen nothing is handed over (money safety, 2026-09-29: it used to say "enter your PIN" regardless).
         val final = awaitUssd(ctrl, lastText, timeoutMs = 18_000L)
-            ?: return ToolResult(false, "MTN didn't show its confirmation screen, so I stopped. Nothing was sent. " +
-                "If a Mobile Money screen is still open, press Cancel.", recoverable = false)
+            ?: return timedOut(number, amount, args.str("reference"), com.tekyerema.money.MoMoRetry.CONFIRM_TIMEOUT)
         Log.i(TAG, "[MOMO] final screen: ${com.tekyerema.core.Privacy.content(final.text.take(160).replace("\n", " | "))}")
         return atConfirmation(ctrl, final, amount, number, pinScreen = isPinPrompt(final), tip = pinTip(ctx))
+            .also { if (it.success) handedOff(ctx, amount, number) }   // round 2: limits, known number, receipt
+    }
+
+    /** The walk timed out (the menu or MTN's confirmation never came): nothing was sent, and "try again" can re-propose
+     *  this exact send — through the whole read-back again (money/MoMoRetry). */
+    private fun timedOut(number: String, amount: String, reference: String?, line: String): ToolResult {
+        com.tekyerema.money.MoMoRetry.remember(number, amount, reference?.trim())
+        return ToolResult(false, line, recoverable = false)
+    }
+
+    /** Round 2: the send reached the PIN hand-off — it counts toward today's limit, the number is now one the user has paid,
+     *  and MTN's "You have sent …" message in the next minutes is read as a receipt (money/). */
+    private fun handedOff(ctx: ToolContext?, amount: String, number: String) {
+        val amt = com.tekyerema.money.MoneyLimits.parseAmount(amount)
+        amt?.let { com.tekyerema.money.MoneyLimits.recordSend(it) }
+        com.tekyerema.money.KnownRecipients.add(number)
+        com.tekyerema.money.MoMoAfterCare.handedOff(ctx?.let { GhanaMobileMoney.network(operatorOf(it)) } ?: "mtn", amt)
+        com.tekyerema.money.MoMoRetry.clear()
     }
 
     /**
@@ -286,15 +315,22 @@ object MoMoSendTool : Tool {
         val raw = args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
             ?: return "Send $amt with Mobile Money? I'll go through the menu and stop at the PIN for you to enter."
         val (to, netWarn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(ARG_SIM))
-        val warn = listOfNotNull(netWarn, MoneyPrivacy.callWarning(args.optBoolean(ARG_ON_CALL))).joinToString(" ").ifEmpty { null }
+        val warn = listOfNotNull(netWarn, firstTimeWarning(args), MoneyPrivacy.callWarning(args.optBoolean(ARG_ON_CALL)))
+            .joinToString(" ").ifEmpty { null }
         return "Send $amt to $to, with Mobile Money?\n" + (warn?.let { "$it " } ?: "") +
             "I'll go through the menu and stop at the PIN for you to enter."
     }
+
+    /** Round 2 (secure_payment_auth.md rec. 7): "You haven't sent money to this number before." when preflight found it
+     *  new — the scam script ("send it back") always pays a number the victim never paid. */
+    internal fun firstTimeWarning(args: JSONObject): String? =
+        if (args.optBoolean(ARG_NEW_RECIPIENT)) com.tekyerema.money.KnownRecipients.FIRST_TIME_LINE else null
 
     /** The read-back's "check the number" line, or null — a structured (Twi) read-back can't carry it, so the English
      *  sentence is spoken whenever there is one (AgentEngine.confirmSpecFor). */
     fun networkWarning(args: JSONObject): String? = listOfNotNull(
         args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
             ?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it, args.str(ARG_SIM)).second },
+        firstTimeWarning(args),
         MoneyPrivacy.callWarning(args.optBoolean(ARG_ON_CALL))).joinToString(" ").ifEmpty { null }
 }
