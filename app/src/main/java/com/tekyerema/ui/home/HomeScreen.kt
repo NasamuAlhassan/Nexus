@@ -84,7 +84,10 @@ fun HomeContent(
     showBrand: Boolean = true,
     circularHitArea: Boolean = false,
     footer: String? = null,
-    onPresence: (Presence) -> Unit = {}
+    onPresence: (Presence) -> Unit = {},
+    /** First-run voice welcome (voice/Welcome.kt) — the app's own Home only, never the arrive-on-top screen someone opened
+     *  to ask for something. */
+    offerWelcome: Boolean = showBrand
 ) {
     val context = LocalContext.current
     val voice by VoiceEngine.state.collectAsState()
@@ -96,6 +99,12 @@ fun HomeContent(
     val speakAloud = remember(settingsVersion) { settings.speakAloud }
     val speechRate = remember(settingsVersion) { settings.speechRate }
     val twi = remember(settingsVersion) { settings.languageMode == Settings.LANG_MODE_TWI }
+    val name = remember(settingsVersion) { settings.preferredName }   // "Good morning, Ama" (voice/Welcome.kt)
+    // First-run voice welcome: the first time Home opens after the permissions page, a few skippable questions by voice.
+    // Never a gate — any request ends it — and marked done as it starts (VoiceEngine.startWelcome).
+    if (offerWelcome) LaunchedEffect(Unit) {
+        if (!settings.welcomeDone && Perms.mic(context)) { delay(900); VoiceEngine.startWelcome() }
+    }
 
     // "Done" is a moment, not a state the engine keeps: hold it briefly after a completed turn.
     val raw = presenceOf(voice, agent)
@@ -223,7 +232,7 @@ fun HomeContent(
                     transitionSpec = { fadeIn(tween(if (reduceMotion) 120 else 320)) togetherWith fadeOut(tween(160)) },
                     label = "greeting"
                 ) { showGreeting ->
-                    if (showGreeting) Greeting(twi)
+                    if (showGreeting) Greeting(twi, name)
                     else AssistantLine(presence, phrase, announce = announce, calm = reduceMotion, speechRate = speechRate)
                 }
                 HintLine(
@@ -272,9 +281,10 @@ fun HomeContent(
     }
 }
 
-/** "Good morning" (Twi mode: "Maakye"), and what to do next. A heading, so TalkBack can land on it. */
+/** "Good morning" (Twi mode: "Maakye") — with the user's name from the welcome, "Good morning, Ama" — and what to do
+ *  next. A heading, so TalkBack can land on it. */
 @Composable
-private fun Greeting(twi: Boolean) {
+private fun Greeting(twi: Boolean, name: String = "") {
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
     val (en, tw) = when (hour) {
         in 5..11 -> "Good morning" to "Maakye"
@@ -282,7 +292,7 @@ private fun Greeting(twi: Boolean) {
         else -> "Good evening" to "Maadwo"
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(if (twi) tw else en, style = MaterialTheme.typography.displaySmall, color = Tk.Text, textAlign = TextAlign.Center,
+        Text(com.tekyerema.voice.Welcome.withName(if (twi) tw else en, name), style = MaterialTheme.typography.displaySmall, color = Tk.Text, textAlign = TextAlign.Center,
             modifier = Modifier.semantics { heading() })
         Text(if (twi) en else "How can I help?", style = MaterialTheme.typography.titleMedium, color = Tk.TextSecondary,
             textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))

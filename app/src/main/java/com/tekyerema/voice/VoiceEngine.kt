@@ -175,6 +175,9 @@ object VoiceEngine {
             "cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
         val duplex = DuplexAudio(app)   // B-07
+        // LOCAL FAST PATH: deterministic device ops (time/battery/volume/open-app/back…) before the LLM. Kept here so the
+        // first-run welcome changes the speaking speed through the same H-08 handler.
+        val fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() }
         controller = VoiceController(
             asr = hybrid,
             tts = tts,
@@ -197,8 +200,7 @@ object VoiceEngine {
                 (when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }) to
                     (when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })
             }).also { fillerPlayer = it },
-            // LOCAL FAST PATH: deterministic device ops (time/battery/volume/open-app/back…) before the LLM.
-            fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() },
+            fastRouter = fastRouter,
             // Fast-path ACTION confirmations speak on the offline system engine so they're instant on any network.
             systemVoice = systemTts,
             // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
@@ -215,7 +217,14 @@ object VoiceEngine {
             bargeInEnabled = {
                 com.tekyerema.core.config.FeatureFlags.isEnabled("B-07") &&
                     com.tekyerema.core.config.AppConfig.bool("speech.bargeIn.enabled", true)
-            }
+            },
+            // First-run voice welcome (voice/Welcome.kt): answers go into Settings; the speed through H-08. A Twi voice
+            // exists only on the "ghana" voice layer — the welcome says so honestly when Twi is chosen without one.
+            welcome = SettingsWelcomeHost(settings, twiVoice = plan.pinnedLanguage == null) { v ->
+                fastRouter.applyPreference(com.tekyerema.agent.FastIntent.Preference("rate", v)).spoken
+            },
+            // "You ask this every Friday — shall I remind you?" (agent/habits): read/info requests only, reminders only speak.
+            habits = com.tekyerema.agent.habits.Habits(app)
         )
         // The living visual follows whichever microphone is listening (our two MicCaptures, or the phone's recognizer).
         if (levels.isNotEmpty()) scope.launch { combine(levels.toList()) { a -> a.maxOrNull() ?: 0f }.collect { _level.value = it } }
@@ -290,6 +299,19 @@ object VoiceEngine {
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
         ReadingPace.rate = when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }   // readings sized in seconds
         systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
+        Welcome.userName = settings.preferredName   // spoken greetings use the name from the welcome
+    }
+
+    /**
+     * First-run voice welcome (voice/Welcome.kt). Home calls it the first time it opens after the permissions page;
+     * Settings › Replay the welcome calls it with [replay]. Marked done the moment it starts, so it never repeats.
+     * Waits (not marked done) while replies aren't read aloud or the mic is off — a later Home opening tries again.
+     */
+    fun startWelcome(replay: Boolean = false): Boolean {
+        if (!initialized || (!replay && settings.welcomeDone)) return false
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled("K-10", true) ||
+            !com.tekyerema.core.config.AppConfig.bool("onboarding.welcome.enabled", true)) return false
+        return controller.startWelcome().also { if (it) settings.welcomeDone = true }
     }
 
     /** K-10: speak a line outside a voice turn (onboarding steps) — only when replies are read aloud and no screen

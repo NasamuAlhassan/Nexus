@@ -293,6 +293,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_ONBOARDED, false)
         set(v) = put { putBoolean(KEY_ONBOARDED, v) }
 
+    /** First-run voice welcome (voice/Welcome.kt): set as it starts, so it plays once; Settings › Replay the welcome runs it again. */
+    var welcomeDone: Boolean
+        get() = prefs.getBoolean("welcome_done", false)
+        set(v) = put { putBoolean("welcome_done", v) }
+
+    /** What the user asked to be called in the welcome ("Good morning, Ama"); blank = no name. */
+    var preferredName: String
+        get() = prefs.getString("preferred_name", "").orEmpty()
+        set(v) = put { putString("preferred_name", v.trim().take(40)) }
+
     /** Q-07: the user agreed to keep their tasks (screens + actions) on this phone, encrypted, to improve Tɛkyerɛma.
      *  Off unless they switch it on; switching it off deletes what was kept. */
     var trajectoryConsent: Boolean

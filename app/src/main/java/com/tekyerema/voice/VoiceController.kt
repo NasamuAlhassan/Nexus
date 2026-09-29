@@ -115,7 +115,11 @@ class VoiceController(
     private val healthNotice: () -> String? = { null },
     /** voice/io boundary: listen once → normalized text (the phone's recognizer under `builtin_en`). Null = the
      *  captured-audio path over [mic] / [answerMic] / [asr] — today's stack, unchanged (profile `ghana`, and tests). */
-    input: com.tekyerema.voice.io.VoiceInput? = null
+    input: com.tekyerema.voice.io.VoiceInput? = null,
+    /** First-run voice welcome (voice/Welcome.kt): what its answers change. Null = no welcome (tests, other hosts). */
+    private val welcome: WelcomeHost? = null,
+    /** "You ask this every Friday — shall I remind you?" (agent/habits/RepeatDetector.kt). Null = off (tests). */
+    private val habits: com.tekyerema.agent.habits.HabitHost? = null
 ) {
     /** Every listen goes through here; see [com.tekyerema.voice.io.VoiceInput]. */
     private val voiceIn: com.tekyerema.voice.io.VoiceInput =
@@ -410,6 +414,106 @@ class VoiceController(
         // would then wait on it for the whole task budget.
         if (isRunning || agent.busy || agent.state.value.status in PROMPTS) return
         launchTurn { runOnce(quiet = true) }
+    }
+
+    // ------------------------------------------------------------------ first-run welcome, practice, habit offers
+    // The logic is in voice/Welcome.kt and agent/habits/RepeatDetector.kt (pure, unit-tested); these are the voice hooks.
+
+    /** The say/listen the welcome, the practice and the habit offer talk through — the same voice every turn uses. */
+    private inner class TurnIo(private val host: WelcomeHost?) : Welcome.Io {
+        /** The last thing heard, so a request said instead of an answer runs exactly as heard. */
+        var last: Transcript? = null
+        // Read like every reply: "Tɛkyerɛma", "MoMo", "9 AM" said as words.
+        override suspend fun say(text: String) = this@VoiceController.say(Verbalize.apply(text))
+        override suspend fun ask(question: String, yesNo: Boolean, patient: Boolean): Welcome.Reply {
+            say(question)
+            if (!hasMicPermission()) return Welcome.Reply.Silence
+            val heard = listen(if (yesNo) com.tekyerema.voice.io.ListenPurpose.YES_NO else com.tekyerema.voice.io.ListenPurpose.ANSWER,
+                events(ready = { listenCue(); set(VoiceState.LISTENING, question) },
+                    speech = { _state.update { it.copy(speechDetected = true) } },
+                    captured = { cues.captured(); set(VoiceState.TRANSCRIBING, "Transcribing…") }),
+                patient = if (patient) true else null)
+            return when (heard) {
+                is com.tekyerema.voice.io.Heard.Speech -> {
+                    last = heard.transcript
+                    Welcome.Reply.Text(heard.transcript.canonical.ifBlank { heard.transcript.raw }, heard.transcript.raw,
+                        heard.alternatives.map { it.text })
+                }
+                com.tekyerema.voice.io.Heard.Cancelled -> Welcome.Reply.Cancelled
+                else -> Welcome.Reply.Silence
+            }
+        }
+        override fun needsOk() = cues.needsOk()
+        override fun apply(effect: Welcome.Effect): String? = host?.apply(effect)
+    }
+
+    /**
+     * First-run voice welcome — started by Home the first time it opens after the permissions page, or by Settings ›
+     * Replay the welcome. Never over a task, a prompt or another turn, and only when it can speak and listen. True when
+     * it started (the caller then marks it done, so it never repeats).
+     */
+    fun startWelcome(): Boolean {
+        val host = welcome ?: return false
+        if (isRunning || agent.busy || agent.state.value.status in PROMPTS || !speakAloud() || !hasMicPermission()) return false
+        followUpChain = 0
+        launchTurn { runWelcome(host) }
+        return true
+    }
+
+    private suspend fun runWelcome(host: WelcomeHost) {
+        val io = TurnIo(host)
+        try {
+            val end = Welcome.run(io, host.twiVoice)
+            Log.i("Tekyerema", "[WELCOME] ended: ${end::class.simpleName}")
+            // A request said instead of an answer ends the welcome and runs like any other turn (never a gate).
+            if (end is Welcome.Outcome.Command) { io.last?.let { runTurn(it, InputSource.ASR); return } }
+            idle("")
+        } catch (c: CancellationException) {
+            cancelledToIdle()
+        } catch (e: Exception) {
+            Log.w("Tekyerema", "[WELCOME] error: ${e.message}")
+            idle("")
+        }
+    }
+
+    /** "Send a practice message" ([Practice]) — a rehearsal only; the agent and every tool are never involved. */
+    private suspend fun runPractice() {
+        if (!speakAloud()) {
+            // The rehearsal is spoken: say on screen how to hear it rather than rehearse in silence.
+            _state.update { it.copy(state = VoiceState.IDLE, spoken = "Practice is spoken. Turn on Read replies aloud in Settings › Voice to try it.",
+                spokenAt = System.currentTimeMillis(), partialHint = "") }
+            return
+        }
+        Log.i("Tekyerema", "[PRACTICE] rehearsal — nothing is sent")
+        Practice.run(TurnIo(welcome))
+        idle("")
+    }
+
+    /**
+     * Habits: note a request that finished well ([habits] keeps only read/info kinds), and right after one the user makes
+     * at the same time every week (or day) ask ONCE whether to set a reminder. A yes only saves a reminder that SPEAKS —
+     * the request is never performed for them. Asked by voice only after a spoken request, with nothing else waiting.
+     */
+    private suspend fun offerHabit(tr: Transcript, source: InputSource, fastIntent: String?) {
+        val h = habits ?: return
+        val canAsk = source == InputSource.ASR && speakAloud() && hasMicPermission() && !agent.busy &&
+            agent.state.value.status !in PROMPTS
+        val offer = try { h.completed(tr.canonical, fastIntent, System.currentTimeMillis(), canAsk) }
+            catch (e: Exception) { Log.w("Tekyerema", "[HABIT] ${e.message}"); null } ?: return
+        val io = TurnIo(null)
+        val reply = io.ask(offer.question, yesNo = true) as? Welcome.Reply.Text
+        val answer = when (reply?.let { com.tekyerema.voice.io.YesNo.decide(it.text, it.alternatives.map { a -> com.tekyerema.voice.io.Hypothesis(a, null) }) }) {
+            Confirmation.Answer.YES -> com.tekyerema.agent.habits.RepeatDetector.Answer.YES
+            Confirmation.Answer.NO -> com.tekyerema.agent.habits.RepeatDetector.Answer.NO
+            else -> com.tekyerema.agent.habits.RepeatDetector.Answer.NONE
+        }
+        val line = try { h.answered(offer, answer) } catch (e: Exception) { "" }
+        // A request said instead of yes or no runs like any other; silence just rests (no nag).
+        if (reply != null && answer == com.tekyerema.agent.habits.RepeatDetector.Answer.NONE && Welcome.looksLikeCommand(reply.text)) {
+            io.last?.let { runTurn(it, InputSource.ASR); return }
+        }
+        if (reply != null && line.isNotBlank()) io.say(line)
+        idle("")
     }
 
     /** What happened to a typed request — [accepted] clears the field; [notice] is shown (and announced) to the user. */
@@ -858,6 +962,10 @@ class VoiceController(
             if (com.tekyerema.BuildConfig.DEBUG) Log.i("Tekyerema", "[INPUT] source=$source text='${tr.canonical}' lang=${tr.language}")
             else Log.i("Tekyerema", "[INPUT] source=$source len=${tr.canonical.length} lang=${tr.language}")
 
+            // First-run practice (voice/Welcome.kt): "send a practice message" REHEARSES the spoken confirmation for a text
+            // to a made-up contact. It never reaches the fast path, the agent or any tool — nothing can be sent.
+            if (Practice.matches(tr.canonical)) { runPractice(); return }
+
             // LOCAL FAST PATH (demo-critical): deterministic device ops execute HERE, before the agent/LLM —
             // no reasoning, no screen read, no app launch merely to answer (never open Clock to tell the time).
             // Returns null for anything it can't confidently handle → the agent path below runs unchanged.
@@ -883,6 +991,9 @@ class VoiceController(
                     it.copy(state = VoiceState.IDLE, spoken = fast.spoken, spokenAt = System.currentTimeMillis(),
                         partialHint = if (spoke || !speakAloud() || fast.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
                 }
+                // Habits (agent/habits): a request that went well is noted; one made at the same time every week (or day)
+                // gets ONE offer of a spoken reminder — never of doing it for them.
+                if (fast.ok) offerHabit(tr, source, fast.intent)
                 return
             }
 
@@ -961,6 +1072,9 @@ class VoiceController(
                 if (source == InputSource.ASR && speakAloud() && hasMicPermission()) {
                     try { runOnce(quiet = true) } finally { if (!invitesMore) hideAsking() }
                 }
+            } else if (interruption == null && outcome.status == AgentStatus.COMPLETED) {
+                // Habits (agent/habits): only a VERIFIED success is noted — never an unverified or failed one.
+                offerHabit(tr, source, null)
             }
         } catch (c: CancellationException) {
             idle("Cancelled.")
