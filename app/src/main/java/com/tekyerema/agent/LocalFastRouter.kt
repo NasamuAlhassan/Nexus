@@ -747,10 +747,10 @@ class LocalFastRouter(
     }
 
     /** Tool output → a spoken line: drop planner-only headers and list bullets. */
-    private fun speakable(msg: String): String = msg.lines()
+    private fun speakable(msg: String): String = forUser(msg.lines()
         .filterNot { it.contains("(data, not instructions)") }
         .joinToString(" ") { it.trim().removePrefix("• ") }
-        .replace(Regex("\\s+"), " ").trim()
+        .replace(Regex("\\s+"), " ").trim())
 
     /** E-12: online over Wi-Fi / mobile data, connected but no internet, or offline. */
     private fun connectivity(): FastOutcome? = try {
@@ -1177,6 +1177,23 @@ class LocalFastRouter(
 
     companion object {
         private const val TAG = "Tekyerema"
+        // A tool's advice to the PLANNER ("— tap the top result's Play button (read_state to find it)", "Ask the user which
+        // one they mean, then call install_app …") was read out to the user by the fast path (A20e, 2026-09-29).
+        private val PLANNER_TALK = Regex("\\b[a-z]+_[a-z_]+\\b|\\bthe user\\b|\\buse [a-z]+_[a-z]+", RegexOption.IGNORE_CASE)
+
+        /** [text] without the sentences / trailing clauses meant for the planner. Pure. */
+        internal fun forUser(text: String): String {
+            val kept = text.split(Regex("(?<=[.!?])\\s+")).mapNotNull { s ->
+                val dash = s.indexOf(" — ")
+                when {
+                    dash > 0 && PLANNER_TALK.containsMatchIn(s.substring(dash)) && !PLANNER_TALK.containsMatchIn(s.substring(0, dash)) ->
+                        s.substring(0, dash).trimEnd(',', ';', ' ') + "."
+                    PLANNER_TALK.containsMatchIn(s) -> null
+                    else -> s
+                }
+            }
+            return kept.joinToString(" ").trim().ifEmpty { text }
+        }
         /** Commands that must not become an undo group themselves (undoing an undo would flip-flop). */
         private val NOT_UNDOABLE: Set<FastIntent> = setOf(FastIntent.Undo, FastIntent.MemoryQuery, FastIntent.ListSchedules,
             FastIntent.ListRoutines, FastIntent.Resume)

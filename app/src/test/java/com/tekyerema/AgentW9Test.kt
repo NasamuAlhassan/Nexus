@@ -177,6 +177,17 @@ class AgentW9Test {
         assertEquals("a plain no can be a real answer", com.tekyerema.voice.ControlVerbs.Verb.STEER, v.classify("no"))
     }
 
+    /** A20e 2026-09-29: the fast path read the planner's hint ("read_state to find it") out loud. */
+    @Test fun planner_hints_are_never_spoken_to_the_user() {
+        val f = com.tekyerema.agent.LocalFastRouter::forUser
+        assertEquals("YT Music opened the search for \"gospel\", but nothing is playing yet.",
+            f("YT Music opened the search for \"gospel\", but nothing is playing yet — tap the top result's Play button (read_state to find it)."))
+        assertEquals("I searched the Play Store for Claude but no result is clearly that app. I can see: TikTok, Temu.",
+            f("I searched the Play Store for Claude but no result is clearly that app. I can see: TikTok, Temu. Ask the user which one they mean, then call install_app with its exact title."))
+        assertEquals("Sent your text to 055 209 3690.", f("Sent your text to 055 209 3690."))
+        assertEquals("It's 3:05 PM — Tuesday.", f("It's 3:05 PM — Tuesday."))
+    }
+
     @Test fun not_installed_is_a_question_for_the_user_not_a_dead_end() {
         val k = com.tekyerema.agent.Recovery.classify(isAccelerator = true, success = false, recoverable = false, needsUser = true)
         assertEquals(com.tekyerema.agent.Recovery.Kind.ASK_USER, k)

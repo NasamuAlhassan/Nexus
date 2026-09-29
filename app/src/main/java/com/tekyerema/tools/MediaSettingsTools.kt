@@ -120,7 +120,7 @@ object PlayMusicTool : Tool {
         val asked = if (search.isEmpty()) "Asked $label to play." else "Asked $label to play \"$search\"."
         if (MediaSessions.current(ctx.appContext) == null)   // no notification access → can't check; say only what we did
             return ToolResult(true, asked, JSONObject().put("checked", false), channel = "intent")
-        val playing = awaitPlaying(ctx, pkg, AppConfig.long("os.media.playWaitMs", 7_000L))
+        val playing = awaitPlaying(ctx, pkg, AppConfig.long("os.media.playWaitMs", 12_000L))
             ?: pressPlayOnScreen(ctx, pkg)
         return if (playing != null) ToolResult(true, "Playing ${MediaSessions.words(playing) ?: search.ifEmpty { "music" }}" +
             (appName?.let { " on ${spokenAppName(it)}" } ?: "") + ".", JSONObject().put("playing", true).put("checked", true), channel = "intent")
