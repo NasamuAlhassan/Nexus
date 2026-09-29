@@ -1017,7 +1017,8 @@ class VoiceController(
             val watcher = launch {
                 agent.state.collect { st ->
                     onState(st)
-                    if (st.status in terminal && st.goal == goal) out.complete(st)
+                    // WS-A: "carry on" resumes a paused task whose goal is the original request (st.request = our words).
+                    if (st.status in terminal && (st.goal == goal || st.request == goal)) out.complete(st)
                 }
             }
             // The clock samples the agent's status each tick: time on the user (confirmation, secure hand-off) and
@@ -1051,7 +1052,7 @@ class VoiceController(
         var lines = 0
         while (lines < cfg.int("ux.progress.maxLines", 8)) {
             val st = agent.state.value
-            if (st.goal != goal) return
+            if (st.goal != goal && st.request != goal) return   // WS-A: a resumed task runs under its original goal
             val working = st.status == AgentStatus.THINKING || st.status == AgentStatus.ACTING
             // Never while the user is interjecting: the answer mic would take "Still working on it." as their words.
             if (working && _state.value.state == VoiceState.EXECUTING && interjectJob?.isActive != true) {
