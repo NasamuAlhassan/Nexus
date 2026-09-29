@@ -59,21 +59,27 @@ object ToolSelector {
     fun enabled(): Boolean = FeatureFlags.isEnabled("D-02", true) && AppConfig.bool("tools.search.enabled", true)
 
     /**
-     * Names of the tools to send this step, in registry order.
+     * Names of the tools to send this step, in a cache-stable order: the core block, then each loaded group in group
+     * order, then tools added during the task in the order they arrived.
      * @param text the goal plus recent conversation (what the request is about)
      */
     fun select(text: String, used: Set<String>, discovered: Set<String>, available: List<String>): List<String> {
         if (!enabled()) return available
+        // N-03: Groq's prompt cache matches an exact PREFIX (per organization, i.e. per key here, for 2 h), and the tool
+        // list sits right after the system prompt. Two rules keep that prefix long:
+        //  - ACROSS tasks: the core block comes first, always in the same order, and each group after it as a block. In
+        //    registry order a group's tools were interleaved with the core ones (drag and pinch between swipe and scroll,
+        //    the comms tools before web_search), so a task that loaded a different group diverged from the last one a
+        //    few tools in; now every task shares system prompt + core tools (~2.6k tokens), whatever else it loads.
+        //  - WITHIN a task: a tool loaded mid-task (find_tool, or used) goes on the END in arrival order, so the prefix
+        //    before it stays byte-identical (Manus, "Context Engineering", 2025: append-only context; the Groq docs:
+        //    changing tool definitions or their order breaks the cache).
+        val have = available.toSet()
         val base = LinkedHashSet<String>()
-        base += AppConfig.stringList("tools.search.core", DEFAULT_CORE)
-        for ((name, g) in groups()) if (g.keywords.containsMatchIn(text)) base += g.tools
-        // N-03: Groq's prompt cache matches an exact PREFIX, and the tool list sits right after the system prompt — a
-        // tool loaded mid-task (find_tool) used to be slotted in at its registry position, changing every tool after it
-        // and so every token after that. The task's base set keeps its order; later additions go on the END, in the
-        // order they arrived, so the prefix before them stays byte-identical (Manus, "Context Engineering", 2025:
-        // append-only context; the Groq docs: changing tool definitions or their order breaks the cache).
-        val extras = LinkedHashSet<String>().apply { addAll(discovered); addAll(used) }.filter { it !in base && it in available }
-        return available.filter { it in base } + extras
+        AppConfig.stringList("tools.search.core", DEFAULT_CORE).filterTo(base) { it in have }
+        for ((_, g) in groups()) if (g.keywords.containsMatchIn(text)) g.tools.filterTo(base) { it in have }
+        val extras = LinkedHashSet<String>().apply { addAll(discovered); addAll(used) }.filter { it !in base && it in have }
+        return base.toList() + extras
     }
 
     /** N-03: a tool schema array rearranged into [names]' order (the registry emits its own order); entries not named

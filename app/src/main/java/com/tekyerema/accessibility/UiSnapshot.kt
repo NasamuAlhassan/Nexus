@@ -112,7 +112,8 @@ data class UiSnapshot(
                       labelMax: Int = com.tekyerema.core.config.AppConfig.int("perception.tree.labelMax", 64).coerceIn(16, 400)): JSONObject {
         // Interactive tree elements first, then labelled static text, then vision elements last —
         // so a busy screen never hides its controls and the model sees which grounding it is using.
-        val tree = elements.filter { it.source == ElementSource.TREE }
+        val folded = if (com.tekyerema.core.config.AppConfig.bool("perception.tree.foldRows", true)) foldedRowParts() else emptySet()
+        val tree = elements.filter { it.source == ElementSource.TREE && it.id !in folded }
         val vision = elements.filter { it.source == ElementSource.VISION }
         val ordered = tree.filter { it.interactive } +
             tree.filter { !it.interactive && !it.label.isNullOrBlank() } +
@@ -178,6 +179,33 @@ data class UiSnapshot(
                         "scroll, or use the app's own search to reach something not listed rather than assuming it's absent."
                 )
             }
+    }
+
+    /**
+     * N-03: the ids of listing noise inside a tappable row. A list row is usually an UNLABELED clickable container
+     * followed by its icon and texts, and the texts are tappable through it (a tap on a text climbs to the nearest
+     * clickable ancestor — the row). So the container adds nothing its text doesn't, and neither does an unlabeled
+     * image inside a row-sized one; on the A20e's Settings home they were 18 of 40 listed elements, and took slots
+     * from real content under the listing cap. Kept: anything labeled, long-pressable, editable, scrollable,
+     * checkable, adjustable, flagged or with custom actions; a container with no plain tappable text inside it
+     * (tapping it is the only way in); and images inside anything bigger than a row (a full-screen tappable layer
+     * mustn't hide an app's unlabeled icon buttons). Pure: bounds and flags only.
+     */
+    internal fun foldedRowParts(): Set<Int> {
+        val tree = elements.filter { it.source == ElementSource.TREE }
+        fun plainTap(e: UiElement) = e.label.isNullOrBlank() && e.clickable && !e.longClickable && !e.editable &&
+            !e.scrollable && !e.checkable && !e.checked && e.range == null && !e.selected && e.enabled && !e.focused &&
+            !e.password && !e.heading && !e.link && e.customActions.isEmpty() && (e.collection == null || e.collection.startsWith("row "))
+        fun inside(a: Box, b: Box) = a.left >= b.left && a.top >= b.top && a.right <= b.right && a.bottom <= b.bottom
+        // Plain text (not a field — AutoCompleteTextView is a TextView too — and not a checkable CheckedTextView).
+        val texts = tree.filter { !it.label.isNullOrBlank() && it.clickable && it.role.endsWith("TextView") && !it.editable && !it.checkable }
+        val rows = tree.filter { c -> plainTap(c) && !c.bounds.isEmpty() && texts.any { it.id != c.id && inside(it.bounds, c.bounds) } }
+        if (rows.isEmpty()) return emptySet()
+        val out = rows.mapTo(HashSet()) { it.id }
+        val screenH = tree.maxOf { it.bounds.bottom }
+        val rowSized = rows.filter { it.bounds.height * 4 <= screenH }
+        for (e in tree) if (e.id !in out && plainTap(e) && e.role.endsWith("ImageView") && rowSized.any { inside(e.bounds, it.bounds) }) out.add(e.id)
+        return out
     }
 
     fun summarize(): String {

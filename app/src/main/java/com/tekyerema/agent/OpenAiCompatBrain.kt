@@ -78,9 +78,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         if (keys.isEmpty()) return@withContext AgentDecision.Fail("No Groq/OpenAI API key configured.")
         val url = settings.groqBaseUrl.trimEnd('/') + "/chat/completions"
 
-        val messages = JSONArray()
-            .put(JSONObject().put("role", "system").put("content", BrainPrompts.SYSTEM))
-            .put(JSONObject().put("role", "user").put("content", BrainPrompts.userText(ctx)))
+        val messages = messagesFor(ctx)
 
         // PROACTIVE PACING (Groq TPM): the free-tier per-MINUTE token cap (~8k) — not a daily quota — is the
         // real limit on multi-step tasks. Each step is ~5–6k tokens, so a single key sustains barely one step
@@ -118,15 +116,9 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
 
             var apiKey = keys[chosen]
             var coolKey = "$model|$apiKey"   // limits are per model per org
-            val body = JSONObject()
-                .put("model", model)
-                .put("messages", messages)
-                .put("tools", ctx.openAiTools)
-                .put("tool_choice", "auto")
-                .put("temperature", AppConfig.double("models.planner.temperature", 0.2))
             // C-21: a debug override wins; else this step's effort (raised by the engine after failures); else the default.
             val effort = settings.reasoningEffortOverride?.takeIf { it.isNotBlank() } ?: ctx.effort ?: settings.groqReasoningEffort
-            if (effort.isNotBlank()) body.put("reasoning_effort", effort)
+            val body = requestBody(model, messages, ctx.openAiTools, AppConfig.double("models.planner.temperature", 0.2), effort)
 
             val payload = body.toString()
             fun requestFor(key: String) = Request.Builder()
@@ -214,9 +206,10 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                     // it instead of eating a 429. Refill is continuous, so wait only for the token DEFICIT,
                     // never longer than the header's full-reset time.
                     val rem = remaining
-                    if (rem != null && rem < ONE_REQUEST_TOKENS) {
+                    val need = nextRequestTokens(usage, ONE_REQUEST_TOKENS)
+                    if (rem != null && rem < need) {
                         val refillPerMs = (limitTok ?: 8000) / 60_000.0
-                        val deficitMs = if (refillPerMs > 0) ((ONE_REQUEST_TOKENS - rem) / refillPerMs).toLong() else (resetMs ?: 3000L)
+                        val deficitMs = if (refillPerMs > 0) ((need - rem) / refillPerMs).toLong() else (resetMs ?: 3000L)
                         val cool = minOf(deficitMs, resetMs ?: deficitMs).coerceIn(0L, 60_000L)
                         if (cool > 0) coolUntil[coolKey] = System.currentTimeMillis() + cool else coolUntil.remove(coolKey)
                     } else coolUntil.remove(coolKey)
@@ -240,6 +233,28 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
     }
 
     companion object {
+        /**
+         * N-03: a step's messages — the fixed system prompt, then this step's message (task-fixed parts first, the screen
+         * last: [BrainPrompts.userText]). With the tool list ([ToolSelector.select]'s cache-stable order) this is what
+         * Groq's prefix cache sees; nothing in front of the step's own message varies between the steps of a task.
+         */
+        fun messagesFor(ctx: BrainContext): JSONArray = JSONArray()
+            .put(JSONObject().put("role", "system").put("content", BrainPrompts.SYSTEM))
+            .put(JSONObject().put("role", "user").put("content", BrainPrompts.userText(ctx)))
+
+        /** The chat-completions body. Pure, so the prefix a step shares with the one before it is unit-tested. gpt-oss puts
+         *  the reasoning effort at the very top of its prompt, so a step at a different effort starts a cache of its own. */
+        fun requestBody(model: String, messages: JSONArray, tools: JSONArray, temperature: Double, effort: String?): JSONObject {
+            val body = JSONObject()
+                .put("model", model)
+                .put("messages", messages)
+                .put("tools", tools)
+                .put("tool_choice", "auto")
+                .put("temperature", temperature)
+            if (!effort.isNullOrBlank()) body.put("reasoning_effort", effort)
+            return body
+        }
+
         /** Turn a chat-completions response into a decision. Pure (no instance state), so it is unit-tested. */
         fun parseResponse(text: String): AgentDecision {
             val json = try { JSONObject(text) } catch (t: Throwable) { return AgentDecision.Fail("Unparseable LLM response.") }
@@ -279,8 +294,20 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         /** Tokens one full step costs (~prompt + completion). A key with fewer remaining is cooled so the
          *  next step doesn't fire a request that would 429. Sized to the ACTUAL step cost after the prompt
          *  trim (~4.4k typical); the old 6000 padded ~1.5k over reality and cooled each key ~18s instead of
-         *  ~7s between steps. A too-low value only risks an occasional 429, which the 4-key rotation absorbs. */
+         *  ~7s between steps. A too-low value only risks an occasional 429, which the 4-key rotation absorbs.
+         *  N-03: now only the estimate when a reply carried no usage — [nextRequestTokens] measures the real step. */
         private val ONE_REQUEST_TOKENS get() = AppConfig.int("models.planner.requestTokens", 4800)
+
+        /**
+         * N-03: what the next step on this key will cost, from what this one just did (prompt + completion, +10% for the
+         * step record growing) — [fallback] when the reply carried no usage. Groq's prompt cache is per ORGANIZATION (one
+         * per key here) and lasts 2 h, so the step after this one only reuses this task's cached prefix if it goes out on
+         * the same key. A fixed 4.8k threshold rotated keys after every ~3.5k step (8k minus a step leaves ~4.5k), so
+         * each step of a short task landed on an org that had never seen it. Measuring keeps the key while it can take
+         * one more step like this one; a wrong guess costs one quick 429, after which the key cools as before.
+         */
+        fun nextRequestTokens(u: com.tekyerema.core.telemetry.LlmUsage?, fallback: Int): Int =
+            if (u == null || u.prompt <= 0) fallback else ((u.prompt + u.completion) * 11L / 10).toInt().coerceIn(500, 64_000)
 
         /** N-15 hedge: the backup request's client — same dispatcher, but its OWN connection pool, so it never inherits the
          *  pooled connection the first request is hung on (it opens a new DNS + TCP + TLS path). */
