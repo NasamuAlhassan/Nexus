@@ -237,7 +237,11 @@ object AgentEngine {
         // would otherwise match the PREVIOUS run's lingering terminal state when the new goal equals the old
         // one — speaking the stale result while this fresh run proceeds unwatched (and could hit an ignored
         // confirmation gate). Setting THINKING here closes that window.
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = null, origin = origin, runSeq = it.runSeq + 1) }
+        // `request` = the user's own words when the run's goal differs from them ("call her back" → "call Ama back"): the
+        // voice turn waits for ITS words (VoiceController.awaitAgent), and with null here it waited out its whole budget
+        // and then stopped the task (found in review, 2026-09-29).
+        val words = goal.trim()
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = words.takeIf { w -> w != g }, origin = origin, runSeq = it.runSeq + 1) }
         currentJob = scope.launch { runTask(g, unattended = unattended, origin = origin) }
     }
 
