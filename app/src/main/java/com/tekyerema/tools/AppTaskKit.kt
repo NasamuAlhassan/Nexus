@@ -127,16 +127,26 @@ object ComposerSend {
 
 /**
  * J-11 for accelerators that drive another app's screen: the engine refuses grounded taps inside a denied or
- * guide-only app, and these tools press buttons there too — so they honour the same lists. Null = may drive [pkg].
+ * guide-only app, and these tools press buttons there too — so they honour the same lists (config ∪ the user's own app
+ * rules, D8). Null = may drive [pkg]. [emergency] = the emergency tool's own steps: the user's rules don't apply there
+ * (emergencies stay exempt), the app's config lists still do.
  */
-internal fun driveRefusal(pkg: String?): String? {
+internal fun driveRefusal(pkg: String?, emergency: Boolean = false): String? {
     if (pkg == null) return null
+    val pc = com.tekyerema.policy.PolicyConfig
     return when (pkg) {
-        in com.tekyerema.policy.PolicyConfig.denyApps() -> "that app is on your list of apps I must not operate"
-        in com.tekyerema.policy.PolicyConfig.guideOnlyApps() -> "that app is guide-only — I can tell you what to tap, but not tap it"
+        in (if (emergency) pc.configDenyApps() else pc.denyApps()) -> "that app is on your list of apps I must not operate"
+        in (if (emergency) pc.configGuideOnlyApps() else pc.guideOnlyApps()) -> "that app is guide-only — I can tell you what to tap, but not tap it"
         else -> null
     }
 }
+
+/**
+ * D8: may a tool even OPEN [pkg] (a launch intent, a deep link into it)? Only "never touch" stops a launch; a guide-only
+ * app opens so the user can be guided there. Null = it may. [label] names the app in the line the user hears.
+ */
+internal fun launchRefusal(pkg: String?, label: String, emergency: Boolean = false): String? =
+    com.tekyerema.operator.AppRules.openRefusal(pkg, label, emergency)
 
 /** Is [pkg] installed? (QUERY_ALL_PACKAGES is declared, so visibility is not the limit on Android 11+.) */
 internal fun isInstalled(context: Context, pkg: String): Boolean = try {

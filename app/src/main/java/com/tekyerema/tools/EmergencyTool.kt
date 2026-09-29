@@ -49,7 +49,9 @@ object EmergencyTool : Tool {
             LocationTool.execute(JSONObject().put("action", "link"), ctx).data?.optString("link")?.takeIf { it.isNotBlank() }
         } catch (_: Throwable) { null }
         val text = "I need help." + (link?.let { " My location: $it" } ?: "") + " (sent by Tɛkyerɛma)"
-        val sms = try { SendSmsTool.execute(JSONObject().put("number", number).put("message", text), ctx) } catch (_: Throwable) { null }
+        // Emergencies stay exempt from the user's app rules (D8): "never touch Messages" must not stop the help text.
+        val helpCtx = ToolContext(ctx.appContext, ctx.controller, ctx.notifications, ctx.observedBefore, ctx.resolvedTarget, emergency = true)
+        val sms = try { SendSmsTool.execute(JSONObject().put("number", number).put("message", text), helpCtx) } catch (_: Throwable) { null }
         val texted = sms?.data?.optBoolean("sent", false) == true
         val callLine = when {
             !called -> "I couldn't start the call to $who."

@@ -70,12 +70,14 @@ internal enum class Page {
     // Phone care: "check my phone" and the event alerts (PhoneCarePage).
     PHONE_CARE,
     // Money safety round 2: the user's Mobile Money limits (MoneyLimitsPage, under Control).
-    MONEY_LIMITS;
+    MONEY_LIMITS,
+    // D8: the user's per-app rules (AppRulesPage, under Control).
+    APP_RULES;
 
     /** Where Back goes. */
     val parent: Page get() = when (this) {
         ROOT -> ROOT
-        PROVIDERS, KEYS, USAGE, DATA, AUDIT, MONEY_LIMITS -> CONTROL
+        PROVIDERS, KEYS, USAGE, DATA, AUDIT, MONEY_LIMITS, APP_RULES -> CONTROL
         else -> ROOT
     }
     val depth: Int get() = if (this == ROOT) 0 else parent.depth + 1
@@ -154,6 +156,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.AUDIT -> AuditPage { page = Page.CONTROL }
         Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
         Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
+        Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }         // D8
     } }
 }
 

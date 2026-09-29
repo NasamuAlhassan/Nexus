@@ -66,6 +66,11 @@ object OpenAppTool : Tool {
                     JSONObject().put("notInstalled", query), needsDisambiguation = true, recoverable = false)
             }
         }
+        // D8 / J-11: an app the user said "never touch" (or the app's own deny list) isn't opened at all — and the model is
+        // told not to reach it another way (the home-screen icon); inside it the loop would blank and block it anyway.
+        launchRefusal(app.packageName, app.label)?.let {
+            return ToolResult(false, "$it Don't open it any other way either — tell the user that.", recoverable = false)
+        }
         val intent = AppResolver.launchIntent(ctx.appContext, app.packageName)
             ?: return ToolResult(false, "No launch intent for ${app.label}.")
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

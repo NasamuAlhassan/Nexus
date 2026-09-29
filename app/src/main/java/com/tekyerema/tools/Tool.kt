@@ -40,7 +40,9 @@ class ToolContext(
      *  changed between planning and execution. */
     val observedBefore: UiSnapshot? = null,
     /** Static target resolution done by the engine before the policy gate, if the tool takes a target. */
-    val resolvedTarget: ResolvedTarget? = null
+    val resolvedTarget: ResolvedTarget? = null,
+    /** D8: set only by the emergency tool for its own steps (the help text) — the user's app rules don't stop those. */
+    val emergency: Boolean = false
 )
 
 /**

@@ -1147,7 +1147,7 @@ object AgentEngine {
                         // The home screen is not searched for icons (LauncherGuard): open_app, or ask the user.
                         val huntRefusal = LauncherGuard.check(decision.name, onHome = launcherPkg != null && before.appPackage == launcherPkg,
                             labelMissing = target != null && resolved == null, goal = goal, named = namedApp,
-                            openAppTried = "open_app" in usedTools, notInstalled = notInstalledApp)
+                            openAppTried = "open_app" in usedTools, notInstalled = notInstalledApp, targetLabel = resolved?.element?.label)
                         if (huntRefusal != null) {
                             log(LogEntry.Kind.POLICY, "Refused ${decision.name} on the home screen: icon hunting")
                             history.add("${decision.name}(${shortArgs(decision.args)}) → refused; $huntRefusal")

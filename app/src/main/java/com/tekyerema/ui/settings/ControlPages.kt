@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Cloud
@@ -145,7 +146,10 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             SettingRow("Mobile Money limits", value = remember(version) { moneyLimitsSummary() }, icon = Icons.Outlined.Payments,
                 iconTint = Spectrum.Gold, description = "The most you can send at once, and in a day.") { open(Page.MONEY_LIMITS) }
             capabilityRow(Capability.SETTINGS, "Wi-Fi, Bluetooth, brightness, sound mode and other phone settings.", Icons.Outlined.Tune, Spectrum.Cyan)
-            capabilityRow(Capability.WEB, "Searching the web for answers.", Icons.Outlined.Public, Spectrum.Violet, divider = false)
+            capabilityRow(Capability.WEB, "Searching the web for answers.", Icons.Outlined.Public, Spectrum.Violet)
+            // D8: per-app rules (AppRulesPage) — never touch an app, or only guide there.
+            SettingRow("App rules", value = remember(version) { appRulesSummary() }, icon = Icons.Outlined.Apps,
+                iconTint = Spectrum.Rose, description = "Apps it must stay out of, or only guide you in.", divider = false) { open(Page.APP_RULES) }
         }
         Note("Whatever you choose here, Tɛkyerɛma always asks before calls, messages and money, and never reads or types a PIN or password.")
         GlassGroup("AI and privacy") {
@@ -179,8 +183,8 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             SettingRow("What Tɛkyerɛma keeps", icon = Icons.Outlined.Inventory2, iconTint = Spectrum.Mint, divider = false,
                 description = "See it, choose how long it's kept, export it or delete it.") { open(Page.DATA) }
         }
-        Note("You can also say “offline mode”, “ask me before every step”, “normal mode”, “what do you keep about me”, " +
-            "“how much have you used today”, “export my history” or “delete everything”.")
+        Note("You can also say “offline mode”, “ask me before every step”, “normal mode”, “never touch WhatsApp”, " +
+            "“what do you keep about me”, “how much have you used today”, “export my history” or “delete everything”.")
     }
 }
 

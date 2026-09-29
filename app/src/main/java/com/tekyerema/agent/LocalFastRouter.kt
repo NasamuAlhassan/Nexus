@@ -1221,6 +1221,10 @@ class LocalFastRouter(
     private suspend fun openApp(query: String): FastOutcome? {
         val match = AppResolver.resolveDetailed(appContext, query)
         val app = (match as? AppResolver.Match.One)?.app ?: return null   // ambiguous/none → let the agent ask
+        // D8: "never touch WhatsApp" holds on the fast path too — said here, never handed on to the agent to try again.
+        com.tekyerema.operator.AppRules.openRefusal(app.packageName, app.label)?.let {
+            return FastOutcome("OPEN_APP", it, systemVoice = true, ok = false)
+        }
         val launch = AppResolver.launchIntent(appContext, app.packageName)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ?: return null
         // Our own screen in front would keep the app BEHIND it: it steps aside first (the reply is still spoken).

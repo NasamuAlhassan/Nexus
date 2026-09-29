@@ -16,13 +16,18 @@ sealed class OpCommand {
     data class Revoke(val capability: Capability) : OpCommand()
     data class Restore(val capability: Capability) : OpCommand()
     object Providers : OpCommand()
+    /** D8: "never touch WhatsApp" / "only guide me in Chrome" ([rule]); "you can use WhatsApp again" (null = lift it). [app] as said. */
+    data class AppRuleSet(val app: String, val rule: AppRule?) : OpCommand()
+    /** D8: "which apps are off limits?" */
+    object AppRulesList : OpCommand()
 }
 
 /**
  * WS-C — the operator's controls by voice or typing, on the local fast path (checked before any other command, no model):
  * "switch to offline mode" / "use the cloud again", "ask me before every step" / "normal mode" / "guide only",
  * "what do you keep about me", "how much have you used today", "delete everything" (asked first), "export my history",
- * "never send messages for me" / "you can send messages again", "where does my data go?", "what mode are you in?".
+ * "never send messages for me" / "you can send messages again", "where does my data go?", "what mode are you in?", and the
+ * per-app rules ("never touch WhatsApp", "only guide me in Chrome", "you can use WhatsApp again" — [AppRuleVoice]).
  * Each change is recorded in the activity log (PrefsOperatorStore) and applies to the very next step.
  */
 object OperatorCommands {
@@ -89,6 +94,8 @@ object OperatorCommands {
             PROVIDERS.matches(g) -> OpCommand.Providers
             else -> REVOKE.firstOrNull { it.second.matches(g) }?.let { OpCommand.Revoke(it.first) }
                 ?: RESTORE.matchEntire(g)?.let { m -> restoreOf(m.groupValues[1])?.let { OpCommand.Restore(it) } }
+                // D8, last: "don't touch my phone" (Guide only) and "never touch my money" (Money) are matched above.
+                ?: AppRuleVoice.classify(g)
         }
     }
 
@@ -208,11 +215,18 @@ object OperatorCommands {
                 DeleteAnswer.OTHER -> clearDelete()   // anything else: the question lapses; handle the words normally
             }
         }
+        // D8: the yes/no to "should I be allowed to use WhatsApp again?" (anything else: the question lapses, nothing loosened).
+        AppRuleVoice.answer(raw, monotonic)?.let { return say("APP_RULE", it, ok = true) }
         val cmd = classify(raw) ?: return null
         val op = OperatorPolicy
         val line = when (cmd) {
             OpCommand.Inventory -> DataControl.spoken(DataControl.items(ctx), op.cloudAllowed, op.providers)
-            OpCommand.DeleteAll -> { askDelete(monotonic); DataControl.DELETE_PROMPT }
+            OpCommand.DeleteAll -> { AppRuleVoice.clearPending(); askDelete(monotonic); DataControl.DELETE_PROMPT }
+            is OpCommand.AppRuleSet, OpCommand.AppRulesList -> {
+                val said = AppRuleVoice.handle(ctx, cmd, monotonic) ?: return null
+                // "I can't find …" / "I can't put Phone off limits" is a refusal: the error cue, not "done".
+                return say(nameOf(cmd), said, ok = !said.startsWith("I can't"))
+            }
             is OpCommand.Export -> if (com.tekyerema.audit.AuditExport.share(ctx, cmd.includeText))
                 (if (cmd.includeText) "I've made a file of your history and activity log, with the message text. "
                     else "I've made a file of your history and activity log, with your own words left out. ") +
@@ -244,7 +258,8 @@ object OperatorCommands {
             is OpCommand.Restore -> { op.restore(cmd.capability); restoreLine(cmd.capability) }
             OpCommand.Providers -> Disclosure.spoken(op.cloudAllowed, op.providers) +
                 if (op.cloudAllowed && op.budgetExhausted(now)) " Today's limit is used up, so I'm on the phone only until tomorrow." else ""
-            OpCommand.Inventory, OpCommand.DeleteAll, is OpCommand.Export -> null
+            // These need Android (the data files, the share sheet, the app list) — handled in [handle].
+            OpCommand.Inventory, OpCommand.DeleteAll, is OpCommand.Export, is OpCommand.AppRuleSet, OpCommand.AppRulesList -> null
         }
     }
 
