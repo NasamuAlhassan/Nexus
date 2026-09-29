@@ -265,4 +265,56 @@ class FastIntentClassifierTest {
         assertNull("a rate question goes to the web", ans("how much is 5 dollars in cedis"))
         assertNull(ans("take my medicine 2 times a day"))
     }
+
+    @Test fun fractions_powers_and_roots_are_answered_on_the_phone() {
+        fun ans(s: String) = (c(s) as? FastIntent.Calculate)?.answer
+        assertEquals("Half of 250 is 125.", ans("What is half of 250?"))
+        assertEquals("A quarter of 80 is 20.", ans("a quarter of 80"))
+        assertEquals("A third of 90 is 30.", ans("what's a third of 90"))
+        assertEquals("Three quarters of 80 cedis is 60 cedis.", ans("3 quarters of 80 cedis"))
+        assertEquals("20 percent of 150 cedis is 30 cedis.", ans("what is 20 percent of 150 cedis"))
+        assertEquals("The square root of 144 is 12.", ans("what is the square root of 144"))
+        assertEquals("The square root of 2 is about 1.4142.", ans("square root of 2"))
+        assertEquals("12 squared is 144.", ans("what is 12 squared"))
+        assertEquals("3 cubed is 27.", ans("3 cubed"))
+        assertEquals("2 to the power of 10 is 1024.", ans("what's 2 to the power of 10"))
+        assertNull(ans("square root of -4"))
+        assertNull(ans("half of the class"))
+    }
+
+    /** On-phone answers with one right answer: dates, conversions, spelling, the time elsewhere. */
+    @Test fun one_right_answer_questions_never_need_a_model() {
+        for (s in listOf("How many days until Christmas?", "what day is 6 March 2027", "what's the date next Friday",
+            "how old is someone born in 1990", "when is Farmers' Day", "is 2028 a leap year", "what day is it tomorrow",
+            "what is the akan name for a boy born on friday"))
+            assertTrue("$s -> ${c(s)}", c(s) is FastIntent.DateAnswer)
+        for (s in listOf("convert 10 km to miles", "how many pounds is 5 kg", "30 degrees celsius in fahrenheit", "how many minutes in an hour"))
+            assertTrue("$s -> ${c(s)}", c(s) is FastIntent.Convert)
+        for (s in listOf("spell accommodation", "how do you spell necessary"))
+            assertTrue("$s -> ${c(s)}", c(s) is FastIntent.Spell)
+        for (s in listOf("what time is it in London", "what's the time in New York", "time in lagos", "can you tell me what time it is in Dubai"))
+            assertTrue("$s -> ${c(s)}", c(s) is FastIntent.WorldTime)
+    }
+
+    /** The new answerers must not take what the existing intents own, and a question about elsewhere/another day that
+     *  can't be answered must reach the model — not "The time is …" / "Today is …" for HERE and TODAY. */
+    @Test fun on_phone_answers_do_not_steal_other_intents() {
+        for (s in listOf("What time is it?", "What's the time?", "Tell me the time.", "What is the current time?", "what time is it now",
+            "What's the time at the moment?"))
+            assertEquals(s, FastIntent.Time, c(s))
+        for (s in listOf("What day is today?", "What day is it?", "what day is it today", "Is today Monday?", "which day is today"))
+            assertEquals(s, FastIntent.Day, c(s))
+        for (s in listOf("What's today's date?", "What date is it?", "what's the date today", "what's the date"))
+            assertEquals(s, FastIntent.Date, c(s))
+        assertTrue(c("remind me in 20 minutes to take my medicine") is FastIntent.CreateSchedule)
+        assertTrue(c("remind me in 20 minutes") is FastIntent.CreateSchedule)
+        for (s in listOf("set a timer for 10 minutes", "set an alarm for 6 am", "how much is 5 dollars in cedis", "spell check",
+            "convert 100 dollars to cedis", "how many days until my birthday", "when is eid"))
+            assertTrue("$s -> ${c(s)}", c(s).let { it !is FastIntent.DateAnswer && it !is FastIntent.Convert && it !is FastIntent.Spell && it !is FastIntent.WorldTime })
+        // Elsewhere / another day it can't work out: the model, never the local time or today's date.
+        for (s in listOf("what time is it in Brazil", "what day is Eid", "what's the date of my exam", "what day is it in London"))
+            assertNull(s, c(s))
+        assertEquals(FastIntent.OpenApp("calculator"), c("open the calculator"))
+        assertEquals(FastIntent.Battery, c("how much battery is left"))
+    }
 }

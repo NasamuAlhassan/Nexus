@@ -79,10 +79,13 @@ class AnswerCache(
         private val VARIETY = Regex("\\b(joke|jokes|story|stories|poem|riddle|random|surprise|quote|fun fact)\\b")
         // Answers that change with the clock carry no web marker, so they'd be kept a week and offered offline for a month.
         // The time of day ("what time is it in London") is never kept; the rest ("how many days until Christmas", "how
-        // old is the president", "…today") are kept as FRESH answers (30 min, offered offline for a day at most).
-        private val TIME_OF_DAY = Regex("\\b(what time|time is it|time in|the time|clock)\\b")
+        // old is the president", "…today", "how many years since 1957", "when is Eid") are kept as FRESH answers (30 min,
+        // offered offline for a day at most). Most of these are answered on the phone now ([LocalDates], [WorldClock]);
+        // the ones that still reach the model must not be repeated from a week-old answer.
+        private val TIME_OF_DAY = Regex("\\b(what time|time is it|time in|the time|clock|time difference)\\b")
         private val CLOCK = Regex("\\b(days?|weeks?|months?|hours?|minutes?|how long|countdown|until|till|how old|age|" +
-            "today|tonight|tomorrow|yesterday|now|current|currently|this (?:week|month|year)|next|last|latest|recent|recently)\\b")
+            "today|tonight|tomorrow|yesterday|now|current|currently|this (?:week|month|year)|next|last|latest|recent|recently|" +
+            "ago|since|left|when is|when's|when will|when does|what year)\\b")
         private val NON_ANSWER = Regex("(?i)\\b(i couldn'?t|i could not|i can'?t|i cannot|i don'?t know|i'?m not sure|sorry|try again|no results)\\b")
 
         /** Normalized cache key, or null when the question shouldn't be cached at all. Pure. */
