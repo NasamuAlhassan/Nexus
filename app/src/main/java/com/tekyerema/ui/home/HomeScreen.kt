@@ -66,6 +66,8 @@ import java.util.Calendar
 
 /** How long a spoken reply stays on Home before an idle screen greets instead. */
 private const val REPLY_FRESH_MS = 3 * 60_000L
+/** How long a transient idle notice ("Cancelled.") stays. */
+private const val IDLE_HINT_MS = 20_000L
 
 /**
  * Home is the voice experience, and nothing else: the orb, one line from the assistant (or a greeting when there is
@@ -136,9 +138,16 @@ fun HomeContent(
         now = System.currentTimeMillis()
     }
     val freshReply = voice.spoken.isNotBlank() && now - voice.spokenAt < REPLY_FRESH_MS
-    val phrase = Phrases.forState(presence, voice, agent).ifBlank {
-        if (presence == Presence.IDLE && freshReply) voice.spoken else ""
+    // An idle notice ("Cancelled.", "I didn't hear anything.") is a moment too: it gave way to nothing and stayed on
+    // screen for hours (A20e, 2026-09-29). It shows for a short while, then the greeting returns.
+    val hintAt = remember(voice.partialHint) { System.currentTimeMillis() }
+    LaunchedEffect(voice.partialHint) {
+        if (voice.partialHint.isNotBlank()) { delay(IDLE_HINT_MS + 50); now = System.currentTimeMillis() }
     }
+    val idleHintFresh = now - hintAt < IDLE_HINT_MS || System.currentTimeMillis() - hintAt < IDLE_HINT_MS
+    val phrase = Phrases.forState(presence, voice, agent)
+        .let { if (presence == Presence.IDLE && !idleHintFresh) "" else it }
+        .ifBlank { if (presence == Presence.IDLE && freshReply) voice.spoken else "" }
     val greet = presence == Presence.IDLE && phrase.isEmpty()
 
     val hint = when {

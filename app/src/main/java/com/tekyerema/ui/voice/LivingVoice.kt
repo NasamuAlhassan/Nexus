@@ -339,7 +339,9 @@ private fun DrawScope.drawWaves(
             if (thinkMix > 0.01f) y += thinkMix * window * r * 0.05f * sin(twoPi * (u * 2.5f + time * 0.9f) + phase)
             if (j == 0) path.moveTo(x, cy + y) else path.lineTo(x, cy + y)
         }
-        val base = (0.07f + 0.85f * voiceMix + 0.25f * thinkMix).coerceAtMost(1f)
+        // Nothing at rest: an idle line across the glass read as the old "scan line" (owner feedback, 2026-09-29).
+        val base = (0.85f * voiceMix + 0.25f * thinkMix).coerceAtMost(1f)
+        if (base < 0.01f) continue
         val a = (base * alphaScale * (1f - 0.25f * k)).coerceIn(0f, 1f)
         val c = tone(colors[k])
         drawPath(path, c, alpha = 0.22f * a, style = kit.waveGlow, blendMode = kit.blend)
