@@ -104,4 +104,15 @@ class ConsentTargetsTest {
             PerceptionRoute("tree", "test"))
         assertFalse(ActionSemantics.confirmation("tap", save, null, login)!!.contains("hunter22"))
     }
+
+    /** Device suite: every Calculator digit asked for a yes (the dialer-keypad rule fired on any number pad). */
+    @Test fun only_a_dialer_keypad_can_dial() {
+        fun keypad(pkg: String, extra: List<UiElement> = emptyList()) = UiSnapshot(pkg, null,
+            (0..9).map { btn(it, it.toString()) } + extra, 0L, PerceptionRoute("tree", "test"))
+        val seven = btn(7, "7")
+        assertTrue("calculator", TargetSemantics.classify("tap", seven, null, false, keypad("com.sec.android.app.popupcalculator")).tier == null)
+        assertEquals(RiskTier.TIER2, TargetSemantics.classify("tap", seven, null, false, keypad("com.samsung.android.dialer")).tier)
+        assertEquals("a Call button makes it a dialer", RiskTier.TIER2,
+            TargetSemantics.classify("tap", seven, null, false, keypad("com.example.voip", listOf(btn(20, "Call")))).tier)
+    }
 }

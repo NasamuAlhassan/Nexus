@@ -36,6 +36,16 @@ object TargetSemantics {
         e.editable && !e.password && !isQueryBox(e) && !e.label.isNullOrBlank() && !e.label.equals(e.hint, ignoreCase = true)
     }
 
+    private val dialerPackage = Regex("(?i)dialer|\\.phone|contacts|incall|telecom|\\.call")
+    private val dialControl = Regex("(?i)^(call|dial|voice call|video call|call button|make a call)$")
+
+    /** A keypad that can place a call: a dialer/phone/contacts app, or a Call/Dial control on the same screen. */
+    fun looksLikeDialer(screen: UiSnapshot?): Boolean {
+        screen ?: return true   // unknown screen: stay careful
+        if (screen.appPackage?.let { dialerPackage.containsMatchIn(it) } == true) return true
+        return screen.elements.any { it.clickable && it.label?.trim()?.let { l -> dialControl.matches(l) } == true }
+    }
+
     /** Fields whose IME action can BE a send (message compose boxes and the like). */
     val communicationField = Regex("\\b(message|reply|chat|comment|caption|post|tweet|status)\\b", RegexOption.IGNORE_CASE)
 
@@ -160,7 +170,10 @@ object TargetSemantics {
 
         // §1.16 — tapping a digit key on a (non-secure) numeric keypad, or a phone-number row, can place a
         // call outright on many dialers; require confirmation.
-        if (onNumericKeypad && targetIsDigit)
+        // Only a DIALER's keypad can dial: every Calculator digit asked for a yes (device suite, A20e, 2026-09-28 — the
+        // runner declined, so "work out 12 × 13" failed). A dialer = a phone/dialer/contacts app, or a Call/Dial control on
+        // the screen. The PIN-pad block above stays unconditional.
+        if (onNumericKeypad && targetIsDigit && looksLikeDialer(screen))
             return Classification(RiskTier.TIER2, null, "dialer keypad key ('$label') — a tap here can dial")
         if (primitive == "tap" && lower != null && phoneNumberLabel.matches(label!!.trim()))
             return Classification(RiskTier.TIER2, null, "target '$label' is a phone number — tapping it can place a call")
