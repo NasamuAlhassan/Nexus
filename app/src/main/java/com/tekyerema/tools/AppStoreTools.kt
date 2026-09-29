@@ -260,7 +260,7 @@ object InstallAppTool : Tool {
             PlayStore.State.UNKNOWN -> return ToolResult(false, "The Play Store page for $title didn't show an Install button.", data, channel = "a11y")
             PlayStore.State.INSTALLABLE -> Unit
         }
-        val started = pressElement(ctrl, state.button!!, page) {
+        val started = pressElement(ctrl, state.button!!, page, onlyNewControlsCount = true) {
             awaitScreen(ctrl, 6_000L) { s -> PlayStore.page(s).state.let { it == PlayStore.State.IN_PROGRESS || it == PlayStore.State.INSTALLED } } != null ||
                 (listing != null && isInstalled(ctx.appContext, listing.pkg))
         }

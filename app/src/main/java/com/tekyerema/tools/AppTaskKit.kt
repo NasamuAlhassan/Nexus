@@ -170,11 +170,20 @@ internal suspend fun awaitForeground(ctrl: AccessibilityController, pkgs: Set<St
  * there: if it has changed (Install → Cancel, a sent box emptied) the first press worked, and a second tap would undo
  * it or act twice.
  */
-internal suspend fun pressElement(ctrl: AccessibilityController, e: UiElement, on: UiSnapshot, reacted: suspend () -> Boolean): Boolean {
+internal suspend fun pressElement(ctrl: AccessibilityController, e: UiElement, on: UiSnapshot, onlyNewControlsCount: Boolean = false,
+                                   reacted: suspend () -> Boolean): Boolean {
     if (ctrl.clickElement(e.id) && reacted()) return true
     val now = try { ctrl.buildSnapshot() } catch (c: CancellationException) { throw c } catch (_: Throwable) { null } ?: return false
     // Anything new on screen (a dialog, a sheet) means the press DID something — never tap blindly through it.
-    if (now.signature() != on.signature()) return reacted()
+    if (!onlyNewControlsCount) { if (now.signature() != on.signature()) return reacted() }
+    else {
+        // [onlyNewControlsCount] (a page whose carousel or images keep changing, like the Play Store's Install sheet —
+        // A20e 2026-09-29: the click never reached the Compose button and the signature check skipped the gesture tap
+        // that would have): only a NEW tappable control counts as a reaction. Never for a Send button — a sent message
+        // may add nothing tappable, and a second tap would send twice.
+        val before = on.elements.mapNotNullTo(HashSet()) { if (it.clickable) it.label?.trim()?.lowercase() else null }
+        if (now.elements.any { it.clickable && !it.label.isNullOrBlank() && it.label.trim().lowercase() !in before }) return reacted()
+    }
     val same = now.elements.firstOrNull {
         !it.editable && it.label == e.label && it.viewId == e.viewId && it.bounds.overlaps(e.bounds)
     } ?: return reacted()
