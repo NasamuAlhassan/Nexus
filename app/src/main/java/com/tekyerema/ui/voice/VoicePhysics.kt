@@ -218,7 +218,9 @@ class PresenceSim {
 
     fun setPresence(p: Presence, calm: Boolean) {
         if (!started) {                                   // the very first state: no gesture, no transition
-            started = true; presence = p; spec = VisualSpec.of(p); settleAll(); return
+            started = true; presence = p; spec = VisualSpec.of(p); settleAll()
+            if (calm) appear.snap(1f)                     // calm: no unfolding — it is simply there
+            return
         }
         if (p == presence) return
         val kick = VisualSpec.kickFor(presence, p)
@@ -303,7 +305,8 @@ class PresenceSim {
 
     /** Nothing left to animate (only meaningful when calm — in full motion the visual always breathes). */
     fun atRest(calm: Boolean): Boolean =
-        calm && !spec.reactive && bloom == 0f && all.all { it.atRest }
+        calm && !spec.reactive && bloom == 0f && all.all { it.atRest } &&
+            appear.value == 1f && press.value == 1f && shake.value == 0f     // (a calm step snaps these three)
 
     /** Age 0..1 of ripple [i], or -1 if it is not showing. */
     fun rippleAge(i: Int): Float {

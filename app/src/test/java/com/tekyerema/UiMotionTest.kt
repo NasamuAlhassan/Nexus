@@ -197,6 +197,23 @@ class UiMotionTest {
     }
 
     @Test
+    fun a_calm_screen_is_whole_from_its_first_frame() {
+        // Regression: a calm screen never steps once settled, so the arrival "unfold" must not start at 0.
+        val sim = PresenceSim()
+        sim.setPresence(Presence.IDLE, calm = true)
+        assertEquals(1f, sim.appear.value, 0f)
+        assertTrue(sim.atRest(calm = true))
+        // Turning calm on mid-arrival: not at rest until one calm step has snapped it whole.
+        val mid = PresenceSim()
+        mid.setPresence(Presence.IDLE, calm = false)
+        run(mid, 0.05f)
+        assertFalse(mid.atRest(calm = true))
+        mid.step(frame, 0f, false, calm = true)
+        assertEquals(1f, mid.appear.value, 0f)
+        assertTrue(mid.atRest(calm = true))
+    }
+
+    @Test
     fun calm_motion_still_cross_fades_colour() {
         val sim = PresenceSim()
         sim.setPresence(Presence.THINKING, calm = true)
