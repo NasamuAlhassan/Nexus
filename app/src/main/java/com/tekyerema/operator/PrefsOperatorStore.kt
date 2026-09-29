@@ -30,7 +30,7 @@ class PrefsOperatorStore(context: Context) : OperatorStore {
         if (key == OperatorPolicy.K_USAGE) return
         com.tekyerema.settings.Settings.notifyChanged()
         if (before == value) return
-        OperatorPolicy.describeChange(key, value)?.let { words ->
+        OperatorPolicy.describeChange(key, value, before)?.let { words ->
             auditWriter.execute {
                 // Its own group (not AuditLog.newTask(), which would move the fast path's current task from this thread).
                 com.tekyerema.audit.AuditLog.record("user", com.tekyerema.audit.AuditLog.SETTING, words, System.currentTimeMillis())

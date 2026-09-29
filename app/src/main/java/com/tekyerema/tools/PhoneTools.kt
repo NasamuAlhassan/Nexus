@@ -298,6 +298,8 @@ object SendSmsTool : Tool {
             .putExtra(Intent.EXTRA_TEXT, message)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         val handler = try { intent.resolveActivity(ctx.appContext.packageManager)?.packageName } catch (_: Throwable) { null }
+        // D8: an SMS app the user said "never touch" isn't opened either (the emergency help text is exempt).
+        launchRefusal(handler, "Messages", ctx.emergency)?.let { return ToolResult(false, it, recoverable = false) }
         try {
             ctx.appContext.startActivity(intent)
         } catch (e: ActivityNotFoundException) {
@@ -308,7 +310,7 @@ object SendSmsTool : Tool {
         val drafted = ToolResult(true, "Opened Messages with the text to $who ready — it is not sent yet; tap Send to send it.",
             data = JSONObject().put("sent", false), channel = "intent")
         val ctrl = ctx.controller
-        if (ctrl == null || !AppConfig.bool("os.sms.pressSend", true) || driveRefusal(handler) != null) return drafted
+        if (ctrl == null || !AppConfig.bool("os.sms.pressSend", true) || driveRefusal(handler, ctx.emergency) != null) return drafted
         return pressSendInComposer(ctrl, setOfNotNull(handler?.takeIf { it != "android" }), message, who, appName = "Messages") ?: drafted
     }
 
@@ -319,7 +321,8 @@ object SendSmsTool : Tool {
     private suspend fun sendWhatsApp(ctx: ToolContext, number: String, message: String, who: String): ToolResult {
         val pkg = WHATSAPP_PKGS.firstOrNull { isInstalled(ctx.appContext, it) }
             ?: return ToolResult(false, "WhatsApp isn't installed on this phone.", recoverable = false)
-        val url = "https://api.whatsapp.com/send?phone=${IntentTemplates.ghanaIntl(number)}&text=" + Uri.encode(message)
+        launchRefusal(pkg, "WhatsApp", ctx.emergency)?.let { return ToolResult(false, it, recoverable = false) }   // D8
+        val url ="https://api.whatsapp.com/send?phone=${IntentTemplates.ghanaIntl(number)}&text=" + Uri.encode(message)
         try {
             ctx.appContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (t: Throwable) {
@@ -328,7 +331,7 @@ object SendSmsTool : Tool {
         val drafted = ToolResult(true, "Opened WhatsApp with the message to $who ready — it is not sent yet; tap Send to send it.",
             data = JSONObject().put("sent", false), channel = "intent")
         val ctrl = ctx.controller ?: return drafted
-        if (driveRefusal(pkg) != null) return drafted
+        if (driveRefusal(pkg, ctx.emergency) != null) return drafted
         return pressSendInComposer(ctrl, setOf(pkg), message, who, appName = "WhatsApp") ?: drafted
     }
 

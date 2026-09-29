@@ -44,9 +44,19 @@ object PolicyConfig {
         return if (prefixes.any { p -> code == "$p#" || code.startsWith("$p*") || code == p }) RiskTier.TIER3 else null
     }
 
-    /** J-11: packages the agent must never operate. */
-    fun denyApps(): Set<String> = AppConfig.stringList("policy.denyApps", emptyList()).map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    /**
+     * J-11: packages the agent must never operate — nor read (ScreenPrivacy). The app's own list PLUS the apps the user
+     * said "never touch" ([com.tekyerema.operator.OperatorPolicy.appRules], D8): a user can add to it, never take a
+     * config entry away. Read at every decision, so a change applies to the next task.
+     */
+    fun denyApps(): Set<String> = configDenyApps() + com.tekyerema.operator.OperatorPolicy.userApps(com.tekyerema.operator.AppRule.NEVER)
 
-    /** J-11: packages where the agent only guides (reads and explains) and never acts. */
-    fun guideOnlyApps(): Set<String> = AppConfig.stringList("policy.guideOnlyApps", emptyList()).map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    /** J-11: packages where the agent only guides (reads and explains) and never acts — config ∪ the user's "guide only". */
+    fun guideOnlyApps(): Set<String> = configGuideOnlyApps() + com.tekyerema.operator.OperatorPolicy.userApps(com.tekyerema.operator.AppRule.GUIDE)
+
+    /** The app's own deny list only (`policy.denyApps`) — shown as "set by the app" and never removable. */
+    fun configDenyApps(): Set<String> = AppConfig.stringList("policy.denyApps", emptyList()).map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+
+    /** The app's own guide-only list only (`policy.guideOnlyApps`). */
+    fun configGuideOnlyApps(): Set<String> = AppConfig.stringList("policy.guideOnlyApps", emptyList()).map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 }

@@ -20,6 +20,8 @@ import org.json.JSONObject
  *    [com.tekyerema.agent.RouterTiers] already drops the cloud tiers when [cloudUsable] is false.
  *  - The MCP server (Workstream D): [remoteControlEnabled], [revokedScopes].
  *  - The agent loop: [stepLimit] (maxStepsPerTask).
+ *  - Everything that reads or drives another app (the loop's ScreenPrivacy.appRule, open_app, the fast path, app-driving
+ *    tools, the MCP screen view): [appRules], through PolicyConfig.denyApps / guideOnlyApps (config ∪ user).
  * Usage is recorded in ONE place — [noteModelCall], called by Telemetry.noteLlm for every model call — so brains must
  * not call [recordUsage] again (that would count every call twice; `OperatorUsageSingleSiteTest` guards it).
  */
@@ -88,6 +90,7 @@ object OperatorPolicy {
     @Volatile private var alerts = true
     @Volatile private var routines = true
     @Volatile private var retentionDays = 0
+    @Volatile private var appRuleMap: Map<String, AppRuleEntry> = emptyMap()
 
     var executionMode: ExecutionMode
         get() = mode
@@ -165,6 +168,34 @@ object OperatorPolicy {
     var historyRetentionDays: Int
         get() = retentionDays
         set(v) { retentionDays = v.coerceAtLeast(0); persist(K_RETENTION, retentionDays.toString()) }
+
+    /**
+     * D8: the user's own per-app rules (package → [AppRuleEntry]), on top of the app's config lists — PolicyConfig.denyApps /
+     * guideOnlyApps return the union, so these only ever make things stricter than config ([AppRules]).
+     */
+    val appRules: Map<String, AppRuleEntry> get() = appRuleMap
+
+    /** The user's rule for [pkg] (config rules not included — see PolicyConfig for the union). */
+    fun appRule(pkg: String?): AppRule? = pkg?.let { appRuleMap[it]?.rule }
+
+    /** Packages the user gave [rule] (never a protected package — see [AppRules.protectedKind]). */
+    fun userApps(rule: AppRule): Set<String> =
+        appRuleMap.values.filter { it.rule == rule && AppRules.protectedKind(it.pkg) == null }.mapTo(HashSet()) { it.pkg }
+
+    /**
+     * Set [pkg]'s rule ([rule] null = remove it). Tightening needs nothing more; a LOOSENING must have been confirmed by
+     * the caller first (a spoken yes — AppRuleVoice — or the Settings dialog). Refused (false) for Tɛkyerɛma itself and
+     * the emergency call path. One synchronized step, so a Settings tap and a voice command can't undo each other.
+     */
+    @Synchronized fun setAppRule(pkg: String, label: String, rule: AppRule?): Boolean {
+        val p = pkg.trim()
+        if (p.isEmpty() || AppRules.protectedKind(p) != null) return false
+        val next = LinkedHashMap(appRuleMap)
+        if (rule == null) next.remove(p) else next[p] = AppRuleEntry(p, label.trim().ifEmpty { p }, rule)
+        appRuleMap = next
+        persist(K_APP_RULES, AppRules.encode(next.values))
+        return true
+    }
 
     // ------------------------------------------------------------------ derived rules
     /** The cloud may be used right now: the user allows it and today's budget isn't spent. */
@@ -292,7 +323,7 @@ object OperatorPolicy {
         store = null
         mode = ExecutionMode.STANDARD; cloud = true; providerOrder = KNOWN_PROVIDERS; weak = WeakModelPolicy.ASK
         steps = DEFAULT_STEPS; stepsChosen = false; capCalls = 0; capTokens = 0; remote = false; revoked = emptySet()
-        schedules = true; alerts = true; routines = true; retentionDays = 0
+        schedules = true; alerts = true; routines = true; retentionDays = 0; appRuleMap = emptyMap()
         usage.clear(); usageDay = Long.MIN_VALUE; lastModel = null
         zoneOffset = { java.util.TimeZone.getDefault().getOffset(it) }
         com.tekyerema.money.MoneyLimits.resetForTest(); com.tekyerema.money.KnownRecipients.resetForTest()   // round 2 (money/)
@@ -316,6 +347,7 @@ object OperatorPolicy {
         alerts = bool(K_ALERTS, true)
         routines = bool(K_ROUTINES, true)
         retentionDays = int(K_RETENTION, 0).coerceAtLeast(0)
+        appRuleMap = AppRules.decode(s.get(K_APP_RULES))
         loadUsage(s.get(K_USAGE))
     }
 
@@ -329,9 +361,10 @@ object OperatorPolicy {
 
     /**
      * A change to one stored choice in plain past-tense words, for the activity log ("switched the cloud off"); null for
-     * the usage counters (not a choice). Pure.
+     * the usage counters (not a choice). [before] = the stored value it replaced (the app rules are described as the
+     * difference: "put WhatsApp off limits"). Pure.
      */
-    fun describeChange(key: String, value: String?): String? {
+    fun describeChange(key: String, value: String?, before: String? = null): String? {
         fun onOff(v: String?) = if (v == "true") "on" else "off"
         fun limit(what: String, v: String?) = v?.toIntOrNull()?.takeIf { it > 0 }?.let { "set the daily $what limit to $it" } ?: "removed the daily $what limit"
         return when (key) {
@@ -358,7 +391,8 @@ object OperatorPolicy {
             K_ALERTS -> "switched message alerts ${onOff(value)}"
             K_ROUTINES -> "switched routines ${onOff(value)}"
             K_RETENTION -> value?.toIntOrNull()?.takeIf { it > 0 }?.let { "set history to be kept for $it days" } ?: "set history back to the usual time"
-            else -> com.tekyerema.money.MoneyLimits.describeChange(key, value)   // round 2: Mobile Money limits (null otherwise)
+            K_APP_RULES -> AppRules.describe(before, value)
+            else ->com.tekyerema.money.MoneyLimits.describeChange(key, value)   // round 2: Mobile Money limits (null otherwise)
         }
     }
 
@@ -374,6 +408,7 @@ object OperatorPolicy {
             .put("revokedCapabilities", org.json.JSONArray(revoked.map { it.name }))
             .put("schedulesEnabled", schedules).put("messageAlertsEnabled", alerts).put("routinesEnabled", routines)
             .put("historyRetentionDays", retentionDays)
+            .put("appRules", org.json.JSONArray(appRuleMap.values.map { JSONObject().put("package", it.pkg).put("rule", it.rule.name) }))
             .put("usageToday", JSONObject().put("calls", calls).put("tokens", tokens))
     }
 
@@ -390,5 +425,7 @@ object OperatorPolicy {
     const val K_ALERTS = "op.alerts"
     const val K_ROUTINES = "op.routines"
     const val K_RETENTION = "op.retentionDays"
+    /** D8: the user's per-app rules ([AppRules.encode]). */
+    const val K_APP_RULES = "op.appRules"
     const val K_USAGE = "op.usage"
 }

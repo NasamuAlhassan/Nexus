@@ -97,6 +97,7 @@ object PlayMusicTool : Tool {
                     data = JSONObject().put("notInstalled", n), recoverable = false)
             }
         }
+        launchRefusal(pkg, appName?.let { spokenAppName(it) } ?: "that app")?.let { return ToolResult(false, it, recoverable = false) }   // D8
         val search = if (artist.isNotEmpty() && query.isEmpty()) artist else listOf(query, artist).filter { it.isNotEmpty() }.joinToString(" ")
         val intent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -149,6 +150,9 @@ object PlayMusicTool : Tool {
         val label = when (collection) { "liked" -> "your liked songs"; "library" -> "your library"; else -> "your downloads" }
         if (!isInstalled(ctx.appContext, YT_MUSIC))
             return ToolResult(false, "I can play $label only in YouTube Music, and it isn't on this phone.", recoverable = false)
+        // D8 / J-11: this walks YouTube Music's own screens, so a "never touch" or "guide only" rule there stops it.
+        launchRefusal(YT_MUSIC, "YouTube Music")?.let { return ToolResult(false, it, recoverable = false) }
+        driveRefusal(YT_MUSIC)?.let { return ToolResult(false, "I can't play $label for you: YouTube Music — $it.", recoverable = false) }
         val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE, recoverable = false)
         val wait = AppConfig.long("os.media.collectionWaitMs", 12_000L)
         fun inApp(s: UiSnapshot) = s.appPackage == YT_MUSIC
@@ -240,6 +244,7 @@ object PlayMusicTool : Tool {
         val ctrl = ctx.controller ?: return null
         val snap = try { ctrl.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { return null }
         if (pkg != null && snap.appPackage != pkg) return null
+        if (driveRefusal(snap.appPackage) != null) return null   // J-11 / D8: no press inside a denied or guide-only app
         val play = AppUi.preferClickable(AppUi.exact(snap, "play", "shuffle", "play all", "shuffle play")) ?: return null
         ctrl.clickElement(play.id)
         return awaitPlaying(ctx, pkg, 4_000L)
@@ -367,8 +372,10 @@ object OpenSettingTool : Tool {
         val (action, label) = actionFor(target)
             ?: return ToolResult(false, "I don't know which setting '$target' is.", recoverable = true)
         val intent = Intent(action).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (intent.resolveActivity(ctx.appContext.packageManager) == null)
-            return ToolResult(false, "This phone doesn't expose a $label setting screen I can open.", recoverable = true)
+        val settingsPkg = intent.resolveActivity(ctx.appContext.packageManager)?.packageName
+            ?: return ToolResult(false, "This phone doesn't expose a $label setting screen I can open.", recoverable = true)
+        // D8: "never touch Settings" keeps the Settings app closed; "guide only" opens it but leaves the switch to the user.
+        launchRefusal(settingsPkg, "Settings")?.let { return ToolResult(false, it, recoverable = false) }
         try { ctx.appContext.startActivity(intent) } catch (t: Throwable) {
             return ToolResult(false, "Couldn't open $label settings: ${t.message}", recoverable = true)
         }
@@ -391,6 +398,9 @@ object OpenSettingTool : Tool {
         val word = if (want) "on" else "off"
         if (toggle.checked == want)
             return ToolResult(true, "$label is already $word.", data = JSONObject().put("confirmed", true), channel = "a11y")
+        if (driveRefusal(before.appPackage ?: settingsPkg) != null)
+            return ToolResult(true, "Opened $label settings. I only guide you in Settings, so please turn it $word there yourself: " +
+                "find the $label switch and double-tap it.", data = JSONObject().put("confirmed", false), channel = "intent", recoverable = false)
         val tapped = ctrl.clickElement(toggle.id)
         ctrl.waitForSettle(900)
         val after = ctrl.buildSnapshot()
