@@ -208,15 +208,18 @@ object AgentEngine {
     /** @param unattended the goal came from a trigger (schedule / notification rule), not the user speaking now —
      *  D-08: tools that don't list the "trigger" caller (money, calls, sends) are refused for it.
      *  Synchronized: a schedule/notification trigger (TriggerReceiver) and the voice layer can submit at the same moment;
-     *  the "is a task already running?" check and the launch must be one step, or both goals run at once on one screen. */
+     *  the "is a task already running?" check and the launch must be one step, or both goals run at once on one screen.
+     *  @param origin null = the phone's user; "remote:<client>" = a paired computer over MCP (Workstream D): the same run,
+     *  read-only unless the user allowed remote actions, every change confirmed on the phone ([com.tekyerema.mcp.RemoteGate]). */
     @Synchronized
-    fun submitGoal(goal: String, unattended: Boolean = false) {
+    fun submitGoal(goal: String, unattended: Boolean = false, origin: String? = null) {
         if (!initialized) return
         // WS-A resume: "carry on" / "continue" with a paused or interrupted task on file resumes THAT task — decided here
         // from the words and the journal (no model call), only on the user's word (never an unattended trigger).
-        if (!unattended && currentJob?.isActive != true) resumeTarget(goal)?.let { rec -> launchResume(rec, goal.trim()); return }
+        if (currentJob?.isActive != true) resumeFor(goal, unattended, origin)?.let { rec -> launchResume(rec, goal.trim()); return }
         val g = goal.trim().let { raw ->
-            if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true)) raw
+            // D: a computer's "her" is not the phone user's "her" — its words are never resolved against their conversation.
+            if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true) || com.tekyerema.mcp.RemoteGate.isRemote(origin)) raw
             else References.rewrite(raw)?.also { log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$it\"") } ?: raw
         }
         if (g.isEmpty()) return
@@ -234,8 +237,8 @@ object AgentEngine {
         // would otherwise match the PREVIOUS run's lingering terminal state when the new goal equals the old
         // one — speaking the stale result while this fresh run proceeds unwatched (and could hit an ignored
         // confirmation gate). Setting THINKING here closes that window.
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = null) }
-        currentJob = scope.launch { runTask(g, unattended = unattended) }
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = null, origin = origin, runSeq = it.runSeq + 1) }
+        currentJob = scope.launch { runTask(g, unattended = unattended, origin = origin) }
     }
 
     /** WS-A: the paused/interrupted task [text] would resume ("carry on"), or null. A pending screen reading keeps a bare
@@ -245,6 +248,12 @@ object AgentEngine {
             com.tekyerema.agent.journal.ResumeIntent.shouldResume(text, true, ScreenReadCursor.pending)
         }
 
+    /** WS-A: the task [text] resumes when submitted — only on the phone user's own word: never an unattended trigger, and
+     *  (merge A+D) never a paired computer's — a remote "carry on" must not resume the user's task as the user; it runs as
+     *  a new remote goal under RemoteGate. */
+    internal fun resumeFor(text: String, unattended: Boolean, origin: String?): com.tekyerema.agent.journal.TaskRecord? =
+        if (unattended || com.tekyerema.mcp.RemoteGate.isRemote(origin)) null else resumeTarget(text)
+
     /** WS-A: run [rec] again from its checkpoint. The run carries the ORIGINAL goal; [words] is what the user said. */
     private fun launchResume(rec: com.tekyerema.agent.journal.TaskRecord, words: String) {
         confirmChannel = Channel(Channel.CONFLATED)
@@ -252,7 +261,9 @@ object AgentEngine {
         answerChannel = Channel(Channel.CONFLATED)
         paused.value = false
         steerQueue.clear()
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = rec.goal, request = words) }
+        // (merge A+D: a resumed run is the phone user's and a NEW run — its own runSeq, so a paired computer's
+        // RemoteTaskTracker never reads it as the remote task that ran before it.)
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = rec.goal, request = words, origin = null, runSeq = it.runSeq + 1) }
         currentJob = scope.launch { runTask(rec.goal, resume = rec, request = words) }
     }
 
@@ -305,15 +316,17 @@ object AgentEngine {
 
     /** TEST ONLY: run [goal] (or resume [resume]) through the real loop with [brain] deciding every step. */
     internal suspend fun runForTest(goal: String, brain: AgentBrain, resume: com.tekyerema.agent.journal.TaskRecord? = null,
-                                    request: String? = null, unattended: Boolean = false, journal: Boolean = true) {
+                                    request: String? = null, unattended: Boolean = false, journal: Boolean? = true,
+                                    origin: String? = null) {
         confirmChannel = Channel(Channel.CONFLATED)
         secureChannel = Channel(Channel.CONFLATED)
         answerChannel = Channel(Channel.CONFLATED)
         paused.value = false
         steerQueue.clear()
         val g = resume?.goal ?: goal
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = request) }
-        runTask(g, forcedBrain = brain, forcedLabel = "SCRIPTED", unattended = unattended, resume = resume, request = request, journal = journal)
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = request, origin = origin, runSeq = it.runSeq + 1) }
+        runTask(g, forcedBrain = brain, forcedLabel = "SCRIPTED", unattended = unattended, resume = resume, request = request,
+            journal = journal, origin = origin)
     }
 
     // ---------------------------------------------------------------- C-12 / C-13 / C-19 task control
@@ -408,9 +421,12 @@ object AgentEngine {
     }
 
     /** @param resume WS-A: a paused/interrupted task to pick up from its checkpoint ([request] = the words, "carry on").
-     *  @param journal WS-A: record this run in the task journal (default: attended, non-test, not a screen-free question). */
+     *  @param journal WS-A: record this run in the task journal (default: attended, the phone user's, non-test, not a
+     *  screen-free question).
+     *  @param origin D: null = the phone's user; "remote:<client>" = a paired computer ([com.tekyerema.mcp.RemoteGate]). */
     private suspend fun runTask(goal: String, forcedBrain: AgentBrain? = null, forcedLabel: String? = null, unattended: Boolean = false,
-                                resume: com.tekyerema.agent.journal.TaskRecord? = null, request: String? = null, journal: Boolean? = null) {
+                                resume: com.tekyerema.agent.journal.TaskRecord? = null, request: String? = null, journal: Boolean? = null,
+                                origin: String? = null) {
         val ctxApp = appContext ?: return
         val set = settings ?: return
         clearLog()
@@ -420,8 +436,11 @@ object AgentEngine {
         if (resume != null) log(LogEntry.Kind.INFO, "Resuming a paused task (${resume.pauseReason ?: resume.state}): $goal")
         // Conversation memory: snapshot the PRIOR turns for this run's brain context, then record this
         // user turn for the NEXT one. Skipped for TEST scenarios (forcedBrain) so they stay isolated.
-        val convo = conversationSnapshot()
-        if (forcedBrain == null) pushConvo("User: " + if (resume != null) "${request ?: "carry on"} (carry on with “$goal”)" else goal)
+        // D: a paired computer's request is remembered as the computer's words, never as something the user said, and its
+        // planner never sees the user's own conversation (a different principal must not be able to read it back out).
+        val convo = if (com.tekyerema.mcp.RemoteGate.isRemote(origin)) emptyList() else conversationSnapshot()
+        if (forcedBrain == null) pushConvo(if (com.tekyerema.mcp.RemoteGate.isRemote(origin)) "Your computer asked: $goal"
+            else "User: " + if (resume != null) "${request ?: "carry on"} (carry on with “$goal”)" else goal)
         setStatus(AgentStatus.THINKING)
 
         // Hybrid brain (directive §14): the on-device LocalBrain handles simple/offline goals directly;
@@ -510,7 +529,7 @@ object AgentEngine {
         // D-02: the tool schema is chosen per step (core primitives + needed groups + used + discovered).
         val usedTools = LinkedHashSet<String>()
         // W8: telemetry turn (Q-01..Q-04, Q-10), audit task (J-12), undo snapshot (J-13), opt-in trajectory (Q-07).
-        val source = if (forcedBrain != null) "test" else if (unattended) "trigger" else "agent"
+        val source = if (forcedBrain != null) "test" else if (unattended) "trigger" else origin ?: "agent"   // D: "remote:<client>"
         com.tekyerema.core.telemetry.Telemetry.ensureTurn(source)
         com.tekyerema.core.telemetry.Telemetry.mark("route")
         com.tekyerema.core.telemetry.Telemetry.update { this.goal = goal }
@@ -524,7 +543,10 @@ object AgentEngine {
         // this run (a run that isn't journaled still dedupes within itself, under its own id).
         val taskRun: com.tekyerema.agent.journal.TaskRun? = when {
             resume != null -> com.tekyerema.agent.journal.TaskRun.resume(resume)
-            journal ?: (forcedBrain == null && !unattended && !direct) -> com.tekyerema.agent.journal.TaskRun.begin(goal, source)
+            // (merge A+D: a paired computer's task is never journaled — a "carry on" would resume it as the phone user's,
+            // outside RemoteGate; it simply ends, and says it stopped rather than paused.)
+            !com.tekyerema.mcp.RemoteGate.isRemote(origin) && (journal ?: (forcedBrain == null && !unattended && !direct)) ->
+                com.tekyerema.agent.journal.TaskRun.begin(goal, source)
             else -> null
         }
         runCtx.journal = taskRun
@@ -1018,6 +1040,14 @@ object AgentEngine {
                             history.add("${decision.name} → BLOCKED: this task started without the user; it may only read and tell, never act for them.")
                             continue
                         }
+                        // D (MCP): a paired computer's task may only read unless the user allowed remote actions (RemoteGate).
+                        val remoteRefusal = com.tekyerema.mcp.RemoteGate.refusal(origin, tool, com.tekyerema.mcp.RemoteControl.actionsAllowed)
+                        if (remoteRefusal != null) {
+                            stats = stats.copy(blocked = stats.blocked + 1)
+                            log(LogEntry.Kind.POLICY, "Blocked: ${decision.name} — $remoteRefusal")
+                            history.add("${decision.name} → BLOCKED: $remoteRefusal. Answer from what you can read, or call cannot_do.")
+                            continue
+                        }
                         // D-06: malformed or schema-violating arguments never reach a tool — the model gets the reason.
                         val argProblem = decision.argError ?: com.tekyerema.tools.ToolArgs.validate(tool, decision.args)
                         if (argProblem != null) {
@@ -1097,11 +1127,17 @@ object AgentEngine {
 
                         // ---- policy: target semantics + provenance, keyed on the resolved target, not the tool name ----
                         val cls = TargetSemantics.classify(decision.name, resolved?.element, requestedLabel, decision.args.boolOrDefault("submit", false), before)
-                        val tags = Provenance.tagArgs(decision.args, goal, before, untrustedRead)
-                        val untrusted = Provenance.hasUntrusted(tags)
+                        // D: provenance (with taint after third-party reads), the policy decision, hidden-target and remote
+                        // floors and the payload injection check — one pure function the injection suite tests (StepGate).
+                        val gate = com.tekyerema.policy.StepGate.assess(tool, decision.args, goal, before, untrustedRead,
+                            resolved?.element, origin) { u ->
+                            policy.evaluate(tool, decision.args, hasUntrustedParams = u, targetTier = cls.tier, hardBlock = cls.block)
+                        }
+                        val tags = gate.tags
+                        val untrusted = gate.untrusted
                         if (untrusted) log(LogEntry.Kind.POLICY, "provenance: ${Provenance.describe(tags)}")
                         if (cls.tier != null) log(LogEntry.Kind.POLICY, "target semantics: ${cls.reason} → ${cls.tier}")
-                        var pd = policy.evaluate(tool, decision.args, hasUntrustedParams = untrusted, targetTier = cls.tier, hardBlock = cls.block)
+                        var pd = gate.decision   // (WS-A: the effect ledger below may still raise it to CONFIRM)
                         // J-11: nothing is operated OR READ inside a denied app (read_state / read_all return screen text,
                         // which would reach the cloud model); a guide-only app is read and explained, never acted on.
                         val appRule = com.tekyerema.policy.ScreenPrivacy.appRule(decision.name, tool.grounded, mutating,
@@ -1115,14 +1151,12 @@ object AgentEngine {
                         }
                         // J-06: a payload that itself carries instructions, or one taken from content that tried to give
                         // orders, stops the task before any confirmation — the user hears why; nothing is sent.
-                        val payloadInjection = Provenance.payloadKeys.firstNotNullOfOrNull { k ->
-                            if (decision.args.has(k)) com.tekyerema.core.Injection.detect(decision.args.optString(k)) else null
-                        }
+                        val payloadInjection = gate.payloadInjection
                         // J-19: an isolated guard model screens the third-party text behind a confirmable payload (flag, off by default).
                         val sentinelBad = if (untrusted && pd.outcome != PolicyOutcome.ALLOW && untrustedRead.isNotEmpty())
                             com.tekyerema.policy.Sentinel.check(untrustedRead.takeLast(3), set)?.malicious == true else false
                         if (sentinelBad && injectionSource == null) injectionSource = "a message the guard flagged"
-                        if (payloadInjection != null || sentinelBad || (injectionSource != null && untrusted && pd.outcome != PolicyOutcome.ALLOW)) {
+                        if (com.tekyerema.policy.StepGate.injectionStop(gate, sentinelBad, injectionSource)) {
                             val src = if (payloadInjection != null) "the text I was about to use" else injectionSource!!
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "INJECTION_STOP: ${decision.name} with a payload from untrusted content that contained instructions (${payloadInjection ?: injectionSource})")
@@ -1150,6 +1184,9 @@ object AgentEngine {
                                 effectLine = v.line
                                 if (pd.outcome != PolicyOutcome.CONFIRM) pd = pd.copy(outcome = PolicyOutcome.CONFIRM,
                                     reason = "The same action is on record — the user decides whether to repeat it.")
+                                // (merge A+D: a step raised to CONFIRM here meets StepGate's CONFIRM rule too — never on a
+                                // control a person can't perceive as the agent reads it.)
+                                pd = com.tekyerema.policy.StepGate.unseenFloor(resolved?.element, pd)
                             }
                             com.tekyerema.agent.journal.EffectGate.Verdict.Proceed -> {}
                         }
@@ -1233,15 +1270,25 @@ object AgentEngine {
                                 // (an editable's label is its CONTENT, not its name — so a text field is "the text box")
                                 val itemName = if (resolved?.element?.editable == true) "the text box"
                                     else resolved?.element?.label?.takeIf { it.isNotBlank() }?.let { "“${it.take(40)}”" } ?: "the selected item"
-                                // WS-A: the ledger's "I already sent this to Ama at 10:02 — send it again?" leads the read-back.
-                                val prompt = (effectLine?.let { "$it\n" } ?: "") + enrichCallConfirmation(decision.name, decision.args, basePrompt, ctxApp)
+                                val plainPrompt = enrichCallConfirmation(decision.name, decision.args, basePrompt, ctxApp)
                                     .replace(Regex("\\belement \\d+\\b"), itemName)
+                                // D: a recipient the goal never named is said to be one (and where it came from); a paired
+                                // computer's request says so first (ActionSemantics / RemoteGate).
+                                // WS-A: the ledger's "I already sent this to Ama at 10:02 — send it again?" leads the read-back
+                                // (after "Your computer is asking me…" for a remote task).
+                                val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
+                                    com.tekyerema.policy.ActionSemantics.withRecipientNotice(
+                                    plainPrompt, com.tekyerema.policy.ActionSemantics.recipientNotice(decision.name, decision.args,
+                                        resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal, tags)))
                                 // §A.1 — a Twi rendering of the SAME action, built from structure (verbatim
                                 // name + digit-by-digit number), for the core confirmable intents. Null for
                                 // anything we can't render structurally → the English line is used.
-                                // (WS-A: no Twi template carries the "already sent" warning yet — so it is asked in English.)
-                                val promptTwi = if (effectLine != null) null else confirmSpecFor(decision.name, decision.args, ctxApp)
+                                // D: the Twi template can't carry "your computer is asking" or an unnamed-recipient notice —
+                                // then the full English sentence is spoken rather than a Twi one that leaves the warning out.
+                                // (WS-A: nor the ledger's "already sent" warning — any addition to the plain prompt means English.)
+                                val promptTwi = confirmSpecFor(decision.name, decision.args, ctxApp)
                                     ?.let { com.tekyerema.voice.ConfirmTemplates.twi(it) }
+                                    ?.takeIf { prompt == plainPrompt }
                                 stats = stats.copy(confirmations = stats.confirmations + 1)
                                 log(LogEntry.Kind.CONFIRM, prompt)
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it

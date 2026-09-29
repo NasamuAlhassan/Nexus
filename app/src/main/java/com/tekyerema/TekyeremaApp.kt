@@ -26,6 +26,8 @@ class TekyeremaApp : Application() {
         ModelManager.init(this)     // §Part D — single model store; first-run download is the delivery path
         AgentEngine.init(this)
         VoiceEngine.init(this)
+        // D: the computer connection (MCP over adb) — idle until the user turns it on (OperatorPolicy.remoteControlEnabled).
+        com.tekyerema.mcp.RemoteControl.init(this)
     }
 
     /** N-08: release on-device models under memory pressure instead of being killed for them. */

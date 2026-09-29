@@ -119,6 +119,30 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Tekyerema.Voice" />
 
+        <!-- Interop (research note §1.6): other apps hand Tɛkyerɛma TEXT — the share sheet ("Tɛkyerɛma") and the text-selection
+             menu ("Read with Tɛkyerɛma"). Exported because other apps start it, so it trusts nothing it receives: text/plain
+             only; it reads the text aloud and keeps it (memory only, 15 min) as untrusted CONTENT for questions about it. It
+             starts no task, answers no confirmation, runs no tool and returns no result — whatever the text says stays text.
+             ManifestHardeningTest pins this entry; InteropArchitectureTest pins what its code may call. -->
+        <activity
+            android:name=".interop.SharedTextActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter android:label="Tɛkyerɛma">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter android:label="Read with Tɛkyerɛma">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+
         <!-- A-08 Quick Settings tile: tap to talk; tap again while working to stop (J-14). -->
         <service
             android:name=".voice.TalkTileService"

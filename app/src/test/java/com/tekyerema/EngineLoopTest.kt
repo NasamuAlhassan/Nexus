@@ -379,6 +379,50 @@ class EngineLoopTest {
         advanceUntilIdle(); job.join()
         assertNull(TaskJournal.latest())
     }
+
+    // ---------------------------------------------------------------- integration (A + B + D, 2026-09-29)
+
+    @Test fun a_plan_rides_on_the_journal_record_and_comes_back_on_carry_on() = runTest {
+        ctrl.screen = Screens.chatList()
+        ctrl.onClick = { e -> if (e.label == "Ama") ctrl.screen = Screens.chat(composer = null) }
+        val brain = ScriptedBrain(
+            { AgentDecision.CallTool("tap", JSONObject().put("element_id", Screens.ROW_ID), null, "element_present: Message",
+                plan = "open Ama's chat => element_present: Message; type the message; send it") },
+            { AgentDecision.Fail("HTTP 429: Rate limit reached (tokens per day). Please try again in 5m.") })
+        var job = launch { AgentEngine.runForTest("send Ama see you at 6", brain) }
+        advanceUntilIdle(); job.join()
+        val rec = TaskJournal.resumable()!!
+        assertEquals("one record per run — B's plan is on A's", rec.id, TaskJournal.latest()!!.id)
+        assertEquals(listOf("open Ama's chat", "type the message", "send it"), rec.plan.map { it.text })
+        assertEquals(listOf(true, false, false), rec.plan.map { it.done })
+
+        val brain2 = ScriptedBrain({ AgentDecision.Done("stopping here") })
+        job = launch { AgentEngine.runForTest("carry on", brain2, resume = rec, request = "carry on") }
+        advanceUntilIdle(); job.join()
+        val progress = brain2.seen.first().progress
+        assertTrue(progress, progress.contains("[x] 1. open Ama's chat") && progress.contains("[>] 2. type the message"))
+        // The completion gate still holds after the resume: open subgoals are never "done".
+        assertEquals(AgentStatus.COMPLETED_UNVERIFIED, state().status)
+    }
+
+    @Test fun a_paired_computers_task_is_never_journaled_and_never_says_paused() = runTest {
+        val job = launch { AgentEngine.runForTest("open my messages",
+            ScriptedBrain({ AgentDecision.CannotDo(com.tekyerema.agent.routing.ModelRouting.NO_CAPABLE_MODEL,
+                com.tekyerema.agent.routing.ModelRouting.PAUSED_TEXT) }), origin = "remote:laptop") }
+        advanceUntilIdle(); job.join()
+        assertNull("a remote task leaves no resumable record", TaskJournal.latest())
+        assertFalse(AgentEngine.isPausedResult(state().lastResult))
+        assertTrue(result()!!, result()!!.contains("so I stopped this task here") && !result()!!.contains("paused"))
+    }
+
+    @Test fun only_the_phone_users_own_carry_on_resumes_a_task() = runTest {
+        val job = launch { AgentEngine.runForTest("send Ama see you at 6",
+            ScriptedBrain({ AgentDecision.CannotDo("network_lost", "The internet isn't working.") })) }
+        advanceUntilIdle(); job.join()
+        assertNotNull(AgentEngine.resumeFor("carry on", unattended = false, origin = null))
+        assertNull("a paired computer can't resume the user's task", AgentEngine.resumeFor("carry on", unattended = false, origin = "remote:laptop"))
+        assertNull("nor can a trigger", AgentEngine.resumeFor("carry on", unattended = true, origin = null))
+    }
 }
 
 /** A native SMS tool that records instead of sending (its own check says it went: the radio accepted it). */
