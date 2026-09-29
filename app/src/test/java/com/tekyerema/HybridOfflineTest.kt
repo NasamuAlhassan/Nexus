@@ -165,6 +165,21 @@ class HybridOfflineTest {
         assertNull(AnswerCache.key("hi"))
     }
 
+    @Test fun clock_relative_answers_are_short_lived() {
+        // review #13: the time of day is never kept; "days until …" / "how old …" are kept only as fresh answers
+        var now = 0L
+        val c = AnswerCache(maxEntries = 8, clock = { now })
+        c.put("what time is it in London", "It's 3 PM in London.")
+        c.put("how many days until Christmas", "87 days.")
+        c.put("how old is the president of Ghana", "He is 65.")
+        assertNull(c.fresh("what time is it in London"))
+        assertEquals("87 days.", c.fresh("how many days until Christmas"))
+        now = 2 * 3_600_000L
+        assertNull("no longer fresh after 2 h", c.fresh("how many days until Christmas"))
+        now = 3 * 24 * 3_600_000L
+        assertNull("not offered offline days later", c.stale("how old is the president of Ghana"))
+    }
+
     @Test fun cache_fresh_then_stale_with_its_age() {
         var now = 0L
         val c = AnswerCache(maxEntries = 8, clock = { now })
@@ -295,6 +310,17 @@ class HybridOfflineTest {
         assertEquals("send_sms", t.name)
         assertEquals("Prince", t.args.getString("contact"))
         assertEquals("the weather is bad and I'm staying home", t.args.getString("message"))
+    }
+
+    @Test fun a_text_never_swallows_a_second_request() = runBlocking {
+        // review #2: "…then call Kofi" is a second request, not part of the message
+        assertTrue(LocalBrain.hasFollowOnCommand("I'm late then call Kofi"))
+        assertTrue(LocalBrain.hasFollowOnCommand("I'm late and open WhatsApp"))
+        assertFalse(LocalBrain.hasFollowOnCommand("the weather is bad and I'm staying home"))
+        assertFalse(LocalBrain.hasFollowOnCommand("call me when you land"))                 // the FIRST clause is the message
+        val d = router(null, false).decide(ctx("text Ama saying I'm late then call Kofi"))
+        if (d is AgentDecision.CallTool) assertTrue("the whole compound became one text: ${d.args}",
+            !(d.name == "send_sms" && d.args.optString("message").contains("call Kofi")))
     }
 
     @Test fun local_reads_only_the_named_apps_messages() = runBlocking {

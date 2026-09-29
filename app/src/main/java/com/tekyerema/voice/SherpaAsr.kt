@@ -171,7 +171,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         // this audio is that snapshot plus only the silence after it.
         val sp = spec; spec = null
         if (sp != null) {
-            val hit = sp.lang == lang && sp.text != null && isContinuation(raw, sp.samples, sr)
+            val hit = sp.gen == specGeneration && sp.lang == lang && sp.text != null && isContinuation(raw, sp.samples, sr)
             com.tekyerema.core.telemetry.Telemetry.update { voice.putIfAbsent("asrSpeculative", if (hit) "hit" else "miss") }
             Log.i("Tekyerema", "[ASR] speculative ${if (hit) "HIT" else "miss"} (snapshot ${sp.samples.size * 1000L / sr}ms of ${raw.size * 1000L / sr}ms)")
             if (hit) return sp.text!!.ifEmpty { null }
@@ -204,23 +204,35 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     }
 
     /** B-19: the last speculative decode (one at a time; consumed by the next real decode, hit or miss). */
-    private class Spec(val lang: String, val samples: FloatArray, val text: String?)
+    private class Spec(val lang: String, val samples: FloatArray, val text: String?, val gen: Int)
     @Volatile private var spec: Spec? = null
+
+    /**
+     * B-19 — bumped whenever the capture says its snapshot went stale ([dropSpeculation]); a speculative result is only
+     * reused if nothing was dropped since its snapshot was taken. Read [specGeneration] when the snapshot is taken (on
+     * the mic thread, before the decode is launched) so a drop that lands before the decode even starts still counts.
+     */
+    @Volatile var specGeneration = 0
+        private set
+
+    /** B-19: the user spoke again after the snapshot (or the turn ended otherwise) — never reuse that decode. */
+    fun dropSpeculation() { synchronized(this) { specGeneration++ }; spec = null }
 
     /**
      * B-19 — decode a snapshot of the utterance while the end-of-turn silence is still being waited out (see
      * [MicCapture.onPause]). Runs under the same lock as real decodes, so the real one simply waits for it and then
      * finds the answer ready. Local only: nothing here ever touches the network.
      */
-    suspend fun speculate(wav: ByteArray, forceLanguage: String?) {
+    suspend fun speculate(wav: ByteArray, forceLanguage: String?, gen: Int = specGeneration) {
         if (!ready) return
         withContext(Dispatchers.Default) {
             lock.withLock {
                 val lang = langKey(forceLanguage)
                 val (raw, sr) = readWav(wav) ?: return@withLock
                 val t0 = SystemClock.uptimeMillis()
+                if (gen != specGeneration) return@withLock                        // already stale: don't hold the recogniser
                 val text = decodeSamples(lang, raw, sr)
-                spec = Spec(lang, raw, text)
+                spec = Spec(lang, raw, text, gen)
                 Log.i("Tekyerema", "[ASR] speculative decode ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms")
             }
         }
@@ -330,12 +342,22 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
          */
         /**
          * B-19 — is [final] the speculative [snapshot] plus only what came after it (the end-of-turn silence, ≤ 2 s)?
-         * MicCapture builds both with one gain, so the shared part is sample-for-sample identical. Pure.
+         * MicCapture builds both with one gain, so the shared part is sample-for-sample identical. What came after must
+         * also be QUIET (well under the snapshot's own level): a prefix match alone would pass "call Ama… no, Kofi" off as
+         * "call Ama" whenever the recomputed gain equals the snapshot's (always, for a loud close voice). Pure.
          */
         internal fun isContinuation(final: FloatArray, snapshot: FloatArray, sr: Int): Boolean {
             if (snapshot.isEmpty() || final.size < snapshot.size || final.size - snapshot.size > 2 * sr) return false
             for (i in snapshot.indices) if (final[i] != snapshot[i]) return false
-            return true
+            if (final.size == snapshot.size) return true
+            return rms(final, snapshot.size, final.size) <= 0.5 * rms(snapshot, 0, snapshot.size)
+        }
+
+        private fun rms(a: FloatArray, from: Int, to: Int): Double {
+            if (to <= from) return 0.0
+            var sum = 0.0
+            for (i in from until to) sum += a[i].toDouble() * a[i]
+            return Math.sqrt(sum / (to - from))
         }
 
         internal fun trimRestart(text: String): String {

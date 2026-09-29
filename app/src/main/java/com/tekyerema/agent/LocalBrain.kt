@@ -220,6 +220,9 @@ class LocalBrain : AgentBrain {
     /** N-09 — "text Ama saying I'm on my way", "send a message to 0244123456 that I'm late" → send_sms, or null. */
     private fun smsDecision(raw: String): AgentDecision? {
         val p = parseSms(raw) ?: return null
+        // "text Ama saying I'm late then call Kofi": the message would swallow the second request (and a long read-back
+        // is easy to approve). A later clause that starts with a command → a compound request for the plan/planner.
+        if (hasFollowOnCommand(p.message)) return null
         val args = JSONObject().put("message", p.message)
         if (p.number != null) args.put("number", p.number) else args.put("contact", p.contact)
         if (p.whatsApp) args.put("via", "whatsapp")
@@ -542,6 +545,14 @@ class LocalBrain : AgentBrain {
             val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
             return Sms(if (isNumber) null else who, if (isNumber) (if (who.trim().startsWith("+")) "+$digits" else digits) else null, msg, whatsApp)
         }
+
+        /** Does a text's body carry another request after it ("I'm late then call Kofi")? Pure. */
+        internal fun hasFollowOnCommand(message: String): Boolean {
+            val parts = message.trim().trimEnd('.', '!', '?').split(RE_CLAUSE_SPLIT).map { it.trim() }.filter { it.isNotEmpty() }
+            return parts.drop(1).any { RE_COMMAND_LEAD.containsMatchIn(it) }
+        }
+        private val RE_COMMAND_LEAD = Regex("^(?:please\\s+)?(?:call|ring|dial|text|sms|message|whatsapp|email|open|launch|" +
+            "remind|send|set|turn|play|read|take|search|find|check|frɛ|bue|kenkan)\\b", RegexOption.IGNORE_CASE)
 
         /** N-09 — split a compound request into 2–4 clauses ("… and …", "… then …", "…; …", Twi "… na …"), or null. Pure. */
         fun splitClauses(goal: String): List<String>? {

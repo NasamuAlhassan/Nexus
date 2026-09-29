@@ -74,8 +74,17 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     /** Never the full-screen "extract" editor in landscape: it moves the text away from where a TalkBack user left it. */
     override fun onEvaluateFullscreenMode() = false
 
+    /** A voice start queued behind the listen cue (250 ms), dropped when the field changes or the keyboard closes. */
+    private var pendingVoiceStart: Runnable? = null
+    private fun cancelPendingVoiceStart() {
+        pendingVoiceStart?.let { view?.removeCallbacks(it) }
+        pendingVoiceStart = null
+        listeningShown = false
+    }
+
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        cancelPendingVoiceStart()
         voice?.cancel()
         optSuggest = prefs.suggestions; optHabit = prefs.textingHabit; optLearn = prefs.learnWords
         optVibrate = prefs.vibrate; optSound = prefs.sound
@@ -99,6 +108,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        cancelPendingVoiceStart()
         voice?.cancel()
         habit.reset()
         variantsOpen = false
@@ -347,7 +357,11 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
                 view?.showMessage("Starting voice typing…")
                 listenCue()
                 val lang = language
-                view?.postDelayed({ if (listeningShown) v.start(lang) }, 250)
+                // The field may change (or the keyboard close) during the cue: re-check it's still this field's voice
+                // turn — a password field or a Secure Input step never gets the mic.
+                val start = Runnable { if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) v.start(lang) }
+                pendingVoiceStart = start
+                view?.postDelayed(start, 250)
             }
             VoiceRoute.VOICE_KEYBOARD -> switchToVoiceKeyboard()
             else -> VoicePlan.explain(route).let { view?.showMessage(it); view?.say(it) }

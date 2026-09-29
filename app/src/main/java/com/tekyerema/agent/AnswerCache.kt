@@ -56,7 +56,8 @@ class AnswerCache(
         val k = key(question) ?: return
         val a = answer.trim()
         if (a.length < 2 || a.length > AppConfig.int("cache.answers.maxChars", 800) || a.endsWith("?") || NON_ANSWER.containsMatchIn(a)) return
-        map[k] = Entry(a, clock(), RetrievalNeed.classify(question) != RetrievalNeed.Need.NONE)
+        if (TIME_OF_DAY.containsMatchIn(k)) return   // wrong within minutes: never kept
+        map[k] = Entry(a, clock(), RetrievalNeed.classify(question) != RetrievalNeed.Need.NONE || CLOCK.containsMatchIn(k))
     }
 
     @Synchronized fun clear() = map.clear()
@@ -76,6 +77,12 @@ class AnswerCache(
         private val CONTEXTUAL = Regex("\\b(it|its|he|she|him|her|his|hers|they|them|their|this|that|these|those|there|then|again|else|more|another)\\b")
         // Asked for variety: the same joke twice is a worse answer than none.
         private val VARIETY = Regex("\\b(joke|jokes|story|stories|poem|riddle|random|surprise|quote|fun fact)\\b")
+        // Answers that change with the clock carry no web marker, so they'd be kept a week and offered offline for a month.
+        // The time of day ("what time is it in London") is never kept; the rest ("how many days until Christmas", "how
+        // old is the president", "…today") are kept as FRESH answers (30 min, offered offline for a day at most).
+        private val TIME_OF_DAY = Regex("\\b(what time|time is it|time in|the time|clock)\\b")
+        private val CLOCK = Regex("\\b(days?|weeks?|months?|hours?|minutes?|how long|countdown|until|till|how old|age|" +
+            "today|tonight|tomorrow|yesterday|now|current|currently|this (?:week|month|year)|next|last|latest|recent|recently)\\b")
         private val NON_ANSWER = Regex("(?i)\\b(i couldn'?t|i could not|i can'?t|i cannot|i don'?t know|i'?m not sure|sorry|try again|no results)\\b")
 
         /** Normalized cache key, or null when the question shouldn't be cached at all. Pure. */

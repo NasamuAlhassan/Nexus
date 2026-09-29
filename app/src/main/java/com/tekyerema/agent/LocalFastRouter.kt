@@ -42,9 +42,12 @@ class LocalFastRouter(
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
-        // The user's routine names and relations must be known before classifying (encrypted files, read once).
-        Routines.ensureLoaded(appContext)
-        com.tekyerema.android.Relations.ensureLoaded(appContext)
+        // The user's routine names and relations must be known before classifying (encrypted files, read once — a
+        // Keystore decrypt, so off the main thread the voice path runs on).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            Routines.ensureLoaded(appContext)
+            com.tekyerema.android.Relations.ensureLoaded(appContext)
+        }
         val intent = FastIntentClassifier.classify(text) ?: run {
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
@@ -65,7 +68,7 @@ class LocalFastRouter(
             Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} could_not_execute llm_called=false latency_ms=$dt → agent")
             return null
         }
-        Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} llm_called=false latency_ms=$dt result='${outcome.spoken.take(60)}'")
+        Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} llm_called=false latency_ms=$dt result='${com.tekyerema.core.Privacy.content(outcome.spoken.take(60))}'")
         return outcome
     }
 
@@ -159,22 +162,25 @@ class LocalFastRouter(
         is FastIntent.Forget -> forget(intent)
         FastIntent.ClearHistory -> clearHistory()
         // ---- Overnight [S] (docs/agent/research/overnight_features.md)
-        is FastIntent.Digest -> digest(intent)
-        is FastIntent.SetRelation -> setRelation(intent)
-        is FastIntent.RelationQuery -> relationQuery(intent)
-        is FastIntent.ForgetRelation -> forgetRelation(intent)
+        // Call-log / Contacts queries and Keystore writes: off the main thread the voice path runs on.
+        is FastIntent.Digest -> io { digest(intent) }
+        is FastIntent.SetRelation -> io { setRelation(intent) }
+        is FastIntent.RelationQuery -> io { relationQuery(intent) }
+        is FastIntent.ForgetRelation -> io { forgetRelation(intent) }
         is FastIntent.Help -> help(intent)
-        is FastIntent.CreateRoutine -> createRoutine(intent)
+        is FastIntent.CreateRoutine -> io { createRoutine(intent) }
         is FastIntent.RunRoutine -> runRoutine(intent)
         FastIntent.ListRoutines -> listRoutines()
-        is FastIntent.DeleteRoutine -> deleteRoutine(intent)
+        is FastIntent.DeleteRoutine -> io { deleteRoutine(intent) }
         FastIntent.Resume -> resume()
         is FastIntent.DescribeScreen -> describeScreen(intent)
         is FastIntent.OpenSetting -> runTool("open_setting", org.json.JSONObject().put("target", intent.target), action = true)
-        is FastIntent.AppInstalled -> appInstalled(intent)
+        is FastIntent.AppInstalled -> io { appInstalled(intent) }
         is FastIntent.SaverQuery -> saverQuery(intent)
         is FastIntent.SaveHelp -> saveHelp(intent)
     }
+
+    private suspend fun <T> io(block: () -> T): T = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { block() }
 
     // ---------------------------------------------------------------- W8: audit, undo, memory controls
     private val extraInverses = ArrayList<com.tekyerema.audit.Inverse>()

@@ -148,6 +148,7 @@ object EntityCorrector {
         "from", "in", "at", "if", "so", "then", "but", "or", "is", "are", "was")
 
     private fun core(w: String) = w.lowercase().trim('.', ',', '!', '?', ';', ':', '"', '\'', '(', ')')
+    private fun isRelation(w: String) = try { com.tekyerema.android.Relations.canonical(w) != null } catch (_: Throwable) { false }
 
     /**
      * Correct the name slots in [text] against [vocab]. Pure; the same input always gives the same output.
@@ -205,7 +206,8 @@ object EntityCorrector {
         for (n in words.size downTo 1) {
             val part = cores.subList(0, n)
             // a protected word on its own is never a name ("call her"); inside a joined span it may be ("you tube")
-            if (n == 1 && part[0] in PROTECTED) continue
+            // nor a relation word ("call my maame" must reach Relations, not become the contact "Mame Esi")
+            if (n == 1 && (part[0] in PROTECTED || isRelation(part[0]))) continue
             val compact = PhoneticKey.compact(part.joinToString(""))
             if (compact.length < 3) continue
             // Already right (a real name, or a known label split by the recogniser in the same way): leave it.

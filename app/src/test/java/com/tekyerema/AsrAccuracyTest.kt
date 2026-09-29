@@ -96,6 +96,13 @@ class AsrAccuracyTest {
         assertEquals("message coffee", EntityCorrector.correct("message coffee", w).text)   // two sound-alikes: ask later
     }
 
+    @Test fun relation_words_are_never_turned_into_contacts() {
+        // review #7: "maame" / "agya" go to Relations ("call my mother"), never to a sound-alike contact
+        val v = EntityCorrector.Vocab.of(listOf("Mame", "Agyei"), emptyList())
+        assertEquals("call my maame", EntityCorrector.correct("call my maame", v).text)
+        assertEquals("call agya", EntityCorrector.correct("call agya", v).text)
+    }
+
     @Test fun empty_vocabulary_changes_nothing() {
         assertEquals("message coffee", EntityCorrector.correct("message coffee", EntityCorrector.Vocab.EMPTY).text)
     }
@@ -134,6 +141,9 @@ class AsrAccuracyTest {
         assertTrue(!SherpaAsr.isContinuation(snap + FloatArray(3 * sr), snap, sr))  // the user kept going
         assertTrue(!SherpaAsr.isContinuation(snap.copyOf(sr / 2), snap, sr))       // shorter than the snapshot
         assertTrue(!SherpaAsr.isContinuation(fin, FloatArray(0), sr))
+        // Review #1: the user spoke again after the pause ("call Ama… no, Kofi") at the same gain — a prefix match only
+        assertTrue(!SherpaAsr.isContinuation(snap + snap.copyOf(sr / 2), snap, sr))
+        assertTrue(SherpaAsr.isContinuation(snap + FloatArray(sr / 2) { 0.01f }, snap, sr))   // low room noise is still silence
     }
 
     @Test fun twi_call_verb_is_a_name_slot() {

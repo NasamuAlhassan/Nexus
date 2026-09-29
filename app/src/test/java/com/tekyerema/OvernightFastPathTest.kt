@@ -119,6 +119,12 @@ class OvernightFastPathTest {
         for (n in listOf("yes", "stop", "cancel", "help", "what time is it", "lock the phone", "what can you do"))
             assertFalse(n, Routines.validName(n))
         assertTrue(Routines.validName("good morning"))
+        // review #12: a routine "music" must not take over "play music", nor "camera" "launch camera"
+        assertNull(Routines.match("play music", listOf("music")))
+        assertNull(Routines.match("launch camera", listOf("camera")))
+        assertEquals("music", Routines.match("start my music routine", listOf("music")))
+        assertEquals("music", Routines.match("run music", listOf("music")))
+        assertEquals("music", Routines.match("music", listOf("music")))
         assertNull(Routines.parseDefinition("if I say yes, will you send it"))
     }
 }

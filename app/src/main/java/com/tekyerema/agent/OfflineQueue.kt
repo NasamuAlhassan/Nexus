@@ -158,7 +158,12 @@ object OfflineQueue {
                             "router.offlineQueue.phrases.answer", "The internet is back. Earlier you asked: {goal}. {answer}",
                             "goal" to item.goal.trim().trimEnd('?', '.', '!'), "answer" to result))
                     }
-                    end.status == AgentStatus.STOPPED -> store.remove(item)   // the user stopped it themselves
+                    end.status == AgentStatus.STOPPED -> {
+                        // The user said "stop" to a kept question: don't start the next one straight after — drop them all.
+                        Log.i("Tekyerema", "[OFFLINE_QUEUE] stopped by the user — dropping the ${store.size()} kept question(s)")
+                        store.clear()
+                        return
+                    }
                     else -> if (!store.failed(item)) Log.i("Tekyerema", "[OFFLINE_QUEUE] gave up on a kept question after repeated failures")
                         else return   // CANNOT_DO/FAILED: likely the link again — wait for the next "back online"
                 }

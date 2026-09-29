@@ -29,7 +29,10 @@ object Http {
             // 4 s). An HTTP/2 PING is answered by the server's network stack, not the model: a missing pong fails the call
             // after two intervals instead of the timeout, and keeps the NAT mapping alive. Idle connections are dropped
             // after 60 s, so the pings don't keep the radio awake. 0 turns it off.
-            .pingInterval(com.tekyerema.core.config.AppConfig.long("router.network.h2PingSec", 5L), TimeUnit.SECONDS)
+            // 15 s, not 5: on EDGE / a congested 3G cell (or a ping queued behind a large request body) a pong can take
+            // longer than 5 s, and OkHttp would fail a working connection — the FallbackBrain watchdog (8 s + a probe)
+            // already catches a truly dead link sooner.
+            .pingInterval(com.tekyerema.core.config.AppConfig.long("router.network.h2PingSec", 15L), TimeUnit.SECONDS)
             .build()
     }
 

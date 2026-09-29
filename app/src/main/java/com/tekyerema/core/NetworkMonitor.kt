@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import kotlinx.coroutines.launch
 
 /** Online/offline/degraded state (directive §32) — decided by the OS, not the user. */
 enum class Connectivity { ONLINE, OFFLINE, DEGRADED }
@@ -32,6 +33,7 @@ object NetworkMonitor {
     @Volatile private var cached: Connectivity = Connectivity.ONLINE   // optimistic until first read
     @Volatile private var currentNet: Network? = null
     @Volatile private var appContext: Context? = null
+    private val reportScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
 
     /** The application context, for plumbing that must act when the network returns (the offline queue). */
     val context: Context? get() = appContext
@@ -44,8 +46,14 @@ object NetworkMonitor {
         // VALIDATED is only re-checked now and then (AOSP re-probes on DNS-timeout streaks, not on a timer), so tell
         // Android what our traffic saw: it re-validates the network and, with the user's "switch to mobile data"
         // setting, may move to a network that works. A hint only — needs no permission beyond network state.
+        // Only once a probe agrees: a slow-but-working link (EDGE, a congested 3G cell) must not be reported as broken,
+        // which can push the phone off a free Wi-Fi onto paid mobile data.
         LinkHealth.onStalled {
-            try { currentNet?.let { cm?.reportNetworkConnectivity(it, false) } } catch (_: Throwable) {}
+            val net = currentNet ?: return@onStalled
+            reportScope.launch {
+                if (LinkProbe.check() == false && net == currentNet)
+                    try { cm?.reportNetworkConnectivity(net, false) } catch (_: Throwable) {}
+            }
         }
         recompute()
         try {

@@ -104,11 +104,16 @@ object VoiceEngine {
         // (a forced-Twi turn with the HCI Lab online skips it). `speech.asr.speculative` = false turns it off.
         val speculate: (ByteArray) -> Unit = { wav ->
             if (com.tekyerema.core.config.AppConfig.bool("speech.asr.speculative", true) && sherpa.ready &&
-                onlineAsrFor(settings.forcedLanguage) == null)
-                scope.launch(Dispatchers.Default) { try { sherpa.speculate(wav, settings.forcedLanguage) } catch (_: Throwable) {} }
+                onlineAsrFor(settings.forcedLanguage) == null) {
+                val gen = sherpa.specGeneration          // taken now, on the mic thread: a drop from here on voids it
+                scope.launch(Dispatchers.Default) { try { sherpa.speculate(wav, settings.forcedLanguage, gen) } catch (_: Throwable) {} }
+            }
         }
         mic.onPause = speculate
-        answerMic.onPause = speculate
+        mic.onSpeculationStale = { sherpa.dropSpeculation() }
+        // Not on the yes/no mic: a confirmation answer is short (little to gain) and "yes… no" must never reach the
+        // confirmation as "yes".
+        answerMic.onPause = null
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
             "language layer: ${layer.summary()} | " +

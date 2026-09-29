@@ -24,6 +24,9 @@ class DescribeScreenToolTest {
         assertEquals(DescribeScreenTool.NO_CONSENT, DescribeScreenTool.gate(true, false, true, false, false))
         assertEquals(DescribeScreenTool.OFFLINE, DescribeScreenTool.gate(true, true, false, false, false))
         assertNull(DescribeScreenTool.gate(true, true, true, false, false))
+        // review #3: never during a Secure Input step, never with a one-time code just in
+        assertEquals(DescribeScreenTool.PRIVATE, DescribeScreenTool.gate(true, true, true, false, false, secureStep = true))
+        assertEquals(DescribeScreenTool.CODE_SHOWING, DescribeScreenTool.gate(true, true, true, false, false, recentCode = true))
     }
 
     @Test fun prompts_keep_the_model_on_the_image() {

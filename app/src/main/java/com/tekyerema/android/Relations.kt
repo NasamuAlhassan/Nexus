@@ -140,20 +140,27 @@ object Relations {
     private val map = LinkedHashMap<String, String>()
     @Volatile private var file: File? = null
     @Volatile private var loaded = false
+    private var failedLoads = 0
 
-    /** Load once from the encrypted file (later calls are free). Safe to call from any request path. */
+    /**
+     * Load once from the encrypted file (later calls are free). Safe to call from any request path. A file that exists
+     * but can't be read (a passing Keystore error) leaves the store UNloaded and memory-only, so the next save can't
+     * overwrite what the user taught with a near-empty map; it's tried again next time (given up after 3 tries).
+     */
     fun ensureLoaded(ctx: Context?) {
         if (loaded || ctx == null) return
         synchronized(this) {
             if (loaded) return
             val f = File(ctx.applicationContext.filesDir, "memory/relations.enc")
+            val text = try { SecureStore.read(f) } catch (_: Throwable) { null }
+            val parsed = text?.let { try { JSONObject(it) } catch (_: Throwable) { null } }
+            if (f.exists() && parsed == null && ++failedLoads < 3) {
+                android.util.Log.w("Tekyerema", "[RELATIONS] couldn't read the saved relations (try $failedLoads) — not overwriting them")
+                return
+            }
             file = f
             loaded = true
-            val text = try { SecureStore.read(f) } catch (_: Throwable) { null } ?: return
-            try {
-                val o = JSONObject(text)
-                for (k in o.keys()) o.optString(k).takeIf { it.isNotBlank() }?.let { map[k] = it }
-            } catch (_: Throwable) {}
+            parsed?.let { o -> for (k in o.keys()) o.optString(k).takeIf { it.isNotBlank() }?.let { if (k !in map) map[k] = it } }
         }
     }
 

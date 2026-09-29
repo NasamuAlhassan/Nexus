@@ -150,6 +150,10 @@ object Routines {
     // ---------------------------------------------------------------- running by name (pure)
 
     private val RUN_LEAD = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:please )?(?:(?:run|start|do|begin|launch|play) (?:my |the )?)?")
+    // "play", "start" and "launch" are also the phone's own commands: "play music" / "launch camera" must not be taken
+    // over by a routine called "music" / "camera". With them the word "routine" must be said ("start my music routine").
+    private val PHONE_LEAD = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:please )?(?:start|launch|play) ")
+    private val SAID_ROUTINE = Regex(" routine(?:[, ]+(?:tekyerema|tɛkyerɛma))?(?: please)?$")
     private val RUN_TAIL = Regex("(?: routine)?(?:[, ]+(?:tekyerema|tɛkyerɛma))?(?: please)?$")
 
     /** The routine named by the whole utterance [g] ("good morning", "run my good morning routine"), or null. */
@@ -157,6 +161,7 @@ object Routines {
         if (names.isEmpty()) return null
         val s = norm(g).replace(",", "")
         val core = s.replace(RUN_LEAD, "").replace(RUN_TAIL, "").trim()
+        if (PHONE_LEAD.containsMatchIn(s) && !SAID_ROUTINE.containsMatchIn(s)) return names.firstOrNull { it == s }
         return names.firstOrNull { it == s || it == core }
     }
 
@@ -174,22 +179,26 @@ object Routines {
     private val routines = LinkedHashMap<String, Routine>()
     @Volatile private var file: File? = null
     @Volatile private var loaded = false
+    private var failedLoads = 0
 
+    /** Like Relations: a saved file that can't be read right now is never overwritten (memory-only until it loads). */
     fun ensureLoaded(ctx: Context?) {
         if (loaded || ctx == null) return
         synchronized(this) {
             if (loaded) return
             val f = File(ctx.applicationContext.filesDir, "memory/routines.enc")
+            val text = try { SecureStore.read(f) } catch (_: Throwable) { null }
+            val arr = text?.let { try { JSONArray(it) } catch (_: Throwable) { null } }
+            if (f.exists() && arr == null && ++failedLoads < 3) {
+                android.util.Log.w("Tekyerema", "[ROUTINES] couldn't read the saved routines (try $failedLoads) — not overwriting them")
+                return
+            }
             file = f; loaded = true
-            val text = try { SecureStore.read(f) } catch (_: Throwable) { null } ?: return
-            try {
-                val arr = JSONArray(text)
-                for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
-                    val steps = o.optJSONArray("steps")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
-                    val name = o.optString("name")
-                    if (name.isNotBlank() && steps.isNotEmpty()) routines[name] = Routine(name, steps)
-                }
-            } catch (_: Throwable) {}
+            if (arr != null) for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->
+                val steps = o.optJSONArray("steps")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+                val name = o.optString("name")
+                if (name.isNotBlank() && steps.isNotEmpty() && name !in routines) routines[name] = Routine(name, steps)
+            }
         }
     }
 

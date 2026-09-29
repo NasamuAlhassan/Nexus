@@ -8,6 +8,8 @@ import com.tekyerema.policy.CapabilityScope
 import com.tekyerema.policy.RiskTier
 import com.tekyerema.policy.ScreenPrivacy
 import org.json.JSONObject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 
 /**
@@ -21,7 +23,9 @@ import java.io.ByteArrayOutputStream
  *
  * Privacy, in order, before any pixel leaves the phone ([gate], pure and unit-tested):
  *  - the user's "Backup AI (Google Gemini)" switch must be on and a key present (the same consent the camera uses);
- *  - never a credential / PIN / robot-check screen (Secure Input), never an app on the deny list;
+ *  - never a credential / PIN / robot-check screen, never during a Secure Input step, never an app on the deny list;
+ *  - never while a one-time-code notification may be on top (the screenshot is the whole display, heads-up included);
+ *  - the screen is checked again AFTER the picture is taken, so a switch to a private screen in between still stops it;
  *  - online only — offline it says so and points to the on-phone reader ("read the screen").
  * One screenshot per request, never stored, never logged. The answer is model text about third-party content, so it
  * is marked untrusted for the planner ([J-07]).
@@ -41,11 +45,14 @@ object DescribeScreenTool : Tool {
     const val NO_CONSENT = "Describing pictures uses Google's online AI, which is switched off in Settings (Backup AI). " +
         "Say “read the screen” to hear the text on it instead."
     const val PRIVATE = "This screen is private, so I won't send a picture of it anywhere."
+    const val CODE_SHOWING = "A security code just arrived, so I won't send a picture of the screen right now. Try again in a minute."
     const val DENIED = "This app is on your private list, so I won't send a picture of it anywhere."
 
     /** Why a picture may NOT be sent, as a spoken line; null = it may. Pure. */
-    fun gate(consent: Boolean, hasKey: Boolean, online: Boolean, privateScreen: Boolean, deniedApp: Boolean): String? = when {
-        privateScreen -> PRIVATE
+    fun gate(consent: Boolean, hasKey: Boolean, online: Boolean, privateScreen: Boolean, deniedApp: Boolean,
+             secureStep: Boolean = false, recentCode: Boolean = false): String? = when {
+        privateScreen || secureStep -> PRIVATE
+        recentCode -> CODE_SHOWING
         deniedApp -> DENIED
         !consent || !hasKey -> NO_CONSENT
         !online -> OFFLINE
@@ -70,12 +77,18 @@ object DescribeScreenTool : Tool {
         val c = ctx.controller
             ?: return ToolResult(false, "I can't see the screen — screen control is off for Tɛkyerɛma.", recoverable = false)
         val s = com.tekyerema.settings.Settings(ctx.appContext)
-        val snap = c.buildSnapshot()
-        gate(s.allowGeminiBackup, s.geminiApiKey.isNotBlank(), NetworkMonitor.isOnline(),
-            ScreenPrivacy.isPrivate(snap), ScreenPrivacy.isDenied(snap.appPackage))?.let { return ToolResult(false, it, recoverable = false) }
+        suspend fun check(): String? {
+            val snap = c.buildSnapshot()
+            return gate(s.allowGeminiBackup, s.geminiApiKey.isNotBlank(), NetworkMonitor.isOnline(),
+                ScreenPrivacy.isPrivate(snap), ScreenPrivacy.isDenied(snap.appPackage),
+                secureStep = com.tekyerema.core.Privacy.secureStep, recentCode = recentCode())
+        }
+        withContext(Dispatchers.Default) { check() }?.let { return ToolResult(false, it, recoverable = false) }
         val bmp = c.captureScreenshot()
             ?: return ToolResult(false, "I couldn't take a picture of the screen on this phone.", recoverable = false)
-        val jpeg = toJpeg(bmp, com.tekyerema.core.config.AppConfig.int("camera.describe.maxSide", 1024), 80)
+        // The screen may have changed while the picture was taken: look again before anything leaves the phone.
+        withContext(Dispatchers.Default) { check() }?.let { return ToolResult(false, it, recoverable = false) }
+        val jpeg = withContext(Dispatchers.Default) { toJpeg(bmp, com.tekyerema.core.config.AppConfig.int("camera.describe.maxSide", 1024), 80) }
             ?: return ToolResult(false, "I couldn't prepare the picture.", recoverable = false)
         val model = com.tekyerema.agent.ModelRoles.model("vision", s.model)
         return when (val r = GeminiVision.describe(jpeg, s.geminiApiKey, model, prompt(args.str("question"), args.boolOrDefault("picture", false)))) {
@@ -86,6 +99,14 @@ object DescribeScreenTool : Tool {
                 ToolResult(false, "I couldn't get a description just now. Say “read the screen” to hear the text on it.", recoverable = false)
         }
     }
+
+    /** A notification whose code was hidden (J-10) arrived in the last minute — it may be showing as a heads-up. */
+    private fun recentCode(now: Long = System.currentTimeMillis()): Boolean = try {
+        com.tekyerema.notifications.NotificationStore.recent(10).any {
+            now - it.postTime < com.tekyerema.core.config.AppConfig.long("camera.describe.codeQuietMs", 60_000L) &&
+                (it.text?.contains(com.tekyerema.core.Redact.HIDDEN) == true || it.title?.contains(com.tekyerema.core.Redact.HIDDEN) == true)
+        }
+    } catch (_: Throwable) { false }
 
     private fun toJpeg(bmp: Bitmap, maxSide: Int, quality: Int): ByteArray? = try {
         val scale = maxSide.toFloat() / maxOf(bmp.width, bmp.height)

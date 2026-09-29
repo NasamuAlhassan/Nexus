@@ -7,7 +7,7 @@
       "weakKbps": 400,
       "fastModelWhenWeak": true,
       "_note": "N-10 (overnight hybrid pass): 'online' means the internet ANSWERS. LinkHealth opens a circuit after a network failure that took >= stall.slowFailMs, two in a row, or a failed probe; while open the router, ASR and web search stay on the phone. A success or a passing probe closes it; after stall.openMs it half-opens. h2PingSec: HTTP/2 PINGs fail a dead connection in ~2 intervals instead of the 35 s call timeout (0 = off). watchdogMs: a cloud call silent this long triggers a probe; a failed probe abandons the call. providerCoolMs: a provider that timed out goes to the back of the chain this long.",
-      "h2PingSec": 5,
+      "h2PingSec": 15,
       "poolKeepAliveSec": 60,
       "prewarmTimeoutSec": 8,
       "watchdogMs": 8000,

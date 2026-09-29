@@ -61,6 +61,12 @@ class MicCapture(
      * the turn itself is unchanged. Set by VoiceEngine (on-device routes only); null = off.
      */
     @Volatile var onPause: ((ByteArray) -> Unit)? = null
+    /**
+     * B-19 — the snapshot handed to [onPause] no longer describes this turn: the user spoke again after it, or the turn
+     * ended some other way. Called synchronously, so the recogniser can never reuse a result that lacks the words said
+     * after the pause ("call Ama… no, Kofi" must not become "call Ama"), even when the final gain happens to match.
+     */
+    @Volatile var onSpeculationStale: (() -> Unit)? = null
     private fun speculateAfterFrames(): Int =
         (com.tekyerema.core.config.AppConfig.int("speech.asr.speculativeAfterMs", 100) / (frame * 1000.0 / sampleRate)).toInt().coerceAtLeast(1)
     private val frame = vad.frameSamples
@@ -204,7 +210,10 @@ class MicCapture(
                         appendPcm(speech, f)
                         if (specCb != null) {
                             val pause = segPause()
-                            if (pause == 0 && specGain != null) specGain = null       // the user carried on: stale
+                            if (pause == 0 && specGain != null) {                     // the user carried on: stale
+                                specGain = null
+                                try { onSpeculationStale?.invoke() } catch (_: Throwable) {}
+                            }
                             else if (pause == specAfter && specGain == null && specs < 1) {
                                 // one snapshot per capture: a wasted decode holds the recogniser for a second or two
                                 val snap = speech.toByteArray()
@@ -238,6 +247,7 @@ class MicCapture(
         val preRms = pcmRms(rawPcm)
         // B-19: a still-valid speculative snapshot fixes the gain, so the final audio = snapshot + the silence after it
         val keptGain = specGain?.takeIf { endReason == "SPEECH_END" }
+        if (specs > 0 && keptGain == null) try { onSpeculationStale?.invoke() } catch (_: Throwable) {}
         val pcm = PcmGain.apply(rawPcm, keptGain ?: PcmGain.gainFor(rawPcm))
         val speechMs = (pcm.size / bytesPerSample.toLong()) * 1000 / sampleRate
         // §3.3/§3.8/§3.11 — end reason, pre/post RMS, and a per-utterance timing line for regression tracking.
