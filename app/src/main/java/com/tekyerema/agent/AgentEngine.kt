@@ -710,7 +710,9 @@ object AgentEngine {
                     is AgentDecision.Fail -> {
                         log(LogEntry.Kind.ERROR, decision.reason)
                         // RESULT is spoken: give the user the real class of problem, never the raw error text.
-                        val busy = Regex("(?i)429|rate.?limit|quota|too many|cooling").containsMatchIn(decision.reason)
+                        // An overloaded provider (Gemini 503 "high demand", A20e 2026-09-29) is "busy" too, not "my side".
+                        val busy = Regex("(?i)429|rate.?limit|quota|too many|cooling|\\b50[23]\\b|high demand|overloaded|unavailable")
+                            .containsMatchIn(decision.reason)
                         // K-06: say what still works, not just "try again".
                         log(LogEntry.Kind.RESULT, if (busy) "I'm getting too many requests right now. Please try again in a minute — " +
                             "phone commands like the time, calls or opening an app still work now."
