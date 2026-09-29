@@ -227,7 +227,7 @@ internal fun ProvidersPage(settings: Settings, onBack: () -> Unit) {
         }
         GlassGroup("When the main AI is busy") {
             Column(Modifier.selectableGroup()) {
-                ChoiceRow("Ask me first", "Asks before a smaller, less careful model carries on with a task.", weak == WeakModelPolicy.ASK) { op.weakModelPolicy = WeakModelPolicy.ASK }
+                ChoiceRow("Ask me first", "Questions and look-ups may use a smaller model (I'll say so); it asks before that model changes anything.", weak == WeakModelPolicy.ASK) { op.weakModelPolicy = WeakModelPolicy.ASK }
                 ChoiceRow("Never use a smaller model", "Waits for the main AI instead.", weak == WeakModelPolicy.NEVER) { op.weakModelPolicy = WeakModelPolicy.NEVER }
                 ChoiceRow("Use the smaller model", "Carries on without asking.", weak == WeakModelPolicy.ALLOW, divider = false) { op.weakModelPolicy = WeakModelPolicy.ALLOW }
             }

@@ -94,7 +94,15 @@ class FallbackBrain(
                     else -> AgentDecision.CannotDo(ModelRouting.QUOTA_EXHAUSTED, ModelRouting.PAUSED_TEXT)
                 }
             }
-            is ModelRouting.Weak.Ask -> { r.weakAsked = true; ModelRouting.askDecision() }
+            is ModelRouting.Weak.Ask -> {
+                // Split by risk (owner, 2026-09-29): an answer, a question back or a look-up goes ahead on the smaller model
+                // (the reply says so); a step that would change the phone is dropped and the user is asked first.
+                val d = qa?.decideWeak(ctx)
+                if (d != null && d !is AgentDecision.Fail && ModelRouting.safeOnWeak(d)) {
+                    Log.w("Tekyerema", "[ROUTE] main model busy → a look-only step on the smaller model (split by risk)")
+                    r.weakSteps++; r.degraded = true; d
+                } else { r.weakAsked = true; ModelRouting.askDecision() }
+            }
             is ModelRouting.Weak.Pause -> AgentDecision.CannotDo(w.reasonClass, w.text)
         }
     }

@@ -174,24 +174,44 @@ class ModelRoutingTest {
 
     @Test fun ask_policy_asks_once_and_carries_on_or_pauses_on_the_answer() = runBlocking {
         val r = route(WeakModelPolicy.ASK)
-        val groq = FakeGroq(DAILY)
+        val groq = FakeGroq(DAILY, weak = ok)   // the smaller model would open an app — a change, so the user is asked
         val fb = fallback(groq, Script(GEMINI_DAILY), route = r)
         val ask = fb.decide(ctx()) as AgentDecision.CallTool
         assertEquals("ask_user", ask.name)
         assertEquals(ModelRouting.ASK_QUESTION, ask.args.getString("question"))
         assertEquals(ModelRouting.ASK_TAG, ask.rationale)
+        assertEquals(1, groq.weakCalls)          // proposed, dropped
         val answered = listOf("ask_user(\"${ModelRouting.ASK_QUESTION}\") → the user answered: \"carry on\"")
-        assertEquals(AgentDecision.Done("weak answer"), fb.decide(ctx(history = answered)))
+        assertEquals(ok, fb.decide(ctx(history = answered)))
         assertTrue(r.weakApproved && r.degraded)
-        assertEquals(1, groq.weakCalls)
+        assertEquals(2, groq.weakCalls)
         assertTrue(r.disclosure().contains("smaller backup AI"))
         assertEquals("", r.disclosure())   // said once
         // Another task, where the user says pause.
         val r2 = route(WeakModelPolicy.ASK)
-        val fb2 = fallback(FakeGroq(DAILY), Script(GEMINI_DAILY), route = r2)
+        val fb2 = fallback(FakeGroq(DAILY, weak = ok), Script(GEMINI_DAILY), route = r2)
         fb2.decide(ctx())
         val paused = fb2.decide(ctx(history = listOf("ask_user(\"${ModelRouting.ASK_QUESTION}\") → the user answered: \"pause until it's back\"")))
         assertEquals(ModelRouting.NO_CAPABLE_MODEL, (paused as AgentDecision.CannotDo).reasonClass)
+    }
+
+    /** Split by risk (owner, 2026-09-29): under "ask me first", an answer or a look-up goes ahead on the smaller model
+     *  (disclosed); only a step that would change the phone asks. */
+    @Test fun ask_policy_lets_the_smaller_model_answer_and_look_but_asks_before_it_changes_anything() = runBlocking {
+        for (weak in listOf(AgentDecision.Done("weak answer"),
+                AgentDecision.CallTool("web_search", JSONObject().put("query", "x"), null),
+                AgentDecision.CallTool("read_state", JSONObject(), null))) {
+            val r = route(WeakModelPolicy.ASK)
+            val d = fallback(FakeGroq(DAILY, weak = weak), Script(GEMINI_DAILY), route = r).decide(ctx())
+            assertEquals(weak, d)
+            assertTrue(r.degraded && !r.weakAsked)
+            assertTrue(r.disclosure().contains("smaller backup AI"))
+        }
+        for (weak in listOf(ok, AgentDecision.CallTool("tap", JSONObject().put("label", "Send"), null),
+                AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Ama"), null))) {
+            val d = fallback(FakeGroq(DAILY, weak = weak), Script(GEMINI_DAILY), route = route(WeakModelPolicy.ASK)).decide(ctx())
+            assertEquals("ask_user", (d as AgentDecision.CallTool).name)
+        }
     }
 
     @Test fun allow_policy_carries_on_but_never_for_a_recovery_step() = runBlocking {

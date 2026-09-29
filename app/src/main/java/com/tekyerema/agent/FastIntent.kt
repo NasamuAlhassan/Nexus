@@ -656,7 +656,12 @@ object FastIntentClassifier {
     private val RE_RECENTS = Regex("\\b(?:recent\\s+apps?|recents|app\\s+switcher|switch\\s+apps?|multitask)\\b")
     private val RE_SCROLL_UP = Regex("\\bscroll\\s+up\\b|\\bscroll\\s+to\\s+the\\s+top\\b|\\b(?:go|jump)\\s+to\\s+the\\s+top\\b|\\bto\\s+the\\s+top\\b")
     private val RE_SCROLL_DOWN = Regex("\\bscroll\\s+down\\b|\\bscroll\\s+to\\s+the\\s+bottom\\b|\\b(?:go|jump)\\s+to\\s+the\\s+bottom\\b|\\bto\\s+the\\s+bottom\\b|\\bscroll\\b")
-    private val RE_HOME = Regex("^home$|\\bgo\\s+home\\b|\\bhome\\s+screen\\b|\\bhome\\s+button\\b|\\bk[ɔo]\\s+fie\\b|\\bfie\\b")
+    // The WHOLE request must be the Home command. Unanchored, "fie" (Twi: home) and "go home" matched inside any sentence —
+    // "Bue WhatsApp ne ka kyerɛ Prince sɛ ɔmbra fie" (tell Prince to come home) or "tell him to go home" pressed Home
+    // instead of sending the message (found in review, 2026-09-29).
+    private val RE_HOME = Regex("^(?:please |can you |ok(?:ay)? )?(?:go (?:back )?(?:to )?(?:the )?home(?: ?screen| page)?|" +
+        "(?:take me|back) (?:to )?(?:the )?home(?: ?screen)?|(?:press|tap|hit) (?:the )?home(?: button| key)?|" +
+        "home(?: ?screen| button| key)?|k[ɔo] fie|fie)(?: please| now)?$")
     private val RE_BACK = Regex("^back$|\\bgo\\s+back\\b|\\bback\\s+button\\b|\\bprevious\\s+screen\\b|\\bsan\\s+k[ɔo]\\b")
 
     // "open/launch/start X" — X is the last group. Existing AppResolver does the actual name matching. "opening the

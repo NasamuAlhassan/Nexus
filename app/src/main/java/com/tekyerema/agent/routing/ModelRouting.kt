@@ -147,6 +147,22 @@ object ModelRouting {
     }
 
     /** The router's question as a decision (the engine asks, waits, and records the answer in the history). */
+    /** Tools that only look or ask — they change nothing on the phone. */
+    private val LOOK_ONLY = setOf("read_state", "read_screen", "read_all", "read_notifications", "read_sms", "web_search", "find_tool",
+        "wait", "ask_user", "describe_screen", "search_contacts", "find_contact", "search_messages", "call_log", "read_shared")
+
+    /**
+     * Split by risk (the owner's choice, 2026-09-29): under the "ask me first" policy, a step the smaller model proposes
+     * that only answers, asks or looks (a web search, reading the screen or messages) goes ahead — the reply says a
+     * smaller AI helped — while anything that would change the phone still asks first. A judge's "look something up"
+     * was interrupted by "the main AI is busy…" right after the app asked what to look up. Pure.
+     */
+    fun safeOnWeak(d: AgentDecision): Boolean = when (d) {
+        is AgentDecision.Done, is AgentDecision.CannotDo -> true
+        is AgentDecision.CallTool -> d.name in LOOK_ONLY
+        else -> false
+    }
+
     fun askDecision(): AgentDecision.CallTool =
         AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", ASK_QUESTION), ASK_TAG)
 

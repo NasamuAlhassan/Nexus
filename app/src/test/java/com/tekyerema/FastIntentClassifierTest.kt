@@ -3,6 +3,7 @@ package com.tekyerema
 import com.tekyerema.agent.FastIntent
 import com.tekyerema.agent.FastIntentClassifier
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -150,6 +151,12 @@ class FastIntentClassifierTest {
     @Test fun navigation() {
         assertEquals(FastIntent.Back, c("Go back."))
         assertEquals(FastIntent.Home, c("Go home."))
+        for (s in listOf("home", "home screen", "go to the home screen", "take me home", "press the home button", "kɔ fie", "ko fie"))
+            assertEquals(s, FastIntent.Home, c(s))
+        // A sentence that merely MENTIONS home is not the Home command (2026-09-29): a message to send, a search.
+        for (s in listOf("Bue WhatsApp ne ka kyerɛ Prince sɛ ɔmbra fie", "tell him to go home", "text Ama that I'm going home",
+                "how far is my home from Accra", "ka kyerɛ Kofi sɛ ɔnkɔ fie"))
+            assertNotEquals(s, FastIntent.Home, c(s))
         assertEquals(FastIntent.Recents, c("Show recent apps."))
         assertEquals(FastIntent.ScrollDown, c("Scroll down."))
         assertEquals(FastIntent.ScrollUp, c("Scroll up."))
