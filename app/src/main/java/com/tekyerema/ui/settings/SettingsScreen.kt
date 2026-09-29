@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material.icons.outlined.VolumeUp
@@ -116,7 +117,14 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                 SettingRow("Privacy", icon = Icons.Outlined.Lock, iconTint = Spectrum.Azure, divider = false) { page = Page.PRIVACY }
             }
             GlassGroup {
-                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet, divider = false) { page = Page.HELP }
+                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet) { page = Page.HELP }
+                // First-run voice welcome (voice/Welcome.kt): the questions and the practice text, by voice, again.
+                var replay by remember { mutableStateOf("") }
+                SettingRow("Replay the welcome", value = replay, icon = Icons.Outlined.Replay, iconTint = Spectrum.Mint, divider = false,
+                    description = "Hear the first-time questions and the practice message again.") {
+                    replay = if (com.tekyerema.voice.VoiceEngine.startWelcome(replay = true)) "Playing"
+                        else "Needs the microphone and Read replies aloud"
+                }
             }
         }
         Page.LANGUAGE -> LanguagePage(settings) { page = Page.ROOT }
@@ -405,7 +413,8 @@ private fun HelpPage(onBack: () -> Unit) {
         ))
         HelpBlock("Before anything risky", listOf(
             "For calls, messages, money and settings that matter, Tɛkyerɛma asks you out loud — “Should I go ahead?” — and waits for you to say yes or no.",
-            "If it can’t make out your answer it asks once more, then leaves it. You can also tap Yes or No."
+            "If it can’t make out your answer it asks once more, then leaves it. You can also tap Yes or No.",
+            "To try it safely, say “send a practice message”. Nothing is sent."
         ))
         HelpBlock("To stop", listOf(
             "Tap the centre of the screen while Tɛkyerɛma is working. Nothing more happens.",

@@ -292,6 +292,9 @@ class LocalFastRouter(
         val turns = AgentEngine.conversationTurns()
         if (turns > 0) parts.add("our conversation from the last little while ($turns lines)")
         if (s.emergencyContactName.isNotBlank()) parts.add("your emergency contact, ${s.emergencyContactName}")
+        // First-run welcome / habits (voice/Welcome.kt, agent/habits): the name to use, and when everyday requests come.
+        if (s.preferredName.isNotBlank()) parts.add("that you like to be called ${s.preferredName}")
+        com.tekyerema.agent.habits.Habits.summary(appContext)?.let { parts.add(it) }
         // C-03 / H-08: who "my mother" is — personal, so it is listed (and "forget everything" removes it).
         if (com.tekyerema.android.Relations.all().isNotEmpty()) parts.add("that " + com.tekyerema.android.Relations.spokenAll())
         Routines.names().takeIf { it.isNotEmpty() }?.let { n ->
@@ -342,6 +345,7 @@ class LocalFastRouter(
                 ScreenMemory.clear()
                 ScreenReadCursor.clear()
                 com.tekyerema.android.Relations.clear()   // who "my mother" is: personal, like the conversation
+                com.tekyerema.agent.habits.Habits.forgetHistory(appContext)   // when everyday requests come (agent/habits)
                 "Okay, I've forgotten our conversations, the messages I was keeping and who your family are. " +
                     "Your settings, schedules, routines and emergency contact stay — change them in Settings."
             }
@@ -482,6 +486,10 @@ class LocalFastRouter(
                 "line, on the dial pad. Press Call to ring.")
         } catch (t: Throwable) { null }
     }
+
+    /** H-08 for the first-run welcome (voice/Welcome.kt): its "should I talk slower or faster?" changes the speed exactly
+     *  as "speak slower" does, and says the same line. */
+    fun applyPreference(p: FastIntent.Preference): FastOutcome = preference(p)
 
     /** H-08: apply a preference said aloud, and say what changed. */
     private fun preference(p: FastIntent.Preference): FastOutcome {

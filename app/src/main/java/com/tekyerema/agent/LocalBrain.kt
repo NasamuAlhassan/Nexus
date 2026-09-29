@@ -536,7 +536,9 @@ class LocalBrain : AgentBrain {
     }
 
     private fun looksTwi(s: String): Boolean = TWI_HINT.containsMatchIn(s.lowercase())
-    private fun greeting(): String = if (twi) "Mewɔ ha. Dɛn na wopɛ sɛ meyɛ?" else "I'm here. What would you like to do?"
+    // With the name the user gave in the first-run welcome (voice/Welcome.kt): "I'm here, Ama. …" — the name only.
+    private fun greeting(): String = if (twi) com.tekyerema.voice.Welcome.withName("Mewɔ ha") + ". Dɛn na wopɛ sɛ meyɛ?"
+        else com.tekyerema.voice.Welcome.withName("I'm here") + ". What would you like to do?"
 
     /** A text to send, as heard: exactly one of [contact] / [number], the [message], and whether it goes by WhatsApp. */
     data class Sms(val contact: String?, val number: String?, val message: String, val whatsApp: Boolean)
