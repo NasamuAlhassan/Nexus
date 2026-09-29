@@ -15,11 +15,13 @@
         "ownCue": "beforeStart",
         "cueGuardMs": 250,
         "retryOnBusyOrClient": 1,
-        "silenceExtras": false,
+        "silenceExtras": true,
+        "completeSilenceMs": 2500,
+        "possiblyCompleteSilenceMs": 2000,
         "freshPerListen": true,
         "patientRelistens": 1,
         "nbestRerank": true,
-        "_note": "component: a flattened ComponentName to pin one recognizer (only if the A20e test shows the default misbehaves). ownCue: beforeStart = our tone then the recognizer; none = the recognizer's own tone only. silenceExtras: SPEECH_INPUT_* hints, ignored by stock recognizers — patience is built by re-listening. freshPerListen: a new SpeechRecognizer per listen so a stopped session's late callbacks can't reach the next one."
+        "_note": "component: a flattened ComponentName to pin one recognizer (only if the A20e test shows the default misbehaves). ownCue: beforeStart = our tone then the recognizer; none = the recognizer's own tone only. silenceExtras: SPEECH_INPUT_* hints (2.5 s / 2 s since 2026-09-29, after 'it stops listening early') — many stock recognizers ignore them, so patience is also built by re-listening. freshPerListen: a new SpeechRecognizer per listen so a stopped session's late callbacks can't reach the next one."
       }
     },
     "bargeIn": {
