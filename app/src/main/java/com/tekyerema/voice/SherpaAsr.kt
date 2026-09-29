@@ -118,9 +118,10 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         // "kofi" isn't truncated to "kof"; Gh-EN uses the sherpa default. The big speedup comes from NOT
         // zero-padding the waveform to 30 s (see rawTranscript) — sherpa 1.13.8 encodes the real length.
         // B-19 (2026-09-28 tail bench, phase2/voice_overnight): the Gh-EN default (1000 frames = 10 s of zero features)
-        // looks wasteful but is NOT — with 600/450/300 this fine-tune stops finding the end of the sentence, repeats
-        // itself up to sherpa's token cap and gets SLOWER as well as worse (unseen Gh-EN: 1.03 s → 1.9-2.7 s mean on the
-        // desktop, WER 0.48 → 0.55-0.73). Both stay configurable (`speech.asr.tailPaddings.<eng|twi>`) for on-phone A/B.
+        // looks wasteful but is NOT — with 600/300 this fine-tune stops finding the end of the sentence and repeats
+        // itself up to sherpa's token cap, so the encoder time saved is eaten by the decoder (300: only 5-14% faster on
+        // the desktop) while WER nearly doubles (owner 0.29 → 0.55, unseen Gh-EN 0.48 → 0.73; asr_tail_summary_clean.md).
+        // Both stay configurable (`speech.asr.tailPaddings.<eng|twi>`) for an on-phone A/B.
         val whisper = OfflineWhisperModelConfig(
             encoder = File(d, "tiny-encoder.onnx").absolutePath,      // fp32 on purpose
             decoder = File(d, "tiny-decoder.int8.onnx").absolutePath,
