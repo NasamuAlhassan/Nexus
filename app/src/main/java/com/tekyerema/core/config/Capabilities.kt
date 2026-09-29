@@ -11,8 +11,10 @@ import android.os.Build
  * switched off for the screening without a code change (and, later, remotely via the override document).
  */
 object FeatureFlags {
+    /** WS-C: a feature the user switched off in Settings › Control (schedules, message alerts, routines) stays off —
+     *  the user can only switch a feature OFF here, never on. */
     fun isEnabled(featureId: String, default: Boolean = true): Boolean =
-        AppConfig.bool("flags.$featureId.enabled", default)
+        !com.tekyerema.operator.OperatorPolicy.featureSwitchedOff(featureId) && AppConfig.bool("flags.$featureId.enabled", default)
 
     fun minApi(featureId: String, default: Int): Int = AppConfig.int("flags.$featureId.min_api", default)
 }

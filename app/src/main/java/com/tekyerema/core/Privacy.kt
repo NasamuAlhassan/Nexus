@@ -13,7 +13,8 @@ import java.io.File
  */
 object Privacy {
     fun traceDays() = AppConfig.int("privacy.retention.traceDays", 7)
-    fun historyDays() = AppConfig.int("privacy.retention.historyDays", 90)
+    /** WS-C: the user may SHORTEN how long history and the activity log are kept (Settings › Control › Your data). */
+    fun historyDays() = com.tekyerema.operator.OperatorPolicy.retentionFor(AppConfig.int("privacy.retention.historyDays", 90))
     fun telemetryDays() = AppConfig.int("privacy.retention.telemetryDays", 30)
     fun trajectoryDays() = AppConfig.int("privacy.retention.trajectoryDays", 30)
 

@@ -21,8 +21,13 @@ object ModelRoles {
     const val GROQ = "groq"
     const val GEMINI = "gemini"
 
-    fun plannerChain(): List<String> =
-        AppConfig.stringList("models.planner.chain", listOf(GROQ, GEMINI)).map { it.trim().lowercase() }.distinct()
+    /** WS-C: the user's provider choice (Settings › Control, OperatorPolicy.providers) orders the configured chain and can
+     *  only remove providers from it; a configured provider the user can't choose yet stays at the end. */
+    fun plannerChain(): List<String> {
+        val configured = AppConfig.stringList("models.planner.chain", listOf(GROQ, GEMINI)).map { it.trim().lowercase() }.distinct()
+        val user = com.tekyerema.operator.OperatorPolicy.providers
+        return user.filter { it in configured } + configured.filter { it !in com.tekyerema.operator.OperatorPolicy.KNOWN_PROVIDERS }
+    }
 
     /** The model for [role], from `models.<role>.model`, else [default]. */
     fun model(role: String, default: String): String = AppConfig.string("models.$role.model", default).ifBlank { default }

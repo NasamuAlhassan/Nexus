@@ -16,6 +16,7 @@ class Settings(context: Context) {
         val enc = if (v.isEmpty()) "" else com.tekyerema.core.SecureStore.encrypt(v.toByteArray(Charsets.UTF_8))
             ?.let { ENC + android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
         prefs.edit().putString(key, enc ?: v).apply()
+        _changes.value = _changes.value + 1   // WS-C: the Control page shows which keys are yours (masked)
     }
 
     private fun getSecret(key: String): String {
@@ -45,15 +46,53 @@ class Settings(context: Context) {
     // --- Groq / OpenAI-compatible provider (default agent brain when a key is present) ---
     val storedGroqKey: String get() = getSecret(KEY_GROQ)
 
+    /** WS-C: the user pointed Tɛkyerɛma at their OWN OpenAI-compatible server in Settings › Control (not the debug
+     *  relay, which keeps the old behaviour). Then only the user's own key is ever sent there — never a built-in one. */
+    val usesOwnServer: Boolean
+        get() = prefs.getBoolean(KEY_OWN_SERVER, false) && !prefs.getString(KEY_GROQ_URL, null).isNullOrBlank()
+
     var groqApiKey: String
-        get() = storedGroqKey.ifBlank { BuildConfig.DEFAULT_GROQ_KEY }
+        get() = if (usesOwnServer) storedGroqKey else storedGroqKey.ifBlank { BuildConfig.DEFAULT_GROQ_KEY }
         set(v) = putSecret(KEY_GROQ, v)
 
     /** All configured Groq keys, in priority order, for rate-limit (429) rotation. The primary key
-     *  (possibly user-overridden in prefs) first, then the extra build-time keys. Distinct + non-blank. */
+     *  (possibly user-overridden in prefs) first, then the extra build-time keys. Distinct + non-blank.
+     *  WS-C: with the user's own server, only the user's own key. */
     val groqApiKeys: List<String>
-        get() = listOf(groqApiKey, BuildConfig.DEFAULT_GROQ_KEY_2, BuildConfig.DEFAULT_GROQ_KEY_3, BuildConfig.DEFAULT_GROQ_KEY_4)
+        get() = (if (usesOwnServer) listOf(storedGroqKey)
+            else listOf(groqApiKey, BuildConfig.DEFAULT_GROQ_KEY_2, BuildConfig.DEFAULT_GROQ_KEY_3, BuildConfig.DEFAULT_GROQ_KEY_4))
             .map { it.trim() }.filter { it.isNotBlank() }.distinct()
+
+    /** WS-C: a key built into this copy of the app exists for [provider] ("groq" | "gemini") — shown as "Built-in key". */
+    fun hasBuiltInKey(provider: String): Boolean = when (provider) {
+        "groq" -> BuildConfig.DEFAULT_GROQ_KEY.isNotBlank()
+        "gemini" -> BuildConfig.DEFAULT_GEMINI_KEY.isNotBlank()
+        else -> false
+    }
+
+    /** WS-C: the key the user typed for [provider], or "" (decrypted — show only masked, never log). */
+    fun userKey(provider: String): String = when (provider) {
+        "groq" -> storedGroqKey
+        "gemini" -> storedApiKey
+        else -> ""
+    }
+
+    /** WS-C: save (encrypted) or, with "", remove the user's own key for [provider]. */
+    fun setUserKey(provider: String, key: String) {
+        when (provider) {
+            "groq" -> putSecret(KEY_GROQ, key)
+            "gemini" -> putSecret(KEY_API, key)
+        }
+    }
+
+    /** WS-C: use the user's own OpenAI-compatible server (and optionally model) for the planner slot; null = back to Groq. */
+    fun setOwnServer(url: String?, model: String?) {
+        if (url.isNullOrBlank()) put { remove(KEY_GROQ_URL); remove(KEY_OWN_SERVER); remove(KEY_GROQ_MODEL) }
+        else put {
+            putString(KEY_GROQ_URL, url.trim()); putBoolean(KEY_OWN_SERVER, true)
+            if (!model.isNullOrBlank()) putString(KEY_GROQ_MODEL, model.trim())
+        }
+    }
 
     var groqModel: String
         get() = prefs.getString(KEY_GROQ_MODEL, null)
@@ -106,11 +145,12 @@ class Settings(context: Context) {
         get() = prefs.getString(KEY_ASR_URL, null)?.ifBlank { null } ?: BuildConfig.DEFAULT_ASR_ONLINE_URL
         set(v) = put { putString(KEY_ASR_URL, v.trim()) }
 
-    /** API key for the online ASR endpoint. Falls back to the Groq key if a dedicated one isn't set. */
+    /** API key for the online ASR endpoint. Falls back to the Groq key if a dedicated one isn't set.
+     *  WS-C: kept encrypted like the other keys (an old plain value is re-saved encrypted on first read). */
     var asrOnlineKey: String
-        get() = (prefs.getString(KEY_ASR_KEY, null)?.ifBlank { null }
+        get() = (getSecret(KEY_ASR_KEY).ifBlank { null }
             ?: BuildConfig.DEFAULT_ASR_ONLINE_KEY.ifBlank { groqApiKey })
-        set(v) = put { putString(KEY_ASR_KEY, v.trim()) }
+        set(v) = putSecret(KEY_ASR_KEY, v)
 
     /** Model id served at [asrOnlineBaseUrl] (default = our Ghanaian-English tune). */
     var asrOnlineModel: String
@@ -196,8 +236,11 @@ class Settings(context: Context) {
 
     /** J-18: allow the Gemini free tier as a backup brain. Google may use free-tier requests to improve its products,
      *  so a user can switch it off; Groq (no training on API data) then carries every request alone. */
+    /** WS-C: every Gemini call site checks this, so it also says no while the user has the cloud off, today's budget is
+     *  spent, or Gemini isn't in their provider list (Settings › Control) — the stored J-18 choice itself is unchanged. */
     var allowGeminiBackup: Boolean
-        get() = prefs.getBoolean("allow_gemini_backup", com.tekyerema.core.config.AppConfig.bool("privacy.allowGeminiBackup", true))
+        get() = prefs.getBoolean("allow_gemini_backup", com.tekyerema.core.config.AppConfig.bool("privacy.allowGeminiBackup", true)) &&
+            com.tekyerema.operator.OperatorPolicy.providerAllowed(com.tekyerema.agent.ModelRoles.GEMINI)
         set(v) = put { putBoolean("allow_gemini_backup", v) }
 
     /** L-04: the person called and texted (with your location) when you say "emergency". Set by voice or in Settings. */
@@ -277,6 +320,7 @@ class Settings(context: Context) {
         private const val KEY_GROQ = "groq_api_key"
         private const val KEY_GROQ_MODEL = "groq_model"
         private const val KEY_GROQ_URL = "groq_base_url"
+        private const val KEY_OWN_SERVER = "groq_base_url_user_set"
         private const val KEY_CLOUD_FIRST = "brain_cloud_first"
         private const val KEY_REASONING_OVERRIDE = "debug_reasoning_effort"
         private const val KEY_LANG = "session_language"

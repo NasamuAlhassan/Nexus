@@ -39,6 +39,11 @@ class LocalFastRouter(
 ) {
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
+        // WS-C: the user's own controls ("offline mode", "ask me before every step", "what do you keep about me",
+        // "delete everything"…) come first and always work — they are how the user stays in charge (operator/).
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.tekyerema.operator.OperatorCommands.handle(appContext, text)
+        }?.let { return it }
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
@@ -51,6 +56,13 @@ class LocalFastRouter(
         val intent = FastIntentClassifier.classify(text) ?: run {
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
+        }
+        // WS-C: the execution mode and switched-off capabilities bind the fast path too — Ask every step / Guide only hand an
+        // action to the agent (whose gate asks or explains), a switched-off capability is refused with the reason.
+        when (val hold = com.tekyerema.operator.FastGate.check(intent, isAction = fastWords(intent) != null)) {
+            com.tekyerema.operator.FastHold.ToAgent -> return null
+            is com.tekyerema.operator.FastHold.Say -> return FastOutcome(intent.name, hold.line, systemVoice = true, ok = !hold.refusal)
+            com.tekyerema.operator.FastHold.Proceed -> {}
         }
         val t0 = SystemClock.uptimeMillis()
         // A command that acts on the app in front must not act on OUR screen: step it aside first (StepAside).
