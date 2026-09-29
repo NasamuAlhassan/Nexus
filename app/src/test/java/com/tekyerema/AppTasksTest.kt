@@ -331,6 +331,12 @@ class AppTasksTest {
         assertEquals(FastIntent.PlayMusic(null, null, null, "liked"), c("play my favourites"))
         assertEquals(FastIntent.PlayMusic(null, null, null, "library"), c("play my library"))
         assertEquals(FastIntent.PlayMusic(null, null, yt, "downloads"), c("play my download on youtube music"))   // a dropped "s"
+        // Misspelt or misheard (owner typed "downladed", 2026-09-29, and got a stranger's song).
+        assertEquals(FastIntent.PlayMusic(null, null, "yt music", "downloads"), c("Play my downladed songs on yt music"))
+        for (w in listOf("downloded", "donwloaded", "dowloaded", "down loaded", "dwnloaded", "downloadded"))
+            assertEquals(w, FastIntent.PlayMusic(null, null, null, "downloads"), c("play my $w songs"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "downloads"), c("play the songs i downladed"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "liked"), c("play the songs i liked"))
         // Still a search / an artist, as before.
         assertEquals(FastIntent.PlayMusic("sarkodie", null, yt), c("play sarkodie on youtube music"))
         assertEquals(FastIntent.PlayMusic(null, "stonebwoy", null), c("play songs by Stonebwoy"))

@@ -580,15 +580,19 @@ object FastIntentClassifier {
     private val RE_PLAY_ANY = Regex("^(?:please )?play (?:some |my )?music(?: please)?$")
     /** The user's OWN music: "play my downloads on YouTube Music" was searched as the words "my downloads" and played a
      *  stranger's song (A20e 2026-09-29). Group 1 = which collection, group 2 = the app. */
+    /** "download(s/ed)" as typed or heard: owner typed "Play my downladed songs on yt music" (A20e 2026-09-29) and it
+     *  searched those words — a stranger's song played. Also downloded / donwloaded / dowloaded / "down loaded". */
+    private const val DL = "d[ao]?w?n? ?w?l[oa]{0,2}d(?:s|ed|ded)?"
+
     private val RE_PLAY_COLLECTION = Regex("^(?:please )?(?:play|shuffle|put on|start playing|start) (?:me )?(?:all )?(?:of )?" +
         "(?:(?:some |the |all the )?(?:songs|music|tracks) (?:from|in|on) )?(?:my |the )?" +
-        "(downloads?|downloaded (?:songs|music|tracks)|(?:songs|music|tracks) (?:that )?i(?:'ve| have)? (?:downloaded|saved|liked)|" +
+        "($DL(?: (?:songs|music|tracks))?|(?:songs|music|tracks) (?:that )?i(?:'ve| have)? (?:$DL|saved|liked)|" +
         "offline (?:songs|music|tracks)|(?:music )?library|liked (?:songs|music|tracks)|likes|favou?rites|favou?rite (?:songs|music|tracks))" +
         "(?: (?:on|in|from|using) ($MUSIC_APPS))?(?: please)?$")
 
     /** "downloads" | "liked" | "library" for the words of [RE_PLAY_COLLECTION]'s first group. */
     private fun collectionOf(words: String): String = when {
-        Regex("download|offline").containsMatchIn(words) -> "downloads"
+        Regex("^$DL|$DL$|offline").containsMatchIn(words) -> "downloads"
         Regex("lik|favou?rite").containsMatchIn(words) -> "liked"
         else -> "library"
     }
