@@ -124,7 +124,10 @@ class WakeWordService : Service() {
                 scores[WakeScorer.FIRE_HEAD]?.let { if (it > top) top = it }
                 val fired = gate.feed(rms, scores)
                 if (monitor) mon.frame(rms, scores, fired, scorer)
-                if (fired) {
+                if (fired && SecureStep.active()) {
+                    // The user is typing a PIN and TalkBack is speaking the keys — never open the mic by ourselves now.
+                    Log.i(TAG, "[WAKE] detection ignored: a PIN is being entered")
+                } else if (fired) {
                     Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (hey=${"%.3f".format(scores[WakeScorer.FIRE_HEAD])}) → activating")
                     release()                                        // hand the mic over before the turn opens it
                     onWake()

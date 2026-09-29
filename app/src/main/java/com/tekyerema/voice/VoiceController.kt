@@ -413,6 +413,8 @@ class VoiceController(
         // Never over a running task or a waiting prompt: a new goal would be refused by the busy engine and this turn
         // would then wait on it for the whole task budget.
         if (isRunning || agent.busy || agent.state.value.status in PROMPTS) return
+        // Right after a Mobile Money hand-off the user is typing the PIN (TalkBack speaks the keys): don't listen.
+        if (SecureStep.active()) return
         launchTurn { runOnce(quiet = true) }
     }
 

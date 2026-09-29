@@ -109,6 +109,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             android.util.Log.d("TkyWin", "type=${event.eventType} pkg=${event.packageName} cls=${event.className} ch=${event.contentChangeTypes} wch=${if (Build.VERSION.SDK_INT >= 28) event.windowChanges else -1}")
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
+            com.tekyerema.voice.SecureStep.onForeground(pkg)   // the phone's PIN dialog closed → the PIN step is over
             val cls = event.className?.toString()
             // An app can come to front with a window-state event whose class ISN'T one of its Activities: the Play
             // Store brought forward reported cls="gn" (obfuscated) on the A20e, the foreground stayed "launcher", the
@@ -451,6 +452,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         val isToast = e.eventType == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED &&
             e.className?.toString()?.contains("Toast", true) == true
         if (e.eventType != AccessibilityEvent.TYPE_ANNOUNCEMENT && !isToast) return
+        if (TelephonyWindows.matches(e.packageName?.toString())) return   // never keep text from a PIN / USSD window
         val text = Sanitize.label(e.text?.joinToString(" ")) ?: return
         synchronized(announced) { announced.addLast(SystemClock.uptimeMillis() to text.take(120)); while (announced.size > 5) announced.removeFirst() }
     }

@@ -61,6 +61,8 @@ object MoMoSendTool : Tool {
 
     /** Set by [preflight]: the SIM's network key, so the read-back can say when the number is on another network. */
     internal const val ARG_SIM = "_sim"
+    /** Set by [preflight]: the phone was on a call when the send was asked for (scam shield, [MoneyPrivacy]). */
+    internal const val ARG_ON_CALL = "_on_call"
 
     private fun operatorOf(ctx: ToolContext): String? {
         val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
@@ -79,6 +81,7 @@ object MoMoSendTool : Tool {
             return ToolResult(false, "My automatic send only knows MTN's menu, and this SIM is on ${net.replaceFirstChar { it.uppercase() }}. " +
                 "Use mobile_money to open the menu and guide the user through it instead.", recoverable = true)
         args.put(ARG_SIM, net)   // the read-back says so when the number is on another network (money safety, 2026-09-29)
+        if (MoneyPrivacy.onCall(ctx.appContext)) args.put(ARG_ON_CALL, true)   // the read-back warns about call-guided scams
         return null
     }
 
@@ -130,7 +133,7 @@ object MoMoSendTool : Tool {
             Log.i(TAG, "[MOMO] screen ${idx + 1}: ${com.tekyerema.core.Privacy.content(dlg.text.take(160).replace("\n", " | "))}")
             // SAFETY: never type into a PIN/credential screen. If it shows (early or on cue), MTN's confirmation is
             // checked against what the user confirmed before the PIN is handed over (atConfirmation).
-            if (isPinScreen(dlg)) return atConfirmation(ctrl, dlg, amount, number, pinScreen = isPinPrompt(dlg))
+            if (isPinScreen(dlg)) return atConfirmation(ctrl, dlg, amount, number, pinScreen = isPinPrompt(dlg), tip = pinTip(ctx))
             respond(ctrl, dlg, value, label)
             delay(900)
         }
@@ -140,7 +143,7 @@ object MoMoSendTool : Tool {
             ?: return ToolResult(false, "MTN didn't show its confirmation screen, so I stopped. Nothing was sent. " +
                 "If a Mobile Money screen is still open, press Cancel.", recoverable = false)
         Log.i(TAG, "[MOMO] final screen: ${com.tekyerema.core.Privacy.content(final.text.take(160).replace("\n", " | "))}")
-        return atConfirmation(ctrl, final, amount, number, pinScreen = isPinPrompt(final))
+        return atConfirmation(ctrl, final, amount, number, pinScreen = isPinPrompt(final), tip = pinTip(ctx))
     }
 
     /**
@@ -151,9 +154,10 @@ object MoMoSendTool : Tool {
      * isn't the PIN screen, press Cancel (always safe) and say what MTN showed — nothing is handed over. The PIN is
      * never typed, seen or logged either way ([pinStop] semantics).
      */
-    private suspend fun atConfirmation(ctrl: AccessibilityController, dlg: Ussd, amount: String, number: String, pinScreen: Boolean): ToolResult =
+    private suspend fun atConfirmation(ctrl: AccessibilityController, dlg: Ussd, amount: String, number: String, pinScreen: Boolean,
+                                       tip: String? = null): ToolResult =
         when (val v = MtnConfirm.verdict(dlg.text, amount, number, pinScreen)) {
-            is MtnConfirm.Verdict.HandOff -> pinStop(v.spoken, MtnConfirm.data(v.screen))
+            is MtnConfirm.Verdict.HandOff -> pinStop(v.spoken + (tip?.let { " $it" } ?: ""), MtnConfirm.data(v.screen))
             is MtnConfirm.Verdict.Cancel -> {
                 Log.i(TAG, "[MOMO] confirmation doesn't match what the user confirmed — pressing Cancel")
                 val pressed = cancelDialog(ctrl, dlg)
@@ -161,6 +165,10 @@ object MoMoSendTool : Tool {
                     channel = "native", recoverable = false)
             }
         }
+
+    /** The loudspeaker PIN tip for this phone right now ([MoneyPrivacy]), or null. */
+    private fun pinTip(ctx: ToolContext): String? =
+        MoneyPrivacy.pinTip(MoneyPrivacy.screenReaderOn(ctx.appContext), MoneyPrivacy.privateAudio(ctx.appContext))
 
     /** Press the dialog's Cancel (Back if it has none) and check the dialog went. True when it is gone. Cancelling a
      *  USSD session never moves money. */
@@ -196,6 +204,7 @@ object MoMoSendTool : Tool {
      *  checked by [MtnConfirm]; [data] carries the registered name etc. for later layers. */
     private fun pinStop(line: String, data: JSONObject): ToolResult {
         Log.i(TAG, "[MOMO] reached the PIN screen — stopping for the user.")
+        com.tekyerema.voice.SecureStep.begin()   // no self-opened mic while the PIN is typed (TalkBack speaks the keys)
         return ToolResult(true, line, data = data, channel = "native")
     }
 
@@ -276,14 +285,16 @@ object MoMoSendTool : Tool {
         // number isn't on a network we know, or is on another network than the SIM (money safety, 2026-09-29).
         val raw = args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
             ?: return "Send $amt with Mobile Money? I'll go through the menu and stop at the PIN for you to enter."
-        val (to, warn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(ARG_SIM))
+        val (to, netWarn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(ARG_SIM))
+        val warn = listOfNotNull(netWarn, MoneyPrivacy.callWarning(args.optBoolean(ARG_ON_CALL))).joinToString(" ").ifEmpty { null }
         return "Send $amt to $to, with Mobile Money?\n" + (warn?.let { "$it " } ?: "") +
             "I'll go through the menu and stop at the PIN for you to enter."
     }
 
     /** The read-back's "check the number" line, or null — a structured (Twi) read-back can't carry it, so the English
      *  sentence is spoken whenever there is one (AgentEngine.confirmSpecFor). */
-    fun networkWarning(args: JSONObject): String? =
+    fun networkWarning(args: JSONObject): String? = listOfNotNull(
         args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
-            ?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it, args.str(ARG_SIM)).second }
+            ?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it, args.str(ARG_SIM)).second },
+        MoneyPrivacy.callWarning(args.optBoolean(ARG_ON_CALL))).joinToString(" ").ifEmpty { null }
 }
