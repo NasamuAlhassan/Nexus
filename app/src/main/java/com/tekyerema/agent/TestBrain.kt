@@ -56,8 +56,10 @@ class TestBrain(
             }
             TestScenario.BACKTRACK -> when (step) {
                 1 -> tool("open_app", JSONObject().put("app", "Settings"), expects = "foreground_is: settings")
-                // The wrong turn, on purpose: another app opens while the plan expected to stay in Settings.
-                2 -> tool("open_app", JSONObject().put("app", "Calculator"), expects = "foreground_is: settings")
+                // The wrong turn, on purpose: a TAP that lands in another app (Samsung Settings' "Device care" item opens Samsung's Device care app; not Google
+                // Play services) while the step expected to stay on Settings' own page. (open_app is a deliberate app switch
+                // and is never a wrong page, so it can't stand in for this.)
+                2 -> tool("tap", JSONObject().put("label", "Device care"), expects = "element_present: Connections")
                 3 -> tool("read_state", JSONObject())
                 else -> done("backtrack scenario complete")
             }
