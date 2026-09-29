@@ -1,10 +1,12 @@
 package com.tekyerema
 
 import com.tekyerema.core.config.AppConfig
+import com.tekyerema.operator.Capabilities
 import com.tekyerema.operator.Capability
 import com.tekyerema.operator.ExecutionMode
 import com.tekyerema.operator.OperatorCommands
 import com.tekyerema.operator.OperatorPolicy
+import com.tekyerema.operator.OperatorStops
 import com.tekyerema.policy.PolicyDecision
 import com.tekyerema.policy.PolicyEngine
 import com.tekyerema.policy.PolicyOutcome
@@ -14,6 +16,7 @@ import com.tekyerema.tools.defaultTools
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -157,6 +160,16 @@ class PolicyOperatorTest {
                 }
             }
         assertTrue(checked > 10_000)
+    }
+
+    @Test fun a_switched_off_capability_ends_the_task_with_the_users_reason_and_guide_only_explains_first() {
+        assertNull(OperatorStops.afterBlock(1, null))   // an ordinary safety block: the model carries on as before
+        assertEquals(Capabilities.revokedLine(Capability.MESSAGES), OperatorStops.afterBlock(1, "off:MESSAGES"))
+        assertNull(OperatorStops.afterBlock(2, "mode:GUIDE_ONLY"))                                  // first: the model explains how
+        assertEquals(OperatorStops.GUIDE_STOP_LINE, OperatorStops.afterBlock(2, "mode:GUIDE_ONLY"))   // tries to act again: stop
+        assertNull(OperatorStops.afterBlock(3, "mode:GUIDE_ONLY"))                                  // a new task starts fresh
+        assertNull(OperatorStops.afterBlock(3, "cloud-off"))
+        assertTrue(Capabilities.revokedLine(Capability.MONEY).startsWith("You've switched off “Money”, so I won't move money for you."))
     }
 
     @Test fun the_default_engine_reads_the_users_live_choices() {

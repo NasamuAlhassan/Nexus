@@ -942,9 +942,14 @@ object AgentEngine {
                                 stats = stats.copy(blocked = stats.blocked + 1)
                                 log(LogEntry.Kind.POLICY, "Blocked: ${pd.reason}")
                                 stepAudit?.blocked()   // J-12 / WS-C: with the policy reason
+                                // WS-C: a capability the user switched off ends the task with their reason (spoken as is);
+                                // Guide only lets the model explain first (operator/OperatorStops).
+                                com.tekyerema.operator.OperatorStops.afterBlock(runCtx.auditTask, pd.operatorRule)?.let { line ->
+                                    log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.CANNOT_DO, stats); return }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → BLOCKED by policy: ${pd.reason}. Do not retry it; if the goal needs it, call cannot_do.")
                                 // A blocked substantive action did not happen: a Done right after must not read as verified.
-                                if (mutating) { mutatingCount++; lastMutatingVerified = false }
+                                // (WS-C: not when the user's own mode blocked it — a guide-only explanation is a complete answer.)
+                                if (mutating && pd.operatorRule == null) { mutatingCount++; lastMutatingVerified = false }
                                 continue
                             }
                             PolicyOutcome.CONFIRM -> {

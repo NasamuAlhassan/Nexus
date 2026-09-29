@@ -125,6 +125,33 @@ object Capabilities {
     const val GUIDE_PREFIX = "I'm in guide-only mode, so I won't do it myself."
 }
 
+/**
+ * WS-C — what the agent loop does right after a step was BLOCKED by one of the user's own choices (pure state, tested):
+ *  - a capability the user switched off ends the task at once with their reason, spoken as is — never a quiet detour
+ *    (the model must not, say, phone someone the user asked to text);
+ *  - Guide only lets the model explain how (its history carries the reason); if it tries to act again, the task ends
+ *    with a plain guide-only line instead of looping.
+ */
+object OperatorStops {
+    private var task = Long.MIN_VALUE
+    private var guideBlocks = 0
+
+    const val GUIDE_STOP_LINE = "I'm in guide-only mode, so I won't do it myself. Ask me how to do it and I'll talk you " +
+        "through it, or say “normal mode” to let me do it."
+
+    /** @return the line to end the task with, or null to let the model carry on. */
+    @Synchronized fun afterBlock(task: Long, operatorRule: String?): String? {
+        if (operatorRule == null) return null
+        if (task != this.task) { this.task = task; guideBlocks = 0 }
+        return when {
+            operatorRule.startsWith("off:") ->
+                Capability.entries.firstOrNull { it.name == operatorRule.removePrefix("off:") }?.let { Capabilities.revokedLine(it) }
+            operatorRule == "mode:GUIDE_ONLY" -> if (++guideBlocks >= 2) GUIDE_STOP_LINE else null
+            else -> null
+        }
+    }
+}
+
 /** What the fast path should do with a command, given the user's execution mode and switched-off capabilities. */
 sealed class FastHold {
     /** Run it as usual. */

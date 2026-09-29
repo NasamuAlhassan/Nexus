@@ -457,7 +457,10 @@ internal fun DataPage(settings: Settings, onBack: () -> Unit, openAudit: () -> U
             SwitchRow("Include message text", "Off: your own words and messages are left out — only their length is shown.", includeText) { includeText = it }
             SettingRow("Export history and activity log", icon = Icons.Outlined.Share, iconTint = Spectrum.Azure,
                 description = "Makes one file and opens the share menu, so you choose where it goes.") {
-                message = if (com.tekyerema.audit.AuditExport.share(context, includeText)) null else "Sorry, I couldn't make the file."
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { com.tekyerema.audit.AuditExport.share(context, includeText) }
+                    message = if (ok) null else "Sorry, I couldn't make the file."
+                }
             }
             SettingRow("Activity log", icon = Icons.Outlined.History, iconTint = Spectrum.Violet, divider = false,
                 description = "Read it here, step by step.") { openAudit() }

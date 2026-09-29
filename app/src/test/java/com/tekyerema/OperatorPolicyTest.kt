@@ -237,6 +237,29 @@ class OperatorPolicyTest {
         for (k in keys) if (k != OperatorPolicy.K_USAGE) assertTrue(k, OperatorPolicy.describeChange(k, "1") != null)
     }
 
+    @Test fun keys_are_shown_masked_and_checked_before_saving() {
+        val p = com.tekyerema.operator.ProviderKeys
+        assertEquals("••••wxyz", p.mask("gsk_abcdefghijklmnopqrstuvwxyz"))
+        assertEquals("••••", p.mask("short-key"))            // too short to show any of it
+        assertEquals("", p.mask("  "))
+        assertNull(p.keyProblem("gsk_abcdefghijklmnop"))
+        assertTrue(p.keyProblem("gsk abc defghijk")!!.contains("no spaces"))
+        assertTrue(p.keyProblem("abc")!!.contains("too short"))
+        assertTrue(p.keyProblem("")!!.contains("first"))
+    }
+
+    @Test fun your_own_server_must_be_https_or_on_your_own_network() {
+        val p = com.tekyerema.operator.ProviderKeys
+        assertNull(p.serverProblem("https://my-llm.example.com/v1"))
+        assertNull(p.serverProblem("http://192.168.1.20:11434/v1"))
+        assertNull(p.serverProblem("http://localhost:8080/v1"))
+        assertNull(p.serverProblem("http://laptop.local:11434/v1"))
+        assertTrue(p.serverProblem("http://example.com/v1")!!.contains("https"))
+        assertTrue(p.serverProblem("http://172.32.0.1/v1")!!.contains("https"))   // outside 172.16/12
+        assertTrue(p.serverProblem("ftp://example.com")!!.contains("https"))
+        assertTrue(p.serverProblem("not a url")!!.isNotEmpty())
+    }
+
     @Test fun the_export_snapshot_has_no_secrets() {
         OperatorPolicy.revokedCapabilities = setOf(Capability.CALLS)
         val j = OperatorPolicy.toJson(noon).toString()
