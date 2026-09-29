@@ -160,6 +160,22 @@
             </intent-filter>
         </service>
 
+        <!-- G-05 the Tɛkyerɛma Twi keyboard (ime/). Exported only to the system (BIND_INPUT_METHOD): the user turns it on in
+             the keyboard list and picks it. It runs in the app process (it reads the Secure Input flag), never logs or
+             sends what is typed, and has no entry point the agent could use to type. -->
+        <service
+            android:name=".ime.TwiKeyboardService"
+            android:exported="true"
+            android:label="@string/ime_name"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
         <!-- A-13 schedules (owner-approved unattended triggers): fires the user's own schedules and re-arms them after
              a reboot, an update or a clock change. Not exported — system broadcasts still arrive, no other app can fire one. -->
         <receiver
