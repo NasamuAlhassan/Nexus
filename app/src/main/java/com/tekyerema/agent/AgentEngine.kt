@@ -602,7 +602,8 @@ object AgentEngine {
             // found with ONE web search and opened (one clear official site), or the user picks from 2–3 options. Null =
             // not that kind of request, an app matches, or offline → everything below runs unchanged.
             val questions = com.tekyerema.agent.research.QuestionBudget()   // ≤ 1 per slot, ≤ 2 "which one" per task
-            val research = if (forcedBrain != null || direct || webFirst) null else com.tekyerema.agent.research.TargetResearch.planSafely(goal,
+            // (merge A+E: a resumed task already did its research before the pause — its checkpoint carries the result.)
+            val research = if (forcedBrain != null || direct || webFirst || resume != null) null else com.tekyerema.agent.research.TargetResearch.planSafely(goal,
                 com.tekyerema.agent.research.TargetResearch.deps(ctxApp, online,
                     ask = if (unattended) null else { q, spoken -> questions.note(q, true); askUser(q, spoken) }) { log(LogEntry.Kind.INFO, it) })
             research?.note?.let { history.add(it) }
