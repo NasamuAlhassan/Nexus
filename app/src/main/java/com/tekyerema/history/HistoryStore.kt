@@ -8,15 +8,21 @@ import org.json.JSONObject
 import java.io.File
 
 /** How a finished request actually ended (§P1 — a blind user must hear the truth, not a blanket "not completed"). */
-enum class Outcome { COMPLETED, UNVERIFIED, CANNOT, FAILED, STOPPED;
+enum class Outcome { COMPLETED, UNVERIFIED, CANNOT, FAILED, STOPPED,
+    /** WS-A: the cloud went away mid-task (network, quota, no capable model) — kept with a checkpoint, resumable. */
+    PAUSED,
+    /** WS-A: the app was closed or killed while the task ran (found still running at the next start). */
+    INTERRUPTED;
     val done: Boolean get() = this == COMPLETED || this == UNVERIFIED   // an action fired (verified or not)
-    /** Short honest label shown under the row; empty for a cleanly-verified completion. */
+    /** Short honest label shown under the row; empty for a cleanly-verified completion. Never claims it finished. */
     val label: String get() = when (this) {
         COMPLETED -> ""
         UNVERIFIED -> "Done — but I couldn't confirm it"
         CANNOT -> "Couldn't do that"
         FAILED -> "Didn't work"
         STOPPED -> "Cancelled"
+        PAUSED -> "Paused before it finished"
+        INTERRUPTED -> "Interrupted before it finished"
     }
 }
 

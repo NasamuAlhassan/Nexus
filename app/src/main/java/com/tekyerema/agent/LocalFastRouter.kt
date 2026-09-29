@@ -42,6 +42,11 @@ class LocalFastRouter(
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
+        // WS-A: "carry on" / "continue" / "resume" with a paused or interrupted task on file → the engine resumes THAT task
+        // (AgentEngine.submitGoal decides it from the words and the journal — no model call). With nothing resumable,
+        // "continue" stays media play as before.
+        if (com.tekyerema.agent.journal.ResumeIntent.shouldResume(text,
+                com.tekyerema.agent.journal.TaskJournal.resumable() != null, ScreenReadCursor.pending)) return null
         // The user's routine names and relations must be known before classifying (encrypted files, read once — a
         // Keystore decrypt, so off the main thread the voice path runs on).
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -324,6 +329,7 @@ class LocalFastRouter(
     /** J-15: clear the History list, the action audit, the traces and the telemetry. */
     private fun clearHistory(): FastOutcome {
         com.tekyerema.history.HistoryStore.clear()
+        com.tekyerema.agent.journal.TaskJournal.clear()   // WS-A: the task journal holds the user's requests too
         com.tekyerema.audit.AuditLog.clear()
         com.tekyerema.core.telemetry.Telemetry.clear()
         AgentEngine.clearTraces()
@@ -659,7 +665,8 @@ class LocalFastRouter(
         // The app under our own screen (or behind the home screen) is where they were — not whatever is in front now.
         val fg = c?.foregroundPackage()
         val app = if (fg == null || fg == own || fg in LAUNCHERS) c?.priorForegroundPackage()?.takeUnless { it == own || it in LAUNCHERS } else null
-        return handled(FastIntent.Resume, LeftOff.line(last, ScreenReadCursor.pending, app?.let { appLabel(it) }, now))
+        return handled(FastIntent.Resume, LeftOff.line(last, ScreenReadCursor.pending, app?.let { appLabel(it) }, now,
+            resumable = com.tekyerema.agent.journal.ResumeOffer.leftOffLine(now)))   // WS-A: a paused/interrupted task first
     }
 
     /** F-09: the picture or screen described online. Offline, "describe the screen" goes on to the on-phone reader. */

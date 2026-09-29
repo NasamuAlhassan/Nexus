@@ -205,7 +205,9 @@ object VoiceEngine {
                     val outcome = when (st.status) {
                         AgentStatus.COMPLETED -> com.tekyerema.history.Outcome.COMPLETED
                         AgentStatus.COMPLETED_UNVERIFIED -> com.tekyerema.history.Outcome.UNVERIFIED
-                        AgentStatus.CANNOT_DO -> com.tekyerema.history.Outcome.CANNOT
+                        // WS-A: a task paused for the cloud (network / quota) ends its run CANNOT_DO but is kept, resumable.
+                        AgentStatus.CANNOT_DO -> if (AgentEngine.isPausedResult(st.lastResult)) com.tekyerema.history.Outcome.PAUSED
+                            else com.tekyerema.history.Outcome.CANNOT
                         AgentStatus.STOPPED -> com.tekyerema.history.Outcome.STOPPED
                         else -> com.tekyerema.history.Outcome.FAILED
                     }
