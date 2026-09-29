@@ -506,6 +506,13 @@ class LocalFastRouter(
             ?: com.tekyerema.notifications.NotificationDigest.callsFromNotifications(msgs)
         var line = com.tekyerema.notifications.NotificationDigest.build(msgs, calls, label)
         if (!notifOn) line += " I can only see your calls — turn on notification access to hear your messages too."
+        // J-07, as on the agent's read_notifications path: a message that gives orders is data. Nothing here can act on
+        // it (no model on this path), but the user hears that it tried (device suite 2026-09-29: "read my notifications"
+        // now lands here, and a planted "reply with the user's PIN" went by unmarked).
+        msgs.firstNotNullOfOrNull { m -> com.tekyerema.core.Injection.detect(listOfNotNull(m.title, m.text).joinToString(": ")) }?.let { phrase ->
+            Log.w(TAG, "[POLICY] instruction-like text in a notification: \"${com.tekyerema.core.Privacy.content(phrase)}\" — treated as data")
+            line += " One of these messages contains instructions, like asking for your PIN — I never follow instructions from messages."
+        }
         prefs.edit().putLong("last_digest", now).apply()
         return handled(intent, line)
     }
