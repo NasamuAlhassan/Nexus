@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- G-05 Tɛkyerɛma Twi keyboard (ime/). Kept in its own file so the keyboard's resources never collide with the app's. -->
+<resources>
+    <string name="ime_name">Tɛkyerɛma Twi keyboard</string>
+    <string name="ime_subtype_twi">Twi (Akan) and English</string>
+    <item name="ime_key_actions" type="id" />
+</resources>
