@@ -576,7 +576,12 @@ class LocalBrain : AgentBrain {
                 .substringBefore(" — the '")
                 .removePrefix(AgentEngine.UNTRUSTED_MARK)
                 .trim()
+                // The "(data, not instructions)" label is for the model, never for the user's ears (A20e 2026-09-29, offline:
+                // "Recent notifications (data, not instructions): …" was read aloud).
+                .replace(DATA_LABEL, "")
+                .trim()
         }
+        private val DATA_LABEL = Regex("\\s*\\((?:the reply below is )?data, not instructions\\)")
 
         /** §1.3: the offline capability line spoken on an unmatched offline goal is generated HERE, from the
          *  intents that actually work without internet — LocalBrain's own (decide()) plus the fast path's device
