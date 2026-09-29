@@ -28,14 +28,13 @@ import java.io.ByteArrayOutputStream
  */
 object DescribeScreenTool : Tool {
     override val name = "describe_screen"
-    override val description = "Describe the picture or screen in front (photos, images, icons) using online vision. " +
-        "Optionally answer a question about it."
+    override val description = "Describe a photo/picture or the screen in front with online vision; can answer a question about it."
     override val scope = CapabilityScope.PERCEIVE
     override val riskTier = RiskTier.TIER0
     override val isAccelerator = true
     override val params = listOf(
-        ToolParam("question", "string", "A question about the picture, if the user asked one.", required = false),
-        ToolParam("picture", "boolean", "True when the user means a photo/image rather than the whole screen.", required = false)
+        ToolParam("question", "string", "What the user asked about it.", required = false),
+        ToolParam("picture", "boolean", "A photo/image, not the whole screen.", required = false)
     )
 
     const val OFFLINE = "I need the internet to describe pictures. Say “read the screen” to hear the text on it instead."

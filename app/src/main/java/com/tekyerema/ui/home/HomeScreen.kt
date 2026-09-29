@@ -4,8 +4,13 @@ import android.Manifest
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,10 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.tekyerema.agent.AgentEngine
 import com.tekyerema.agent.AgentStatus
@@ -44,7 +48,9 @@ import com.tekyerema.ui.components.BigButton
 import com.tekyerema.ui.components.BrandRow
 import com.tekyerema.ui.components.CommandField
 import com.tekyerema.ui.components.PageMargin
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
+import com.tekyerema.ui.theme.TkHaptic
 import com.tekyerema.ui.voice.LivingVoice
 import com.tekyerema.ui.voice.Phrases
 import com.tekyerema.ui.voice.Presence
@@ -71,10 +77,12 @@ fun HomeContent(
     val context = LocalContext.current
     val voice by VoiceEngine.state.collectAsState()
     val agent by AgentEngine.state.collectAsState()
-    val level by VoiceEngine.level.collectAsState()
+    // The mic level is NOT collected here: the living visual reads it once per frame, so a talking user no longer
+    // recomposes this whole screen on every audio buffer.
     val settingsVersion by settings.changes.collectAsState()
-    val reduceMotion = remember(settingsVersion) { settings.reduceMotion }
+    val reduceMotion = LocalCalmMotion.current      // Reduce motion OR the system's "Remove animations"
     val speakAloud = remember(settingsVersion) { settings.speakAloud }
+    val speechRate = remember(settingsVersion) { settings.speechRate }
 
     // "Done" is a moment, not a state the engine keeps: hold it briefly after a completed turn.
     val raw = presenceOf(voice, agent)
@@ -144,7 +152,7 @@ fun HomeContent(
         Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             LivingVoice(
                 presence = presence,
-                level = level,
+                level = { VoiceEngine.level.value },
                 reduceMotion = reduceMotion,
                 contentDescription = label,
                 stateDescription = stateText,
@@ -170,34 +178,36 @@ fun HomeContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
-                // I-08: a long answer keeps ALL its words (smaller type, up to 8 lines) instead of being cut at 3 lines.
-                val long = phrase.length > 90
-                if (phrase.isNotEmpty()) Text(
-                    text = phrase,
-                    style = if (long) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium,
-                    color = if (presence == Presence.IDLE) Tk.TextSecondary else Tk.Text,
-                    textAlign = TextAlign.Center,
-                    maxLines = if (long) 8 else 3,
-                    modifier = Modifier.fillMaxWidth().semantics { if (announce) liveRegion = LiveRegionMode.Polite }
+                // I-08: a long answer keeps ALL its words (AssistantLine: smaller type, up to 8 lines). A new line rises
+                // into place; a spoken reply is revealed at speaking pace; TalkBack always gets the whole line at once.
+                AssistantLine(presence, phrase, announce = announce, calm = reduceMotion, speechRate = speechRate)
+                // A notice about a typed request (sent to the running task, waiting for yes/no) is announced.
+                HintLine(
+                    hint,
+                    color = if (presence == Presence.CONFIRM_LISTENING || notice.isNotEmpty()) Tk.Attention else Tk.TextSecondary,
+                    announce = notice.isNotEmpty(),
+                    modifier = Modifier.padding(top = if (phrase.isEmpty()) 0.dp else 10.dp)
                 )
-                if (hint.isNotEmpty()) {
-                    Text(hint, style = MaterialTheme.typography.bodyMedium,
-                        color = if (presence == Presence.CONFIRM_LISTENING || notice.isNotEmpty()) Tk.Attention else Tk.TextSecondary, textAlign = TextAlign.Center,
-                        // A notice about a typed request (sent to the running task, waiting for yes/no) is announced.
-                        modifier = Modifier.padding(top = if (phrase.isEmpty()) 0.dp else 10.dp)
-                            .semantics { if (notice.isNotEmpty()) liveRegion = LiveRegionMode.Polite })
-                }
                 // Buttons stay as a quiet parallel path (a helper, TalkBack, a noisy room); voice is primary.
                 // Yes / No only for a real confirmation: an open question or the secure step is answered by voice (or on
-                // the reply panel), and a stray "Yes" must never be offered where it means nothing.
-                AnimatedVisibility(visible = (presence == Presence.CONFIRMING || presence == Presence.CONFIRM_LISTENING) &&
-                        agent.status == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION, enter = fadeIn(), exit = fadeOut()) {
+                // the reply panel), and a stray "Yes" must never be offered where it means nothing. They rise into place
+                // on a spring (calm: a plain fade) and answer with the system's confirm / reject haptics.
+                AnimatedVisibility(
+                    visible = (presence == Presence.CONFIRMING || presence == Presence.CONFIRM_LISTENING) &&
+                        agent.status == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION,
+                    enter = if (reduceMotion) fadeIn(tween(160))
+                        else fadeIn(tween(200, delayMillis = 80)) + expandVertically(spring(0.8f, 380f, IntSize(1, 1))) +
+                            slideInVertically(spring(0.6f, 800f, IntOffset(1, 1))) { it / 2 },
+                    exit = if (reduceMotion) fadeOut(tween(100))
+                        else fadeOut(tween(120)) + shrinkVertically(spring(1f, 1600f, IntSize(1, 1)))
+                ) {
                     Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         // J-02: the buttons answer the confirmation this card is showing, not whatever is pending at tap time.
                         val seq = agent.confirmationSeq
                         BigButton("No", onClick = { AgentEngine.confirm(false, seq) }, modifier = Modifier.weight(1f), filled = false,
-                            contentDescription = "No, don't do it")
-                        BigButton("Yes, do it", onClick = { AgentEngine.confirm(true, seq) }, modifier = Modifier.weight(1.4f))
+                            contentDescription = "No, don't do it", haptic = TkHaptic.REJECT)
+                        BigButton("Yes, do it", onClick = { AgentEngine.confirm(true, seq) }, modifier = Modifier.weight(1.4f),
+                            haptic = TkHaptic.CONFIRM)
                     }
                 }
             }

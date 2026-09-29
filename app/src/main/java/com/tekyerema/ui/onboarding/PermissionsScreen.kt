@@ -2,6 +2,7 @@ package com.tekyerema.ui.onboarding
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +33,9 @@ import com.tekyerema.ui.components.BigButton
 import com.tekyerema.ui.components.BrandMark
 import com.tekyerema.ui.components.Hairline
 import com.tekyerema.ui.components.PageMargin
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
+import com.tekyerema.ui.theme.TkMotion
 
 /**
  * First launch: one page that says why, one button that asks. Then the product.
@@ -77,6 +80,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         step = if (Perms.screenControl(context)) 3 else 2
     }
+    val calm = LocalCalmMotion.current
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = PageMargin)) {
         Spacer(Modifier.height(28.dp))
@@ -93,7 +97,13 @@ fun PermissionsScreen(onDone: () -> Unit) {
         )
         Spacer(Modifier.height(36.dp))
 
-        if (step == 1) {
+        // Each step slides on from the right as the last one is done (calm motion: a cross-fade).
+        AnimatedContent(
+            targetState = step,
+            transitionSpec = { TkMotion.sharedAxisX(forward = targetState > initialState, calm = calm) },
+            label = "onboarding step"
+        ) { shown -> Column {
+        if (shown == 1) {
             Text("To work for you, it needs", style = MaterialTheme.typography.titleLarge, color = Tk.Text,
                 modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(10.dp))
@@ -107,7 +117,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
             Reason("Notifications", "to read your messages and reply")
             Spacer(Modifier.height(36.dp))
             BigButton("Allow and continue", onClick = { launcher.launch(Perms.runtimePermissions()) })
-        } else if (step == 2) {
+        } else if (shown == 2) {
             Text("One more thing", style = MaterialTheme.typography.titleLarge, color = Tk.Text,
                 modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(10.dp))
@@ -124,7 +134,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
             }
             Spacer(Modifier.height(12.dp))
             BigButton("Not now", onClick = { step = 3 }, filled = false)
-        } else if (step == 3) {
+        } else if (shown == 3) {
             // REL-P0-1 — without "display over other apps", opening apps / placing calls / driving MoMo from
             // the background is silently blocked, and the confirmation card can't float over other apps.
             Text("Let it act for you", style = MaterialTheme.typography.titleLarge, color = Tk.Text,
@@ -151,6 +161,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             BigButton("Skip for now", onClick = onDone, filled = false)
         }
+        } }
         Spacer(Modifier.height(32.dp))
     }
 }

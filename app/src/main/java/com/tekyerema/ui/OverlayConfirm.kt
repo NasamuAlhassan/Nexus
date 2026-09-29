@@ -21,6 +21,10 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.tekyerema.accessibility.TekyeremaAccessibilityService
 import com.tekyerema.agent.AgentEngine
+import com.tekyerema.ui.theme.TkHaptic
+import com.tekyerema.ui.theme.tkHaptic
+import com.tekyerema.ui.voice.Follower
+import com.tekyerema.ui.voice.StrobeGuard
 import com.tekyerema.voice.ConfirmPhase
 import com.tekyerema.voice.Confirmation
 import com.tekyerema.voice.PromptSurface
@@ -63,6 +67,8 @@ object OverlayConfirm {
     private const val TEXT = "#F4F6FB"
     private const val TEXT2 = "#9AA6C4"
     private const val ATTENTION = "#F5C26B"
+    private const val ATTENTION_EDGE = "#59F5C26B"   // 35 % amber
+    @Volatile private var calm = false
 
     @Volatile private var kind = PromptSurface.Kind.CONFIRM
     /** The panel on screen was put there by the agent's state (so a state change may take it down). */
@@ -103,6 +109,8 @@ object OverlayConfirm {
             fun dp(v: Int) = (v * d).toInt()
             val header = PromptSurface.header(kind)
             val secure = kind == PromptSurface.Kind.SECURE
+            // Reduce motion (in the app) or "Remove animations" (the phone): the panel fades in and holds still.
+            calm = com.tekyerema.settings.Settings(ctx).reduceMotion || com.tekyerema.ui.theme.systemAnimatorScale(ctx) <= 0f
 
             val card = LinearLayout(host).apply {
                 orientation = LinearLayout.VERTICAL
@@ -110,7 +118,8 @@ object OverlayConfirm {
                 background = GradientDrawable().apply {
                     setColor(Color.parseColor(INK2))
                     cornerRadius = dp(28).toFloat()
-                    setStroke(dp(1), Color.parseColor(INK3))
+                    // A faint amber edge ties the panel to "needs your OK" (the colour the living visual turns).
+                    setStroke(dp(1), Color.parseColor(ATTENTION_EDGE))
                 }
                 contentDescription = when (kind) {
                     PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
@@ -121,7 +130,7 @@ object OverlayConfirm {
 
             // Top row: the small presence + the question.
             val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            val mini = MiniPresenceView(host)
+            val mini = MiniPresenceView(host, calm)
             val miniSize = if (secure) 40 else 64
             row.addView(mini, LinearLayout.LayoutParams(dp(miniSize), dp(miniSize)).apply { marginEnd = dp(14) })
             val texts = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
@@ -153,7 +162,8 @@ object OverlayConfirm {
 
             // The buttons: a parallel path to the voice (a helper, TalkBack, a noisy room), always there to answer on.
             val buttons = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
-            fun btn(label: String, description: String, filled: Boolean, hides: Boolean, guarded: Boolean = false, onClick: () -> Unit) = Button(host).apply {
+            fun btn(label: String, description: String, filled: Boolean, hides: Boolean, guarded: Boolean = false,
+                    haptic: TkHaptic = TkHaptic.TAP, onClick: () -> Unit) = Button(host).apply {
                 text = label
                 contentDescription = description
                 isAllCaps = false
@@ -165,22 +175,34 @@ object OverlayConfirm {
                     cornerRadius = dp(24).toFloat()
                     if (filled) setColor(Color.parseColor(TEXT)) else { setColor(Color.TRANSPARENT); setStroke(dp(1), Color.parseColor(INK3)) }
                 }
+                // A press squashes the button a little and it springs back on release (calm: no movement). Returns
+                // false, so the Button's own click and accessibility handling are untouched.
+                if (!calm) setOnTouchListener { v, e ->
+                    when (e.actionMasked) {
+                        android.view.MotionEvent.ACTION_DOWN ->
+                            v.animate().scaleX(0.95f).scaleY(0.95f).setDuration(90L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
+                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
+                            v.animate().scaleX(1f).scaleY(1f).setDuration(260L).setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
+                    }
+                    false
+                }
                 setOnClickListener {
                     // A guarded (approving) button ignores a tap that lands before the panel has been up for a moment.
                     if (guarded && !com.tekyerema.policy.ConfirmGate.armed(shownAt, android.os.SystemClock.uptimeMillis())) return@setOnClickListener
+                    it.tkHaptic(haptic)
                     onClick(); if (hides) hideNow()
                 }
             }
             val (left, right) = PromptSurface.buttons(kind)
             val leftBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(left, "No, don't do it", filled = false, hides = true) { AgentEngine.confirm(false, seq) }
-                else -> btn(left, "Stop the task", filled = false, hides = true) { VoiceEngine.cancel() }
+                PromptSurface.Kind.CONFIRM -> btn(left, "No, don't do it", filled = false, hides = true, haptic = TkHaptic.REJECT) { AgentEngine.confirm(false, seq) }
+                else -> btn(left, "Stop the task", filled = false, hides = true, haptic = TkHaptic.REJECT) { VoiceEngine.cancel() }
             }
             val rightBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(right, "Yes, do it", filled = true, hides = true, guarded = true) { AgentEngine.confirm(true, seq) }
+                PromptSurface.Kind.CONFIRM -> btn(right, "Yes, do it", filled = true, hides = true, guarded = true, haptic = TkHaptic.CONFIRM) { AgentEngine.confirm(true, seq) }
                 // Reopens the microphone for this question; the panel stays until it is answered.
                 PromptSurface.Kind.QUESTION -> btn(right, "Answer by voice", filled = true, hides = false) { VoiceEngine.respond() }
-                PromptSurface.Kind.SECURE -> btn(right, "Done — I've finished the secure step", filled = true, hides = true) { AgentEngine.secureInputDone() }
+                PromptSurface.Kind.SECURE -> btn(right, "Done — I've finished the secure step", filled = true, hides = true, haptic = TkHaptic.CONFIRM) { AgentEngine.secureInputDone() }
             }
             buttons.addView(leftBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
             buttons.addView(rightBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginStart = dp(6) })
@@ -211,8 +233,22 @@ object OverlayConfirm {
                 gravity = if (secure) Gravity.TOP else Gravity.CENTER
                 if (secure) y = dp(36)
             }
+            // Entrance: the card grows into place from 90 % and settles with a slight overshoot (scale, not a slide:
+            // the window is exactly the card's size, so a slide would be clipped at its edge). The secure step grows
+            // from its top edge, out of the way of a PIN pad. 380 ms — well inside the Yes button's 600 ms arming
+            // delay (ConfirmGate), so the button is still by the time a tap can count. Alpha starts just above 0: a
+            // view at alpha 0 is not "visible to user", and TalkBack could skip the panel's first moment.
+            card.alpha = 0.02f
+            if (!calm) {
+                card.scaleX = 0.9f; card.scaleY = 0.9f
+                if (secure) card.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotY = 0f }
+            }
             try {
                 wm.addView(wrapper, lp); view = wrapper; wmUsed = wm; presence = mini; caption = cap
+                card.animate().alpha(1f).scaleX(1f).scaleY(1f)
+                    .setDuration(if (calm) 150L else 380L)
+                    .setInterpolator(if (calm) android.view.animation.DecelerateInterpolator() else android.view.animation.OvershootInterpolator(1.1f))
+                    .start()
                 bindToVoice()
                 // TalkBack users hear the panel arrive; with replies read aloud the question is already being spoken.
                 if (!com.tekyerema.settings.Settings(ctx).speakAloud) wrapper.announceForAccessibility(card.contentDescription)
@@ -235,22 +271,30 @@ object OverlayConfirm {
                     PromptSurface.Kind.CONFIRM -> {
                         val phase = v.confirmPhase
                         presence?.phase = phase
-                        caption?.text = when (phase) {
+                        setCaption(when (phase) {
                             ConfirmPhase.ASKING -> "Asking…"
                             ConfirmPhase.LISTENING -> if (v.speechDetected) "Listening…" else Confirmation.LISTEN_HINT
                             ConfirmPhase.HEARD -> "Got it"
                             ConfirmPhase.NONE -> Confirmation.LISTEN_HINT
-                        }
+                        })
                     }
                     else -> {
                         val listening = VoiceEngine.isRunning && !VoiceEngine.canRespond
                         presence?.phase = if (listening) ConfirmPhase.LISTENING else ConfirmPhase.ASKING
-                        caption?.text = captionFor(kind, listening)
+                        setCaption(captionFor(kind, listening))
                     }
                 }
             }
         }
         s.launch { VoiceEngine.level.collect { presence?.level = it } }
+    }
+
+    /** A new caption fades up instead of swapping in a single frame (calm: it just changes). */
+    private fun setCaption(text: String) {
+        val c = caption ?: return
+        if (c.text?.toString() == text) return
+        c.text = text
+        if (!calm) { c.alpha = 0.25f; c.animate().alpha(1f).setDuration(200L).start() }
     }
 
     fun hide(ctx: Context) { main.post { hideNow() } }
@@ -272,59 +316,119 @@ object OverlayConfirm {
         view = null; wmUsed = null
     }
 
+
     /**
-     * A 64 dp echo of the living visual in amber: three arcs that turn slowly while asking, open
-     * and follow the microphone level while listening, and close when the answer is heard.
+     * A 64 dp echo of the living visual in amber, on the same spring physics ([com.tekyerema.ui.voice.Spring]):
+     * a soft amber glow beating slowly (0.5 Hz — "waiting for you"), three rings that turn while asking, open and
+     * ripple with the microphone (inner ring first) while listening, and close with a small ring of light when the
+     * answer is heard. Calm motion: the same shapes, held still.
      */
-    private class MiniPresenceView(ctx: Context) : View(ctx) {
+    private class MiniPresenceView(ctx: Context, private val calm: Boolean) : View(ctx) {
         var phase: ConfirmPhase = ConfirmPhase.ASKING
-            set(v) { field = v; invalidate() }
+            set(v) {
+                if (v != field && v == ConfirmPhase.HEARD) heardAt = t
+                field = v; openS.target = openFor(v); invalidate()
+            }
         var level: Float = 0f
-            set(v) { field = v; invalidate() }
+            set(v) { field = v; if (calm) return; invalidate() }
+
+        private fun openFor(p: ConfirmPhase) = when (p) { ConfirmPhase.LISTENING -> 0.45f; ConfirmPhase.HEARD -> 0f; else -> 0.18f }
+
         private var t = 0f
-        private val start = System.nanoTime()
+        private var lastNs = 0L
+        private var heardAt = -10f
+        private val angles = floatArrayOf(0f, 61f, 122f)
+        private val openS = com.tekyerema.ui.voice.Spring(openFor(ConfirmPhase.ASKING), 160f, 0.72f)
+        private val rings = arrayOf(com.tekyerema.ui.voice.Spring(0f, 520f, 0.45f), com.tekyerema.ui.voice.Spring(0f, 330f, 0.45f),
+            com.tekyerema.ui.voice.Spring(0f, 200f, 0.45f))
+        private val voice = Follower(0.03f, 0.18f)
+        private val voiceGlow = Follower(StrobeGuard.GLOW_ATTACK_SEC, StrobeGuard.GLOW_RELEASE_SEC)
         private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 4000L; repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { t = (System.nanoTime() - start) / 1e9f; invalidate() }
+            addUpdateListener { tick() }
         }
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
+        private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val threadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
         private val rect = RectF()
         private val thread = Path()
         private val amber = Color.parseColor("#F5C26B")
 
         init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-        override fun onAttachedToWindow() { super.onAttachedToWindow(); animator.start() }
+        override fun onAttachedToWindow() { super.onAttachedToWindow(); if (!calm) animator.start() }
         override fun onDetachedFromWindow() { animator.cancel(); super.onDetachedFromWindow() }
+
+        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+            // Gradients are built once per size and reused every frame.
+            val cx = w / 2f; val cy = h / 2f
+            val glowR = minOf(w, h) * 0.49f
+            glowPaint.shader = android.graphics.RadialGradient(cx, cy, glowR,
+                intArrayOf(Color.argb(110, 245, 194, 107), Color.argb(40, 245, 194, 107), Color.TRANSPARENT),
+                floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP)
+            val r = minOf(w, h) * 0.36f
+            val tw = r * 2.6f; val x0 = cx - tw / 2f
+            threadPaint.shader = android.graphics.LinearGradient(x0, 0f, x0 + tw, 0f,
+                intArrayOf(Color.TRANSPARENT, amber, amber, Color.TRANSPARENT), floatArrayOf(0f, 0.2f, 0.8f, 1f),
+                android.graphics.Shader.TileMode.CLAMP)
+        }
+
+        private fun tick() {
+            val now = System.nanoTime()
+            val dt = if (lastNs == 0L) 0f else ((now - lastNs) / 1e9f).coerceAtMost(0.05f)
+            lastNs = now
+            t += dt
+            val drive = if (phase == ConfirmPhase.LISTENING) level.coerceIn(0f, 1f) else 0f
+            voice.step(drive, dt); voiceGlow.step(drive, dt)
+            openS.step(dt)
+            rings[0].target = voice.value
+            for (i in 1 until rings.size) rings[i].target = rings[i - 1].value
+            for (s in rings) s.step(dt)
+            val speed = if (phase == ConfirmPhase.LISTENING) 34f else 22f
+            for (i in angles.indices) angles[i] = (angles[i] + (if (i % 2 == 0) 1f else -1f) * speed * dt) % 360f
+            invalidate()
+        }
 
         override fun onDraw(c: Canvas) {
             val d = resources.displayMetrics.density
             val cx = width / 2f; val cy = height / 2f
             val r = minOf(width, height) * 0.36f
-            val open = when (phase) { ConfirmPhase.LISTENING -> 0.45f; ConfirmPhase.HEARD -> 0f; else -> 0.18f }
-            val lvl = if (phase == ConfirmPhase.LISTENING) level else 0f
-            // thread
-            paint.strokeWidth = 1.6f * d; paint.color = amber; paint.alpha = 200
+            val open = if (calm) openFor(phase) else openS.value.coerceIn(0f, 1f)
+            val heard = if (calm) 0f else (1f - (t - heardAt) / 0.7f).coerceIn(0f, 1f)
+            val twoPi = 2f * PI.toFloat()
+            // glow: a slow heartbeat, brighter (strobe-guarded) with the voice and when the answer lands
+            val beat = if (calm) 0.5f else 0.5f + 0.5f * sin(twoPi * StrobeGuard.CONFIRM_BEAT_HZ * t)
+            glowPaint.alpha = (150 + 50 * beat + 55 * voiceGlow.value + 60 * heard).toInt().coerceIn(0, 255)
+            c.drawCircle(cx, cy, minOf(width, height) * 0.49f, glowPaint)
+            // thread, faded at both ends
+            threadPaint.strokeWidth = 1.6f * d; threadPaint.alpha = 210
             thread.reset()
             val w = r * 2.6f; val x0 = cx - w / 2
+            val lvl = voice.value
             for (j in 0..40) {
                 val u = j / 40f; val x = x0 + u * w
                 val win = sin(PI.toFloat() * u)
-                val y = cy + win * (r * 0.45f * lvl) * sin(2f * PI.toFloat() * (u * 5f - t * 2.5f)) + d * 0.6f * sin(2f * PI.toFloat() * (u + t / 6f))
+                val y = cy + win * (r * 0.45f * lvl) * sin(twoPi * (u * 5f - t * 2.5f)) + d * 0.6f * sin(twoPi * (u + t / 6f))
                 if (j == 0) thread.moveTo(x, y) else thread.lineTo(x, y)
             }
-            c.drawPath(thread, paint)
-            // rings
+            c.drawPath(thread, threadPaint)
+            // rings (index 0 = outermost), each pushed out by its link of the voice chain
             val factors = floatArrayOf(1.0f, 0.82f, 0.64f)
             val widths = floatArrayOf(1.6f, 2.4f, 3.6f)
             val alphas = intArrayOf(110, 170, 240)
             for (i in factors.indices) {
-                val rr = r * factors[i] * (1f + lvl * 0.08f)
-                val sweep = 360f * (1f - open * (0.45f + 0.15f * (2 - i)))
-                val dir = if (i % 2 == 0) 1f else -1f
-                val start = i * 61f + dir * t * 22f
-                paint.strokeWidth = widths[i] * d; paint.color = amber; paint.alpha = alphas[i]
+                val chain = rings[2 - i].value
+                val rr = r * factors[i] * (1f + chain * 0.10f + 0.03f * heard)
+                val sweep = (360f * (1f - open * (0.45f + 0.15f * (2 - i)))).coerceIn(0f, 360f)
+                paint.strokeWidth = widths[i] * d; paint.color = amber; paint.alpha = (alphas[i] + 15 * heard).toInt().coerceAtMost(255)
                 rect.set(cx - rr, cy - rr, cx + rr, cy + rr)
-                c.drawArc(rect, start, sweep, false, paint)
+                c.drawArc(rect, angles[i] + i * 61f, sweep, false, paint)
+            }
+            // heard: a ring of light released outward
+            if (heard > 0f) {
+                val e = 1f - heard
+                paint.strokeWidth = 1.5f * d; paint.color = Color.WHITE; paint.alpha = (200 * heard * heard).toInt()
+                val rr = r * (0.7f + 0.65f * (1f - (1f - e) * (1f - e)))
+                c.drawCircle(cx, cy, rr, paint)
             }
         }
     }

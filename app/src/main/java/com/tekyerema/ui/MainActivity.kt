@@ -7,6 +7,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,7 +33,9 @@ import com.tekyerema.ui.history.HistoryScreen
 import com.tekyerema.ui.home.HomeContent
 import com.tekyerema.ui.onboarding.PermissionsScreen
 import com.tekyerema.ui.settings.SettingsScreen
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.TekyeremaTheme
+import com.tekyerema.ui.theme.TkMotion
 import com.tekyerema.ui.theme.pageBackground
 import kotlinx.coroutines.launch
 
@@ -67,11 +70,15 @@ private fun App() {
     val settings = remember { Settings(context) }
     var onboarded by remember { mutableStateOf(settings.onboardingDone) }
 
+    val calm = LocalCalmMotion.current
     Box(Modifier.fillMaxSize().pageBackground().systemBarsPadding().imePadding()) {
-        if (!onboarded) {
-            PermissionsScreen(onDone = { settings.onboardingDone = true; onboarded = true })
-        } else {
-            Shell(settings)
+        // Finishing onboarding fades through into the product rather than cutting to it.
+        AnimatedContent(targetState = onboarded, transitionSpec = { TkMotion.fadeThrough(calm) }, label = "onboarding") { done ->
+            if (!done) {
+                PermissionsScreen(onDone = { settings.onboardingDone = true; onboarded = true })
+            } else {
+                Shell(settings)
+            }
         }
     }
 }
@@ -80,13 +87,22 @@ private fun App() {
 private fun Shell(settings: Settings) {
     var section by rememberSaveable { mutableStateOf(Section.HOME) }
     BackHandler(enabled = section != Section.HOME) { section = Section.HOME }
+    val calm = LocalCalmMotion.current
 
     Column(Modifier.fillMaxSize()) {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            when (section) {
-                Section.HOME -> HomeContent(settings)
-                Section.HISTORY -> HistoryScreen()
-                Section.SETTINGS -> SettingsScreen(settings)
+        // Top-level destinations fade through (Material): the old page fades quickly, the new one grows into place.
+        AnimatedContent(
+            targetState = section,
+            transitionSpec = { TkMotion.fadeThrough(calm) },
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            label = "section"
+        ) { shown ->
+            Box(Modifier.fillMaxSize()) {
+                when (shown) {
+                    Section.HOME -> HomeContent(settings)
+                    Section.HISTORY -> HistoryScreen()
+                    Section.SETTINGS -> SettingsScreen(settings)
+                }
             }
         }
         QuietNav(current = section, onSelect = { section = it })

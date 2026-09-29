@@ -3,6 +3,7 @@ package com.tekyerema.ui.settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -41,7 +42,9 @@ import com.tekyerema.ui.components.PageMargin
 import com.tekyerema.ui.components.PageTitle
 import com.tekyerema.ui.components.SettingRow
 import com.tekyerema.ui.components.SwitchRow
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
+import com.tekyerema.ui.theme.TkMotion
 
 private enum class Page { ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP, KEYBOARD }
 
@@ -53,7 +56,13 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
     BackHandler(enabled = page != Page.ROOT) { page = Page.ROOT }
     val context = LocalContext.current
 
-    when (page) {
+    // Deeper pages slide in from the right and back out to it (Material's shared axis X); calm motion cross-fades.
+    val calm = LocalCalmMotion.current
+    AnimatedContent(
+        targetState = page,
+        transitionSpec = { TkMotion.sharedAxisX(forward = targetState != Page.ROOT, calm = calm) },
+        label = "settings page"
+    ) { shown -> when (shown) {
         Page.ROOT -> Column(modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             PageTitle("Settings")
             Hairline(inset = PageMargin)
@@ -73,7 +82,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.PRIVACY -> PrivacyPage(settings) { page = Page.ROOT }
         Page.HELP -> HelpPage { page = Page.ROOT }
         Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
-    }
+    } }
 }
 
 private fun languageLabel(mode: String) = when (mode) {

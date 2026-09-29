@@ -29,6 +29,7 @@ import com.tekyerema.ui.components.Hairline
 import com.tekyerema.ui.components.Overline
 import com.tekyerema.ui.components.PageMargin
 import com.tekyerema.ui.components.PageTitle
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -51,12 +52,16 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
             }
             return
         }
+        // A task finishing while History is open slides the list down and fades its row in, instead of jumping.
+        val calm = LocalCalmMotion.current
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
             groups.forEach { (day, list) ->
-                item(key = "h-$day") { Overline(day) }
+                item(key = "h-$day") { Overline(day, if (calm) Modifier else Modifier.animateItem()) }
                 itemsIndexed(list, key = { _, e -> e.timeMs.toString() + e.title }) { i, e ->
-                    HistoryRow(e)
-                    if (i < list.lastIndex) Hairline(inset = PageMargin + 84.dp)
+                    Column(if (calm) Modifier else Modifier.animateItem()) {
+                        HistoryRow(e)
+                        if (i < list.lastIndex) Hairline(inset = PageMargin + 84.dp)
+                    }
                 }
             }
         }

@@ -1,11 +1,14 @@
 package com.tekyerema.ui.components
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,8 +44,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
@@ -62,13 +70,22 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
+import com.tekyerema.ui.theme.TkHaptic
+import com.tekyerema.ui.theme.TkMotion
+import com.tekyerema.ui.theme.tkHaptic
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
 /** Horizontal page margin, everywhere. */
 val PageMargin = 24.dp
+
+/** A pressed primary button: a cool grey under Ink text (≈14:1). */
+private val PressedFill = Color(0xFFD3DAEA)
+/** The navigation indicator pill: a lift of the ink, decorative (the label and icon carry the contrast). */
+private val NavPill = Color(0xFF1B2547)
 
 // ---------------------------------------------------------------------------------------- brand
 
@@ -137,7 +154,10 @@ val HistoryIcon: ImageVector by lazy {
     }.build()
 }
 
-/** Three quiet destinations under a hairline. Large targets; the current one is simply brighter. */
+/**
+ * Three quiet destinations under a hairline. Large targets; the current one is brighter and sits on a pill that
+ * grows out from the icon on a spring (Material's navigation indicator), so the change of place is felt, not just seen.
+ */
 @Composable
 fun QuietNav(current: Section, onSelect: (Section) -> Unit, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth()) {
@@ -155,7 +175,11 @@ fun QuietNav(current: Section, onSelect: (Section) -> Unit, modifier: Modifier =
 private fun RowScope.NavItem(section: Section, selected: Boolean, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val tint = if (selected) Tk.Text else Tk.TextTertiary
+    val calm = LocalCalmMotion.current
+    val tint by animateColorAsState(if (selected) Tk.Text else Tk.TextTertiary, TkMotion.defaultEffects(), label = "nav tint")
+    // 0 → 1 on a bouncy spatial spring: the pill overshoots its width a touch, then settles (calm: it just fades).
+    val grow by animateFloatAsState(if (selected) 1f else 0f,
+        if (calm) TkMotion.fastEffects() else TkMotion.fastSpatial(), label = "nav pill")
     Column(
         modifier = Modifier
             .weight(1f)
@@ -164,16 +188,28 @@ private fun RowScope.NavItem(section: Section, selected: Boolean, onClick: () ->
             .then(if (focused) Modifier.border(2.dp, Tk.Focus, RoundedCornerShape(14.dp)) else Modifier)
             .selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.Tab, onClick = onClick)
             .semantics { this.selected = selected; contentDescription = section.label }
-            .padding(vertical = 8.dp),
+            .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        when (section) {
-            Section.HOME -> Icon(Icons.Outlined.Home, null, tint = tint, modifier = Modifier.size(22.dp))
-            Section.HISTORY -> Icon(HistoryIcon, null, tint = tint, modifier = Modifier.size(22.dp))
-            Section.SETTINGS -> Icon(Icons.Outlined.Settings, null, tint = tint, modifier = Modifier.size(22.dp))
+        Box(
+            Modifier.size(width = 60.dp, height = 32.dp).drawBehind {
+                val g = grow.coerceIn(0f, 1.08f)
+                if (g > 0.01f) {
+                    val w = size.width * (if (calm) 1f else g)
+                    drawRoundRect(NavPill.copy(alpha = grow.coerceIn(0f, 1f)), topLeft = Offset((size.width - w) / 2f, 0f),
+                        size = androidx.compose.ui.geometry.Size(w, size.height), cornerRadius = CornerRadius(size.height / 2f))
+                }
+            },
+            contentAlignment = Alignment.Center
+        ) {
+            when (section) {
+                Section.HOME -> Icon(Icons.Outlined.Home, null, tint = tint, modifier = Modifier.size(22.dp))
+                Section.HISTORY -> Icon(HistoryIcon, null, tint = tint, modifier = Modifier.size(22.dp))
+                Section.SETTINGS -> Icon(Icons.Outlined.Settings, null, tint = tint, modifier = Modifier.size(22.dp))
+            }
         }
-        Spacer(Modifier.height(5.dp))
+        Spacer(Modifier.height(2.dp))
         Text(section.label, style = MaterialTheme.typography.labelSmall, color = tint)
     }
 }
@@ -221,18 +257,26 @@ fun Note(text: String, modifier: Modifier = Modifier) {
         modifier = modifier.padding(horizontal = PageMargin, vertical = 10.dp))
 }
 
-/** Shared row chrome: full-width, 68 dp minimum, ripple, white focus outline, hairline below. */
+/**
+ * Shared row chrome: full-width, 68 dp minimum, white focus outline, hairline below. A press lights the row with a
+ * soft ink wash that fades back on release (there was no touch response at all), drawn in the draw phase only.
+ */
 @Composable
 private fun RowShell(
     modifier: Modifier,
-    focused: Boolean,
+    interaction: MutableInteractionSource,
     divider: Boolean,
     content: @Composable RowScope.() -> Unit
 ) {
+    val focused by interaction.collectIsFocusedAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val wash by animateFloatAsState(if (pressed) 1f else 0f,
+        if (pressed) TkMotion.fastEffects() else TkMotion.slowEffects(), label = "row press")
     Column {
         Row(
             modifier = modifier
                 .fillMaxWidth()
+                .drawBehind { if (wash > 0.01f) drawRect(Tk.Ink2.copy(alpha = wash)) }
                 .then(if (focused) Modifier.border(2.dp, Tk.Focus) else Modifier)
                 .defaultMinSize(minHeight = 68.dp)
                 .padding(horizontal = PageMargin, vertical = 14.dp),
@@ -247,10 +291,9 @@ private fun RowShell(
 @Composable
 fun SettingRow(label: String, value: String? = null, divider: Boolean = true, onClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
     RowShell(
         modifier = Modifier.clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick),
-        focused = focused, divider = divider
+        interaction = interaction, divider = divider
     ) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text, modifier = Modifier.weight(1f))
         if (value != null) {
@@ -263,10 +306,9 @@ fun SettingRow(label: String, value: String? = null, divider: Boolean = true, on
 @Composable
 fun SwitchRow(label: String, description: String? = null, checked: Boolean, divider: Boolean = true, onChange: (Boolean) -> Unit) {
     val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
     RowShell(
         modifier = Modifier.toggleable(value = checked, interactionSource = interaction, indication = null, role = Role.Switch, onValueChange = onChange),
-        focused = focused, divider = divider
+        interaction = interaction, divider = divider
     ) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
@@ -286,10 +328,14 @@ fun SwitchRow(label: String, description: String? = null, checked: Boolean, divi
 @Composable
 fun ChoiceRow(label: String, description: String? = null, selected: Boolean, divider: Boolean = true, onSelect: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
+    val calm = LocalCalmMotion.current
+    // The dot pops in on a bouncy spring (calm: it appears); the ring recolours with it.
+    val dot by animateFloatAsState(if (selected) 1f else 0f,
+        if (calm) TkMotion.fastEffects() else TkMotion.fastSpatial(), label = "radio dot")
+    val ring by animateColorAsState(if (selected) Tk.Cyan else Tk.TextTertiary, TkMotion.defaultEffects(), label = "radio ring")
     RowShell(
         modifier = Modifier.selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.RadioButton, onClick = onSelect),
-        focused = focused, divider = divider
+        interaction = interaction, divider = divider
     ) {
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
@@ -297,26 +343,51 @@ fun ChoiceRow(label: String, description: String? = null, selected: Boolean, div
         }
         Spacer(Modifier.width(16.dp))
         Box(
-            Modifier.size(24.dp).border(2.dp, if (selected) Tk.Cyan else Tk.TextTertiary, CircleShape),
-            contentAlignment = Alignment.Center
-        ) { if (selected) Box(Modifier.size(12.dp).background(Tk.Cyan, CircleShape)) }
+            Modifier.size(24.dp).border(2.dp, ring, CircleShape).drawBehind {
+                val d = dot.coerceAtLeast(0f)
+                if (d > 0.01f) drawCircle(Tk.Cyan, radius = 6.dp.toPx() * (if (calm) 1f else d), alpha = d.coerceAtMost(1f))
+            }
+        )
     }
 }
 
-/** The one big action on a page (60 dp, full width). Filled = primary, outlined = secondary. */
+/**
+ * The one big action on a page (60 dp, full width). Filled = primary, outlined = secondary.
+ *
+ * It is physical: a press squashes it a little on a fast spring and it springs back when released (calm motion: it
+ * only darkens), and a tap answers with the system's haptic for that kind of action ([haptic]).
+ */
 @Composable
-fun BigButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, filled: Boolean = true, contentDescription: String? = null) {
+fun BigButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    filled: Boolean = true,
+    contentDescription: String? = null,
+    haptic: TkHaptic = TkHaptic.TAP
+) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    val pressed by interaction.collectIsPressedAsState()
+    val calm = LocalCalmMotion.current
+    val view = LocalView.current
     val shape = RoundedCornerShape(30.dp)
+    val scale by animateFloatAsState(if (pressed && !calm) 0.95f else 1f,
+        if (pressed) TkMotion.fastSpatial() else TkMotion.release(), label = "button press")
+    // Pressed: the white button dims to a cool grey (Ink text still ~14:1); the outlined one fills with ink.
+    val fill by animateColorAsState(
+        when { filled && pressed -> PressedFill; filled -> Tk.Text; pressed -> Tk.Ink2; else -> Color.Transparent },
+        TkMotion.fastEffects(), label = "button fill")
     Box(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 60.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale }
             .clip(shape)
-            .background(if (filled) Tk.Text else Color.Transparent)
+            .drawBehind { drawRect(fill) }
             .border(if (focused) 3.dp else 1.5.dp, if (focused) Tk.Cyan else if (filled) Tk.Text else Tk.TextSecondary, shape)
-            .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick)
+            .clickable(interactionSource = interaction, indication = null, role = Role.Button,
+                onClick = { view.tkHaptic(haptic); onClick() })
             .semantics { if (contentDescription != null) this.contentDescription = contentDescription }
             .padding(horizontal = 24.dp, vertical = 17.dp),
         contentAlignment = Alignment.Center

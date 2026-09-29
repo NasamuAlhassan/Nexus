@@ -23,7 +23,9 @@ class PromptBudgetTest {
         // D-02: the model never receives the whole schema any more (per-step subsets, below); this caps the compiled set.
         // 27.5k: +4 app-task accelerators (install_app, take_photo, ask_app, google_sign_in — [D] 2026-09-28), which
         // load only with the "apps" tool-search group; the per-step subset guard below is unchanged.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 27_500)
+        // 28k (overnight 2026-09-29): + tap_sequence (several predictable taps per LLM call) and describe_screen (online
+        // vision on one screenshot). The model only ever gets a per-step subset (guarded below at 9k).
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 28_000)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
     }
 
