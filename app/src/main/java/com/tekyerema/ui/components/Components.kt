@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
@@ -349,14 +350,20 @@ fun SettingRow(
         interaction = interaction, divider = divider, dividerInset = if (icon != null) 74.dp else 20.dp
     ) {
         if (icon != null) { IconTile(icon, iconTint); Spacer(Modifier.width(16.dp)) }
+        // A long value ("Groq → Google Gemini") goes under the description: on the right it squeezed the title and
+        // description into a one-word-per-line column (Control page, A20e 2026-09-29). A short one stays on the right, capped.
+        val longValue = (value?.length ?: 0) > 14
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
             if (description != null) Text(description, style = MaterialTheme.typography.bodySmall, color = Tk.TextSecondary,
                 modifier = Modifier.padding(top = 2.dp))
+            if (longValue) Text(value!!, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary,
+                modifier = Modifier.padding(top = 4.dp))
         }
-        if (!value.isNullOrEmpty()) {
+        if (!value.isNullOrEmpty() && !longValue) {
             Spacer(Modifier.width(12.dp))
-            Text(value, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary, textAlign = TextAlign.End)
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary, textAlign = TextAlign.End,
+                maxLines = 2, modifier = Modifier.widthIn(max = 132.dp))
         }
         Spacer(Modifier.width(4.dp))
         Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = Tk.TextTertiary, modifier = Modifier.size(22.dp))
