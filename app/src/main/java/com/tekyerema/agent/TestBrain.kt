@@ -25,7 +25,10 @@ enum class TestScenario {
     ACCELERATOR_MISS_FALLBACK,
     // Consequential read-back: with an SMS DRAFT already open (opened over ADB), tap Send → the policy must ask,
     // naming WHO and WHAT. The harness declines — nothing is ever sent.
-    SEND_READBACK
+    SEND_READBACK,
+    // Workstream B: a wrong turn (an unexpected app comes to the front) → the engine backs out to the last verified screen
+    // by itself (Backtracker, the ladder's BACK rung) — a device check for the agenticness evidence, 2026-09-29.
+    BACKTRACK
 }
 
 /**
@@ -50,6 +53,13 @@ class TestBrain(
                 // Step 2 proves a legitimate cross-app follow-up is NOT rejected by the state-race guard.
                 2 -> tool("read_state", JSONObject())
                 else -> done("open_settings scenario complete")
+            }
+            TestScenario.BACKTRACK -> when (step) {
+                1 -> tool("open_app", JSONObject().put("app", "Settings"), expects = "foreground_is: settings")
+                // The wrong turn, on purpose: another app opens while the plan expected to stay in Settings.
+                2 -> tool("open_app", JSONObject().put("app", "Calculator"), expects = "foreground_is: settings")
+                3 -> tool("read_state", JSONObject())
+                else -> done("backtrack scenario complete")
             }
             TestScenario.OPEN_MESSAGES -> when (step) {
                 1 -> tool("open_app", JSONObject().put("app", "Messages"), expects = "foreground_is: messaging")
