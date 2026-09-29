@@ -21,6 +21,8 @@ fun defaultTools(): List<Tool> = listOf(
     SetRangeTool,
     KeyEventTool,
     OpenAppTool,
+    // G-11 several predictable taps (+ typing) from one planning call — expanded by the engine into checked tap/type steps
+    com.tekyerema.agent.TapSequenceTool,
     // Honest stop (a decision, intercepted by the engine — never executed)
     CannotDoTool,
     // D-02 tool search (intercepted by the engine): loads tools the current step's subset left out

@@ -16,7 +16,7 @@ object ToolSelector {
      *  keyword, it was missing on a follow-up ("I meant mimics…", A20e 2026-09-28) — the model said "there's no
      *  web_search tool" and spent a step on find_tool. Its schema is ~60 tokens. */
     val DEFAULT_CORE = listOf("read_state", "wait", "tap", "long_press", "swipe", "scroll", "type", "key_event",
-        "open_app", "cannot_do", "find_tool", "ask_user", "web_search")
+        "open_app", "cannot_do", "find_tool", "ask_user", "web_search", "tap_sequence")
 
     private data class Group(val tools: List<String>, val keywords: Regex)
 
@@ -64,12 +64,24 @@ object ToolSelector {
      */
     fun select(text: String, used: Set<String>, discovered: Set<String>, available: List<String>): List<String> {
         if (!enabled()) return available
-        val want = LinkedHashSet<String>()
-        want += AppConfig.stringList("tools.search.core", DEFAULT_CORE)
-        for ((name, g) in groups()) if (g.keywords.containsMatchIn(text)) want += g.tools
-        want += used
-        want += discovered
-        return available.filter { it in want }
+        val base = LinkedHashSet<String>()
+        base += AppConfig.stringList("tools.search.core", DEFAULT_CORE)
+        for ((name, g) in groups()) if (g.keywords.containsMatchIn(text)) base += g.tools
+        // N-03: Groq's prompt cache matches an exact PREFIX, and the tool list sits right after the system prompt — a
+        // tool loaded mid-task (find_tool) used to be slotted in at its registry position, changing every tool after it
+        // and so every token after that. The task's base set keeps its order; later additions go on the END, in the
+        // order they arrived, so the prefix before them stays byte-identical (Manus, "Context Engineering", 2025:
+        // append-only context; the Groq docs: changing tool definitions or their order breaks the cache).
+        val extras = LinkedHashSet<String>().apply { addAll(discovered); addAll(used) }.filter { it !in base && it in available }
+        return available.filter { it in base } + extras
+    }
+
+    /** N-03: a tool schema array rearranged into [names]' order (the registry emits its own order); entries not named
+     *  keep their place after the named ones. */
+    fun inOrder(schema: org.json.JSONArray, names: List<String>, nameOf: (org.json.JSONObject) -> String?): org.json.JSONArray {
+        val rank = names.withIndex().associate { it.value to it.index }
+        val items = (0 until schema.length()).mapNotNull { schema.optJSONObject(it) }
+        return org.json.JSONArray(items.sortedBy { rank[nameOf(it)] ?: Int.MAX_VALUE })
     }
 
     private fun groups(): Map<String, Group> {

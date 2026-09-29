@@ -159,6 +159,81 @@ class AgentSpeedTest {
         assertFalse(p.keepWaitingForLaunch(3_600, actionable = 0, grew = false, maxMs = 3_500, maxSparse = 5))  // bounded
     }
 
+    // ---------------------------------------------------------------- G-11 tap_sequence
+
+    private fun steps(args: JSONObject, expects: String? = null) =
+        (com.tekyerema.agent.ActionChain.expand(args, expects) as com.tekyerema.agent.ActionChain.Expansion.Steps).steps
+
+    @Test fun a_keypad_entry_becomes_checked_taps_by_label() {
+        val s = steps(JSONObject().put("labels", "1|2| × |1|3|="), "element_present: 156")
+        assertEquals(listOf("1", "2", "×", "1", "3", "="), s.map { it.args.getString("label") })
+        assertTrue(s.all { it.name == "tap" && !it.args.has("element_id") })   // labels, never per-snapshot ids
+        assertEquals("element_present: 2", s[0].expects)                      // each tap claims the next key is there
+        assertEquals("element_present: 156", s.last().expects)                // the model's own claim on the last step
+        assertEquals("chain:1/6", s[0].rationale); assertEquals("chain:6/6", s.last().rationale)
+    }
+
+    @Test fun a_search_button_then_its_text_is_tap_then_type() {
+        val s = steps(JSONObject().put("labels", "Search").put("then_type", "Kwame Nkrumah").put("submit", true), "element_present: Kwame Nkrumah")
+        assertEquals(listOf("tap", "type"), s.map { it.name })
+        assertNull("the tap before typing makes no claim — the field it opens is found at run time", s[0].expects)
+        assertEquals("Kwame Nkrumah", s[1].args.getString("text")); assertTrue(s[1].args.getBoolean("submit"))
+        assertFalse(s[1].args.has("element_id"))
+        assertEquals("element_present: Kwame Nkrumah", s[1].expects)
+    }
+
+    @Test fun a_sequence_without_labels_or_too_long_is_rejected() {
+        val c = com.tekyerema.agent.ActionChain
+        assertTrue(c.expand(JSONObject().put("labels", " | "), null) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+        assertTrue(c.expand(JSONObject().put("labels", (1..20).joinToString("|")), null) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+    }
+
+    @Test fun a_chain_goes_on_only_after_a_step_that_did_something() {
+        val c = com.tekyerema.agent.ActionChain
+        assertTrue(c.stepPassed(success = true, verified = true, changed = false))
+        assertTrue(c.stepPassed(success = true, verified = false, changed = true))
+        assertFalse(c.stepPassed(success = true, verified = false, changed = false))   // a dead tap stops it
+        assertFalse(c.stepPassed(success = false, verified = false, changed = true))
+        val rest = steps(JSONObject().put("labels", "a|b|c"))
+        assertTrue(c.stoppedNote(1, 3, rest.drop(1), "x").contains("NOT done: b, c"))
+    }
+
+    private fun el(id: Int, editable: Boolean = false, focused: Boolean = false, password: Boolean = false) =
+        com.tekyerema.accessibility.UiElement(id, "EditText", "f$id", com.tekyerema.accessibility.Box(0, 0, 10, 10),
+            editable = editable, focused = focused, password = password)
+
+    private fun snap(vararg e: com.tekyerema.accessibility.UiElement) = com.tekyerema.accessibility.UiSnapshot("app", "App", e.toList(),
+        0L, com.tekyerema.accessibility.PerceptionRoute("tree", "test"))
+
+    @Test fun the_typed_text_goes_into_the_focused_or_only_field_never_a_password() {
+        val c = com.tekyerema.agent.ActionChain
+        assertEquals(2, c.typeTarget(snap(el(1, editable = true), el(2, editable = true, focused = true))))
+        assertEquals(1, c.typeTarget(snap(el(0), el(1, editable = true))))
+        assertNull(c.typeTarget(snap(el(1, editable = true), el(2, editable = true))))   // ambiguous: the planner decides
+        assertNull(c.typeTarget(snap(el(1, editable = true, focused = true, password = true))))
+    }
+
+    @Test fun tap_sequence_is_offered_every_step() {
+        val all = com.tekyerema.tools.ToolRegistry(com.tekyerema.tools.defaultTools()) { true }.all.map { it.name }
+        assertTrue("tap_sequence" in all)
+        assertTrue("tap_sequence" in com.tekyerema.agent.ToolSelector.select("open chrome", emptySet(), emptySet(), all))
+        assertTrue(com.tekyerema.agent.BrainPrompts.SYSTEM.contains("tap_sequence"))
+    }
+
+    // ---------------------------------------------------------------- N-03 cache-stable tool order
+
+    @Test fun a_tool_loaded_mid_task_goes_on_the_end_so_the_cached_prefix_survives() {
+        val all = com.tekyerema.tools.ToolRegistry(com.tekyerema.tools.defaultTools()) { true }.all.map { it.name }
+        val sel = com.tekyerema.agent.ToolSelector
+        val before = sel.select("open chrome", emptySet(), emptySet(), all)
+        val after = sel.select("open chrome", setOf("tap"), linkedSetOf("set_alarm", "pinch"), all)
+        assertEquals(before, after.take(before.size))           // the step-1 list is an exact prefix of the step-2 list
+        assertEquals(listOf("set_alarm", "pinch"), after.drop(before.size))
+        val reg = com.tekyerema.tools.ToolRegistry(com.tekyerema.tools.defaultTools()) { true }
+        val arr = sel.inOrder(reg.openAiTools(after), after) { it.optJSONObject("function")?.optString("name") }
+        assertEquals(after, (0 until arr.length()).map { arr.getJSONObject(it).getJSONObject("function").getString("name") })
+    }
+
     // ---------------------------------------------------------------- OpenAiCompatBrain helpers
 
     @Test fun the_backup_request_uses_the_next_free_key() {
