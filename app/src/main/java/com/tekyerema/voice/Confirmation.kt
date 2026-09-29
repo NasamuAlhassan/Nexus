@@ -76,6 +76,10 @@ object Confirmation {
         val redirect = REDIRECT.any { norm.contains(it) }
         // An explicit redirect overrides even a (possibly spurious) yes/no verdict — safety first.
         if (redirect) return true
+        // Money safety (2026-09-29): a digit fix ("the middle is 4 5 6", "no, it's 0 5 5 3 2 3 8 0 1 2") is a revision even
+        // after a "no" or a "yes" — the corrected action is proposed again and confirmed again, never run on this reply
+        // (agent/NumberCorrection). A "no" that stops ("no, cancel") stays a decline.
+        if (com.tekyerema.agent.NumberCorrection.looksLikeFix(text)) return true
         // A plain decline with no redirect stays a decline; a clean yes stays a yes.
         if (ans != Answer.UNCLEAR) return false
         // Otherwise: reroute only a coherent phrase (≥3 words), never a one-word filler.

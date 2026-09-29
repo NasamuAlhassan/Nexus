@@ -469,10 +469,13 @@ class LocalBrain : AgentBrain {
         if (digits.length >= 7 && digits.length != 10) {
             // A Ghana mobile number is 10 digits. A short or long one is a mishearing (or a number said in two
             // breaths) — say what was heard and ask again; never walk *170# with it.
-            val spoken = digits.toList().joinToString(" ")
+            // Read back in the groups people check numbers in ("0 5 5, 3 2 3, 8") — money safety, 2026-09-29 (NumberSpeech).
+            val spoken = NumberSpeech.spoken(digits)
+            // A known network prefix says which part was probably heard right ("It starts like an MTN number").
+            val net = NumberSpeech.networkKey(digits.take(3) + "0000000")?.let { NumberSpeech.networkName(it) }
             // English in both languages until a native speaker writes the Twi line.
             return AgentDecision.Done("I heard the number $spoken — that's ${digits.length} digits, and a Ghana mobile number has 10. " +
-                "Please say the number again.")
+                (net?.let { "It starts like ${NumberSpeech.networkPhrase(it)}. " } ?: "") + "Please say the number again.")
         }
         if (digits.length == 10) {
             // Deterministic *170# driver: it reads each menu screen and stops at the PIN. The TIER3 confirmation

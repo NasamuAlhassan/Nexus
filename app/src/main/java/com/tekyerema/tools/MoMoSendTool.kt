@@ -23,6 +23,9 @@ import org.json.JSONObject
  *  - It is NOT blind: it READS each USSD screen and only responds to screens it recognises. Any unexpected
  *    screen → STOP (so a changed/promo/error menu can't make it press a money key wrongly).
  *  - Money only moves when the USER enters the PIN, and MTN shows the final amount+recipient on that screen.
+ *  - That screen is READ and said first (2026-09-29, [MtnConfirm]): MTN's own words — the recipient's registered name,
+ *    amount, fee, total. If the amount (or a shown number) isn't what the user confirmed, or it isn't the PIN prompt,
+ *    the driver presses Cancel and says what MTN showed. Nothing is handed over unchecked.
  *  - Every screen is logged ([MOMO] …) so a live 10-pesewa test surfaces MTN's exact wording for tuning.
  *
  * This is a FIRST DRAFT written without live testing (real money) — it MUST be validated with one 10-pesewa
@@ -49,13 +52,15 @@ object MoMoSendTool : Tool {
      * be said again before any read-back, never confirmed and dialled. The text goes back to the planner and the user.
      */
     internal fun numberProblem(raw: String?): String? {
-        var d = raw?.filter { it.isDigit() }.orEmpty()
-        if (d.length == 12 && d.startsWith("233")) d = "0" + d.substring(3)
+        val d = com.tekyerema.agent.NumberSpeech.normalize(raw)
         if (d.length == 10 && d.startsWith("0")) return null
         if (d.isEmpty()) return "I don't have the recipient's number yet — ask the user for it."
-        return "I heard the number ${d.toList().joinToString(" ")} — that's ${d.length} digits, and a Ghana mobile number has 10 " +
+        return "I heard the number ${com.tekyerema.agent.NumberSpeech.spoken(d)} — that's ${d.length} digits, and a Ghana mobile number has 10 " +
             "starting with 0. Ask the user to say it again slowly, or to type it."
     }
+
+    /** Set by [preflight]: the SIM's network key, so the read-back can say when the number is on another network. */
+    internal const val ARG_SIM = "_sim"
 
     private fun operatorOf(ctx: ToolContext): String? {
         val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
@@ -73,6 +78,7 @@ object MoMoSendTool : Tool {
         if (GhanaMobileMoney.sendSequence(op, "0", "0", "x") == null)
             return ToolResult(false, "My automatic send only knows MTN's menu, and this SIM is on ${net.replaceFirstChar { it.uppercase() }}. " +
                 "Use mobile_money to open the menu and guide the user through it instead.", recoverable = true)
+        args.put(ARG_SIM, net)   // the read-back says so when the number is on another network (money safety, 2026-09-29)
         return null
     }
 
@@ -122,38 +128,79 @@ object MoMoSendTool : Tool {
             lastText = dlg.text
             // J-15: a USSD screen carries names, numbers and balances — words in logcat only where content logging is allowed.
             Log.i(TAG, "[MOMO] screen ${idx + 1}: ${com.tekyerema.core.Privacy.content(dlg.text.take(160).replace("\n", " | "))}")
-            // SAFETY: never type into a PIN/credential screen. If it shows (early or on cue), stop for the user.
-            if (isPinScreen(dlg)) return pinStop(amount, number)
+            // SAFETY: never type into a PIN/credential screen. If it shows (early or on cue), MTN's confirmation is
+            // checked against what the user confirmed before the PIN is handed over (atConfirmation).
+            if (isPinScreen(dlg)) return atConfirmation(ctrl, dlg, amount, number, pinScreen = isPinPrompt(dlg))
             respond(ctrl, dlg, value, label)
             delay(900)
         }
-        // Sequence fired — the next screen should be the PIN. Log it for verification, then hand off.
-        awaitUssd(ctrl, lastText, timeoutMs = 18_000L)?.let {
-            Log.i(TAG, "[MOMO] final screen: ${com.tekyerema.core.Privacy.content(it.text.take(160).replace("\n", " | "))}")
+        // Sequence fired — the next screen should be MTN's confirmation + PIN prompt. It is READ and checked; with no
+        // readable screen nothing is handed over (money safety, 2026-09-29: it used to say "enter your PIN" regardless).
+        val final = awaitUssd(ctrl, lastText, timeoutMs = 18_000L)
+            ?: return ToolResult(false, "MTN didn't show its confirmation screen, so I stopped. Nothing was sent. " +
+                "If a Mobile Money screen is still open, press Cancel.", recoverable = false)
+        Log.i(TAG, "[MOMO] final screen: ${com.tekyerema.core.Privacy.content(final.text.take(160).replace("\n", " | "))}")
+        return atConfirmation(ctrl, final, amount, number, pinScreen = isPinPrompt(final))
+    }
+
+    /**
+     * Money safety (2026-09-29): at MTN's confirmation / PIN screen, speak MTN's OWN words — the recipient's registered
+     * name, amount, fee, total — before the user types the PIN. The owner's live send showed "Transfer to AMA MENSAH …"
+     * and the name was never said; it is the best check a blind user has against a misheard number. If the amount on the
+     * screen isn't the confirmed amount, a shown number isn't the confirmed number, the amount can't be found, or this
+     * isn't the PIN screen, press Cancel (always safe) and say what MTN showed — nothing is handed over. The PIN is
+     * never typed, seen or logged either way ([pinStop] semantics).
+     */
+    private suspend fun atConfirmation(ctrl: AccessibilityController, dlg: Ussd, amount: String, number: String, pinScreen: Boolean): ToolResult =
+        when (val v = MtnConfirm.verdict(dlg.text, amount, number, pinScreen)) {
+            is MtnConfirm.Verdict.HandOff -> pinStop(v.spoken, MtnConfirm.data(v.screen))
+            is MtnConfirm.Verdict.Cancel -> {
+                Log.i(TAG, "[MOMO] confirmation doesn't match what the user confirmed — pressing Cancel")
+                val pressed = cancelDialog(ctrl, dlg)
+                ToolResult(false, MtnConfirm.cancelledLine(v.why, pressed), data = MtnConfirm.data(v.screen).put("cancelled", pressed),
+                    channel = "native", recoverable = false)
+            }
         }
-        return pinStop(amount, number)
+
+    /** Press the dialog's Cancel (Back if it has none) and check the dialog went. True when it is gone. Cancelling a
+     *  USSD session never moves money. */
+    private suspend fun cancelDialog(ctrl: AccessibilityController, dlg: Ussd): Boolean {
+        try { dlg.cancelId?.let { ctrl.clickElement(it) } ?: ctrl.globalAction("back") } catch (_: Throwable) {}
+        delay(900)
+        var now = readUssd(ctrl)
+        if (now != null && now.text == dlg.text) {
+            try { ctrl.globalAction("back") } catch (_: Throwable) {}
+            delay(900)
+            now = readUssd(ctrl)
+        }
+        return now == null || now.text != dlg.text
     }
 
     /** True when the USSD screen is the PIN/credential entry — the operator must NEVER type into it. Stops on
      *  a masked/password field (structure) OR credential wording (text), so a differently-worded secret screen
      *  can't slip past the literal word "PIN". */
     private fun isPinScreen(dlg: Ussd): Boolean =
+        isPinPrompt(dlg) ||
+        // Fail closed (2026-09-29): a payment screen's words (a GHS figure + total / fee / tax / confirm) stop the walk too,
+        // whatever the prompt says — then MTN's screen is checked, and only a real PIN prompt is handed over.
+        com.tekyerema.policy.TargetSemantics.isMoneyConfirmationText(dlg.text)
+
+    /** The PIN prompt itself: a masked field or PIN wording. Only this is handed to the user with "enter your PIN" —
+     *  a payment screen that wants something else ("1. Confirm") is cancelled, since the instruction would be wrong. */
+    private fun isPinPrompt(dlg: Ussd): Boolean =
         dlg.hasPassword ||
         Regex("\\bpin\\b|enter your pin|enter pin|momo pin|mobile money pin|\\benter mm\\b|passcode|secret code|\\botp\\b|password",
             RegexOption.IGNORE_CASE).containsMatchIn(dlg.text)
 
-    /** The success hand-off at the PIN: everything is entered; the USER types the PIN. */
-    private fun pinStop(amount: String, number: String): ToolResult {
+    /** The success hand-off at the PIN: everything is entered; the USER types the PIN. [line] is MTN's confirmation as
+     *  checked by [MtnConfirm]; [data] carries the registered name etc. for later layers. */
+    private fun pinStop(line: String, data: JSONObject): ToolResult {
         Log.i(TAG, "[MOMO] reached the PIN screen — stopping for the user.")
-        return ToolResult(
-            true,
-            "I've entered everything. The Mobile Money PIN screen is up — enter your PIN to send $amount cedis to $number. I never handle the PIN.",
-            channel = "native"
-        )
+        return ToolResult(true, line, data = data, channel = "native")
     }
 
     // ---- helpers ----
-    private data class Ussd(val text: String, val inputId: Int?, val sendId: Int?, val hasPassword: Boolean = false)
+    private data class Ussd(val text: String, val inputId: Int?, val sendId: Int?, val hasPassword: Boolean = false, val cancelId: Int? = null)
 
     /** Wait for the NEXT USSD dialog after a submit. We do NOT rely on the text differing — two consecutive
      *  MTN prompts can be worded identically (enter number, then RE-ENTER the number to confirm). Instead we
@@ -179,8 +226,11 @@ object MoMoSendTool : Tool {
         snap.screenTitle?.takeIf { it.isNotBlank() }?.let { labels += it }
         var inputId: Int? = null
         var sendId: Int? = null
+        var cancelId: Int? = null
         for (e in snap.elements) {
             val l = e.label?.trim().orEmpty()
+            // The dialog's Cancel — pressed when MTN's confirmation doesn't match what the user confirmed (still read as text).
+            if (e.clickable && !e.editable && cancelId == null && Regex("^(cancel|dismiss)$", RegexOption.IGNORE_CASE).matches(l)) cancelId = e.id
             if (e.editable && inputId == null) inputId = e.id
             else if (e.clickable && Regex("^(send|ok|submit|reply)$", RegexOption.IGNORE_CASE).matches(l)) { if (sendId == null) sendId = e.id }
             else if (l.isNotBlank() && !e.editable) labels += l
@@ -195,7 +245,7 @@ object MoMoSendTool : Tool {
         // Surface whether ANY field on this screen is masked/password — the PIN entry is masked even when its
         // wording lacks the literal word "PIN". The PIN-stop below treats a masked field as a hard stop.
         val hasPassword = snap.elements.any { it.password }
-        return Ussd(text, inputId, sendId, hasPassword)
+        return Ussd(text, inputId, sendId, hasPassword, cancelId)
     }
 
     /** Type [value] into the dialog input and press Send (falls back to the field's own submit action). */
@@ -221,10 +271,19 @@ object MoMoSendTool : Tool {
 
     override fun confirmationPrompt(args: JSONObject): String {
         val amt = args.str("amount")?.let { "$it cedis" } ?: "money"
-        // Read the recipient number digit-by-digit ("0 2 4 …") so TTS never speaks it as one huge number and
-        // a blind user can catch a wrong-number or units (pesewa/cedi) mistake BEFORE the send is driven.
-        val to = args.str("number")?.filter { it.isDigit() }?.takeIf { it.isNotEmpty() }
-            ?.toCharArray()?.joinToString(" ") ?: "the recipient"
-        return "Send $amt to $to with Mobile Money? I'll go through the menu and stop at the PIN for you to enter."
+        // Read the recipient number in the groups people check it in ("0 5 5, 3 2 3, 8 0 1 1") with its network, so a
+        // blind user can catch a wrong-number or units (pesewa/cedi) mistake BEFORE the send is driven — and hear when the
+        // number isn't on a network we know, or is on another network than the SIM (money safety, 2026-09-29).
+        val raw = args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
+            ?: return "Send $amt with Mobile Money? I'll go through the menu and stop at the PIN for you to enter."
+        val (to, warn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(ARG_SIM))
+        return "Send $amt to $to, with Mobile Money?\n" + (warn?.let { "$it " } ?: "") +
+            "I'll go through the menu and stop at the PIN for you to enter."
     }
+
+    /** The read-back's "check the number" line, or null — a structured (Twi) read-back can't carry it, so the English
+     *  sentence is spoken whenever there is one (AgentEngine.confirmSpecFor). */
+    fun networkWarning(args: JSONObject): String? =
+        args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
+            ?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it, args.str(ARG_SIM)).second }
 }

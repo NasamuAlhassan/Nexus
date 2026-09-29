@@ -18,7 +18,7 @@ object ConfirmTemplates {
     data class Spec(
         val kind: Kind,
         val name: String? = null,     // contact / recipient — passed through VERBATIM, never translated
-        val number: String? = null,   // phone number — read digit by digit
+        val number: String? = null,   // phone number — read digit by digit, in 3-3-4 groups
         val amount: String? = null,   // cedi amount — read digit by digit
         val message: String? = null   // message body — passed through VERBATIM
     ) {
@@ -38,6 +38,15 @@ object ConfirmTemplates {
             .map { if (it == '+') "plus" else TWI_DIGIT[it] ?: it.toString() }
             .joinToString(" ")
 
+    /** A phone number in Twi numerals, in the groups people check it in (3-3-4, a pause between groups):
+     *  "0553238011" → "zero anum anum, mmiɛnsa mmienu mmiɛnsa, nwɔtwe zero baako baako" (money safety, 2026-09-29). */
+    fun twiNumber(s: String): String {
+        val groups = com.tekyerema.agent.NumberSpeech.groups(s)
+        if (groups.isEmpty()) return twiDigits(s)
+        val plus = s.trim().startsWith("+") && !com.tekyerema.agent.NumberSpeech.isGhanaMobileShape(s)
+        return (if (plus) "plus " else "") + groups.joinToString(", ") { twiDigits(it) }
+    }
+
     /** Read digit-by-digit in English ("024" → "0 2 4"); mirrors the English confirmation discipline. */
     fun enDigits(s: String): String =
         s.filter { it.isDigit() || it == '+' }
@@ -50,13 +59,13 @@ object ConfirmTemplates {
     fun twi(spec: Spec): String {
         val body = when (spec.kind) {
             Spec.Kind.CALL ->
-                if (!spec.name.isNullOrBlank()) "Wopɛ sɛ mefrɛ ${spec.name} wɔ ${twiDigits(spec.number.orEmpty())}?"
-                else "Wopɛ sɛ mefrɛ ${twiDigits(spec.number.orEmpty())}?"
+                if (!spec.name.isNullOrBlank()) "Wopɛ sɛ mefrɛ ${spec.name} wɔ ${twiNumber(spec.number.orEmpty())}?"
+                else "Wopɛ sɛ mefrɛ ${twiNumber(spec.number.orEmpty())}?"
             // §P2.1 — the app OPENS Mobile Money; the user finishes the amount + PIN. Say that, don't imply
             // the app itself pays. [owner: verify Twi]
             Spec.Kind.SEND_MONEY ->
                 "Menbue Mobile Money sɛ wode cedi ${twiDigits(spec.amount.orEmpty())} bɛkɔma " +
-                    (spec.name?.takeIf { it.isNotBlank() } ?: twiDigits(spec.number.orEmpty())) +
+                    (spec.name?.takeIf { it.isNotBlank() } ?: twiNumber(spec.number.orEmpty())) +
                     "? Wo ankasa na wobɛhyɛ PIN."
             Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime cedi ${twiDigits(spec.amount.orEmpty())}? Wo ankasa na wobɛhyɛ PIN."
             // K-05: the words themselves are read back too (verbatim), not only the recipient.
