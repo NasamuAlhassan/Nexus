@@ -270,7 +270,7 @@ class AuditTrailTest {
         sampleLog()
         val doc = AuditExport.build(AuditLog.all(), AuditLog.anchor(), history, includeText = false, OperatorPolicy.toJson(), now)
         val s = doc.toString()
-        for (secret in listOf("code is", "Kwame", "that the code")) assertFalse(secret, s.contains(secret))
+        for (secret in listOf("code is", "Kwame", "that the code", "Ama")) assertFalse(secret, s.contains(secret))
         // Digits are checked only in the word fields (hex digests may contain any digits by chance).
         val words = (0 until doc.getJSONObject("audit").getJSONArray("entries").length()).flatMap { i ->
             doc.getJSONObject("audit").getJSONArray("entries").getJSONObject(i).let { listOf(it.optString("text"), it.optString("reason")) }
@@ -285,7 +285,7 @@ class AuditTrailTest {
         assertTrue(entries.getJSONObject(0).getString("text").matches(Regex("\\[\\d+ chars]")))   // the user's own words: length only
         assertEquals("send_sms", entries.getJSONObject(1).getString("tool"))                   // structure stays
         assertEquals("target “…” spends money", entries.getJSONObject(1).getString("reason"))
-        assertEquals("text Ama", entries.getJSONObject(1).getString("text"))                   // who, never what
+        assertEquals("text …", entries.getJSONObject(1).getString("text"))                     // not even who
         val h = doc.getJSONArray("history").getJSONObject(0)
         assertEquals("message", h.getString("kind")); assertTrue(h.getString("title").startsWith("["))
         assertEquals("STANDARD", doc.getJSONObject("settings").getString("executionMode"))
@@ -322,6 +322,48 @@ class AuditTrailTest {
         assertEquals("I don't know", AuditExport.redact("I don't know"))
         assertEquals("mail …@…", AuditExport.redact("mail ama.mensah@example.com"))
         assertEquals("[12 chars]", AuditExport.redactEntryText(AuditLog.TASK_START, "call my mum"  + "!"))
-        assertEquals("called Ama", AuditExport.redactEntryText(AuditLog.DONE, "called Ama"))
+        assertEquals("called …", AuditExport.redactEntryText(AuditLog.DONE, "called Ama"))
+        assertEquals("text …", AuditExport.redactEntryText(AuditLog.PROPOSED, "text Kofi Mensah"))
+        assertEquals("saved a contact for …", AuditExport.redactEntryText(AuditLog.DONE, "saved a contact for Ama"))
+        assertEquals("started watching for …", AuditExport.redactEntryText(AuditLog.DONE, "started watching for Ama's messages"))
+        assertEquals("opened WhatsApp", AuditExport.redactEntryText(AuditLog.DONE, "opened WhatsApp"))
+        assertEquals("tapped “…”", AuditExport.redactEntryText(AuditLog.DONE, "tapped “Send”"))
+        // What the screen showed may quote a typed message (apostrophes and all): length only.
+        val seen = "field 3 contains 'I'll be late, sorry'"
+        assertEquals("[${seen.length} chars]", AuditExport.redactEntryText(AuditLog.VERIFIED, seen))
+    }
+
+    @Test fun exported_words_without_their_seal_fail_and_text_and_reason_cant_swap() {
+        sampleLog()
+        val full = AuditExport.build(AuditLog.all(), AuditLog.anchor(), history, true, null, now).getJSONObject("audit")
+        full.getJSONArray("entries").getJSONObject(1).apply { remove("nonce"); put("text", "call Kofi") }
+        val c = AuditChain.verifyExport(full)
+        assertFalse(c.ok); assertEquals(1, c.firstBad); assertTrue(c.problem!!.contains("seal"))
+        // The same characters split differently between text and reason give a different digest.
+        assertNotEquals(AuditChain.contentDigest("n", "a\nb", ""), AuditChain.contentDigest("n", "a", "b"))
+    }
+
+    @Test fun a_lost_log_file_is_rewritten_whole_on_the_next_entry() {
+        repeat(3) { add(AuditLog.DONE, "step $it") }
+        File(dir, "audit.log").delete()                  // e.g. a failed write left nothing on disk
+        add(AuditLog.DONE, "step 3")
+        AuditLog.initDir(dir)
+        assertEquals(4, AuditLog.count())
+        assertTrue(AuditLog.verify().intact)              // no false "tampered" warning after a restart
+    }
+
+    @Test fun lines_are_sealed_with_the_logs_own_key_and_clearing_shreds_it() {
+        add(AuditLog.DONE, "texted Ama")
+        val keyFile = File(dir, "audit.key")
+        assertTrue(keyFile.exists())
+        val oldLog = File(dir, "audit.log").readBytes()
+        val oldKey = keyFile.readBytes()
+        AuditLog.clear()
+        add(AuditLog.DONE, "x")
+        assertFalse(oldKey.contentEquals(keyFile.readBytes()))
+        File(dir, "audit.log").writeBytes(oldLog)          // an old copy put back after the delete…
+        AuditLog.initDir(dir)
+        assertEquals(1, AuditLog.verify().unreadable)      // …can't be read with the new key
+        assertEquals(0, AuditLog.count())
     }
 }

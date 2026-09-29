@@ -50,7 +50,9 @@ object Capabilities {
         raisedTier: RiskTier? = null,
         targetReason: String? = null,
         targetLabel: String? = null,
-        appPackage: String? = null
+        appPackage: String? = null,
+        /** What a notification button or an app-defined action says it does ("Reply", "Call back", "Send"). */
+        actionText: String? = null
     ): Capability? {
         if (tool in NEVER_SWITCHED_OFF) return null
         if (tool in MONEY_TOOLS || scope == CapabilityScope.FINANCIAL || raisedTier == RiskTier.TIER3) return Capability.MONEY
@@ -59,6 +61,10 @@ object Capabilities {
         if (scope == CapabilityScope.WEB) return Capability.WEB
         if (tool in SETTINGS_TOOLS || scope == CapabilityScope.SETTINGS) return Capability.SETTINGS
         if (!changesPhone) return null
+        if (!actionText.isNullOrBlank()) {
+            if (CALL_WORD.containsMatchIn(actionText)) return Capability.CALLS
+            if (SEND_WORD.containsMatchIn(actionText)) return Capability.MESSAGES
+        }
         // The GUI path: only a target the semantics already flagged as consequential counts (an ordinary tap doesn't).
         if (raisedTier != null) {
             val reason = targetReason.orEmpty().lowercase()
@@ -150,6 +156,16 @@ object OperatorStops {
             else -> null
         }
     }
+
+    const val GUIDE_DONE_PREFIX = "I'm in guide-only mode, so I haven't changed anything myself."
+
+    /**
+     * What a finished task says once Guide only blocked a step in it: the model's words, led by a plain statement that
+     * nothing was done — so "I've turned Wi-Fi on" can never reach a blind user as if it had happened.
+     */
+    @Synchronized fun doneSummary(task: Long, summary: String): String =
+        if (task == this.task && guideBlocks > 0 && !summary.trimStart().startsWith("I'm in guide-only mode")) "$GUIDE_DONE_PREFIX $summary"
+        else summary
 }
 
 /** What the fast path should do with a command, given the user's execution mode and switched-off capabilities. */
@@ -167,12 +183,35 @@ object FastGate {
     private val ASSISTANT_OWN = setOf("PREFERENCE", "SET_EMERGENCY_CONTACT", "CREATE_SCHEDULE", "CLEAR_SCHEDULES", "WATCH_SENDER",
         "CLEAR_HISTORY", "SET_RELATION", "FORGET_RELATION", "CREATE_ROUTINE", "DELETE_ROUTINE", "UNDO", "FORGET")
 
+    /** Emergency help is never held back by a mode or a switched-off capability. */
+    private val ALWAYS = setOf("EMERGENCY_LINE")
+
+    /** The fast commands a routine's steps resolve to (a routine runs them without coming back through this gate). */
+    private val routineSteps: (String) -> List<FastIntent> = { name ->
+        com.tekyerema.agent.Routines.get(name)?.steps.orEmpty()
+            .mapNotNull { (com.tekyerema.agent.Routines.resolve(it) as? com.tekyerema.agent.Routines.Step.Fast)?.intent }
+    }
+
     /**
      * @param isAction the fast path's own verdict that this command changes something (it has "did" words for it).
+     * @param steps the fast commands of a routine (test seam).
      */
-    fun check(intent: FastIntent, isAction: Boolean, op: OperatorPolicy.View = OperatorPolicy.view()): FastHold {
+    fun check(
+        intent: FastIntent,
+        isAction: Boolean,
+        op: OperatorPolicy.View = OperatorPolicy.view(),
+        steps: (String) -> List<FastIntent> = routineSteps
+    ): FastHold {
+        if (intent.name in ALWAYS) return FastHold.Proceed
         Capabilities.ofFast(intent)?.let { c -> if (c in op.revoked) return FastHold.Say(Capabilities.revokedLine(c)) }
         if (!op.cloudUsable && Capabilities.fastNeedsCloud(intent)) return FastHold.Say(Capabilities.cloudLine(op))
+        // A routine may not do, step by step, what the user switched off.
+        if (intent is FastIntent.RunRoutine) for (s in steps(intent.routine)) {
+            Capabilities.ofFast(s)?.let { c ->
+                if (c in op.revoked) return FastHold.Say("Your “${intent.routine}” routine would ${Capabilities.doing(c)}. " +
+                    Capabilities.revokedLine(c))
+            }
+        }
         // A routine runs several commands without coming back through this gate: hold the whole routine.
         val changes = (isAction && intent.name !in ASSISTANT_OWN) || intent is FastIntent.RunRoutine
         if (!changes) return FastHold.Proceed

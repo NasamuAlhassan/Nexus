@@ -120,7 +120,7 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
     @Composable
     fun capabilityRow(c: Capability, line: String, icon: ImageVector, tint: androidx.compose.ui.graphics.Color, divider: Boolean = true) =
         SwitchRow(Capabilities.label(c), line, c !in revoked, divider = divider, icon = icon, iconTint = tint) { on ->
-            op.revokedCapabilities = if (on) op.revokedCapabilities - c else op.revokedCapabilities + c
+            if (on) op.restore(c) else op.revoke(c)
         }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -213,8 +213,12 @@ internal fun ProvidersPage(settings: Settings, onBack: () -> Unit) {
             Note("You're using your own server (${settings.groqModel}). Change it in Your API keys.")
         } else GlassGroup("Groq model") {
             Column(Modifier.selectableGroup()) {
-                ChoiceRow("gpt-oss-120b", "The most careful. Recommended.", model == Settings.DEFAULT_GROQ_MODEL) { settings.groqModel = Settings.DEFAULT_GROQ_MODEL }
-                ChoiceRow("gpt-oss-20b", "Faster, but less careful and easier to mislead.", model == SMALL_MODEL, divider = false) { settings.groqModel = SMALL_MODEL }
+                ChoiceRow("gpt-oss-120b", "The most careful. Recommended.", model == Settings.DEFAULT_GROQ_MODEL) {
+                    if (model != Settings.DEFAULT_GROQ_MODEL) { settings.groqModel = Settings.DEFAULT_GROQ_MODEL; noteSetting("set the Groq model to gpt-oss-120b") }
+                }
+                ChoiceRow("gpt-oss-20b", "Faster, but less careful and easier to mislead.", model == SMALL_MODEL, divider = false) {
+                    if (model != SMALL_MODEL) { settings.groqModel = SMALL_MODEL; noteSetting("set the Groq model to gpt-oss-20b") }
+                }
             }
         }
         GlassGroup("When the main AI is busy") {
@@ -229,6 +233,14 @@ internal fun ProvidersPage(settings: Settings, onBack: () -> Unit) {
 }
 
 private const val SMALL_MODEL = "openai/gpt-oss-20b"
+
+/** Changes that live in Settings rather than OperatorPolicy (model, keys, server) go to the activity log too — the fact
+ *  only, never a key. Off the main thread. */
+private fun noteSetting(words: String) {
+    kotlin.concurrent.thread(name = "audit-setting") {
+        com.tekyerema.audit.AuditLog.record("user", com.tekyerema.audit.AuditLog.SETTING, words, System.currentTimeMillis())
+    }
+}
 
 @Composable
 private fun DisclosureRow(s: Disclosure.Statement, divider: Boolean = true) {
@@ -279,13 +291,17 @@ private fun KeyCard(settings: Settings, provider: String, name: String, version:
             BigButton("Save key", onClick = {
                 val problem = ProviderKeys.keyProblem(text)
                 if (problem != null) message = problem
-                else { settings.setUserKey(provider, text.trim()); text = ""; message = "Saved. $name now uses your key." }
+                else {
+                    settings.setUserKey(provider, text.trim()); text = ""; message = "Saved. $name now uses your key."
+                    noteSetting("added your own $name key")
+                }
             })
             if (mine.isNotBlank()) {
                 Spacer(Modifier.height(8.dp))
                 BigButton("Remove my key", filled = false, onClick = {
                     settings.setUserKey(provider, ""); text = ""
                     message = if (builtIn) "Removed. $name uses the built-in key again." else "Removed."
+                    noteSetting("removed your own $name key")
                 })
             }
         }
@@ -316,11 +332,17 @@ private fun OwnServerCard(settings: Settings, version: Long) {
             BigButton("Use this server", onClick = {
                 val problem = ProviderKeys.serverProblem(url) ?: if (model.isBlank()) "Type the model name too." else null
                 if (problem != null) message = problem
-                else { settings.setOwnServer(url.trim(), model.trim()); message = "Saved. The planner now uses your server." }
+                else {
+                    settings.setOwnServer(url.trim(), model.trim()); message = "Saved. The planner now uses your server."
+                    noteSetting("switched the planner to your own server")
+                }
             })
             if (active) {
                 Spacer(Modifier.height(8.dp))
-                BigButton("Go back to Groq", filled = false, onClick = { settings.setOwnServer(null, null); message = "Back to Groq." })
+                BigButton("Go back to Groq", filled = false, onClick = {
+                    settings.setOwnServer(null, null); message = "Back to Groq."
+                    noteSetting("switched the planner back to Groq")
+                })
             }
         }
     }

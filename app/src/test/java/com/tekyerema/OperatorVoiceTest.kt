@@ -104,15 +104,20 @@ class OperatorVoiceTest {
         assertTrue(FastIntentClassifier.classify("put my phone on normal mode", routines = false) is FastIntent.Ringer)
     }
 
-    @Test fun delete_everything_is_asked_first() {
+    @Test fun delete_everything_is_asked_first_and_only_an_explicit_delete_confirms() {
         val now = 1_000_000L
+        val a = OperatorCommands.DeleteAnswer.CONFIRM
         assertFalse(OperatorCommands.deletePending(now))
-        assertEquals(true, OperatorCommands.answerToDelete("Yes, delete everything"))
-        assertEquals(true, OperatorCommands.answerToDelete("yes"))
-        assertEquals(true, OperatorCommands.answerToDelete("aane"))
-        assertEquals(false, OperatorCommands.answerToDelete("No"))
-        assertEquals(false, OperatorCommands.answerToDelete("keep it"))
-        assertNull(OperatorCommands.answerToDelete("what time is it"))
+        assertEquals(a, OperatorCommands.answerToDelete("Yes, delete everything"))
+        assertEquals(a, OperatorCommands.answerToDelete("yes please delete everything"))
+        assertEquals(a, OperatorCommands.answerToDelete("delete it"))
+        // One misheard "ok" must never wipe everything: a bare yes only gets a reminder of the full phrase.
+        for (s in listOf("yes", "ok", "okay", "sure", "aane", "go ahead", "do it"))
+            assertEquals(s, OperatorCommands.DeleteAnswer.UNCLEAR, OperatorCommands.answerToDelete(s))
+        for (s in listOf("No", "no, keep everything", "keep it", "cancel", "don't delete it", "daabi"))
+            assertEquals(s, OperatorCommands.DeleteAnswer.CANCEL, OperatorCommands.answerToDelete(s))
+        assertEquals(OperatorCommands.DeleteAnswer.OTHER, OperatorCommands.answerToDelete("what time is it"))
+        assertEquals(OperatorCommands.DeleteAnswer.OTHER, OperatorCommands.answerToDelete("nobody called"))
         OperatorCommands.askDelete(now)
         assertTrue(OperatorCommands.deletePending(now + 30_000))
         assertFalse(OperatorCommands.deletePending(now + OperatorCommands.CONFIRM_WINDOW_MS + 1))   // a late "yes" can't delete
@@ -167,6 +172,21 @@ class OperatorVoiceTest {
         assertTrue((gate(FastIntent.OpenApp("Telegram"), true, v) as FastHold.Say).line.contains("Telegram"))
         assertEquals(FastHold.ToAgent, gate(FastIntent.Screenshot, true, v))   // no canned guide: the agent explains
         assertEquals(FastHold.Proceed, gate(FastIntent.Time, false, v))
+    }
+
+    @Test fun emergency_help_is_never_held_back() {
+        for (v in listOf(OperatorPolicy.View(mode = ExecutionMode.GUIDE_ONLY), OperatorPolicy.View(mode = ExecutionMode.ASK_EVERY_STEP),
+            OperatorPolicy.View(revoked = Capability.entries.toSet(), cloudAllowed = false)))
+            assertEquals(FastHold.Proceed, gate(FastIntent.EmergencyLine("ambulance"), true, v))
+    }
+
+    @Test fun a_routine_cant_do_step_by_step_what_was_switched_off() {
+        val steps: (String) -> List<FastIntent> = { if (it == "good night") listOf(FastIntent.VolumeDown, FastIntent.QuickToggle("dnd", true)) else emptyList() }
+        val noSettings = OperatorPolicy.View(revoked = setOf(Capability.SETTINGS))
+        val held = FastGate.check(FastIntent.RunRoutine("good night"), false, noSettings, steps) as FastHold.Say
+        assertTrue(held.line, held.line.startsWith("Your “good night” routine would change your phone's settings."))
+        assertEquals(FastHold.Proceed, FastGate.check(FastIntent.RunRoutine("good night"), false, OperatorPolicy.View(), steps))
+        assertEquals(FastHold.Proceed, FastGate.check(FastIntent.RunRoutine("morning"), false, noSettings, steps))
     }
 
     @Test fun switched_off_capabilities_and_cloud_bind_the_fast_path_too() {

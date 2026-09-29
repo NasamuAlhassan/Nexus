@@ -219,6 +219,42 @@ class OperatorPolicyTest {
         assertEquals(90, com.tekyerema.core.Privacy.historyDays())
         OperatorPolicy.historyRetentionDays = 0
         assertEquals(90, com.tekyerema.core.Privacy.historyDays())
+        // A configured 0 or less is left exactly as it is — the user can't lengthen it from there either.
+        OperatorPolicy.historyRetentionDays = 30
+        assertEquals(0, OperatorPolicy.retentionFor(0))
+        assertEquals(-1, OperatorPolicy.retentionFor(-1))
+    }
+
+    @Test fun revoke_and_restore_change_one_capability_and_leave_the_rest() {
+        OperatorPolicy.revokedCapabilities = setOf(Capability.WEB)
+        OperatorPolicy.revoke(Capability.MONEY)
+        assertEquals(setOf(Capability.WEB, Capability.MONEY), OperatorPolicy.revokedCapabilities)
+        OperatorPolicy.restore(Capability.WEB)
+        assertEquals(setOf(Capability.MONEY), OperatorPolicy.revokedCapabilities)
+    }
+
+    @Test fun cloud_off_keeps_speech_on_the_phone_too() = kotlinx.coroutines.test.runTest {
+        val dir = listOf(File("src/main/assets/config"), File("app/src/main/assets/config")).first { it.isDirectory }
+        AppConfig.loadFrom(dir.listFiles { f -> f.name.endsWith(".json") }!!.sortedBy { it.name }.map { "config/${it.name}" to it.readText() })
+        var sent = 0
+        val transport = object : com.tekyerema.language.SpeechTransport {
+            override suspend fun send(request: okhttp3.Request, connectMs: Long, callMs: Long): com.tekyerema.language.HttpReply {
+                sent++; return com.tekyerema.language.HttpReply(200, "{}".toByteArray(), "application/json", null)
+            }
+        }
+        val sink = object : com.tekyerema.language.AudioSink {
+            override suspend fun play(audio: ByteArray) = true
+            override fun stop() {}
+        }
+        val r = com.tekyerema.language.LanguageLayer.build(AppConfig.obj("providers.speech.clients"),
+            mapOf("SPEECH_HCILAB_TOKEN" to "speech_live_x"), transport, { sink })
+        val twi = com.tekyerema.voice.Lang.TWI
+        assertTrue(com.tekyerema.language.LanguageLayer.onlineAsr(twi, r.asr, cloudAllowed = true) != null)
+        OperatorPolicy.cloudAllowed = false
+        assertNull(com.tekyerema.language.LanguageLayer.onlineAsr(twi, r.asr, cloudAllowed = true))
+        assertFalse(r.tts.getValue("hcilab_tts").speak("Mema wo akye", twi))   // the phone's own voice says it instead
+        assertEquals(0, sent)
+        AppConfig.loadFrom(emptyList())
     }
 
     @Test fun every_change_has_plain_words_for_the_activity_log() {

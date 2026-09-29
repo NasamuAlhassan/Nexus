@@ -15,9 +15,19 @@ class Settings(context: Context) {
         val v = value.trim()
         val enc = if (v.isEmpty()) "" else com.tekyerema.core.SecureStore.encrypt(v.toByteArray(Charsets.UTF_8))
             ?.let { ENC + android.util.Base64.encodeToString(it, android.util.Base64.NO_WRAP) }
+        val before = prefs.getString(key, "").orEmpty()
         prefs.edit().putString(key, enc ?: v).apply()
-        _changes.value = _changes.value + 1   // WS-C: the Control page shows which keys are yours (masked)
+        // WS-C: the Control page shows which keys are yours (masked) — redraw only when the key itself changed (a plain
+        // value re-saved on read, with no Keystore to encrypt it, must not bump the counter on every read).
+        val unchanged = if (before.startsWith(ENC)) isSame(before, v) else before == v
+        if (!unchanged) _changes.value = _changes.value + 1
     }
+
+    /** Does the stored (encrypted) value [stored] hold [plain]? */
+    private fun isSame(stored: String, plain: String): Boolean = try {
+        com.tekyerema.core.SecureStore.decrypt(android.util.Base64.decode(stored.removePrefix(ENC), android.util.Base64.NO_WRAP))
+            ?.toString(Charsets.UTF_8) == plain
+    } catch (_: Throwable) { false }
 
     private fun getSecret(key: String): String {
         val raw = prefs.getString(key, "").orEmpty()
@@ -97,7 +107,7 @@ class Settings(context: Context) {
     var groqModel: String
         get() = prefs.getString(KEY_GROQ_MODEL, null)
             ?: BuildConfig.DEFAULT_GROQ_MODEL.ifBlank { com.tekyerema.core.config.AppConfig.string("models.planner.model", DEFAULT_GROQ_MODEL) }
-        set(v) { prefs.edit().putString(KEY_GROQ_MODEL, v.trim()).apply() }
+        set(v) = put { putString(KEY_GROQ_MODEL, v.trim()) }   // WS-C: chosen in Settings › Control, so the page redraws
 
     /** Base URL for the OpenAI-compatible brain slot. Defaults to Groq's cloud endpoint, but
      *  local.properties' GROQ_BASE_URL can repoint this at any OpenAI-compatible server —

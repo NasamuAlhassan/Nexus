@@ -83,6 +83,7 @@ internal fun AuditPage(onBack: () -> Unit) {
         }
         item {
             Note("Each entry is linked to the one before it, so a change to any of them shows here and in an exported copy. " +
+                "When you export, the phone notes where the log ended, so a copy changed later can be told apart. " +
                 "Kept for ${com.tekyerema.core.Privacy.historyDays()} days.")
         }
         val list = cards

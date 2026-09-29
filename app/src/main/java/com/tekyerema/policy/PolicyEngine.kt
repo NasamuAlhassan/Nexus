@@ -111,12 +111,18 @@ class PolicyEngine(
         op: OperatorPolicy.View
     ): PolicyDecision {
         if (base.outcome == PolicyOutcome.BLOCK) return base
+        // Emergency help is never switched off or held back by a mode: the user asked for help out loud (still confirmed).
+        if (tool.name in Capabilities.NEVER_SWITCHED_OFF) return base
         val changes = Capabilities.changesPhone(tool.scope, PolicyConfig.effectiveTier(tool))
         if (op.mode == ExecutionMode.GUIDE_ONLY && changes) {
             return PolicyDecision(PolicyOutcome.BLOCK, GUIDE_ONLY_REASON, tier = base.tier, operatorRule = "mode:GUIDE_ONLY")
         }
         val raised = maxTierOrNull(targetTier, PolicyConfig.argTier(tool, args))
-        val cap = Capabilities.of(tool.name, tool.scope, changes, raised, context?.targetReason, context?.targetLabel, context?.appPackage)
+        // A notification button ("Reply", "Call back") or an app-defined action ("Send") says what it does in its arguments.
+        val actionText = args.optString("action").takeIf { tool.name == "notification_action" }
+            ?: args.optString("custom").takeIf { tool.name == "node_action" }
+        val cap = Capabilities.of(tool.name, tool.scope, changes, raised, context?.targetReason, context?.targetLabel,
+            context?.appPackage, actionText)
         if (cap != null && cap in op.revoked) {
             return PolicyDecision(PolicyOutcome.BLOCK,
                 "The user switched off “${Capabilities.label(cap)}” in Settings, Control. Don't do it any other way either. " +

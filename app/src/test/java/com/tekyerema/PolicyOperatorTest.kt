@@ -162,6 +162,29 @@ class PolicyOperatorTest {
         assertTrue(checked > 10_000)
     }
 
+    @Test fun emergency_help_is_never_blocked_by_a_mode_or_a_switch_but_is_still_confirmed() {
+        val worst = listOf(guide, askEvery, OperatorPolicy.View(ExecutionMode.GUIDE_ONLY, Capability.entries.toSet(), cloudAllowed = false))
+        for (v in worst) assertEquals(v.toString(), PolicyOutcome.CONFIRM, eval(v, "emergency").outcome)
+    }
+
+    @Test fun notification_buttons_and_app_actions_count_as_messages_or_calls() {
+        val noMsg = OperatorPolicy.View(revoked = setOf(Capability.MESSAGES))
+        val noCalls = OperatorPolicy.View(revoked = setOf(Capability.CALLS))
+        assertEquals(PolicyOutcome.BLOCK, eval(noMsg, "notification_action", JSONObject().put("action", "Reply").put("match", "Ama")).outcome)
+        assertEquals(PolicyOutcome.BLOCK, eval(noCalls, "notification_action", JSONObject().put("action", "Call back").put("match", "Ama")).outcome)
+        assertEquals(PolicyOutcome.BLOCK, eval(noMsg, "node_action", JSONObject().put("action", "custom").put("custom", "Send")).outcome)
+        assertEquals(PolicyOutcome.ALLOW, eval(noMsg, "notification_action", JSONObject().put("action", "dismiss")).outcome)
+        assertEquals(PolicyOutcome.CONFIRM, eval(noMsg, "notification_action", JSONObject().put("action", "Archive").put("match", "x")).outcome)
+    }
+
+    @Test fun after_a_guide_only_block_the_answer_never_sounds_like_it_was_done() {
+        OperatorStops.afterBlock(77, "mode:GUIDE_ONLY")
+        assertEquals("${OperatorStops.GUIDE_DONE_PREFIX} I've turned Wi-Fi on.", OperatorStops.doneSummary(77, "I've turned Wi-Fi on."))
+        val explained = "I'm in guide-only mode, so I won't do it myself. Swipe down with two fingers and double-tap Wi-Fi."
+        assertEquals(explained, OperatorStops.doneSummary(77, explained))
+        assertEquals("Done.", OperatorStops.doneSummary(78, "Done."))   // another task without a guide-only block
+    }
+
     @Test fun a_switched_off_capability_ends_the_task_with_the_users_reason_and_guide_only_explains_first() {
         assertNull(OperatorStops.afterBlock(1, null))   // an ordinary safety block: the model carries on as before
         assertEquals(Capabilities.revokedLine(Capability.MESSAGES), OperatorStops.afterBlock(1, "off:MESSAGES"))

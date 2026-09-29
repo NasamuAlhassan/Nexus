@@ -130,9 +130,14 @@ object OperatorPolicy {
         get() = revoked
         set(v) { revoked = v.toSet(); persist(K_REVOKED, revoked.joinToString(",") { it.name }) }
 
+    /** Switch [c] off / back on in one step (a Settings toggle and a voice command at once can't undo each other). */
+    @Synchronized fun revoke(c: Capability) { revokedCapabilities = revoked + c }
+    @Synchronized fun restore(c: Capability) { revokedCapabilities = revoked - c }
+
     /**
      * Contract view of [revokedCapabilities] as scopes: a scope counts as revoked when every capability under it is off
-     * (COMMS_SEND = messages AND calls). Setting it switches off every capability under each scope given.
+     * (COMMS_SEND = messages AND calls). Setting it REPLACES the whole set — every capability under the scopes given is
+     * off, every other one on — so a caller that only wants to add a restriction should use [revoke].
      */
     var revokedScopes: Set<CapabilityScope>
         get() = CapabilityScope.entries.filter { s ->
@@ -180,9 +185,10 @@ object OperatorPolicy {
         else -> false
     }
 
-    /** The history/audit retention to use given the app's [configuredDays]: the user may only shorten it. */
+    /** The history/audit retention to use given the app's [configuredDays]: the user may only shorten it (a configured
+     *  0 or less is left exactly as configured). */
     fun retentionFor(configuredDays: Int): Int =
-        if (retentionDays in 1 until configuredDays || (configuredDays <= 0 && retentionDays > 0)) retentionDays else configuredDays
+        if (configuredDays > 0 && retentionDays in 1 until configuredDays) retentionDays else configuredDays
 
     /** What the policy engine needs, read once per decision. */
     data class View(

@@ -661,6 +661,9 @@ object AgentEngine {
 
                 when (decision) {
                     is AgentDecision.Done -> {
+                        // WS-C: after a Guide-only block the reply leads with "I haven't changed anything myself" (OperatorStops).
+                        @Suppress("NAME_SHADOWING")
+                        val decision = decision.copy(summary = com.tekyerema.operator.OperatorStops.doneSummary(runCtx.auditTask, decision.summary))
                         // G-21: a PARTIAL step (scrolled or tapped on to new content without meeting its claim yet) is
                         // navigation, not a failed state change — it doesn't dilute the ratio. It never counts as verified
                         // either: if it was the LAST state-changing step, lastMutatingVerified is false and the gate holds.
@@ -814,6 +817,8 @@ object AgentEngine {
                         if (!com.tekyerema.tools.ToolManifest.mayCall(tool, caller)) {
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "Blocked: ${decision.name} is not allowed in an unattended task")
+                            com.tekyerema.audit.AuditHooks.refused(source, runCtx.auditTask, step, tool, decision.args, decision.rationale,
+                                "a task that started by itself may only read and tell")   // WS-C
                             history.add("${decision.name} → BLOCKED: this task started without the user; it may only read and tell, never act for them.")
                             continue
                         }
@@ -830,6 +835,8 @@ object AgentEngine {
                             com.tekyerema.policy.PolicyConfig.effectiveTier(tool).ordinal >= RiskTier.TIER2.ordinal
                         if (consequential && loopGuard.mustCheckFirst(tool.name)) {
                             log(LogEntry.Kind.POLICY, "Not retrying ${decision.name} yet: the last attempt may have gone through — check first")
+                            com.tekyerema.audit.AuditHooks.refused(source, runCtx.auditTask, step, tool, decision.args, decision.rationale,
+                                "the last attempt may have gone through — check first")   // WS-C
                             history.add("${decision.name} → NOT retried yet: the previous ${decision.name} failed or didn't verify, but it may " +
                                 "still have happened. First CHECK whether it went through (read_state, or read_sms / call_log); retry only if it clearly didn't.")
                             continue
@@ -842,6 +849,8 @@ object AgentEngine {
                         val sideEffectKey = if (consequential) tool.name + "|" + decision.args.toString() else null
                         if (sideEffectKey != null && sideEffectKey in doneSideEffects) {
                             log(LogEntry.Kind.POLICY, "Not repeating ${decision.name}: the identical action already succeeded in this task")
+                            com.tekyerema.audit.AuditHooks.refused(source, runCtx.auditTask, step, tool, decision.args, decision.rationale,
+                                "not repeated: the same action already succeeded in this task")   // WS-C
                             history.add("${decision.name}(${shortArgs(decision.args)}) → NOT repeated: it already succeeded earlier in this task. " +
                                 "Check whether it worked instead of doing it again.")
                             continue

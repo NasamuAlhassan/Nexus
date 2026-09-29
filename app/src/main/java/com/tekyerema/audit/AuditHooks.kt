@@ -13,8 +13,10 @@ import org.json.JSONObject
  *
  *   taskStarted → proposed → [approved | declined | blocked] → done/failed → verified/unverified … → taskEnded
  *
- * Recorded for every step that changes the phone or sends something out (web included); pure reads are not. The words
- * saved are the same plain words "what did you just do?" speaks; the typed or sent text itself is never repeated.
+ * Recorded for every step that changes the phone or sends something out (web included); pure reads are not. A step's
+ * words are the same plain words "what did you just do?" speaks (who, never the typed or sent text); the confirmation
+ * read-back and the verification detail may quote it — they stay in the encrypted log and keep only their length in a
+ * default (redacted) export.
  */
 object AuditHooks {
     /** One step's audit context; its methods add the step's later events. Null-safe: `step?.approved(seq, prompt)`. */
@@ -67,6 +69,18 @@ object AuditHooks {
             decidedBy(rationale, com.tekyerema.operator.OperatorPolicy.lastModel),
             ActionWords.proposal(tool.name, args, element), ActionWords.describe(tool.name, args, element)
         ).also { it.proposed() }
+    }
+
+    /**
+     * A step a safety rule refused BEFORE the policy gate — a tool an unattended task may not use, a consequential action
+     * that must be checked before any retry, an identical send that already went (no-repeat). Recorded as BLOCKED.
+     */
+    fun refused(source: String, task: Long, step: Int, tool: Tool, args: JSONObject, rationale: String?, why: String) {
+        if (!recordable(tool.scope)) return
+        AuditLog.append(AuditEntry(0, task, source, AuditLog.BLOCKED, ActionWords.proposal(tool.name, args), step = step,
+            tool = tool.name, tier = com.tekyerema.policy.PolicyConfig.effectiveTier(tool).name, scope = tool.scope.name,
+            policy = PolicyOutcome.BLOCK.name, reason = why,
+            decidedBy = decidedBy(rationale, com.tekyerema.operator.OperatorPolicy.lastModel), outcome = "blocked"))
     }
 
     /** Who chose the action: the on-device rules, or the model that answered last (the one that made this decision). */

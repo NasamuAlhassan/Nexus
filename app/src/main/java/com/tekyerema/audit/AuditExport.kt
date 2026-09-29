@@ -29,8 +29,13 @@ object AuditExport {
     private val EMAIL = Regex("[\\w.+-]+@[\\w-]+(?:\\.[\\w-]+)+")
     private val DIGITS = Regex("\\+?\\d[\\d\\s-]*\\d|\\d")
 
-    /** Kinds whose text is the user's own words or a read-back of what they were asked (length only, like TraceRedact). */
-    private val WORDS_KINDS = setOf(AuditLog.TASK_START, AuditLog.APPROVED, AuditLog.DECLINED)
+    /** Kinds whose text is the user's own words, a read-back of what they were asked, or what the screen showed (which
+     *  may quote a typed message) — length only, like TraceRedact does for the user's words and read-backs. */
+    private val WORDS_KINDS = setOf(AuditLog.TASK_START, AuditLog.APPROVED, AuditLog.DECLINED, AuditLog.VERIFIED, AuditLog.UNVERIFIED)
+
+    /** Who an action was for ("texted Ama", "call Kofi", "saved a contact for Ama") — the name is personal too. */
+    private val WHO = Regex("^(texted|called|replied to|text|call|reply to|saved a contact for|started sending|send|" +
+        "started watching for|stopped watching for|pressed and held|press and hold|called and texted)\\b\\s*\\S.*$", RegexOption.IGNORE_CASE)
 
     /** Quoted text, e-mail addresses and digits out; the shape stays ("tapped “…”", "sent # cedis"). */
     fun redact(text: String): String {
@@ -41,9 +46,12 @@ object AuditExport {
         return DIGITS.replace(t, "#")
     }
 
-    /** How an entry's words appear in a redacted export. */
-    fun redactEntryText(kind: String, text: String): String =
-        if (kind in WORDS_KINDS && text.isNotEmpty()) "[${text.length} chars]" else redact(text)
+    /** How an entry's words appear in a redacted export: the user's words as a length, actions without their person. */
+    fun redactEntryText(kind: String, text: String): String = when {
+        text.isEmpty() -> text
+        kind in WORDS_KINDS -> "[${text.length} chars]"
+        else -> redact(text).let { t -> WHO.matchEntire(t)?.let { it.groupValues[1] + " …" } ?: t }
+    }
 
     /** The export document (pure). [operator] is the snapshot of the user's choices (no keys). */
     fun build(
@@ -77,7 +85,11 @@ object AuditExport {
                     .put("algorithm", "sha256")
                     .put("canonical", "one name=value line each, in order: v=2,t,task,step,source,kind,tool,tier,scope,policy," +
                         "provenance,decidedBy,confirmSeq,approved,verified,outcome,content=contentDigest,prev; values escape \\ and newline")
-                    .put("contentDigest", "sha256(nonce + \"\\n\" + text + \"\\n\" + reason); the nonce is exported only with the words")
+                    .put("contentDigest", "sha256(nonce + \"\\n\" + len(text) + \":\" + text + \"\\n\" + len(reason) + \":\" + reason); " +
+                        "the nonce is exported only with the words; redacted words are not covered")
+                    .put("limits", "Shows an edited, removed, added or reordered entry. A copy whose later hashes were all " +
+                        "recomputed, or whose last entries were cut off, is caught by comparing 'head' with the head the phone " +
+                        "recorded in its own log when this file was exported.")
                     .put("anchor", anchor).put("head", check.head).put("entries", entries.size)
                     .put("verifiedOnExport", check.ok))
                 .put("entries", arr))
@@ -127,8 +139,11 @@ object AuditExport {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             app.startActivity(chooser)
-            AuditLog.record("user", AuditLog.DONE, if (includeText) "exported your history with message text" else "exported your history",
-                AuditLog.newTask())
+            // The phone keeps the exported chain's head and length, so a copy altered later can be told from this one.
+            val head = doc.getJSONObject("audit").getJSONObject("chain")
+            AuditLog.append(AuditEntry(0, System.currentTimeMillis(), "user", AuditLog.DONE,
+                if (includeText) "exported your history with message text" else "exported your history",
+                reason = "exported chain head ${head.getString("head")}, ${head.getInt("entries")} entries"))
             true
         } catch (_: Throwable) { false }
     }

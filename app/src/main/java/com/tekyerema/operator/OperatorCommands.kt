@@ -102,18 +102,30 @@ object OperatorCommands {
     }
 
     // ------------------------------------------------------------------ "delete everything" is asked first (pure state)
-    private val YES = Regex("^(?:yes|yeah|yep|yes please|ok|okay|sure|go ahead|do it|confirm|aane|yes delete(?: it| everything| all)?|delete (?:it|everything))$")
-    private val NO = Regex("^(?:no|nope|cancel|stop|don't|do not|keep it|keep everything|never mind|no thanks|no don't|daabi)$")
+    /** Only an answer that says "delete" confirms an irreversible wipe — one misheard "ok" must never do it. */
+    private val DELETE_YES = Regex("^(?:(?:yes|yeah|aane|ok|okay)(?: please)? )?(?:go ahead and )?delete (?:it|everything|it all|all of it|all|all my data)(?: please| now)?$")
+    private val BARE_YES = Regex("^(?:yes|yeah|yep|yes please|ok|okay|sure|go ahead|do it|confirm|aane)$")
+    private val NO = Regex("^(?:no|nope|cancel|stop|don't|do not|never mind|daabi|keep it|keep everything)\\b.*$")
     const val CONFIRM_WINDOW_MS = 60_000L
     @Volatile private var deleteAskedAt = 0L
 
+    enum class DeleteAnswer { CONFIRM, CANCEL, UNCLEAR, OTHER }
+
+    /** [now] is a monotonic clock (elapsedRealtime on the phone), so a clock change can't reopen the question. */
     fun deletePending(now: Long): Boolean = deleteAskedAt != 0L && now - deleteAskedAt in 0..CONFIRM_WINDOW_MS
 
-    /** What an utterance means while a delete is pending: true = yes, false = no, null = something else (the ask lapses). */
-    fun answerToDelete(raw: String): Boolean? {
+    /** What an utterance means while a delete is pending. UNCLEAR = a bare "yes"/"ok": ask for the full phrase instead. */
+    fun answerToDelete(raw: String): DeleteAnswer {
         val g = normalize(raw)
-        return when { YES.matches(g) -> true; NO.matches(g) -> false; else -> null }
+        return when {
+            DELETE_YES.matches(g) -> DeleteAnswer.CONFIRM
+            NO.matches(g) -> DeleteAnswer.CANCEL
+            BARE_YES.matches(g) -> DeleteAnswer.UNCLEAR
+            else -> DeleteAnswer.OTHER
+        }
     }
+
+    const val DELETE_SAY_IT = "To delete everything, say “yes, delete everything”. Or say “no” to keep it."
 
     internal fun askDelete(now: Long) { deleteAskedAt = now }
     internal fun clearDelete() { deleteAskedAt = 0L }
@@ -181,24 +193,26 @@ object OperatorCommands {
      * Handle [raw] if it is an operator command (or the answer to "delete everything?"); null = not ours, carry on.
      * Called first on the local fast path (LocalFastRouter.tryHandle).
      */
-    fun handle(ctx: Context, raw: String, now: Long = System.currentTimeMillis()): FastOutcome? {
-        if (deletePending(now)) {
+    fun handle(ctx: Context, raw: String, now: Long = System.currentTimeMillis(),
+               monotonic: Long = android.os.SystemClock.elapsedRealtime()): FastOutcome? {
+        if (deletePending(monotonic)) {
             when (answerToDelete(raw)) {
-                true -> {
+                DeleteAnswer.CONFIRM -> {
                     clearDelete()
                     val failed = DataControl.deleteEverything(ctx)
                     return say("DELETE_ALL", if (failed.isEmpty()) DataControl.DELETED
                         else DataControl.DELETED + " I couldn't clear: " + DataControl.joinAnd(failed) + ".", ok = failed.isEmpty())
                 }
-                false -> { clearDelete(); return say("DELETE_ALL", "Okay, I kept everything.") }
-                null -> clearDelete()   // anything else: the question lapses; handle the words normally
+                DeleteAnswer.CANCEL -> { clearDelete(); return say("DELETE_ALL", "Okay, I kept everything.") }
+                DeleteAnswer.UNCLEAR -> return say("DELETE_ALL", DELETE_SAY_IT)   // still asked; nothing deleted
+                DeleteAnswer.OTHER -> clearDelete()   // anything else: the question lapses; handle the words normally
             }
         }
         val cmd = classify(raw) ?: return null
         val op = OperatorPolicy
         val line = when (cmd) {
-            OpCommand.Inventory -> DataControl.spoken(DataControl.items(ctx), op.cloudUsable(now), op.providers)
-            OpCommand.DeleteAll -> { askDelete(now); DataControl.DELETE_PROMPT }
+            OpCommand.Inventory -> DataControl.spoken(DataControl.items(ctx), op.cloudAllowed, op.providers)
+            OpCommand.DeleteAll -> { askDelete(monotonic); DataControl.DELETE_PROMPT }
             is OpCommand.Export -> if (com.tekyerema.audit.AuditExport.share(ctx, cmd.includeText))
                 (if (cmd.includeText) "I've made a file of your history and activity log, with the message text. "
                     else "I've made a file of your history and activity log, with your own words left out. ") +
@@ -226,9 +240,10 @@ object OperatorCommands {
             }
             OpCommand.ModeQuery -> modeQueryLine(op.executionMode, op.cloudUsable(now))
             OpCommand.Usage -> usageLine(op.usageByProvider(now), op.dailyCloudCallCap, op.dailyTokenCap)
-            is OpCommand.Revoke -> { op.revokedCapabilities = op.revokedCapabilities + cmd.capability; revokeLine(cmd.capability) }
-            is OpCommand.Restore -> { op.revokedCapabilities = op.revokedCapabilities - cmd.capability; restoreLine(cmd.capability) }
-            OpCommand.Providers -> Disclosure.spoken(op.cloudUsable(now), op.providers)
+            is OpCommand.Revoke -> { op.revoke(cmd.capability); revokeLine(cmd.capability) }
+            is OpCommand.Restore -> { op.restore(cmd.capability); restoreLine(cmd.capability) }
+            OpCommand.Providers -> Disclosure.spoken(op.cloudAllowed, op.providers) +
+                if (op.cloudAllowed && op.budgetExhausted(now)) " Today's limit is used up, so I'm on the phone only until tomorrow." else ""
             OpCommand.Inventory, OpCommand.DeleteAll, is OpCommand.Export -> null
         }
     }

@@ -12,9 +12,14 @@ import java.security.SecureRandom
  * entry removed by the retention limit.
  *
  * The two fields that can hold personal words — [AuditEntry.text] and [AuditEntry.reason] (a reason may quote an on-screen
- * label such as a payee) — enter the hash only through a salted digest, sha256(nonce + "\n" + text + "\n" + reason), so an
- * export with the words redacted still verifies, and the digest can't be guessed back without the per-entry nonce, which
- * is exported only together with the words.
+ * label such as a payee) — enter the hash only through a salted digest,
+ * sha256(nonce + "\n" + len(text) + ":" + text + "\n" + len(reason) + ":" + reason), so an export with the words
+ * redacted still verifies, and the digest can't be guessed back without the per-entry nonce, which is exported only
+ * together with the words. In a redacted export the replacement words are marked `"redacted": true` and are not covered.
+ *
+ * Limits, stated plainly: the chain shows an edit, a removal from the middle, an insertion or a reordering. Someone who
+ * recomputes every later hash, or cuts entries off the end, is caught only by comparing with the head the phone recorded
+ * when the file was exported (an "exported your history" entry in the phone's own log carries it).
  *
  * Canonical form (v2), one "name=value" per line, in this order, values with "\" → "\\" and newline → "\n":
  *   v, t, task, step, source, kind, tool, tier, scope, policy, provenance, decidedBy, confirmSeq, approved, verified,
@@ -31,7 +36,9 @@ object AuditChain {
     fun sha256(s: String): String =
         MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 
-    fun contentDigest(nonce: String, text: String, reason: String): String = sha256(nonce + "\n" + text + "\n" + reason)
+    /** Each part length-prefixed, so words can't be moved between text and reason without changing the digest. */
+    fun contentDigest(nonce: String, text: String, reason: String): String =
+        sha256(nonce + "\n" + text.length + ":" + text + "\n" + reason.length + ":" + reason)
 
     private fun esc(s: String) = s.replace("\\", "\\\\").replace("\n", "\\n")
 
@@ -90,6 +97,10 @@ object AuditChain {
         val anchor = audit.optJSONObject("chain")?.optString("anchor")?.ifEmpty { null } ?: GENESIS
         val list = (0 until arr.length()).map { arr.getJSONObject(it) }
         for ((i, o) in list.withIndex()) {
+            val redacted = o.optBoolean("redacted", false)
+            // Words shown without their seal (the nonce removed) and not marked as redacted: they can't be checked, so fail.
+            if (!redacted && !o.has("nonce") && (o.optString("text").isNotEmpty() || o.optString("reason").isNotEmpty()))
+                return Check(false, i, i, "entry ${i + 1}'s words can't be checked (their seal was removed)")
             if (o.has("nonce") && contentDigest(o.getString("nonce"), o.optString("text"), o.optString("reason")) != o.optString("contentDigest"))
                 return Check(false, i, i, "entry ${i + 1}'s words don't match what was recorded")
         }

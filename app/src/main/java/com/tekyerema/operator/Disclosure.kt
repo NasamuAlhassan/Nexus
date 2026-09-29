@@ -38,7 +38,8 @@ object Disclosure {
     /** "Where does my data go?" (pure). */
     fun spoken(cloudOn: Boolean, providers: List<String>): String {
         if (!cloudOn) return "The cloud is off, so nothing you say leaves your phone. I'm using only what's on the phone."
-        if (providers.isEmpty()) return "No online AI is switched on, so nothing you say leaves your phone."
+        if (providers.isEmpty()) return "No online AI is switched on, so no AI service gets your requests. " +
+            "Say “offline mode” to keep everything on the phone."
         val order = providers.joinToString(", then ") { name(it) }
         return "I use $order. " + providers.mapNotNull { of(it)?.text }.joinToString(" ") +
             " You can change this in Settings, Control."

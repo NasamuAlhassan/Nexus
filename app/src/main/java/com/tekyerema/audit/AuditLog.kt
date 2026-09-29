@@ -18,7 +18,9 @@ import java.io.FileOutputStream
  * decided, the confirmation number and the user's answer, the verification verdict and the outcome ([AuditHooks] is what
  * the agent loop calls). Entries are hash-chained ([AuditChain]); [verify] detects an edited, removed or reordered entry.
  * Storage is append-only: one encrypted line per entry ("audit/audit.log"), so recording a step never rewrites the file;
- * only the retention/size limit rewrites it, keeping the chain's anchor.
+ * only the retention/size limit rewrites it, keeping the chain's anchor. Lines are sealed (AES-GCM) with the log's own
+ * data key, which is itself kept encrypted by the Keystore ([SecureStore], "audit/audit.key") — one Keystore call per
+ * start, not one per line; deleting the log deletes its key too.
  */
 data class AuditEntry(
     val t: Long,
@@ -77,6 +79,7 @@ object AuditLog {
     /** Unit tests: keep the log in [d] (null = memory only) and start empty. */
     @Synchronized internal fun initDir(d: File?) {
         dir = d; entries.clear(); anchor = AuditChain.GENESIS; unreadable = 0; loaded = false; currentTask = 0L
+        dataKey = null; needsRewrite = false
     }
 
     fun newTask(): Long { currentTask = clock(); return currentTask }
@@ -179,8 +182,10 @@ object AuditLog {
     /** Delete the log. The new chain starts with one "cleared" entry, so a missing past is visible rather than silent. */
     @Synchronized
     fun clear() {
-        entries.clear(); anchor = AuditChain.GENESIS; unreadable = 0; loaded = true
-        try { logFile()?.delete(); legacyFile()?.delete() } catch (_: Throwable) {}
+        entries.clear(); anchor = AuditChain.GENESIS; unreadable = 0; loaded = true; needsRewrite = false
+        // The key goes too: anything left of the old file (a copy, a backup) can no longer be read.
+        try { logFile()?.delete(); legacyFile()?.delete(); keyFile()?.delete() } catch (_: Throwable) {}
+        dataKey = null
         append(AuditEntry(0, 0, "user", CLEARED, "The activity log was cleared."))
     }
 
@@ -205,17 +210,26 @@ object AuditLog {
 
     private const val PRUNE_BATCH = 50
 
+    /** A line that should be on disk isn't (a failed write): the next append rewrites the whole file instead, so a gap
+     *  never shows up later as "tampered". */
+    private var needsRewrite = false
+
     private fun appendLine(e: AuditEntry) {
         val f = logFile() ?: return
-        val line = encode(AuditJson.toJson(e)) ?: return   // no key: the entry lives in memory only (never in the clear)
+        // A fresh file must carry the anchor and every entry still only in memory; so must a file that missed a line.
+        if (needsRewrite || (!f.exists() && (anchor != AuditChain.GENESIS || entries.size > 1))) {
+            needsRewrite = !rewrite()
+            return
+        }
+        val line = encode(AuditJson.toJson(e))
+        if (line == null) { needsRewrite = true; return }   // no key yet: kept in memory (never in the clear), written later
         try {
             f.parentFile?.mkdirs()
-            if (!f.exists() && anchor != AuditChain.GENESIS) { rewrite(); return }   // a fresh file must carry the anchor
             FileOutputStream(f, true).use { out ->
                 out.write((line + "\n").toByteArray(Charsets.UTF_8))
                 try { out.fd.sync() } catch (_: Throwable) {}
             }
-        } catch (_: Throwable) {}
+        } catch (_: Throwable) { needsRewrite = true }
     }
 
     /** Write the whole log (anchor line + entries) atomically. */
@@ -233,11 +247,43 @@ object AuditLog {
         } catch (_: Throwable) { false }
     }
 
-    private fun encode(o: JSONObject): String? =
-        SecureStore.encrypt(o.toString().toByteArray(Charsets.UTF_8))?.let { java.util.Base64.getEncoder().encodeToString(it) }
+    // Envelope encryption: the log's own AES-256 key, stored encrypted by the Keystore (SecureStore); lines are sealed
+    // in-process with it (iv 12 bytes + AES-GCM ciphertext and tag, base64).
+    private var dataKey: javax.crypto.SecretKey? = null
+    private fun keyFile(): File? = dir?.let { File(it, "audit.key") }
+
+    private fun dataKey(create: Boolean): javax.crypto.SecretKey? {
+        dataKey?.let { return it }
+        val f = keyFile() ?: return null
+        SecureStore.read(f)?.let { s ->
+            return try { javax.crypto.spec.SecretKeySpec(java.util.Base64.getDecoder().decode(s.trim()), "AES").also { dataKey = it } }
+            catch (_: Throwable) { null }
+        }
+        if (!create) return null
+        // No key yet (or one this phone's Keystore can no longer open — the old lines are then unreadable, and say so).
+        val k = javax.crypto.KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
+        if (!SecureStore.write(f, java.util.Base64.getEncoder().encodeToString(k.encoded))) return null   // no Keystore: memory only
+        dataKey = k
+        return k
+    }
+
+    private fun encode(o: JSONObject): String? {
+        val k = dataKey(create = true) ?: return null
+        return try {
+            val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(javax.crypto.Cipher.ENCRYPT_MODE, k)
+            java.util.Base64.getEncoder().encodeToString(c.iv + c.doFinal(o.toString().toByteArray(Charsets.UTF_8)))
+        } catch (_: Throwable) { null }
+    }
 
     private fun decode(line: String): JSONObject? = try {
-        SecureStore.decrypt(java.util.Base64.getDecoder().decode(line.trim()))?.let { JSONObject(it.toString(Charsets.UTF_8)) }
+        val k = dataKey(create = false)
+        if (k == null) null else {
+            val blob = java.util.Base64.getDecoder().decode(line.trim())
+            val c = javax.crypto.Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(javax.crypto.Cipher.DECRYPT_MODE, k, javax.crypto.spec.GCMParameterSpec(128, blob, 0, 12))
+            JSONObject(c.doFinal(blob, 12, blob.size - 12).toString(Charsets.UTF_8))
+        }
     } catch (_: Throwable) { null }
 
     // ---------------------------------------------------------------- speech (pure)

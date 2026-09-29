@@ -47,9 +47,12 @@ object DataControl {
         }
         val head = if (kept.isEmpty()) "I'm not keeping anything about you on this phone right now."
             else "On this phone, encrypted, I keep: " + joinAnd(kept.take(8)) + "."
-        val out = if (!cloudOn || providers.isEmpty()) "The cloud is off, so nothing you say leaves the phone."
-            else "When I need the online AI, what you ask and what's on the screen go to " +
+        val out = when {
+            !cloudOn -> "The cloud is off, so nothing you say leaves the phone."
+            providers.isEmpty() -> "No online AI is switched on, so no AI service gets your requests."
+            else -> "When I need the online AI, what you ask and what's on the screen go to " +
                 joinAnd(providers.map { Disclosure.name(it) }) + " to work out each step."
+        }
         return "$head $out Say “export my history” for a copy, or “delete everything” to erase it."
     }
 
