@@ -133,7 +133,11 @@ class RoutingBrain(
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         // N-09: the user answered our "should I find out when the internet is back?" offer.
         offered?.let { return answerOffer(ctx, it) }
-        pinHandoff(ctx.history)?.let { return AgentDecision.Done(it) }
+        // (Trust 2026-09-29: the task stopped at the PIN — the helper can't be brought in now; agent/helper/HelperGate.)
+        pinHandoff(ctx.history)?.let { com.tekyerema.agent.helper.HelperGate.atPin(); return AgentDecision.Done(it) }
+        // Trust (2026-09-29): "call my helper" / "tell my helper what you did" are planned on the phone, online or offline,
+        // whichever brain is in charge (agent/helper/TrustedHelper.kt); the engine's gate confirms the call or the text.
+        com.tekyerema.agent.helper.HelperPlan.decide(ctx.goal, ctx.history)?.let { return it }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
 
         // Cloud-first: hand EVERYTHING to the cloud brain (the relay = Claude), skipping LocalBrain. Sticky so

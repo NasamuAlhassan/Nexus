@@ -49,7 +49,10 @@ object Relations {
         "landlord" to listOf("landlord", "landlady"),
         "driver" to listOf("driver"),
         "neighbour" to listOf("neighbour", "neighbor"),
-        "caregiver" to listOf("caregiver", "carer", "helper"),
+        "caregiver" to listOf("caregiver", "carer"),
+        // Trust (2026-09-29, agent/helper/TrustedHelper.kt): the ONE person "call my helper" / "tell my helper what you did"
+        // reach — its own relation, no longer folded into "caregiver".
+        "helper" to listOf("helper", "trusted helper"),
         "teacher" to listOf("teacher")
     )
 
@@ -95,6 +98,7 @@ object Relations {
             Regex("$lead(?:remember|note|know) (?:that )?my ($rel) is $NAME$", RegexOption.IGNORE_CASE) to true,
             Regex("$lead(?:save|set|add|mark|make) $NAME as my ($rel)$", RegexOption.IGNORE_CASE) to false,
             Regex("$lead(?:set|save|change|make) my ($rel) (?:to|as|to be) $NAME$", RegexOption.IGNORE_CASE) to true,
+            Regex("$lead(?:make|set) $NAME my ($rel)$", RegexOption.IGNORE_CASE) to false,   // "make Kofi my helper"
             Regex("${lead}my ($rel) is (?:saved|called|named|listed) (?:as |in my contacts as )?$NAME$", RegexOption.IGNORE_CASE) to true
         )
         for ((re, relFirst) in explicit) re.matchEntire(g)?.let { m -> return request(m, relFirst, explicit = true) }
@@ -114,7 +118,8 @@ object Relations {
         val relation = canonical(said) ?: return null
         if (name.length < 2 || STOP_START.containsMatchIn(name) || COMPOUND.containsMatchIn(name)) return null
         if (name.split(' ').size > 4 || canonical(name) != null) return null   // "my mum is my mother" is not a name
-        return SetRequest(relation, said.lowercase(), name, explicit)
+        // "my helper is Kofi" is always meant (nobody says it in passing): an unknown name is answered, not handed on.
+        return SetRequest(relation, said.lowercase(), name, explicit || relation == "helper")
     }
 
     /** "who is my mother" → "mother"; "who are my family" → "" (all). Null when it isn't a relation question. */

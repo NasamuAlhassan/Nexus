@@ -58,6 +58,9 @@ class LocalFastRouter(
             Routines.ensureLoaded(appContext)
             com.tekyerema.android.Relations.ensureLoaded(appContext)
         }
+        // Trust (2026-09-29, agent/helper/TrustFast.kt): private reading by voice ("read my messages privately", "read
+        // them") and the helper's PIN rule ("call my helper" is refused at a PIN). Null = not one of those.
+        com.tekyerema.agent.helper.TrustFast.handle(appContext, text, controller())?.let { return it }
         val intent = FastIntentClassifier.classify(text) ?: run {
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
@@ -542,6 +545,9 @@ class LocalFastRouter(
         val calls = (if (callsOn) missedCallsSince(since) else null)
             ?: com.tekyerema.notifications.NotificationDigest.callsFromNotifications(msgs)
         var line = com.tekyerema.notifications.NotificationDigest.build(msgs, calls, label)
+        // Private reading (2026-09-29): on the loudspeaker, who and how many — "read them" reads the words (PrivateReading).
+        line = com.tekyerema.notifications.PrivateReading.digest(appContext, line,
+            com.tekyerema.notifications.NotificationDigest.build(msgs, calls, label, quoteNewest = false), msgs)
         if (!notifOn) line += " I can only see your calls — turn on notification access to hear your messages too."
         // J-07, as on the agent's read_notifications path: a message that gives orders is data. Nothing here can act on
         // it (no model on this path), but the user hears that it tried (device suite 2026-09-29: "read my notifications"

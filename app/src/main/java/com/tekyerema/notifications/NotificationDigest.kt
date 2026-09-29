@@ -48,8 +48,9 @@ object NotificationDigest {
      * The spoken catch-up. [messages] are already limited to the window; [sinceLabel] opens the line ("since you last
      * asked", "in the last 12 hours"). Apps with the most notifications come first; within an app, the busiest people.
      */
+    /** @param quoteNewest false = say who and how many only (private reading on the loudspeaker, [PrivateReading]). */
     fun build(messages: List<IndexedMessage>, calls: List<MissedCall>, sinceLabel: String,
-              maxApps: Int = 3, maxPeople: Int = 3): String {
+              maxApps: Int = 3, maxPeople: Int = 3, quoteNewest: Boolean = true): String {
         val items = messages.filter { it.pkg !in DIALERS }.sortedByDescending { it.t }
         val missed = calls.sortedByDescending { it.t }
         if (items.isEmpty() && missed.isEmpty()) return "Nothing new ${sinceLabel}."
@@ -67,7 +68,7 @@ object NotificationDigest {
             val otherApps = apps.drop(maxApps).sumOf { it.value.size }
             parts.add(count(items.size, "notification") + ". " + appLines.joinToString(". ") +
                 if (otherApps > 0) ". And ${count(otherApps, "more")} from other apps" else "")
-            latest(items)?.let { parts.add(it) }
+            if (quoteNewest) latest(items)?.let { parts.add(it) }
         }
         return sinceLabel.replaceFirstChar { it.uppercaseChar() } + ": " + parts.joinToString(". ") + "."
     }

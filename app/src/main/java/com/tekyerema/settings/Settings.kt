@@ -261,6 +261,12 @@ class Settings(context: Context) {
         get() = prefs.getString("emergency_contact_number", "").orEmpty()
         set(v) = put { putString("emergency_contact_number", v.filter { it.isDigit() || it == '+' }) }
 
+    /** Private reading (2026-09-29, notifications/PrivateReading): on the loudspeaker, say who messages are from and how
+     *  many — not what they say — until the user says "read them". Headphones read them in full. Off by default. */
+    var privateReading: Boolean
+        get() = prefs.getBoolean("private_reading", false)
+        set(v) = put { putBoolean("private_reading", v) }
+
     /** B-03: how long Tɛkyerɛma waits through pauses — "quick" | "normal" | "patient" (default from config). */
     var vadStrategy: String
         get() = prefs.getString("vad_strategy", null) ?: com.tekyerema.core.config.AppConfig.string("speech.vad.strategy", "normal")
