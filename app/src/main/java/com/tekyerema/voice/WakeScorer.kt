@@ -33,7 +33,8 @@ class WakeScorer(private val ctx: Context) {
         /** Per-phrase bars. Heads retrained 2026-09-13 with the owner's recorded wake clips (and commands as
          *  negatives). Wake matrix 2026-09-14: "hey" head at 0.97 fired 14/16 live-condition wakes, 1/270
          *  command clips, 0 on silence/noise. */
-        val PHRASES = linkedMapOf("hey_tekyerema" to 0.97f, "tekyerema" to 0.90f)
+        /*  A-07 (2026-09-28): the "hey" bar is now 0.995 — see [WakeGate.DEFAULT_BAR] for the measurement. */
+        val PHRASES = linkedMapOf("hey_tekyerema" to 0.995f, "tekyerema" to 0.90f)
         /** The only head allowed to fire: the bare head scored 0.93–0.94 on plain white/fan noise and fired
          *  2–5×/30 s; the "hey" head stays at 0.66–0.70 on the same noise. The bare head is logged only. */
         const val FIRE_HEAD = "hey_tekyerema"

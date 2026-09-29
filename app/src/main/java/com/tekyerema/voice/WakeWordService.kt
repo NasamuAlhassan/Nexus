@@ -93,7 +93,7 @@ class WakeWordService : Service() {
                     // frames = 80 ms frames scored in these ~10 s (125 = keeping up with real time); ms = scorer time
                     // per frame (must stay under 80); full = frames that needed the full recompute (the peak changed).
                     val st = scorer.takeStats()
-                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]} " +
+                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeGate.bar()} " +
                         "frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} full=${st[3]} incremental=${scorer.incremental} ${scorer.takeReasons()}")
                     hb = now; top = 0f
                 }
@@ -202,7 +202,7 @@ class WakeWordService : Service() {
                     if (a.ready) a.rawTranscript(wav, Lang.GH_EN)?.trim()?.ifBlank { "(nothing)" } else "(on-device model not ready)"
                 } catch (t: Throwable) { "(transcribe failed: ${t.message})" }
                 Log.i(TAG, "[WAKE] heard: '$words'  hey=${"%.2f".format(hey)} bare=${"%.2f".format(bare)} " +
-                    "${if (fired) "→ FIRED" else "→ below bar ${WakeScorer.PHRASES[WakeScorer.FIRE_HEAD]}"}  clip=${file?.name}")
+                    "${if (fired) "→ FIRED" else "→ below bar ${WakeGate.bar()}"}  clip=${file?.name}")
             }
         }
     }

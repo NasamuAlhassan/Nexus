@@ -14,7 +14,7 @@ import org.junit.Test
  */
 class WakeWordTest {
     private val loud = 0.05f
-    private val hey = mapOf(WakeScorer.FIRE_HEAD to 0.99f, "tekyerema" to 0.99f)
+    private val hey = mapOf(WakeScorer.FIRE_HEAD to 0.999f, "tekyerema" to 0.99f)
     private val low = mapOf(WakeScorer.FIRE_HEAD to 0.40f, "tekyerema" to 0.30f)
 
     private fun fires(gate: WakeGate, frames: List<Pair<Float, Map<String, Float>>>) = frames.count { (r, s) -> gate.feed(r, s) }
@@ -58,6 +58,15 @@ class WakeWordTest {
         assertEquals(1, fires(g, List(5) { loud to hey }))
         fires(g, List(WakeGate.REFRACTORY_FRAMES + 5) { loud to low })
         assertEquals(1, fires(g, List(5) { loud to hey }))
+    }
+
+    @Test fun ordinary_speech_scoring_098_no_longer_wakes() {
+        // A-07: the owner's commands / a close TV scored 0.98-0.99 on the shipped head and woke it at the old 0.97 bar
+        val g = WakeGate()
+        assertEquals(0, fires(g, List(15) { loud to mapOf(WakeScorer.FIRE_HEAD to 0.985f, "tekyerema" to 0.9f) }))
+        assertEquals(0.995f, WakeGate.DEFAULT_BAR, 1e-6f)
+        // an explicit bar still works (config `wake.bar`)
+        assertEquals(1, fires(WakeGate(bar = 0.97f), List(5) { loud to mapOf(WakeScorer.FIRE_HEAD to 0.985f) }))
     }
 
     @Test fun gated_frames_do_not_count() {
