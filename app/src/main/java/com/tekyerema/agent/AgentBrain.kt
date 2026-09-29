@@ -28,7 +28,9 @@ sealed class AgentDecision {
      *  [argError] is set when the call's arguments could not be parsed (D-06): the engine rejects the call with
      *  that reason instead of running the tool with empty arguments. */
     data class CallTool(val name: String, val args: JSONObject, val rationale: String?, val expects: String? = null,
-                        val argError: String? = null) : AgentDecision()
+                        val argError: String? = null,
+                        /** B: the model's plan riding in this call (`plan` argument, stripped from [args]) — see agent/plan. */
+                        val plan: String? = null) : AgentDecision()
     data class Done(val summary: String) : AgentDecision()
     /** Honest stop: the environment, not a missing tool, prevents the goal (plan §15). */
     data class CannotDo(val reasonClass: String, val detail: String) : AgentDecision()
@@ -37,6 +39,9 @@ sealed class AgentDecision {
     data class Fail(val reason: String) : AgentDecision()
 
     companion object {
+        /** B: the optional argument that carries the model's plan (declared on the acting tools by ToolRegistry). */
+        const val PLAN_ARG = "plan"
+
         /** D-06: every compiled tool name, from the registry itself, so a new tool can never be missing here. */
         val knownTools: Set<String> by lazy { com.tekyerema.tools.defaultTools().map { it.name }.toSet() }
 
@@ -63,7 +68,10 @@ sealed class AgentDecision {
             }
             val expects = if (args.has("expects") && !args.isNull("expects")) args.optString("expects").trim().ifEmpty { null } else null
             args.remove("expects")
-            return CallTool(name, args, rationale, expects)
+            // B: the plan is for the engine, never the tool — lifted out before argument validation and execution.
+            val plan = com.tekyerema.agent.plan.PlanParser.flatten(args.opt(PLAN_ARG))
+            args.remove(PLAN_ARG)
+            return CallTool(name, args, rationale, expects, plan = plan)
         }
     }
 }

@@ -13,7 +13,7 @@ import javax.crypto.spec.GCMParameterSpec
  *
  * If the Keystore can't be used, NOTHING is written in the clear — [write] returns false and the caller keeps the
  * data in memory only. Format: "TKY1" + iv length (1 byte) + iv + ciphertext-with-tag. [keyProvider] lets unit tests
- * supply a software key.
+ * supply a software key. Writes are fsync'd before the atomic rename ([writeDurably]).
  */
 object SecureStore {
     private const val ALIAS = "tekyerema_store_v1"
@@ -72,14 +72,27 @@ object SecureStore {
     /** Encrypt [text] into [file] (atomically). False = not written (no key) — keep the data in memory only. */
     fun write(file: File, text: String): Boolean {
         val blob = encrypt(text.toByteArray(Charsets.UTF_8)) ?: return false
-        return try {
-            file.parentFile?.mkdirs()
-            val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.writeBytes(blob)
-            if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
-            true
-        } catch (_: Throwable) { false }
+        return writeDurably(file, blob)
     }
+
+    /**
+     * Write [bytes] to a temp file, fsync it, then rename it over [file] — AtomicFile's contract ("completely written and
+     * sync'd to disk before renaming"). The old write renamed an UN-synced temp file: after a power loss (a dying battery
+     * is plausible for this user group) the rename could survive while the data didn't, leaving an empty or torn file —
+     * for the effect ledger that means forgetting a send that was about to happen (research: agenticness_reliability_state
+     * §2.2). Single writer per file; callers serialize (the engine runs one task at a time).
+     */
+    internal fun writeDurably(file: File, bytes: ByteArray): Boolean = try {
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        java.io.FileOutputStream(tmp).use { out ->
+            out.write(bytes)
+            out.flush()
+            out.fd.sync()   // the bytes are on disk BEFORE the rename makes them the file
+        }
+        if (!tmp.renameTo(file)) { file.delete(); if (!tmp.renameTo(file)) throw java.io.IOException("rename failed") }
+        true
+    } catch (_: Throwable) { false }
 
     /** The decrypted text, or null when the file is missing, not ours, or can't be decrypted. */
     fun read(file: File): String? = try {

@@ -1,6 +1,27 @@
 {
   "schema_version": 1,
   "speech": {
+    "voiceLayer": {
+      "profile": "builtin_en",
+      "_note": "builtin_en = Android SpeechRecognizer + system TTS, English only (testing; SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
+      "systemSpeech": {
+        "languageTag": "en-GH",
+        "fallbackTag": "en-US",
+        "preferOffline": "whenOffline",
+        "maxResults": 3,
+        "yesNoMaxResults": 5,
+        "partials": true,
+        "component": "",
+        "ownCue": "beforeStart",
+        "cueGuardMs": 250,
+        "retryOnBusyOrClient": 1,
+        "silenceExtras": false,
+        "freshPerListen": true,
+        "patientRelistens": 1,
+        "nbestRerank": true,
+        "_note": "component: a flattened ComponentName to pin one recognizer (only if the A20e test shows the default misbehaves). ownCue: beforeStart = our tone then the recognizer; none = the recognizer's own tone only. silenceExtras: SPEECH_INPUT_* hints, ignored by stock recognizers — patience is built by re-listening. freshPerListen: a new SpeechRecognizer per listen so a stopped session's late callbacks can't reach the next one."
+      }
+    },
     "bargeIn": {
       "enabled": false,
       "minChars": 60,

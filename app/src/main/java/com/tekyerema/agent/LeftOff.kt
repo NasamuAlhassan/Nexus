@@ -24,10 +24,12 @@ object LeftOff {
      * [last] = the newest History entry (null when there is none), [readingPending] = a screen reading was cut into
      * parts and more remains, [lastApp] = the app the user was in before Tɛkyerɛma came up (null when unknown).
      */
-    fun line(last: HistoryEntry?, readingPending: Boolean, lastApp: String?, nowMs: Long): String {
+    fun line(last: HistoryEntry?, readingPending: Boolean, lastApp: String?, nowMs: Long, resumable: String? = null): String {
         val parts = ArrayList<String>()
         if (lastApp != null) parts.add("You were in $lastApp.")
         if (readingPending) parts.add("I was partway through reading the screen to you — say “continue” to hear the rest.")
+        // WS-A: a paused or interrupted task on file (TaskJournal) is what they were doing — named first, with how to go on.
+        if (resumable != null) return (parts + resumable).joinToString(" ")
         if (last != null) {
             val ago = ago(nowMs - last.timeMs)
             parts.add(if (last.outcome.done) {
@@ -37,6 +39,8 @@ object LeftOff {
                 val how = when (last.outcome) {
                     Outcome.STOPPED -> "it was stopped before it finished"
                     Outcome.CANNOT -> "I couldn't do it"
+                    Outcome.PAUSED -> "it was paused before it finished"
+                    Outcome.INTERRUPTED -> "it was interrupted before it finished"
                     else -> "it didn't work"
                 }
                 "Your last request, $ago, was “${last.title}” — $how. Say it again and I'll try again."

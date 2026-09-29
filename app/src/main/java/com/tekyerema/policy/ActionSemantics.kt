@@ -54,6 +54,20 @@ object ActionSemantics {
             .firstOrNull { l -> l.length in 2..40 && !NAV_WORDS.matches(l.lowercase()) && !l.equals(s?.appName, true) }
     }
 
+    /** The control's own "…to X" ("Send to 5554"), or null. */
+    private fun labelRecipient(text: String): String? = Regex("(?i)\\bto\\s+(.{1,40})$").find(text)?.groupValues?.get(1)?.trim()
+
+    /** WHO a send/call control on [before] reaches: the control's own "…to X" beats the screen title, and a title that is
+     *  just the APP's name ("Messages" on the conversation list) is not a recipient (seen on-device: "Send this message to
+     *  Messages?"). */
+    private fun screenRecipient(text: String, before: UiSnapshot?): String? {
+        val appName = before?.appName?.trim().orEmpty()
+        fun notApp(t: String) = t.isNotBlank() && !(appName.isNotEmpty() && (t.equals(appName, true) || appName.contains(t, true)))
+        return labelRecipient(text)
+            ?: before?.screenTitle?.trim()?.takeIf { notApp(it) }
+            ?: screenHeading(before)?.takeIf { notApp(it) }
+    }
+
     /** A confirmation sentence, or null to fall back to the tool's own prompt. */
     fun confirmation(
         primitive: String, target: UiElement?, requestedLabel: String?, before: UiSnapshot?,
@@ -61,14 +75,8 @@ object ActionSemantics {
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
-        // WHO: the control's own "…to X" ("Send to 5554") beats the screen title, and a title that is just the APP's
-        // name ("Messages" on the conversation list) is not a recipient (seen on-device: "Send this message to Messages?").
-        val appName = before?.appName?.trim().orEmpty()
-        val labelRecipient = Regex("(?i)\\bto\\s+(.{1,40})$").find(text)?.groupValues?.get(1)?.trim()
-        fun notApp(t: String) = t.isNotBlank() && !(appName.isNotEmpty() && (t.equals(appName, true) || appName.contains(t, true)))
-        val recipient = labelRecipient
-            ?: before?.screenTitle?.trim()?.takeIf { notApp(it) }
-            ?: screenHeading(before)?.takeIf { notApp(it) }
+        val labelRecipient = labelRecipient(text)
+        val recipient = screenRecipient(text, before)
 
         // Sending a message: tapping a Send control (message = composer's current text) OR
         // submitting into a communication field (message = the text being typed).
@@ -123,4 +131,95 @@ object ActionSemantics {
         }
         return null
     }
+
+    // ---------------------------------------------------------------- the recipient read-back rule
+
+    /** Tools that reach another person, named by one of [Provenance.recipientKeys]. */
+    private val PERSON_TOOLS = setOf("send_sms", "make_call", "reply_to_notification", "momo_send", "mobile_money")
+    /** Where a GUI recipient was read: the control's own words, or the open chat's title. */
+    private const val FROM_LABEL = "(label)"
+    private const val FROM_CHAT = "(chat)"
+    /** Words that don't identify anyone, so they never count as "the user named them". */
+    private val NOT_A_NAME = setOf("mr", "mrs", "ms", "dr", "the", "and", "my", "of", "to", "de", "on")
+
+    /**
+     * Research §2.2 b (OWASP ASI09): the person a send, call or payment reaches must come from the user. When the goal
+     * does NOT name the recipient, the read-back says so and where the recipient came from — the screen, a message I read,
+     * the chat that is open — so someone who can't see the screen can catch a name or number that an injected message
+     * slipped in. Null when the goal names them (a relation word saved for them counts: "text my mum").
+     *
+     * @param goal the goal of the run (for a paired computer's task, its request — the read-back already says so)
+     * @param tags this step's payload provenance ([StepGate] / [Provenance.tagArgs]): where an argument came from
+     * @param relation a relation word in the goal → the contact saved for it ("mum" → "Akosua Mensah")
+     */
+    fun recipientNotice(
+        tool: String, args: org.json.JSONObject, target: UiElement?, requestedLabel: String?, screen: UiSnapshot?,
+        submit: Boolean, goal: String, tags: Map<String, com.tekyerema.core.Tagged<String>>,
+        relation: (String) -> String? = ::savedRelation
+    ): String? {
+        val (key, who) = recipientOf(tool, args, target, requestedLabel, screen, submit) ?: return null
+        if (namedInGoal(who, goal, relation)) return null
+        val subject = if (who.count { it.isDigit() } >= 5) "You didn't say this number" else "You didn't name $who"
+        val from = when (key) {
+            FROM_CHAT -> "it's the chat that is open on the screen"
+            FROM_LABEL -> "I read it on the screen"
+            "sender" -> "it's who the message came from"
+            else -> when (tags[key]?.why) {
+                com.tekyerema.core.Provenance.WHY_SCREEN -> "I read it on the screen"
+                com.tekyerema.core.Provenance.WHY_MESSAGE -> "it came from a message I read"
+                else -> if (screen?.elements.orEmpty().any { it.label?.contains(who, ignoreCase = true) == true })
+                    "I read it on the screen" else "I chose it myself"
+            }
+        }
+        return "$subject — $from."
+    }
+
+    /** [prompt] with the recipient notice on its own line (unchanged when there is none). */
+    fun withRecipientNotice(prompt: String, notice: String?): String = if (notice.isNullOrBlank()) prompt else "$prompt\n$notice"
+
+    /** (argument key or [FROM_LABEL]/[FROM_CHAT], who) for an action that reaches a person, or null. */
+    internal fun recipientOf(
+        tool: String, args: org.json.JSONObject, target: UiElement?, requestedLabel: String?, screen: UiSnapshot?, submit: Boolean
+    ): Pair<String, String>? {
+        if (tool in PERSON_TOOLS) for (k in com.tekyerema.core.Provenance.recipientKeys) {
+            val v = if (args.has(k) && !args.isNull(k)) args.optString(k).trim() else ""
+            if (v.isNotEmpty()) return k to v
+        }
+        if (tool != "tap" && tool != "type") return null
+        val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
+        val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
+        val commsType = tool == "type" && submit && TargetSemantics.communicationField.containsMatchIn(text.lowercase())
+        if (verb == "call") {
+            val named = text.replaceFirst(Regex("(?i)^call\\s+"), "").trim()
+            if (named.isNotEmpty() && !named.equals(text, true)) return FROM_LABEL to named
+        }
+        if (verb in SEND_VERBS || verb == "call" || commsType) {
+            labelRecipient(text)?.let { return FROM_LABEL to it }
+            screenRecipient(text, screen)?.let { return FROM_CHAT to it }
+        }
+        return null
+    }
+
+    /**
+     * Did the goal name [who]? A number (5+ digits) counts when the goal holds the same number (0XX… and +233XX… alike,
+     * compared on the last 9 digits); a name when one of its words is a word of the goal, or when the goal uses a
+     * relation word saved for that contact.
+     */
+    fun namedInGoal(who: String, goal: String, relation: (String) -> String? = ::savedRelation): Boolean {
+        fun words(s: String) = s.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 2 && it !in NOT_A_NAME }
+        val digits = who.filter { it.isDigit() }
+        if (digits.length >= 5) {
+            val want = digits.takeLast(9)
+            return Regex("\\+?\\d[\\d\\s-]{3,}\\d").findAll(goal).any { it.value.filter { c -> c.isDigit() }.takeLast(9) == want }
+        }
+        val goalWords = words(goal).toSet()
+        val whoWords = words(who)
+        if (whoWords.any { it in goalWords }) return true
+        return goalWords.any { w ->
+            val saved = relation(w) ?: return@any false
+            saved.equals(who, ignoreCase = true) || words(saved).any { it in whoWords }
+        }
+    }
+
+    private fun savedRelation(word: String): String? = try { com.tekyerema.android.Relations.contactFor(word) } catch (_: Throwable) { null }
 }

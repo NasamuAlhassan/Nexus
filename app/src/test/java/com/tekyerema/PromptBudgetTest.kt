@@ -25,7 +25,13 @@ class PromptBudgetTest {
         // load only with the "apps" tool-search group; the per-step subset guard below is unchanged.
         // 28k (overnight 2026-09-29): + tap_sequence (several predictable taps per LLM call) and describe_screen (online
         // vision on one screenshot). The model only ever gets a per-step subset (guarded below at 9k).
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 28_000)
+        // 28.3k (Workstream B, 2026-09-29): + an optional `plan` argument ({"type":"string"}, ~25 chars) on the ~14 acting
+        // tools, so a multi-step goal's plan rides in the first action's call instead of costing a planning call of its own.
+        // Measured: compiled set 27,799 → 28,099 chars; the 'open chrome' subset 8,182 → 8,382 (guard below, 9k, unchanged).
+        // Workstream D (2026-09-29): + read_shared (text shared / selected into Tɛkyerɛma), which loads only with the
+        // "shared" tool-search group; the per-step subset guard below is unchanged.
+        // Integration A+E+B+D (2026-09-29): measured 28,577 (B's plan arg + E's open_url + D's read_shared) — cap = that + ~120.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 28_700)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
     }
 

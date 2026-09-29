@@ -113,5 +113,9 @@ data class VoiceUiState(
     /** While a confirmation is being asked and answered by voice. */
     val confirmPhase: ConfirmPhase = ConfirmPhase.NONE,
     /** Whether the last text that entered the agent came from ASR or the keyboard. */
-    val inputSource: InputSource = InputSource.NONE
+    val inputSource: InputSource = InputSource.NONE,
+    /** voice/io: the phone recognizer's partial words while the user talks (screen only; empty on the captured path).
+     *  Deliberately NOT in [partialHint]: that line can be a live region, and TalkBack reading the words back while the
+     *  user speaks would be heard by the recognizer. */
+    val livePartial: String = ""
 )

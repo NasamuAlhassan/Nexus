@@ -170,6 +170,21 @@ class RunGoalReceiver : BroadcastReceiver() {
                 else try { com.tekyerema.ui.voice.Presence.valueOf(name.trim().uppercase()) } catch (t: Throwable) { null }
             return
         }
+        // D: the computer connection (MCP) for device testing, until the Settings switch lands (Workstream C).
+        //   --es mcp on|off|status   --es mcp_actions on|off   (pairing is still spoken/shown on the phone; nothing here pairs)
+        intent.getStringExtra("mcp")?.let { v ->
+            when (v.lowercase()) {
+                "on" -> com.tekyerema.operator.OperatorPolicy.remoteControlEnabled = true
+                "off" -> com.tekyerema.mcp.RemoteControl.turnOff("The computer connection is off.")
+            }
+            Log.i("Tekyerema", "[MCP] ${com.tekyerema.mcp.RemoteControl.status()}")
+            return
+        }
+        intent.getStringExtra("mcp_actions")?.let { v ->
+            com.tekyerema.mcp.RemoteControl.actionsAllowed = v.equals("on", true) || v == "1"
+            Log.i("Tekyerema", "[MCP] ${com.tekyerema.mcp.RemoteControl.status()}")
+            return
+        }
         // Drive confirmation / stop over ADB during testing.
         intent.getStringExtra("stop")?.let { AgentEngine.stop(); return }
         // A fresh conversation (the Settings "reset" button), so one test's turns don't colour the next request.

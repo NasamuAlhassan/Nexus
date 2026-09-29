@@ -100,8 +100,9 @@ object DescribeScreenTool : Tool {
         }
     }
 
-    /** A notification whose code was hidden (J-10) arrived in the last minute — it may be showing as a heads-up. */
-    private fun recentCode(now: Long = System.currentTimeMillis()): Boolean = try {
+    /** A notification whose code was hidden (J-10) arrived in the last minute — it may be showing as a heads-up.
+     *  Internal: the vision locate path (agent/recovery/VisionLocate) applies the same gate. */
+    internal fun recentCode(now: Long = System.currentTimeMillis()): Boolean = try {
         com.tekyerema.notifications.NotificationStore.recent(10).any {
             now - it.postTime < com.tekyerema.core.config.AppConfig.long("camera.describe.codeQuietMs", 60_000L) &&
                 (it.text?.contains(com.tekyerema.core.Redact.HIDDEN) == true || it.title?.contains(com.tekyerema.core.Redact.HIDDEN) == true)

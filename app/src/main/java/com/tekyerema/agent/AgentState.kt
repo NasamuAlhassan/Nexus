@@ -74,5 +74,13 @@ data class AgentUiState(
     val brain: String = "not configured",
     val lastStats: String? = null,
     /** C-15: the last run's typed result as JSON (status, summary, steps, actions, verified, goal). */
-    val lastResult: String? = null
+    val lastResult: String? = null,
+    /** WS-A: the words that started this run when they differ from [goal] — "carry on" resuming a paused task, whose
+     *  [goal] is the original request. A caller waiting on its own words (the voice turn) matches either. */
+    val request: String? = null,
+    /** Who asked for the current run: null = the phone's user (voice, typing, their triggers); "remote:<client>" = a
+     *  paired computer over MCP ([com.tekyerema.mcp.RemoteGate]). */
+    val origin: String? = null,
+    /** Numbers each submitted goal (never reused in the process), so an observer can tell two runs of the same goal apart. */
+    val runSeq: Long = 0L
 )

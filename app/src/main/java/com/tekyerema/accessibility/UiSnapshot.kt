@@ -54,7 +54,12 @@ data class UiElement(
     /** F-14: a web link. */
     val link: Boolean = false,
     /** G-03: actions the app itself defines on this element ("Archive", "Mark as read") — TalkBack's actions menu. */
-    val customActions: List<String> = emptyList()
+    val customActions: List<String> = emptyList(),
+    /** Why a person can't perceive this element as the agent reads it ([Perceivability.CRAMMED] / [Perceivability.MISMATCH]),
+     *  or null. A flagged element is never the target of a consequential action ([com.tekyerema.policy.StepGate]). */
+    val unseen: String? = null,
+    /** The app this node belongs to, when it is NOT the window's own app (content embedded from another app). */
+    val pkg: String? = null
 ) {
     val interactive: Boolean
         get() = clickable || longClickable || editable || scrollable || checkable || range != null
@@ -124,7 +129,10 @@ data class UiSnapshot(
             o.put("id", e.id)
             o.put("role", e.role)
             // J-10: a one-time code / PIN in a label (an SMS preview, a banner) never reaches the model; the element stays.
-            if (!e.label.isNullOrBlank()) o.put("label", (com.tekyerema.core.Redact.secrets(e.label) ?: e.label).take(labelMax))
+            // Hidden text (far more words than the box can show — Perceivability) is withheld: nobody can read it on screen.
+            if (!e.label.isNullOrBlank() && e.unseen != Perceivability.CRAMMED)
+                o.put("label", (com.tekyerema.core.Redact.secrets(e.label) ?: e.label).take(labelMax))
+            e.pkg?.let { o.put("from_app", it) }
             // Mark only vision elements (they need x,y grounding); "tree" is the default, so omit it — this
             // JSON is sent for up to 45 elements on every step, so per-element bytes dominate the request.
             if (e.source == ElementSource.VISION) o.put("source", "vision")
@@ -140,6 +148,7 @@ data class UiSnapshot(
             if (e.password) flags.add("password")
             if (e.heading) flags.add("heading")   // F-14
             if (e.link) flags.add("link")         // F-14
+            e.unseen?.let { flags.add(it) }       // hidden_text / a11y_mismatch: not what a person sees or hears
             if (flags.isNotEmpty()) o.put("flags", JSONArray(flags))
             if (e.customActions.isNotEmpty()) o.put("custom_actions", JSONArray(e.customActions.take(6)))   // G-03
             // Keep the explicit primitive vocabulary per element: the model can't be trusted to map the
@@ -210,7 +219,8 @@ data class UiSnapshot(
 
     fun summarize(): String {
         // J-10: this is read_state's result (it goes to the model) — codes hidden like in [toCompactJson].
-        val visible = elements.mapNotNull { it.label?.takeIf { l -> l.isNotBlank() }?.let { l -> com.tekyerema.core.Redact.secrets(l) } }.take(12)
+        val visible = elements.filter { it.unseen != Perceivability.CRAMMED }
+            .mapNotNull { it.label?.takeIf { l -> l.isNotBlank() }?.let { l -> com.tekyerema.core.Redact.secrets(l) } }.take(12)
         val head = "App: ${appPackage ?: "unknown"}" + (screenTitle?.let { "; screen: $it" } ?: "") +
             "; perception: ${perception.source}"
         return if (visible.isEmpty()) "$head. No readable text found."

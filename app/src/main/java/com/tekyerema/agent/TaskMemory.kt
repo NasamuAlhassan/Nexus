@@ -13,6 +13,15 @@ class TaskMemory {
     private val knownEntities = LinkedHashMap<String, String>()
     private val recentFailures = ArrayDeque<String>()
 
+    /** B: the explicit plan (subgoals + statuses), rendered each step; persisted through TaskJournal by the engine. */
+    val plan = com.tekyerema.agent.plan.PlanTracker()
+
+    /** B: AndroidArena-style visit line for the current screen ("you've been here 3 times; tried tap 'X' ×2"), or null. */
+    var visitLine: String? = null
+
+    /** B: the goal looks multi-part and no plan came yet — nudge the model to include one (first steps only). */
+    var wantPlan: Boolean = false
+
     fun noteScreen(app: String?, screen: String?) {
         app?.takeIf { it.isNotBlank() }?.let { currentApp = it }
         screen?.takeIf { it.isNotBlank() }?.let { currentScreen = it }
@@ -31,9 +40,12 @@ class TaskMemory {
         while (recentFailures.size > 3) recentFailures.removeFirst()
     }
 
-    /** A short prompt block, or "" when there is nothing worth adding. */
+    /** A short prompt block, or "" when there is nothing worth adding. The plan block's one-shot notes (a subgoal just
+     *  done, REPLAN) are consumed — call once per planning call. */
     fun render(): String {
         val parts = mutableListOf<String>()
+        plan.promptBlock(hintMultiStep = wantPlan && !plan.hasPlan).takeIf { it.isNotBlank() }?.let { parts.add(it) }
+        visitLine?.takeIf { it.isNotBlank() }?.let { parts.add(it) }
         val loc = buildString {
             if (currentApp.isNotBlank()) append("app=").append(currentApp.substringAfterLast('.'))
             if (currentScreen.isNotBlank()) { if (isNotEmpty()) append(" · "); append("screen=").append(currentScreen) }
@@ -44,5 +56,21 @@ class TaskMemory {
         if (recentFailures.isNotEmpty())
             parts.add("recent problems: " + recentFailures.joinToString("; "))
         return parts.joinToString("\n")
+    }
+
+    // WS-A (task journal): the scratchpad is part of a task's checkpoint, so "carry on" after a pause or a restart
+    // starts from what was learned, not from an empty memory. Additive; nothing else reads these.
+    fun toJson(): org.json.JSONObject = org.json.JSONObject()
+        .put("app", currentApp).put("screen", currentScreen)
+        .put("entities", org.json.JSONObject(knownEntities as Map<*, *>))
+        .put("failures", org.json.JSONArray(recentFailures.toList()))
+
+    companion object {
+        fun fromJson(o: org.json.JSONObject?): TaskMemory = TaskMemory().apply {
+            if (o == null) return@apply
+            noteScreen(o.optString("app"), o.optString("screen"))
+            o.optJSONObject("entities")?.let { e -> e.keys().forEach { k -> noteEntity(k, e.optString(k)) } }
+            o.optJSONArray("failures")?.let { a -> for (i in 0 until a.length()) noteFailure(a.optString(i)) }
+        }
     }
 }

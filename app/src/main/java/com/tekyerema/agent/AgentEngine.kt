@@ -90,8 +90,6 @@ object AgentEngine {
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
     private val READING_TOOLS = BrainPrompts.READING_TOOLS
-    /** G-21: reads that can show whether an uncertain send / call went through (not `wait`, not the web). */
-    private val CHECK_TOOLS = setOf("read_state", "read_all", "read_sms", "call_log", "read_notifications", "search_messages")
     private fun resultLimit(tool: String): Int =
         com.tekyerema.core.config.AppConfig.int("tools.resultLimits.$tool", if (tool in READING_TOOLS) 600 else 160)
 
@@ -183,6 +181,8 @@ object AgentEngine {
             registry = ToolRegistry(defaultTools())
             initialized = true
             loadConversation()   // H-10: pick the conversation back up after the process was killed mid-session
+            // WS-A: the task journal and the effect ledger (a task found still running was cut off → INTERRUPTED).
+            com.tekyerema.agent.journal.JournalBoot.start(context.applicationContext)
         }
         refreshReadiness()
     }
@@ -208,12 +208,18 @@ object AgentEngine {
     /** @param unattended the goal came from a trigger (schedule / notification rule), not the user speaking now —
      *  D-08: tools that don't list the "trigger" caller (money, calls, sends) are refused for it.
      *  Synchronized: a schedule/notification trigger (TriggerReceiver) and the voice layer can submit at the same moment;
-     *  the "is a task already running?" check and the launch must be one step, or both goals run at once on one screen. */
+     *  the "is a task already running?" check and the launch must be one step, or both goals run at once on one screen.
+     *  @param origin null = the phone's user; "remote:<client>" = a paired computer over MCP (Workstream D): the same run,
+     *  read-only unless the user allowed remote actions, every change confirmed on the phone ([com.tekyerema.mcp.RemoteGate]). */
     @Synchronized
-    fun submitGoal(goal: String, unattended: Boolean = false) {
+    fun submitGoal(goal: String, unattended: Boolean = false, origin: String? = null) {
         if (!initialized) return
+        // WS-A resume: "carry on" / "continue" with a paused or interrupted task on file resumes THAT task — decided here
+        // from the words and the journal (no model call), only on the user's word (never an unattended trigger).
+        if (currentJob?.isActive != true) resumeFor(goal, unattended, origin)?.let { rec -> launchResume(rec, goal.trim()); return }
         val g = goal.trim().let { raw ->
-            if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true)) raw
+            // D: a computer's "her" is not the phone user's "her" — its words are never resolved against their conversation.
+            if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true) || com.tekyerema.mcp.RemoteGate.isRemote(origin)) raw
             else References.rewrite(raw)?.also { log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$it\"") } ?: raw
         }
         if (g.isEmpty()) return
@@ -231,9 +237,39 @@ object AgentEngine {
         // would otherwise match the PREVIOUS run's lingering terminal state when the new goal equals the old
         // one — speaking the stale result while this fresh run proceeds unwatched (and could hit an ignored
         // confirmation gate). Setting THINKING here closes that window.
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = g) }
-        currentJob = scope.launch { runTask(g, unattended = unattended) }
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = null, origin = origin, runSeq = it.runSeq + 1) }
+        currentJob = scope.launch { runTask(g, unattended = unattended, origin = origin) }
     }
+
+    /** WS-A: the paused/interrupted task [text] would resume ("carry on"), or null. A pending screen reading keeps a bare
+     *  "continue" (it is what the user just heard); "continue the task" still resumes. */
+    fun resumeTarget(text: String): com.tekyerema.agent.journal.TaskRecord? =
+        com.tekyerema.agent.journal.TaskJournal.resumable()?.takeIf {
+            com.tekyerema.agent.journal.ResumeIntent.shouldResume(text, true, ScreenReadCursor.pending)
+        }
+
+    /** WS-A: the task [text] resumes when submitted — only on the phone user's own word: never an unattended trigger, and
+     *  (merge A+D) never a paired computer's — a remote "carry on" must not resume the user's task as the user; it runs as
+     *  a new remote goal under RemoteGate. */
+    internal fun resumeFor(text: String, unattended: Boolean, origin: String?): com.tekyerema.agent.journal.TaskRecord? =
+        if (unattended || com.tekyerema.mcp.RemoteGate.isRemote(origin)) null else resumeTarget(text)
+
+    /** WS-A: run [rec] again from its checkpoint. The run carries the ORIGINAL goal; [words] is what the user said. */
+    private fun launchResume(rec: com.tekyerema.agent.journal.TaskRecord, words: String) {
+        confirmChannel = Channel(Channel.CONFLATED)
+        secureChannel = Channel(Channel.CONFLATED)
+        answerChannel = Channel(Channel.CONFLATED)
+        paused.value = false
+        steerQueue.clear()
+        // (merge A+D: a resumed run is the phone user's and a NEW run — its own runSeq, so a paired computer's
+        // RemoteTaskTracker never reads it as the remote task that ran before it.)
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = rec.goal, request = words, origin = null, runSeq = it.runSeq + 1) }
+        currentJob = scope.launch { runTask(rec.goal, resume = rec, request = words) }
+    }
+
+    /** WS-A: did this run's typed result end in a PAUSE (kept, resumable) rather than a real "couldn't do it"? */
+    fun isPausedResult(lastResult: String?): Boolean =
+        lastResult != null && try { !org.json.JSONObject(lastResult).isNull("paused") } catch (_: Throwable) { false }
 
     /**
      * DEBUG/TEST ONLY. Runs a deterministic [TestScenario] through the exact same pipeline as a
@@ -260,6 +296,38 @@ object AgentEngine {
      *  restriction; the accessibility HOME action is not, so this faithfully creates the race the guard
      *  must catch. Not part of the agent's action space. */
     internal fun perturbForegroundForTest() { controller?.globalAction("home") }
+
+    // ---------------------------------------------------------------- WS-A engine-loop test seam (JVM tests only)
+    // The audit's biggest reliability gap: no test ran runTask (the engine is an Android singleton). These two entry points
+    // let a JVM test drive the REAL loop — policy gate, confirmation, Secure Input, ledger, journal — with a fake
+    // controller (attachController) and a scripted brain, on the test's own coroutine (virtual time). The app never calls
+    // them and nothing in the loop branches on them.
+
+    /** TEST ONLY: a context (app-private dir, in-memory prefs), settings and a tool set, without the app's startup. */
+    internal fun installForTest(context: Context, tools: List<com.tekyerema.tools.Tool>) {
+        appContext = context
+        settings = Settings(context)
+        registry = ToolRegistry(tools) { true }
+        initialized = true
+        currentJob = null
+        activeRun = null
+        _state.value = AgentUiState()
+    }
+
+    /** TEST ONLY: run [goal] (or resume [resume]) through the real loop with [brain] deciding every step. */
+    internal suspend fun runForTest(goal: String, brain: AgentBrain, resume: com.tekyerema.agent.journal.TaskRecord? = null,
+                                    request: String? = null, unattended: Boolean = false, journal: Boolean? = true,
+                                    origin: String? = null) {
+        confirmChannel = Channel(Channel.CONFLATED)
+        secureChannel = Channel(Channel.CONFLATED)
+        answerChannel = Channel(Channel.CONFLATED)
+        paused.value = false
+        steerQueue.clear()
+        val g = resume?.goal ?: goal
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = request, origin = origin, runSeq = it.runSeq + 1) }
+        runTask(g, forcedBrain = brain, forcedLabel = "SCRIPTED", unattended = unattended, resume = resume, request = request,
+            journal = journal, origin = origin)
+    }
 
     // ---------------------------------------------------------------- C-12 / C-13 / C-19 task control
     private val paused = kotlinx.coroutines.flow.MutableStateFlow(false)
@@ -352,17 +420,27 @@ object AgentEngine {
         log(LogEntry.Kind.INFO, "Stopped by user.")
     }
 
-    private suspend fun runTask(goal: String, forcedBrain: AgentBrain? = null, forcedLabel: String? = null, unattended: Boolean = false) {
+    /** @param resume WS-A: a paused/interrupted task to pick up from its checkpoint ([request] = the words, "carry on").
+     *  @param journal WS-A: record this run in the task journal (default: attended, the phone user's, non-test, not a
+     *  screen-free question).
+     *  @param origin D: null = the phone's user; "remote:<client>" = a paired computer ([com.tekyerema.mcp.RemoteGate]). */
+    private suspend fun runTask(goal: String, forcedBrain: AgentBrain? = null, forcedLabel: String? = null, unattended: Boolean = false,
+                                resume: com.tekyerema.agent.journal.TaskRecord? = null, request: String? = null, journal: Boolean? = null,
+                                origin: String? = null) {
         val ctxApp = appContext ?: return
         val set = settings ?: return
         clearLog()
         openTrace(goal)
         setGoal(goal)
-        log(LogEntry.Kind.USER, goal)
+        log(LogEntry.Kind.USER, request ?: goal)
+        if (resume != null) log(LogEntry.Kind.INFO, "Resuming a paused task (${resume.pauseReason ?: resume.state}): $goal")
         // Conversation memory: snapshot the PRIOR turns for this run's brain context, then record this
         // user turn for the NEXT one. Skipped for TEST scenarios (forcedBrain) so they stay isolated.
-        val convo = conversationSnapshot()
-        if (forcedBrain == null) pushConvo("User: $goal")
+        // D: a paired computer's request is remembered as the computer's words, never as something the user said, and its
+        // planner never sees the user's own conversation (a different principal must not be able to read it back out).
+        val convo = if (com.tekyerema.mcp.RemoteGate.isRemote(origin)) emptyList() else conversationSnapshot()
+        if (forcedBrain == null) pushConvo(if (com.tekyerema.mcp.RemoteGate.isRemote(origin)) "Your computer asked: $goal"
+            else "User: " + if (resume != null) "${request ?: "carry on"} (carry on with “$goal”)" else goal)
         setStatus(AgentStatus.THINKING)
 
         // Hybrid brain (directive §14): the on-device LocalBrain handles simple/offline goals directly;
@@ -370,20 +448,23 @@ object AgentEngine {
         // online. Offline with no local match → an honest refusal, never a silent cloud call or a
         // fabricated answer. This means the operator ALWAYS has a working brain, even with no key/network.
         val online = com.tekyerema.core.NetworkMonitor.isOnline()
+        // B: quota-aware routing — one route per task: the pinned model, the weak-model policy and budgets (OperatorPolicy).
+        val route = com.tekyerema.agent.routing.TaskRoute(unattended = unattended)
         val brain: AgentBrain = forcedBrain ?: run {
             // Cloud fallback CHAIN — use every credential: Groq (keys rotated inside OpenAiCompatBrain)
             // first, then Gemini, so a drained free-tier quota isn't a dead end (demo-readiness fix).
             val cloudChain = if (!RouterTiers.enabled(RouterTiers.CLOUD)) emptyList() else buildList {   // C-01
-                // N-06: provider order for the planner role from config (models.planner.chain).
-                for (id in ModelRoles.plannerChain()) when (id) {
-                    ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set))
+                // N-06: provider order for the planner role from config (models.planner.chain); B: only what the operator
+                // allows (OperatorPolicy.cloudAllowed / providers — cloud off means on-device only).
+                for (id in ModelRoles.plannerChainAllowed()) when (id) {
+                    ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set, route))
                     // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
                     ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
                     else -> Log.w(TAG, "[BRAIN] models.planner.chain: unknown provider '$id' — skipped")
                 }
             }
             val cloud: AgentBrain? = when (cloudChain.size) {
-                0 -> null; else -> FallbackBrain(cloudChain)   // even one brain gets the network-blip retry
+                0 -> null; else -> FallbackBrain(cloudChain, route = route)   // even one brain gets the network-blip retry
             }
             // Twi→English rewrite before the cloud operator was provided by Khaya MT, removed 2026-09-27.
             // Until the HCI Lab MT is wired into this seam there is no cloud Twi→English rewrite (null ⇒ goal
@@ -403,7 +484,7 @@ object AgentEngine {
             }
         }
         val cloudName = buildList {
-            for (id in ModelRoles.plannerChain()) when (id) {
+            for (id in ModelRoles.plannerChainAllowed()) when (id) {
                 ModelRoles.GROQ -> if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
                 ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
             }
@@ -419,7 +500,7 @@ object AgentEngine {
         // BACK to dismiss our own surface and reveal what was underneath; only if we're STILL on our own
         // package after that do we fall back to HOME. Generic: keyed on our own package, no app logic.
         // I-01: a general-knowledge question is answered without touching or reading the screen (T1).
-        val direct = forcedBrain == null && com.tekyerema.core.config.FeatureFlags.isEnabled("I-01", true) &&
+        val direct = resume == null && forcedBrain == null && com.tekyerema.core.config.FeatureFlags.isEnabled("I-01", true) &&
             RouterTiers.enabled(RouterTiers.DIRECT) && DirectAnswer.isKnowledgeQuestion(goal)
         if (direct) log(LogEntry.Kind.INFO, "Direct question — answering without observing the screen (T1).")
         // C-05: a direct question that needs fresh facts starts from the web, not the model's memory (T2).
@@ -438,7 +519,7 @@ object AgentEngine {
         var chainPrevOk = true
         var chainTypeWaits = 0
         // I-03: a self-contained one-fact question goes straight to web_search; its answer is what the user hears.
-        val webFirst = forcedBrain == null && online && WebFirst.enabled() && WebFirst.eligible(goal, retrievalNeed)
+        val webFirst = resume == null && forcedBrain == null && online && WebFirst.enabled() && WebFirst.eligible(goal, retrievalNeed)
         if (webFirst) {
             log(LogEntry.Kind.INFO, "web-first: one fresh fact — searching directly, no planning call")
             planned.add(AgentDecision.CallTool("web_search", JSONObject().put("query", WebFirst.query(goal)), "local:web-first"))
@@ -448,7 +529,7 @@ object AgentEngine {
         // D-02: the tool schema is chosen per step (core primitives + needed groups + used + discovered).
         val usedTools = LinkedHashSet<String>()
         // W8: telemetry turn (Q-01..Q-04, Q-10), audit task (J-12), undo snapshot (J-13), opt-in trajectory (Q-07).
-        val source = if (forcedBrain != null) "test" else if (unattended) "trigger" else "agent"
+        val source = if (forcedBrain != null) "test" else if (unattended) "trigger" else origin ?: "agent"   // D: "remote:<client>"
         com.tekyerema.core.telemetry.Telemetry.ensureTurn(source)
         com.tekyerema.core.telemetry.Telemetry.mark("route")
         com.tekyerema.core.telemetry.Telemetry.update { this.goal = goal }
@@ -457,6 +538,22 @@ object AgentEngine {
             trajectory = if (forcedBrain == null && com.tekyerema.core.telemetry.Trajectories.enabled(ctxApp))
                 com.tekyerema.core.telemetry.TrajectoryRecorder(goal) else null)
         activeRun = runCtx
+        // WS-A task journal: an attended GUI task is recorded (begin) or picked up again (resume) — so a pause for the cloud
+        // or the process being killed leaves a checkpoint instead of nothing (audit §3). The effect gate is the ledger for
+        // this run (a run that isn't journaled still dedupes within itself, under its own id).
+        val taskRun: com.tekyerema.agent.journal.TaskRun? = when {
+            resume != null -> com.tekyerema.agent.journal.TaskRun.resume(resume)
+            // (merge A+D: a paired computer's task is never journaled — a "carry on" would resume it as the phone user's,
+            // outside RemoteGate; it simply ends, and says it stopped rather than paused.)
+            !com.tekyerema.mcp.RemoteGate.isRemote(origin) && (journal ?: (forcedBrain == null && !unattended && !direct)) ->
+                com.tekyerema.agent.journal.TaskRun.begin(goal, source)
+            else -> null
+        }
+        runCtx.journal = taskRun
+        val effectsTaskId = taskRun?.id ?: "run-${System.nanoTime()}"   // the ledger's task id for this run (B's Backtracker reads it too)
+        val effects = com.tekyerema.agent.journal.EffectGate(effectsTaskId, { com.tekyerema.agent.journal.JournalBoot.world })
+        val resumedFrom = taskRun?.resumedFrom
+        var resumeLookPending = resumedFrom != null   // the first look after "carry on" says whether the phone is where it was
         val discoveredTools = LinkedHashSet<String>()
         val history = ArrayList<String>()
         var stats = RunStats()
@@ -477,7 +574,7 @@ object AgentEngine {
         val futility = Futility()                // futility: how often each looked-for element FAILED to appear (weighted)
         val exploration = Exploration()          // G-21: every label this task has seen, per app — tells progress from wandering
         var appSwitched = false                  // the last executed step brought a different app to the front
-        val taskMemory = TaskMemory()            // Phase II P0: compact structured progress state injected into the prompt
+        val taskMemory = TaskMemory.fromJson(resumedFrom?.memory)   // Phase II P0 scratchpad (WS-A: restored on resume)
         var visionNext = false                  // the model asked for vision via read_state; carry it into the next observation
         var usedRead = false                    // §C.3 — did the run read the screen? (grounds a screen-derived answer)
         // Mobile-Money / USSD: the user approves the transfer (recipient + amount) ONCE; after that we must
@@ -487,8 +584,8 @@ object AgentEngine {
         // so this never lets a PIN be typed; the brain is also told to stop at the PIN and has none to type.
         var moneyOpApproved = false
         var failStreak = 0                        // C-21: consecutive failed / unverified steps
-        val doneSideEffects = HashSet<String>()   // D-09: consequential actions that already succeeded this task
-        val loopGuard = LoopGuard()               // G-21 cycles + uncertain side effects, G-12 escalation
+        // D-09 / G-21 duplicate protection now lives in the effect ledger (`effects`, WS-A): persistent, cross-task.
+        val loopGuard = LoopGuard()               // G-21 cycles, G-12 escalation
         val moneyApproval = MoneyApproval()       // J-02: what exactly the user approved (number, amount)
         val untrustedRead = ArrayList<String>()   // J-07: third-party text this run read through tools (messages, USSD)
         var injectionSource: String? = null        // J-06: where instruction-like untrusted text was seen, if anywhere
@@ -498,9 +595,74 @@ object AgentEngine {
         val launcherPkg = com.tekyerema.tools.defaultLauncherPackage(ctxApp)
         val namedApp = AppMention.named(goal)
         var notInstalledApp: String? = null
+        // WS-A resume: the loop's memory comes back from the checkpoint — never its approvals (moneyOpApproved stays false:
+        // consequential steps are confirmed again) and never its old screen (the loop observes afresh before anything).
+        if (resumedFrom != null && taskRun != null) {
+            history.addAll(resumedFrom.history)
+            mutatingCount = resumedFrom.mutatingCount; mutatingVerified = resumedFrom.mutatingVerified
+            partialCount = resumedFrom.partialCount; lastMutatingVerified = resumedFrom.lastMutatingVerified
+            failStreak = resumedFrom.failStreak; usedRead = resumedFrom.usedRead
+            usedTools += resumedFrom.usedTools; discoveredTools += resumedFrom.discoveredTools
+            untrustedRead += resumedFrom.untrustedRead; injectionSource = resumedFrom.injectionSource
+            history.add(taskRun.resumeNote())
+        }
+        // WS-A: a checkpoint of what the loop needs to pick this task up again (after every executed step, and at a pause).
+        fun checkpointNow(step: Int) = taskRun?.save(step, history, taskMemory.toJson(), mutatingCount, mutatingVerified,
+            partialCount, lastMutatingVerified, failStreak, usedRead, usedTools, discoveredTools, untrustedRead, injectionSource)
+        // WS-A: the cloud went away mid-task (network, quota, no capable model, budget) — PAUSE with a checkpoint and say so
+        // honestly; it resumes only when the user says "carry on". Never a silent downgrade, never an automatic restart.
+        fun pauseRun(step: Int, reason: com.tekyerema.agent.journal.PauseReason, resumeAfterMs: Long?, s: RunStats) {
+            val run = taskRun ?: return
+            checkpointNow(step - 1)
+            val line = run.pause(reason, resumeAfterMs)
+            log(LogEntry.Kind.INFO, "PAUSED [${reason.name}] — checkpoint kept; resumes only when the user says \"carry on\"")
+            log(LogEntry.Kind.RESULT, line)
+            // Like a dropped connection (A20e 2026-09-29), a pause is about THAT moment — not remembered as "the internet is down".
+            pushConvo("Tɛkyerɛma: (paused “$goal” — ${com.tekyerema.agent.journal.PauseRules.because(reason)}; this says nothing " +
+                "about the connection now. \"carry on\" resumes it.)")
+            finish(AgentStatus.CANNOT_DO, s, paused = reason)
+        }
+        // ---- B (agenticness: planning, recovery, routing) — per-task state; logic lives in agent/plan/* and agent/recovery/*.
+        // (merge A+B: ONE journal record per run — WS-A's `taskRun` above; B's plan and pinned model ride on it.)
+        val runStartMs = System.currentTimeMillis()
+        val taskRecovery = com.tekyerema.agent.recovery.RecoveryCoordinator(
+            backtracker = com.tekyerema.agent.recovery.Backtracker(effectsSince = { t ->
+                com.tekyerema.agent.journal.EffectLedger.all().any { it.at >= maxOf(t, runStartMs) && (it.taskId == null || it.taskId == effectsTaskId) }
+            }),
+            locateGate = { s, used -> com.tekyerema.agent.recovery.VisionLocate.gate(com.tekyerema.operator.OperatorPolicy.cloudAllowed,
+                set.allowGeminiBackup, set.geminiApiKey.isNotBlank(), com.tekyerema.core.NetworkMonitor.isOnline(),
+                com.tekyerema.policy.ScreenPrivacy.isPrivate(s), com.tekyerema.policy.ScreenPrivacy.isDenied(s.appPackage),
+                com.tekyerema.core.Privacy.secureStep, com.tekyerema.tools.DescribeScreenTool.recentCode(), used) })
+        var ladderAsk = false                     // the recovery ladder reached "ask the user"
+        // (merge A+B: "carry on" brings the plan back from the journal record — subgoals settled before the pause stay settled.)
+        if (resume != null) taskMemory.plan.restore(resume.plan)
+        taskMemory.wantPlan = !direct && forcedBrain == null && com.tekyerema.agent.plan.PlanTracker.looksMultiStep(goal)
+        /** B: the plan (and the model pinned for this task) onto this run's journal record (WS-A's; none = not journaled). */
+        fun journalCheckpoint() { taskRun?.notePlan(taskMemory.plan.toSubgoals(), route.pinnedName) }
         try {
-            val maxSteps = com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60)   // G-15
-            for (step in 1..maxSteps) {
+            // ===== Workstream E: research before acting (LOCATE) — agent/research/TargetResearch.kt =====
+            // "open University of Ghana Sakai": a destination that isn't on the phone is recalled (a remembered pick) or
+            // found with ONE web search and opened (one clear official site), or the user picks from 2–3 options. Null =
+            // not that kind of request, an app matches, or offline → everything below runs unchanged.
+            val questions = com.tekyerema.agent.research.QuestionBudget()   // ≤ 1 per slot, ≤ 2 "which one" per task
+            // (merge A+E: a resumed task already did its research before the pause — its checkpoint carries the result.)
+            val research = if (forcedBrain != null || direct || webFirst || resume != null) null else com.tekyerema.agent.research.TargetResearch.planSafely(goal,
+                com.tekyerema.agent.research.TargetResearch.deps(ctxApp, online,
+                    ask = if (unattended) null else { q, spoken -> questions.note(q, true); askUser(q, spoken) }) { log(LogEntry.Kind.INFO, it) })
+            research?.note?.let { history.add(it) }
+            research?.open?.let { planned.add(it) }
+            research?.end?.let { e ->
+                log(LogEntry.Kind.RESULT, e.line); pushConvo("Tɛkyerɛma: ${e.line}")
+                finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats); return
+            }
+            // G-15; B: never more than the operator's per-task step budget (OperatorPolicy.maxStepsPerTask).
+            val maxSteps = minOf(com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60),
+                com.tekyerema.operator.OperatorPolicy.maxStepsPerTask.coerceIn(1, 60))
+            // WS-A: a resumed task counts on from its checkpoint, with at least `agent.resume.minSteps` more steps.
+            val firstStep = (resumedFrom?.step ?: 0) + 1
+            val lastStep = if (resumedFrom == null) maxSteps
+                else maxOf(maxSteps, firstStep - 1 + com.tekyerema.core.config.AppConfig.int("agent.resume.minSteps", 10))
+            for (step in firstStep..lastStep) {
                 coroutineContext.ensureActive()
                 // C-12: a pause holds the task HERE, between steps — never mid-action.
                 if (paused.value) {
@@ -596,6 +758,10 @@ object AgentEngine {
                         history.add("DENIED APP: ${before.appName ?: before.appPackage} is on the user's deny list — you cannot see or " +
                             "operate it. Go Back or Home, or call cannot_do.")
                 }
+                // WS-A (past the Secure Input boundary): an uncertain chat send of this task is settled as soon as its chat
+                // is in front, and the first look after "carry on" tells the planner whether the phone is where it stopped.
+                effects.observe(before)
+                if (resumeLookPending) { resumeLookPending = false; taskRun?.resumeScreenNote(before)?.let { history.add(it) } }
                 // J-06: note instruction-like text on the screen once. It stays data; a payload taken from content
                 // that tried to give orders stops the task at the policy gate below.
                 if (injectionSource == null) before.elements.firstNotNullOfOrNull { com.tekyerema.core.Injection.detect(it.label) }?.let {
@@ -605,6 +771,15 @@ object AgentEngine {
                 log(LogEntry.Kind.PERCEIVE, "source=${before.perception.source} reason=${before.perception.reason}" +
                     (if (before.strippedHiddenText > 0) " strippedHidden=${before.strippedHiddenText}" else "") +
                     (if (before.secureWindow) " secureWindow=true" else ""))
+                // B: count the visit, keep the first screen as a checkpoint, carry vision-located elements, and run a vision
+                // locate the recovery ladder asked for — only here, after the Secure Input boundary and the deny list; the
+                // locate re-checks privacy/consent before and after its one screenshot (agent/recovery/VisionLocate).
+                if (!directStep) {
+                    before = taskRecovery.onObserved(before)
+                    before = runPendingLocate(taskRecovery, ctxApp, before, history)
+                    taskMemory.visitLine = taskRecovery.visits.line(before)
+                    if (step > 2) taskMemory.wantPlan = false   // the "include a plan" nudge is for the first steps only
+                }
                 stats = stats.copy(steps = step, perceptionRoutes = bump(stats.perceptionRoutes, before.perception.source))
                 taskMemory.noteScreen(before.appPackage, before.screenTitle)   // Phase II P0: track current app/screen
                 futility.observed(before)      // a looked-for label that turned up (even a step late) exists after all
@@ -635,7 +810,9 @@ object AgentEngine {
                     } else {
                         val next = chain.first()
                         if (next.name == "type" && !next.args.has("element_id")) {
-                            val field = ActionChain.typeTarget(before)
+                            // B: after a vision tap aimed at a field, only the field it FOCUSED (VisionLocate.typeViaTap).
+                            val field = ActionChain.typeTarget(before,
+                                focusedOnly = next.rationale?.contains(com.tekyerema.agent.recovery.VisionLocate.FOCUS_TAG) == true)
                             if (field != null) next.args.put("element_id", field)
                             else if (chainTypeWaits++ < 3) {
                                 // The field the last tap opens may still be appearing: look again from the top of the loop
@@ -658,6 +835,19 @@ object AgentEngine {
 
                 when (decision) {
                     is AgentDecision.Done -> {
+                        // B: completion gate — every plan subgoal must be done (checks re-run on this screen first) or
+                        // skipped with a reason; otherwise the model is told exactly what's missing (agent/plan/TaskPlan).
+                        val planGate = if (decision.summary.trim().endsWith("?")) com.tekyerema.agent.plan.PlanTracker.Gate.Accept
+                            else taskMemory.plan.gate(before)
+                        if (planGate is com.tekyerema.agent.plan.PlanTracker.Gate.Refuse) {
+                            log(LogEntry.Kind.INFO, "completion gate: plan subgoal(s) ${planGate.open.joinToString { it.id.toString() }} still open — not done yet")
+                            history.add(planGate.note)
+                            journalCheckpoint()
+                            continue
+                        }
+                        val planOpen = (planGate as? com.tekyerema.agent.plan.PlanTracker.Gate.Unverified)?.open
+                        // B: if a smaller backup model did part of the task, the spoken result says so (once).
+                        val spokenSummary = decision.summary + route.disclosure()
                         // G-21: a PARTIAL step (scrolled or tapped on to new content without meeting its claim yet) is
                         // navigation, not a failed state change — it doesn't dilute the ratio. It never counts as verified
                         // either: if it was the LAST state-changing step, lastMutatingVerified is false and the gate holds.
@@ -678,12 +868,13 @@ object AgentEngine {
                         // (because an earlier step didn't verify) both spoke a wrong "…but I couldn't confirm it"
                         // tail AND stopped the voice layer's ask-card/mic-reopen (which keys off a trailing "?").
                         val isQuestion = decision.summary.trim().endsWith("?")
-                        if (isQuestion || (!ungroundedRead && (mutatingCount == 0 || substantiveOk))) {
-                            log(LogEntry.Kind.RESULT, decision.summary)
+                        if (isQuestion || (planOpen == null && !ungroundedRead && (mutatingCount == 0 || substantiveOk))) {
+                            log(LogEntry.Kind.RESULT, spokenSummary)
                             pushConvo("Tɛkyerɛma: ${decision.summary}")
                             finish(AgentStatus.COMPLETED, stats); return
                         }
                         val why = when {
+                            planOpen != null -> "plan subgoal(s) never verified: " + planOpen.joinToString("; ") { "${it.id}. ${it.text.take(50)}" }
                             ungroundedRead -> "answer asserts detail not present on the observed screen"
                             lastMutatingVerified != true -> "the most recent state-changing action did not verify"
                             else -> "only $mutatingVerified of $assessed state-changing actions verified (ratio ${"%.2f".format(ratio)})"
@@ -692,23 +883,39 @@ object AgentEngine {
                         // spoken) stays a PLAIN sentence. VoiceController appends the honest "— but I couldn't
                         // confirm it" for COMPLETED_UNVERIFIED, so the user never hears the jargon prefix.
                         log(LogEntry.Kind.INFO, "unverified completion: $why (outcome not backed by observation)")
-                        log(LogEntry.Kind.RESULT, decision.summary)
+                        log(LogEntry.Kind.RESULT, spokenSummary)
                         pushConvo("Tɛkyerɛma: ${decision.summary}")
                         finish(AgentStatus.COMPLETED_UNVERIFIED, stats); return
                     }
                     is AgentDecision.CannotDo -> {
+                        // WS-A: the network dropped, or no capable model / quota / budget is left (Workstream B's reason
+                        // classes) — that is not "can't do it": the task PAUSES with a checkpoint (journaled tasks only).
+                        val pauseFor = if (taskRun != null) com.tekyerema.agent.journal.PauseRules.forCannotDo(decision.reasonClass) else null
+                        if (pauseFor != null) {
+                            log(LogEntry.Kind.INFO, "CANNOT DO [${decision.reasonClass}] → pause")
+                            pauseRun(step, pauseFor, null, stats); return
+                        }
                         // RESULT is what gets SPOKEN — the reason class is for developers, not the user's ears.
+                        // (merge A+B: a run with no journal record can't be resumed — B's "I've paused this" becomes "I stopped".)
+                        val detail = com.tekyerema.agent.routing.ModelRouting.notResumable(decision.detail)
                         log(LogEntry.Kind.INFO, "CANNOT DO [${decision.reasonClass}]")
-                        log(LogEntry.Kind.RESULT, decision.detail)
+                        log(LogEntry.Kind.RESULT, detail)
                         // A dropped connection is about THAT moment. Remembered word for word ("the internet isn't
                         // working"), the model refused the next request on a working link (A20e, 2026-09-29).
                         val netDrop = decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST
                         pushConvo(if (netDrop) "Tɛkyerɛma: (that request didn't run — the connection dropped for a moment; " +
-                            "this says nothing about the connection now)" else "Tɛkyerɛma: ${decision.detail}")
+                            "this says nothing about the connection now)" else "Tɛkyerɛma: $detail")
                         finish(AgentStatus.CANNOT_DO, stats); return
                     }
                     is AgentDecision.Fail -> {
                         log(LogEntry.Kind.ERROR, decision.reason)
+                        // WS-A: a quota / rate limit (429) or an overloaded provider (503) mid-task PAUSES a journaled task
+                        // with a checkpoint instead of failing it — "try again in a minute" used to restart it from zero.
+                        val pauseFor = if (taskRun != null) com.tekyerema.agent.journal.PauseRules.forFail(decision.reason) else null
+                        if (pauseFor != null) {
+                            pauseRun(step, pauseFor, com.tekyerema.agent.journal.PauseRules.resumeAfter(decision.reason, System.currentTimeMillis()), stats)
+                            return
+                        }
                         // RESULT is spoken: give the user the real class of problem, never the raw error text.
                         // An overloaded provider (Gemini 503 "high demand", A20e 2026-09-29) is "busy" too, not "my side".
                         val busy = Regex("(?i)429|rate.?limit|quota|too many|cooling|\\b50[23]\\b|high demand|overloaded|unavailable")
@@ -727,6 +934,13 @@ object AgentEngine {
                         continue
                     }
                     is AgentDecision.CallTool -> {
+                        // B: a plan riding in this call (the first action of a multi-step goal, or a REPLAN) — already
+                        // stripped from the tool's arguments; the engine owns the subgoal statuses from here.
+                        decision.plan?.let { raw ->
+                            val change = taskMemory.plan.offer(raw)
+                            if (change != null) { log(LogEntry.Kind.PLAN, change); journalCheckpoint() }
+                            else log(LogEntry.Kind.INFO, "plan ignored (not 2–7 subgoals): ${raw.take(120)}")
+                        }
                         val tool = registry.get(decision.name)
                         if (tool == null) {
                             log(LogEntry.Kind.ERROR, "Unknown tool '${decision.name}'.")
@@ -736,8 +950,14 @@ object AgentEngine {
                         // C-13: ask the user and WAIT for the answer inside this task (it used to end the task with a question).
                         if (decision.name == "ask_user") {
                             val q = decision.args.optString("question").ifBlank { "Could you tell me a bit more?" }
-                            val opts = decision.args.optString("options").trim()
-                            val ans = if (unattended) null else askUser(q, if (opts.isNotEmpty()) "$q For example: $opts." else q)
+                            // E (agent/research/Options.kt): never the same question twice, ≤ 2 "which one" questions per task;
+                            // options read as "A, B, or C?" (≤ 3, most likely first) and noted so "the second one" resolves.
+                            val options = com.tekyerema.agent.research.SpokenOptions.split(decision.args.optString("options"))
+                            val refused = questions.refusal(q, options.size >= 2)
+                            if (refused != null) { history.add("ask_user(\"$q\") → not asked: $refused"); continue }
+                            questions.note(q, options.size >= 2)
+                            if (options.size >= 2) References.noteOptions(options)
+                            val ans = if (unattended) null else askUser(q, com.tekyerema.agent.research.SpokenOptions.withQuestion(q, options))
                             if (ans == null) {
                                 log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
                                 finish(AgentStatus.CANNOT_DO, stats); return
@@ -749,11 +969,17 @@ object AgentEngine {
                                 pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
                                 finish(AgentStatus.STOPPED, stats); return
                             }
-                            history.add("ask_user(\"$q\") → the user answered: \"$ans\"")
+                            val picked = (com.tekyerema.agent.research.OptionAnswer.parse(ans, options) as?
+                                com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.let { options[it.index] }
+                            history.add("ask_user(\"$q\") → the user answered: \"$ans\"" + (picked?.let { " (= $it)" } ?: ""))
                             continue
                         }
                         // G-12: several failed steps in a row — ask the user how to go on instead of burning steps (once per task).
-                        if (!unattended && decision.name != "cannot_do" && loopGuard.shouldEscalate(failStreak)) {
+                        // B: …or the recovery ladder reached its "ask the user" rung (same once-per-task allowance).
+                        val ladderEscalates = ladderAsk && loopGuard.escalateNow()
+                        ladderAsk = false
+                        if (!unattended && decision.name != "cannot_do" && (ladderEscalates || loopGuard.shouldEscalate(failStreak))) {
+                            taskRecovery.ladder.markTried(com.tekyerema.agent.recovery.Rung.ASK_USER)
                             // An app that isn't installed is the likely snag: ask about THAT, not "keep trying?" (which read
                             // as permission to hunt the home screen and the launcher search on the A20e).
                             val missing = notInstalledApp
@@ -814,6 +1040,14 @@ object AgentEngine {
                             history.add("${decision.name} → BLOCKED: this task started without the user; it may only read and tell, never act for them.")
                             continue
                         }
+                        // D (MCP): a paired computer's task may only read unless the user allowed remote actions (RemoteGate).
+                        val remoteRefusal = com.tekyerema.mcp.RemoteGate.refusal(origin, tool, com.tekyerema.mcp.RemoteControl.actionsAllowed)
+                        if (remoteRefusal != null) {
+                            stats = stats.copy(blocked = stats.blocked + 1)
+                            log(LogEntry.Kind.POLICY, "Blocked: ${decision.name} — $remoteRefusal")
+                            history.add("${decision.name} → BLOCKED: $remoteRefusal. Answer from what you can read, or call cannot_do.")
+                            continue
+                        }
                         // D-06: malformed or schema-violating arguments never reach a tool — the model gets the reason.
                         val argProblem = decision.argError ?: com.tekyerema.tools.ToolArgs.validate(tool, decision.args)
                         if (argProblem != null) {
@@ -821,28 +1055,13 @@ object AgentEngine {
                             history.add("${decision.name}(${shortArgs(decision.args)}) → rejected: $argProblem. Call it again with valid arguments.")
                             continue
                         }
-                        // G-21: a consequential action whose last attempt failed or didn't verify may still have gone through —
-                        // don't put it to the user again until the task has checked (never a second text or payment by accident).
+                        // The tool's STATIC consequence (non-idempotent, tier ≥ TIER2). Duplicate protection no longer keys on it:
+                        // WS-A moved D-09 / G-21 to the effect ledger below, which keys on what the GATE decided for this step.
                         val consequential = !com.tekyerema.tools.ToolManifest.meta(tool.name).idempotent &&
                             com.tekyerema.policy.PolicyConfig.effectiveTier(tool).ordinal >= RiskTier.TIER2.ordinal
-                        if (consequential && loopGuard.mustCheckFirst(tool.name)) {
-                            log(LogEntry.Kind.POLICY, "Not retrying ${decision.name} yet: the last attempt may have gone through — check first")
-                            history.add("${decision.name} → NOT retried yet: the previous ${decision.name} failed or didn't verify, but it may " +
-                                "still have happened. First CHECK whether it went through (read_state, or read_sms / call_log); retry only if it clearly didn't.")
-                            continue
-                        }
                         // B-12: tidy dictated words BEFORE the read-back, so what the user approves is exactly what is sent.
                         if (decision.name in DICTATED_TOOLS) for (k in listOf("text", "message"))
                             decision.args.optString(k).takeIf { it.isNotBlank() }?.let { decision.args.put(k, DictationCleanup.clean(it)) }
-                        // D-09: a send / call / payment that already succeeded in this task is never repeated — refused here,
-                        // BEFORE the confirmation, so the user is never asked to approve something that will then be refused.
-                        val sideEffectKey = if (consequential) tool.name + "|" + decision.args.toString() else null
-                        if (sideEffectKey != null && sideEffectKey in doneSideEffects) {
-                            log(LogEntry.Kind.POLICY, "Not repeating ${decision.name}: the identical action already succeeded in this task")
-                            history.add("${decision.name}(${shortArgs(decision.args)}) → NOT repeated: it already succeeded earlier in this task. " +
-                                "Check whether it worked instead of doing it again.")
-                            continue
-                        }
                         val expectation = Expects.parse(decision.expects)
                         // Mutating = changes device state (anything that isn't pure observation).
                         // Scope-based, so it stays generic — no per-tool flag, no app knowledge.
@@ -871,6 +1090,20 @@ object AgentEngine {
                                 is ResolveOutcome.OnlyWeak, is ResolveOutcome.NotFound -> { /* label may be revealed by scrolling at execute time */ }
                             }
                         }
+                        // B: `type` aimed at a vision element (OCR / vision locate) — no node to set text on: tap it, then
+                        // type into the field it FOCUSES. Two ordinary steps, each through this whole pipeline (policy gate,
+                        // Secure Input boundary, password check); the screen's vision elements are carried so the tap resolves.
+                        val viaTap = com.tekyerema.agent.recovery.VisionLocate.typeViaTap(decision, resolved?.element)
+                        if (viaTap != null) {
+                            taskRecovery.carried = com.tekyerema.agent.recovery.RecoveryCoordinator.visionOf(before)
+                            planned.addFirst(viaTap.first)
+                            chain.clear(); chain.add(viaTap.second)
+                            // chainPrevOk starts false: only the tap's own verified/changed result (end of its step) lets the
+                            // typing go ahead — a refused or failed tap stops the chain.
+                            chainTotal = 2; chainDone = 1; chainPrevOk = false; chainTypeWaits = 0
+                            log(LogEntry.Kind.PLAN, "Step $step: type into a vision-found field → tap it, then type into the field it focuses")
+                            continue
+                        }
                         // The home screen is not searched for icons (LauncherGuard): open_app, or ask the user.
                         val huntRefusal = LauncherGuard.check(decision.name, onHome = launcherPkg != null && before.appPackage == launcherPkg,
                             labelMissing = target != null && resolved == null, goal = goal, named = namedApp,
@@ -894,11 +1127,17 @@ object AgentEngine {
 
                         // ---- policy: target semantics + provenance, keyed on the resolved target, not the tool name ----
                         val cls = TargetSemantics.classify(decision.name, resolved?.element, requestedLabel, decision.args.boolOrDefault("submit", false), before)
-                        val tags = Provenance.tagArgs(decision.args, goal, before, untrustedRead)
-                        val untrusted = Provenance.hasUntrusted(tags)
+                        // D: provenance (with taint after third-party reads), the policy decision, hidden-target and remote
+                        // floors and the payload injection check — one pure function the injection suite tests (StepGate).
+                        val gate = com.tekyerema.policy.StepGate.assess(tool, decision.args, goal, before, untrustedRead,
+                            resolved?.element, origin) { u ->
+                            policy.evaluate(tool, decision.args, hasUntrustedParams = u, targetTier = cls.tier, hardBlock = cls.block)
+                        }
+                        val tags = gate.tags
+                        val untrusted = gate.untrusted
                         if (untrusted) log(LogEntry.Kind.POLICY, "provenance: ${Provenance.describe(tags)}")
                         if (cls.tier != null) log(LogEntry.Kind.POLICY, "target semantics: ${cls.reason} → ${cls.tier}")
-                        val pd = policy.evaluate(tool, decision.args, hasUntrustedParams = untrusted, targetTier = cls.tier, hardBlock = cls.block)
+                        var pd = gate.decision   // (WS-A: the effect ledger below may still raise it to CONFIRM)
                         // J-11: nothing is operated OR READ inside a denied app (read_state / read_all return screen text,
                         // which would reach the cloud model); a guide-only app is read and explained, never acted on.
                         val appRule = com.tekyerema.policy.ScreenPrivacy.appRule(decision.name, tool.grounded, mutating,
@@ -912,14 +1151,12 @@ object AgentEngine {
                         }
                         // J-06: a payload that itself carries instructions, or one taken from content that tried to give
                         // orders, stops the task before any confirmation — the user hears why; nothing is sent.
-                        val payloadInjection = Provenance.payloadKeys.firstNotNullOfOrNull { k ->
-                            if (decision.args.has(k)) com.tekyerema.core.Injection.detect(decision.args.optString(k)) else null
-                        }
+                        val payloadInjection = gate.payloadInjection
                         // J-19: an isolated guard model screens the third-party text behind a confirmable payload (flag, off by default).
                         val sentinelBad = if (untrusted && pd.outcome != PolicyOutcome.ALLOW && untrustedRead.isNotEmpty())
                             com.tekyerema.policy.Sentinel.check(untrustedRead.takeLast(3), set)?.malicious == true else false
                         if (sentinelBad && injectionSource == null) injectionSource = "a message the guard flagged"
-                        if (payloadInjection != null || sentinelBad || (injectionSource != null && untrusted && pd.outcome != PolicyOutcome.ALLOW)) {
+                        if (com.tekyerema.policy.StepGate.injectionStop(gate, sentinelBad, injectionSource)) {
                             val src = if (payloadInjection != null) "the text I was about to use" else injectionSource!!
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "INJECTION_STOP: ${decision.name} with a payload from untrusted content that contained instructions (${payloadInjection ?: injectionSource})")
@@ -927,6 +1164,34 @@ object AgentEngine {
                             pushConvo("Tɛkyerɛma: I stopped because $src tried to give me instructions.")
                             finish(AgentStatus.CANNOT_DO, stats); return
                         }
+                        // ---- WS-A effect ledger (replaces D-09 / G-21): the CONSEQUENCE of this step — a tap on Send, type +
+                        // submit into a chat, send_sms… keyed on kind + target + payload hash — is looked up across tasks and
+                        // restarts once the gate has decided, before anything is asked or done. Done in this task → refused;
+                        // done (or maybe done) earlier → the user is asked, even if the policy would have allowed it. ----
+                        val effectSpec = if (mutating && pd.outcome != PolicyOutcome.BLOCK && !com.tekyerema.tools.ToolManifest.meta(tool.name).idempotent)
+                            try { com.tekyerema.agent.journal.EffectKeys.describe(decision.name, decision.args, resolved?.element, requestedLabel,
+                                decision.args.boolOrDefault("submit", false), before) } catch (_: Throwable) { null }   // the gate still confirms
+                            else null
+                        var effectLine: String? = null
+                        if (effectSpec != null) when (val v = effects.check(effectSpec, before)) {
+                            is com.tekyerema.agent.journal.EffectGate.Verdict.Refuse -> {
+                                log(LogEntry.Kind.POLICY, "Effect ledger: ${decision.name} ${v.log}")
+                                history.add("${decision.name}(${shortArgs(decision.args)}) → ${v.note}")
+                                continue
+                            }
+                            is com.tekyerema.agent.journal.EffectGate.Verdict.AskAgain -> {
+                                log(LogEntry.Kind.POLICY, "Effect ledger: the same consequence is on record (${v.prior.state}) — asking the user")
+                                effectLine = v.line
+                                if (pd.outcome != PolicyOutcome.CONFIRM) pd = pd.copy(outcome = PolicyOutcome.CONFIRM,
+                                    reason = "The same action is on record — the user decides whether to repeat it.")
+                                // (merge A+D: a step raised to CONFIRM here meets StepGate's CONFIRM rule too — never on a
+                                // control a person can't perceive as the agent reads it.)
+                                pd = com.tekyerema.policy.StepGate.unseenFloor(resolved?.element, pd)
+                            }
+                            com.tekyerema.agent.journal.EffectGate.Verdict.Proceed -> {}
+                        }
+                        // Recorded in the ledger: what the gate made the user confirm, and statically consequential tools.
+                        val effectful = effectSpec != null && (pd.outcome == PolicyOutcome.CONFIRM || consequential)
                         when (pd.outcome) {
                             PolicyOutcome.BLOCK -> {
                                 stats = stats.copy(blocked = stats.blocked + 1)
@@ -939,7 +1204,8 @@ object AgentEngine {
                                 continue
                             }
                             PolicyOutcome.CONFIRM -> {
-                              if (moneyOpApproved && isDialerNavigation(before) &&
+                              // (WS-A: a step the ledger has on record is always asked — the Mobile-Money pass never skips it.)
+                              if (effectLine == null && moneyOpApproved && isDialerNavigation(before) &&
                                   moneyApproval.covers(decision.name, decision.args, resolved?.element?.label ?: requestedLabel)) {
                                 // The transfer (recipient + amount) was already approved once; the user chose guided
                                 // navigation, so don't re-ask at every USSD menu step (it would time out). The PIN is
@@ -1004,13 +1270,25 @@ object AgentEngine {
                                 // (an editable's label is its CONTENT, not its name — so a text field is "the text box")
                                 val itemName = if (resolved?.element?.editable == true) "the text box"
                                     else resolved?.element?.label?.takeIf { it.isNotBlank() }?.let { "“${it.take(40)}”" } ?: "the selected item"
-                                val prompt = enrichCallConfirmation(decision.name, decision.args, basePrompt, ctxApp)
+                                val plainPrompt = enrichCallConfirmation(decision.name, decision.args, basePrompt, ctxApp)
                                     .replace(Regex("\\belement \\d+\\b"), itemName)
+                                // D: a recipient the goal never named is said to be one (and where it came from); a paired
+                                // computer's request says so first (ActionSemantics / RemoteGate).
+                                // WS-A: the ledger's "I already sent this to Ama at 10:02 — send it again?" leads the read-back
+                                // (after "Your computer is asking me…" for a remote task).
+                                val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
+                                    com.tekyerema.policy.ActionSemantics.withRecipientNotice(
+                                    plainPrompt, com.tekyerema.policy.ActionSemantics.recipientNotice(decision.name, decision.args,
+                                        resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal, tags)))
                                 // §A.1 — a Twi rendering of the SAME action, built from structure (verbatim
                                 // name + digit-by-digit number), for the core confirmable intents. Null for
                                 // anything we can't render structurally → the English line is used.
+                                // D: the Twi template can't carry "your computer is asking" or an unnamed-recipient notice —
+                                // then the full English sentence is spoken rather than a Twi one that leaves the warning out.
+                                // (WS-A: nor the ledger's "already sent" warning — any addition to the plain prompt means English.)
                                 val promptTwi = confirmSpecFor(decision.name, decision.args, ctxApp)
                                     ?.let { com.tekyerema.voice.ConfirmTemplates.twi(it) }
+                                    ?.takeIf { prompt == plainPrompt }
                                 stats = stats.copy(confirmations = stats.confirmations + 1)
                                 log(LogEntry.Kind.CONFIRM, prompt)
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
@@ -1160,8 +1438,11 @@ object AgentEngine {
                         setStatus(AgentStatus.ACTING)
                         val toolCtx = ToolContext(ctxApp, controller, NotificationStore, observedBefore = before, resolvedTarget = resolved)
                         val actionMark = controller?.lastEventUptime() ?: 0L   // G-10: settle waits for events AFTER this
+                        // WS-A: INTENDED is on disk (fsync'd) BEFORE the tool runs — a crash between the tap and the next write
+                        // still leaves "this may have happened", checked in the world before anything is redone.
+                        val effect = if (effectful) effects.intend(effectSpec!!, decision.name) else null
                         val result = ActionQueue.run { tool.execute(decision.args, toolCtx) }
-                        if (result.success && sideEffectKey != null) doneSideEffects.add(sideEffectKey)
+                        effect?.let { effects.dispatched(it, result.success, result.message) }
                         // C-22: remember who this was about, for "call her back" / "text him" next time.
                         if (result.success) when (decision.name) {
                             "make_call", "send_sms" -> References.notePerson(decision.args.optString("contact").ifBlank { null })
@@ -1174,7 +1455,7 @@ object AgentEngine {
                         if (mutating) com.tekyerema.audit.AuditLog.record(source,
                             if (result.success) com.tekyerema.audit.AuditLog.DONE else com.tekyerema.audit.AuditLog.FAILED,
                             com.tekyerema.audit.ActionWords.describe(decision.name, decision.args, resolved?.element?.label), runCtx.auditTask)
-                        if (consequential && result.success) runCtx.irreversible.add(com.tekyerema.audit.ActionWords.noun(decision.name, decision.args))
+                        if ((consequential || effect != null) && result.success) runCtx.irreversible.add(com.tekyerema.audit.ActionWords.noun(decision.name, decision.args))
                         // Phase II P0: remember durable entities the goal named so they survive step-to-step.
                         if (result.success) when (decision.name) {
                             "momo_send" -> { taskMemory.noteEntity("number", decision.args.str("number")); taskMemory.noteEntity("amount", decision.args.str("amount")) }
@@ -1189,103 +1470,17 @@ object AgentEngine {
                         // Everything else is observed again, on the same route the decision used, and the
                         // claim is re-checked over a short window — a launched app or a sent message can
                         // take a moment to appear, and a single instant snapshot is a race (round 9 finding).
-                        var afterSig: String? = null   // REL-P2 stall: post-action screen signature (null on PERCEIVE/secure → not counted)
-                        var afterSnap: UiSnapshot? = null   // G-21: the verified-against screen (null on PERCEIVE/WEB/secure)
-                        var extraScrolls = 0                // G-21 goal-directed scroll: scrolls made after the model's one
-                        var listEnded = false               // …and whether the list stopped moving before the claim was met
-                        val passedScreens = ArrayList<UiSnapshot>()   // …and the screens it scrolled past on the way
-                        val vr: com.tekyerema.verifier.VerificationResult
-                        if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE || tool.scope == com.tekyerema.policy.CapabilityScope.WEB) {
-                            vr = tool.verify(decision.args, toolCtx, before, before, result)
-                        } else {
-                            // G-10: wait for the screen to react to THIS action, then to go quiet — bounded (REL-P1-3: a long quiet
-                            // wait starves on animated screens); a dead tap costs reactMs, not a fixed sleep.
-                            controller?.waitForChange(actionMark,
-                                com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
-                                com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
-                            // SECURE INPUT BOUNDARY (verify path): a mutating action can LAND on a credential
-                            // screen — the MoMo PIN prompt appears as the RESULT of confirming the amount, so it
-                            // is first seen HERE as `after`, not at the top of the loop. observeForVerify inspects
-                            // the raw a11y tree BEFORE any screenshot/OCR (Perception.observe can auto-escalate to
-                            // a screenshot even when vision isn't requested) and never captures a credential
-                            // screen. If we land on one we suspend verification; the top-of-loop boundary enters
-                            // Secure Input Mode on the next iteration. Keeps a PIN/password out of screenshots+OCR.
-                            var after = observeForVerify(controller, before.perception.usedVision)
-                            if (TargetSemantics.isCredentialScreen(after)) {
-                                vr = com.tekyerema.verifier.VerificationResult(true,
-                                    "reached a secure-input screen — verification suspended, screen not observed")
-                            } else {
-                                var toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
-                                var v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
-                                var polls = 0
-                                // REL-P1-3: 3 re-polls normally; up to 8 while the screen is MID-TRANSITION (no package / no
-                                // elements — an app cold-starting after its icon was tapped). Seen on-device: "open Chrome"
-                                // by icon read as unverified at ~1.5 s, and the model then launched Chrome a second time.
-                                fun maxPolls(a: UiSnapshot) = if (a.appPackage.isNullOrBlank() || a.elements.isEmpty()) 8 else 3
-                                // A scroll/swipe lands at once: when the moved screen held still across a re-poll, waiting longer
-                                // can't make the claimed element appear (A20e: every unverified scroll sat through 3 polls, ~3 s).
-                                val landsAtOnce = decision.name == "scroll" || decision.name == "swipe"
-                                var lastPollSig = after.signature()
-                                while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < maxPolls(after)) {
-                                    kotlinx.coroutines.delay(500)
-                                    after = observeForVerify(controller, before.perception.usedVision)
-                                    if (TargetSemantics.isCredentialScreen(after)) break
-                                    toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
-                                    v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
-                                    polls++
-                                    val sig = after.signature()
-                                    if (landsAtOnce && sig == lastPollSig && sig != before.signature()) break
-                                    lastPollSig = sig
-                                }
-                                // G-21 goal-directed scroll (Progress.keepScrolling): the claim names what the model is scrolling
-                                // TOWARD, so keep scrolling the same way until it shows, the list stops moving, or the app changes —
-                                // one planning step instead of one per screenful (One UI's "About phone" is 3 screens down). Only an
-                                // allowed, non-consequential scroll; the credential check runs on every screen before any capture.
-                                val sought = Progress.soughtLabel(expectation)
-                                if (pd.outcome == PolicyOutcome.ALLOW && !consequential && !TargetSemantics.isCredentialScreen(after)) {
-                                    var prev = after
-                                    var moved = prev.signature() != before.signature()
-                                    while (Progress.keepScrolling(decision.name, result.success, v.verified, sought,
-                                            sameApp = prev.appPackage == before.appPackage, moved = moved, repeats = extraScrolls)) {
-                                        // Element ids are per snapshot: re-find the SAME list in the fresh one (no target → the tool
-                                        // takes the first scrollable, as the model's call did).
-                                        val again = resolved?.element?.let { (TargetResolver.reResolve(it, prev) as? ResolveOutcome.Found)?.target }
-                                        if (resolved != null && again == null) break
-                                        val mark = controller?.lastEventUptime() ?: 0L
-                                        val r2 = ActionQueue.run {
-                                            tool.execute(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = prev, resolvedTarget = again))
-                                        }
-                                        extraScrolls++
-                                        stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, r2.channel))
-                                        if (!r2.success) break
-                                        controller?.waitForChange(mark,
-                                            com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
-                                            com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
-                                        var next = observeForVerify(controller, before.perception.usedVision)
-                                        if (!TargetSemantics.isCredentialScreen(next) && next.signature() == prev.signature()) {
-                                            kotlinx.coroutines.delay(400)   // a slow fling: one more look before calling it the end
-                                            next = observeForVerify(controller, before.perception.usedVision)
-                                        }
-                                        after = next
-                                        if (TargetSemantics.isCredentialScreen(next)) break
-                                        moved = next.signature() != prev.signature()
-                                        if (!moved) listEnded = true
-                                        toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
-                                        v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
-                                        passedScreens.add(prev)   // scrolled past: "seen" for novelty, but never the final screen
-                                        prev = next
-                                    }
-                                    if (extraScrolls > 0) log(LogEntry.Kind.ACTION, "scroll → kept scrolling $extraScrolls more time" +
-                                        "${if (extraScrolls > 1) "s" else ""} toward '${sought?.take(50)}'" +
-                                        when { v.verified -> " — found it"; listEnded -> " — reached the end of the list"; else -> "" })
-                                }
-                                afterSig = after.signature()   // REL-P2 stall: capture the post-action screen signature
-                                if (!TargetSemantics.isCredentialScreen(after)) afterSnap = after
-                                vr = if (TargetSemantics.isCredentialScreen(after))
-                                    com.tekyerema.verifier.VerificationResult(true, "reached a secure-input screen — verification suspended, screen not observed")
-                                else if (polls > 0) v.copy(detail = v.detail + " (after ${polls} re-observation${if (polls > 1) "s" else ""})") else v
-                            }
-                        }
+                        // (The body is [verifyStep] — moved out of runTask at the A+E+B+D merge: the loop hit the JVM's 64 KB
+                        // method limit. Same code, same Secure Input boundary on the verify path.)
+                        val check = verifyStep(tool, decision, toolCtx, before, result, expectation, actionMark,
+                            allowScrollOn = pd.outcome == PolicyOutcome.ALLOW && !consequential, resolved = resolved, ctxApp = ctxApp)
+                        check.scrollChannels.forEach { stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, it)) }
+                        val vr = check.vr
+                        val afterSig = check.afterSig   // REL-P2 stall: post-action screen signature (null on PERCEIVE/secure → not counted)
+                        val afterSnap = check.afterSnap   // G-21: the verified-against screen (null on PERCEIVE/WEB/secure)
+                        val extraScrolls = check.extraScrolls   // G-21 goal-directed scroll: scrolls made after the model's one
+                        val listEnded = check.listEnded         // …and whether the list stopped moving before the claim was met
+                        val passedScreens = check.passedScreens // …and the screens it scrolled past on the way
                         // G-21: how far this step moved the task (Progress) — novelty is measured BEFORE this screen is noted.
                         val sameApp = afterSnap != null && afterSnap.appPackage == before.appPackage
                         passedScreens.forEach(exploration::note)
@@ -1301,6 +1496,9 @@ object AgentEngine {
                         log(LogEntry.Kind.VERIFY, if (vr.verified) "verified — ${vr.detail}"
                             else if (verdict == Progress.Verdict.PARTIAL) "PARTIAL — ${vr.detail}; but the screen moved on to $novel new item(s)"
                             else "NOT verified — ${vr.detail}")
+                        // WS-A: the ledger row settles — CONFIRMED when verified; otherwise the chat on screen may still tell
+                        // (message still in the box = not sent), else UNKNOWN: reconciled before any retry, never retried blind.
+                        effect?.let { effects.settled(it, vr.verified, vr.detail, afterSnap) }
                         runCtx.trajectory?.step(before.toCompactJson(), decision.name, decision.args, result.message, vr.verified)   // Q-07 (opt-in)
                         if (tool.scope != com.tekyerema.policy.CapabilityScope.PERCEIVE) {
                             stats = if (vr.verified) stats.copy(verifiedTrue = stats.verifiedTrue + 1) else stats.copy(verifiedFalse = stats.verifiedFalse + 1)
@@ -1317,9 +1515,8 @@ object AgentEngine {
                         // turning up new content, and reads, hold it (A20e: two scrolls toward "About phone" asked the user
                         // "keep trying or stop?" one step later).
                         failStreak = Progress.nextFailStreak(failStreak, verdict)
-                        // G-21: reads check uncertain outcomes; a consequential action's outcome is remembered until then.
-                        if (decision.name in CHECK_TOOLS && result.success) loopGuard.noteChecked()
-                        if (consequential) loopGuard.noteConsequential(tool.name, result.success, vr.verified)
+                        // (G-21's "uncertain until any read" is the effect ledger's job now — WS-A: only a world check that
+                        // recognises the outcome counts as checked, not a read of some unrelated screen.)
                         // G-12: two failed steps in a row on the plain tree → take the next look with vision (on-device OCR).
                         if (failStreak >= 2 && !before.perception.usedVision &&
                             com.tekyerema.core.config.AppConfig.bool("executor.recovery.visionOnFailure", true)) visionNext = true
@@ -1449,13 +1646,43 @@ object AgentEngine {
                                 (if (untrustedOut) "$UNTRUSTED_MARK " else "") + "${result.message.take(resultLimit(decision.name))}${recovery}" +
                                 (if (entities.isEmpty()) "" else " [${com.tekyerema.core.TextEntities.summary(entities)}]")
                         )
+
+                        // ---- B: outcome class → plan ticks, checkpoints/barriers, then the class's own fix: close a popup,
+                        // backtrack from a wrong page, or the next recovery-ladder rung (agent/recovery/*, agent/plan/*;
+                        // the body is [recoverAfterStep]) ----
+                        val acts = recoverAfterStep(taskRecovery, com.tekyerema.agent.recovery.RecoveryCoordinator.Step(
+                            decision = decision, verdict = verdict, success = result.success, recoverable = result.recoverable,
+                            needsUser = result.needsDisambiguation, message = result.message,
+                            targetMissing = target != null && resolved == null, requestedLabel = requestedLabel,
+                            resolvedLabel = resolved?.element?.label,
+                            resolvedFromTree = resolved?.element?.source != com.tekyerema.accessibility.ElementSource.VISION,
+                            // (merge A+B: a step the effect ledger recorded — a GUI Send, type+submit into a chat — is
+                            // consequential here too: a backtrack barrier, and no recovery ladder after it fails.)
+                            expectation = expectation, before = before, after = afterSnap, consequential = consequential || effect != null,
+                            confirmed = pd.outcome == PolicyOutcome.CONFIRM, mutating = mutating,
+                            scrolled = extraScrolls > 0 || listEnded, launcherPkg = launcherPkg),
+                            canAsk = !unattended, taskMemory = taskMemory, history = history, planned = planned)
+                        if (acts.visionNext) visionNext = true
+                        if (acts.ask) ladderAsk = true
+                        journalCheckpoint()
                         // I-03 web-first: the search's own short answer IS the reply — no second planning call to restate it.
                         // A failed search leaves the queue empty, so the planner takes over with the failure in its history.
                         if (webFirst && decision.name == "web_search" && result.success)
                             WebFirst.spoken(result.data?.optString("answer"))?.let { planned.add(AgentDecision.Done(it)) }
+                        // E: a research-planned open that ran ends the task with its line ("Opening UG Sakai at …"); the pick
+                        // is remembered once the site verifiably came up. A failed open leaves the planner to carry on.
+                        if (decision.rationale == com.tekyerema.agent.research.TargetResearch.TAG)
+                            research?.after(result.success, vr.verified)?.let { planned.add(AgentDecision.Done(it)) }
                         // G-11: the chain goes on only if this step ran and did something (verified, or changed the screen).
                         if (decision.rationale?.startsWith(ActionChain.TAG) == true)
                             chainPrevOk = ActionChain.stepPassed(result.success, vr.verified, afterSig != null && afterSig != before.signature())
+                        // WS-A: checkpoint after every executed step; a VERIFIED state change is remembered in plain words
+                        // ("opened WhatsApp") with the screen it verified on, for the resume offer and "is the phone where it was?".
+                        if (taskRun != null) {
+                            if (mutating && vr.verified) taskRun.noteVerified(
+                                com.tekyerema.audit.ActionWords.describe(decision.name, decision.args, resolved?.element?.label), afterSnap)
+                            checkpointNow(step)
+                        }
                     }
                 }
             }
@@ -1463,6 +1690,7 @@ object AgentEngine {
             finish(AgentStatus.FAILED, stats)
         } catch (ce: CancellationException) {
             log(LogEntry.Kind.STATS, stats.summary())
+            runCtx.journal?.finish(com.tekyerema.agent.journal.TaskState.CANCELLED)   // WS-A: stopped by the user — not resumable
             if (activeRun === runCtx) { activeRun = null; com.tekyerema.core.telemetry.Telemetry.endTurn("stopped", byVoice = false) }
             setStatus(AgentStatus.STOPPED)
             throw ce
@@ -1470,6 +1698,231 @@ object AgentEngine {
             log(LogEntry.Kind.ERROR, "Error: ${t.message}")
             finish(AgentStatus.FAILED, stats)
         }
+    }
+
+    // ---------------------------------------------------------------- pieces of the loop, moved out of runTask
+    // Integration note (A+E+B merge, 2026-09-29): runTask outgrew the JVM's 64 KB-per-method bytecode limit
+    // (MethodTooLargeException — every suspension point in a suspend fun spills all its live locals). The verify step and
+    // Workstream B's two largest blocks live here instead — same code, same order, called from the same places in the loop.
+
+    /** What observing again after an executed step showed ([verifyStep]). */
+    private class StepCheck(
+        val vr: com.tekyerema.verifier.VerificationResult,
+        /** REL-P2 stall: post-action screen signature (null on PERCEIVE/WEB/secure → not counted) */
+        val afterSig: String?,
+        /** G-21: the verified-against screen (null on PERCEIVE/WEB/secure) */
+        val afterSnap: UiSnapshot?,
+        /** G-21 goal-directed scroll: scrolls made after the model's one, whether the list stopped moving before the claim
+         *  was met, and the screens scrolled past on the way */
+        val extraScrolls: Int, val listEnded: Boolean, val passedScreens: List<UiSnapshot>,
+        /** each extra scroll's channel (each is one more action in the run's stats) */
+        val scrollChannels: List<String>
+    )
+
+    /**
+     * ---- observe again, verify the CLAIM against a fresh observation ----
+     * Perception-only tools don't change the device: their own observation stands. Everything else is observed again, on
+     * the same route the decision used, and the claim is re-checked over a short window — a launched app or a sent message
+     * can take a moment to appear, and a single instant snapshot is a race (round 9 finding).
+     * @param allowScrollOn the step was ALLOWED (not confirmed) and isn't consequential — only then may G-21 keep scrolling
+     */
+    private suspend fun verifyStep(
+        tool: com.tekyerema.tools.Tool, decision: AgentDecision.CallTool, toolCtx: ToolContext, before: UiSnapshot,
+        result: com.tekyerema.tools.ToolResult, expectation: com.tekyerema.verifier.Expectation?, actionMark: Long,
+        allowScrollOn: Boolean, resolved: ResolvedTarget?, ctxApp: Context
+    ): StepCheck {
+        var afterSig: String? = null
+        var afterSnap: UiSnapshot? = null
+        var extraScrolls = 0
+        var listEnded = false
+        val passedScreens = ArrayList<UiSnapshot>()
+        val scrollChannels = ArrayList<String>()
+        val vr: com.tekyerema.verifier.VerificationResult
+        if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE || tool.scope == com.tekyerema.policy.CapabilityScope.WEB) {
+            vr = tool.verify(decision.args, toolCtx, before, before, result)
+        } else {
+            // G-10: wait for the screen to react to THIS action, then to go quiet — bounded (REL-P1-3: a long quiet
+            // wait starves on animated screens); a dead tap costs reactMs, not a fixed sleep.
+            controller?.waitForChange(actionMark,
+                com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
+                com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
+            // SECURE INPUT BOUNDARY (verify path): a mutating action can LAND on a credential
+            // screen — the MoMo PIN prompt appears as the RESULT of confirming the amount, so it
+            // is first seen HERE as `after`, not at the top of the loop. observeForVerify inspects
+            // the raw a11y tree BEFORE any screenshot/OCR (Perception.observe can auto-escalate to
+            // a screenshot even when vision isn't requested) and never captures a credential
+            // screen. If we land on one we suspend verification; the top-of-loop boundary enters
+            // Secure Input Mode on the next iteration. Keeps a PIN/password out of screenshots+OCR.
+            var after = observeForVerify(controller, before.perception.usedVision)
+            if (TargetSemantics.isCredentialScreen(after)) {
+                vr = com.tekyerema.verifier.VerificationResult(true,
+                    "reached a secure-input screen — verification suspended, screen not observed")
+            } else {
+                var toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
+                var v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
+                var polls = 0
+                // REL-P1-3: 3 re-polls normally; up to 8 while the screen is MID-TRANSITION (no package / no
+                // elements — an app cold-starting after its icon was tapped). Seen on-device: "open Chrome"
+                // by icon read as unverified at ~1.5 s, and the model then launched Chrome a second time.
+                fun maxPolls(a: UiSnapshot) = if (a.appPackage.isNullOrBlank() || a.elements.isEmpty()) 8 else 3
+                // A scroll/swipe lands at once: when the moved screen held still across a re-poll, waiting longer
+                // can't make the claimed element appear (A20e: every unverified scroll sat through 3 polls, ~3 s).
+                val landsAtOnce = decision.name == "scroll" || decision.name == "swipe"
+                var lastPollSig = after.signature()
+                while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < maxPolls(after)) {
+                    kotlinx.coroutines.delay(500)
+                    after = observeForVerify(controller, before.perception.usedVision)
+                    if (TargetSemantics.isCredentialScreen(after)) break
+                    toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
+                    v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
+                    polls++
+                    val sig = after.signature()
+                    if (landsAtOnce && sig == lastPollSig && sig != before.signature()) break
+                    lastPollSig = sig
+                }
+                // G-21 goal-directed scroll (Progress.keepScrolling): the claim names what the model is scrolling
+                // TOWARD, so keep scrolling the same way until it shows, the list stops moving, or the app changes —
+                // one planning step instead of one per screenful (One UI's "About phone" is 3 screens down). Only an
+                // allowed, non-consequential scroll; the credential check runs on every screen before any capture.
+                val sought = Progress.soughtLabel(expectation)
+                if (allowScrollOn && !TargetSemantics.isCredentialScreen(after)) {
+                    var prev = after
+                    var moved = prev.signature() != before.signature()
+                    while (Progress.keepScrolling(decision.name, result.success, v.verified, sought,
+                            sameApp = prev.appPackage == before.appPackage, moved = moved, repeats = extraScrolls)) {
+                        // Element ids are per snapshot: re-find the SAME list in the fresh one (no target → the tool
+                        // takes the first scrollable, as the model's call did).
+                        val again = resolved?.element?.let { (TargetResolver.reResolve(it, prev) as? ResolveOutcome.Found)?.target }
+                        if (resolved != null && again == null) break
+                        val mark = controller?.lastEventUptime() ?: 0L
+                        val r2 = ActionQueue.run {
+                            tool.execute(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = prev, resolvedTarget = again))
+                        }
+                        extraScrolls++
+                        scrollChannels.add(r2.channel)
+                        if (!r2.success) break
+                        controller?.waitForChange(mark,
+                            com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
+                            com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
+                        var next = observeForVerify(controller, before.perception.usedVision)
+                        if (!TargetSemantics.isCredentialScreen(next) && next.signature() == prev.signature()) {
+                            kotlinx.coroutines.delay(400)   // a slow fling: one more look before calling it the end
+                            next = observeForVerify(controller, before.perception.usedVision)
+                        }
+                        after = next
+                        if (TargetSemantics.isCredentialScreen(next)) break
+                        moved = next.signature() != prev.signature()
+                        if (!moved) listEnded = true
+                        toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
+                        v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
+                        passedScreens.add(prev)   // scrolled past: "seen" for novelty, but never the final screen
+                        prev = next
+                    }
+                    if (extraScrolls > 0) log(LogEntry.Kind.ACTION, "scroll → kept scrolling $extraScrolls more time" +
+                        "${if (extraScrolls > 1) "s" else ""} toward '${sought?.take(50)}'" +
+                        when { v.verified -> " — found it"; listEnded -> " — reached the end of the list"; else -> "" })
+                }
+                afterSig = after.signature()   // REL-P2 stall: capture the post-action screen signature
+                if (!TargetSemantics.isCredentialScreen(after)) afterSnap = after
+                vr = if (TargetSemantics.isCredentialScreen(after))
+                    com.tekyerema.verifier.VerificationResult(true, "reached a secure-input screen — verification suspended, screen not observed")
+                else if (polls > 0) v.copy(detail = v.detail + " (after ${polls} re-observation${if (polls > 1) "s" else ""})") else v
+            }
+        }
+        return StepCheck(vr, afterSig, afterSnap, extraScrolls, listEnded, passedScreens, scrollChannels)
+    }
+
+    /** B: the vision locate the recovery ladder asked for, on [screen] (already past the Secure Input boundary and the deny
+     *  list — the locate re-checks privacy/consent before and after its one screenshot). Returns the screen, with the
+     *  located element added when one was found. */
+    private suspend fun runPendingLocate(rec: com.tekyerema.agent.recovery.RecoveryCoordinator, ctxApp: Context,
+                                         screen: UiSnapshot, history: MutableList<String>): UiSnapshot {
+        val want = rec.pendingLocate ?: return screen
+        rec.pendingLocate = null
+        var before = screen
+        when (val r = com.tekyerema.agent.recovery.VisionLocate.locate(controller, ctxApp, want, before, rec.locatesUsed)) {
+            is com.tekyerema.agent.recovery.VisionLocate.Result.Found -> {
+                rec.locatesUsed++
+                before = before.copy(elements = before.elements + r.element)
+                rec.carried = com.tekyerema.agent.recovery.RecoveryCoordinator.visionOf(before)
+                log(LogEntry.Kind.PERCEIVE, "vision locate: found '${want.take(40)}' → element ${r.element.id}")
+                history.add("VISION LOCATE: '${want.take(50)}' was found in a picture of the screen → element [${r.element.id}] " +
+                    "(source=vision). Tap it by element_id if it's what you need; to type into it, call type with that element_id.")
+            }
+            is com.tekyerema.agent.recovery.VisionLocate.Result.NotFound -> {
+                rec.locatesUsed++
+                log(LogEntry.Kind.PERCEIVE, "vision locate: '${want.take(40)}' not found")
+                history.add("VISION LOCATE: '${want.take(50)}' isn't visible in a picture of the screen either.")
+            }
+            is com.tekyerema.agent.recovery.VisionLocate.Result.Refused -> log(LogEntry.Kind.INFO, "vision locate not run: ${r.why}")
+        }
+        return before
+    }
+
+    /** B: after an executed step — its outcome class → plan ticks, checkpoints/barriers, then the class's own fix: close a
+     *  popup, backtrack from a wrong page, or the next recovery-ladder rung. History notes and engine-chosen steps are added
+     *  to [history] / [planned]; the caller applies the returned [Actions]' visionNext / ask. */
+    private suspend fun recoverAfterStep(
+        rec: com.tekyerema.agent.recovery.RecoveryCoordinator, first: com.tekyerema.agent.recovery.RecoveryCoordinator.Step,
+        canAsk: Boolean, taskMemory: TaskMemory, history: MutableList<String>, planned: ArrayDeque<AgentDecision>
+    ): com.tekyerema.agent.recovery.RecoveryCoordinator.Actions {
+        var bStep = first
+        val before = bStep.before
+        val decision = bStep.decision
+        var outcome = rec.classify(bStep)
+        // Only on a settled screen: a wrong app or a popup must still be there on a second look.
+        if (bStep.after != null && (outcome == com.tekyerema.agent.recovery.OutcomeClass.WRONG_PAGE ||
+                outcome == com.tekyerema.agent.recovery.OutcomeClass.DIALOG)) {
+            kotlinx.coroutines.delay(com.tekyerema.core.config.AppConfig.long("agent.recovery.settleMs", 500L))
+            val again = observeForVerify(controller, false)
+            if (!TargetSemantics.isCredentialScreen(again)) { bStep = bStep.copy(after = again); outcome = rec.classify(bStep) }
+        }
+        val acts = rec.afterStep(bStep, outcome, canAsk = canAsk)
+        if (outcome.failure) log(LogEntry.Kind.VERIFY, "outcome: ${outcome.name.lowercase()}")
+        acts.logs.forEach { log(LogEntry.Kind.INFO, it) }
+        val ticked = taskMemory.plan.onStep(com.tekyerema.agent.plan.PlanTracker.StepEvidence(
+            verified = bStep.verdict == Progress.Verdict.VERIFIED,
+            read = bStep.verdict == Progress.Verdict.OBSERVED && bStep.success,
+            failed = outcome.failure, before = before, after = bStep.after))
+        if (ticked.isNotEmpty()) {
+            rec.ladder.reset()   // a new subgoal starts a fresh ladder
+            log(LogEntry.Kind.PLAN, "subgoal done: " + ticked.joinToString("; ") { "${it.id}. ${it.text} (${it.evidence})" })
+        }
+        history.addAll(acts.notes)
+        acts.planned.forEach { planned.add(it) }
+        if (acts.backtrack) {
+            // Engine backtracking: Back until the last verified checkpoint matches (≤3), else relaunch + replay
+            // the verified navigation. Never on a credential screen, a phone session, over a typed draft, or
+            // across a consequential step (Backtracker barriers + the EffectLedger).
+            val bt = rec.backtracker.run(bStep.after ?: before, object : com.tekyerema.agent.recovery.Backtracker.Ops {
+                override suspend fun back(): Boolean = controller?.globalAction("back") == true
+                override suspend fun observe(): UiSnapshot? {
+                    controller?.waitForSettle(com.tekyerema.core.config.AppConfig.long("executor.launch.settleMs", 1200L))
+                    return observeForVerify(controller, false).takeIf { !TargetSemantics.isCredentialScreen(it) }
+                }
+            }, rec.typedTexts)
+            val how = com.tekyerema.agent.recovery.VisitCounter.actionKey(decision.name, decision.args, bStep.resolvedLabel)
+            val why = outcome.name.lowercase().replace('_', ' ')
+            when (bt) {
+                is com.tekyerema.agent.recovery.Backtracker.Result.Reached -> {
+                    log(LogEntry.Kind.ACTION, "backtrack → ${bt.presses} Back press(es) to ${bt.to.appName ?: bt.to.key.pkg}")
+                    history.add("BACKTRACK (engine): $how ended in a $why, so I pressed Back ${bt.presses} time(s) to the last " +
+                        "screen that worked (${bt.to.appName ?: bt.to.key.pkg}${bt.to.key.title?.let { " · $it" } ?: ""}). Don't take that route again.")
+                }
+                is com.tekyerema.agent.recovery.Backtracker.Result.Replay -> {
+                    log(LogEntry.Kind.ACTION, "backtrack → Back didn't find it; relaunch + replay ${bt.steps.size} verified step(s)")
+                    bt.steps.forEach { planned.add(it) }
+                    history.add("BACKTRACK (engine): $how ended in a $why and Back didn't reach the last good screen, so I'm " +
+                        "reopening ${bt.to.appName ?: "the app"} and replaying the route that worked (${bt.steps.size} steps). Then take a different route.")
+                }
+                is com.tekyerema.agent.recovery.Backtracker.Result.NotReached ->
+                    history.add("BACKTRACK: I couldn't get back to the last screen that worked (${bt.why}) — look where you are and take another route.")
+                is com.tekyerema.agent.recovery.Backtracker.Result.Refused ->
+                    history.add("BACKTRACK: not going back (${bt.why}) — go on from here by another route.")
+                com.tekyerema.agent.recovery.Backtracker.Result.AlreadyThere -> {}
+            }
+        }
+        return acts
     }
 
     /** C-13 / G-12: ask the user and WAIT for the answer inside the task. null = no answer in time, or the task was stopped. */
@@ -1498,7 +1951,11 @@ object AgentEngine {
         val usedTools: Set<String>, val auditTask: Long,
         val undoBefore: com.tekyerema.audit.DeviceSnap?,
         val trajectory: com.tekyerema.core.telemetry.TrajectoryRecorder?
-    ) { val irreversible = ArrayList<String>() }
+    ) {
+        val irreversible = ArrayList<String>()
+        /** WS-A: this run's task-journal record (null = not journaled). */
+        var journal: com.tekyerema.agent.journal.TaskRun? = null
+    }
 
     @Volatile private var activeRun: RunCtx? = null
 
@@ -1518,10 +1975,17 @@ object AgentEngine {
         else -> "failed"
     }
 
-    private fun finish(status: AgentStatus, stats: RunStats) {
+    /** @param paused WS-A: the run ended because the task PAUSED (kept, resumable) — recorded in the typed result. */
+    private fun finish(status: AgentStatus, stats: RunStats, paused: com.tekyerema.agent.journal.PauseReason? = null) {
         log(LogEntry.Kind.STATS, stats.summary())
         val summary = _state.value.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text ?: ""
         val r = activeRun.also { activeRun = null }
+        // WS-A: the journal record ends with the run (a paused one stays PAUSED — it ended the loop, not the task).
+        r?.journal?.finish(when (status) {
+            AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED -> com.tekyerema.agent.journal.TaskState.COMPLETED
+            AgentStatus.STOPPED -> com.tekyerema.agent.journal.TaskState.CANCELLED
+            else -> com.tekyerema.agent.journal.TaskState.FAILED
+        })
         val tier = r?.let { tierOf(it) }
         // C-15: a typed result for this run (history, traces, triggers and the run report read it).
         val result = org.json.JSONObject()
@@ -1533,6 +1997,7 @@ object AgentEngine {
             .put("verified", stats.verifiedTrue).put("unverified", stats.verifiedFalse)
             .put("decideMs", stats.decideLatencyMs)
             .put("goal", _state.value.goal ?: "")
+            .put("paused", paused?.name ?: org.json.JSONObject.NULL)   // WS-A: History says "Paused", not "Couldn't do that"
         if (r != null) try {
             com.tekyerema.core.telemetry.Telemetry.update { this.tier = tier; this.steps = stats.steps }
             com.tekyerema.core.telemetry.Telemetry.mark("action_done")

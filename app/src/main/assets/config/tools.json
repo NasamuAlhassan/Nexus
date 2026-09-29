@@ -59,8 +59,14 @@
     "read_all": {"feature": "F-15", "idempotent": true, "untrusted_output": true},
     "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true},
     "describe_screen": {"feature": "F-09", "idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
+    "read_shared": {"idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
+    "resultLimits": {"read_shared": 1500},
     "search": {
       "groups": {
+        "shared": {
+          "tools": ["read_shared"],
+          "keywords": "\\b(shared|share|selected|selection|highlighted|this text|that text|the text|what (?:is|does) (?:this|that|it)(?: mean| say)?|read (?:it|this|that) again|sum (?:it|this|that) up|summari[sz]e (?:it|this|that)|explain (?:it|this|that))\\b"
+        },
         "vision": {
           "tools": ["describe_screen"],
           "keywords": "\\b(describe|picture|pictures|photo|photos|image|images|icon|icons|what does it look like|looks like)\\b"

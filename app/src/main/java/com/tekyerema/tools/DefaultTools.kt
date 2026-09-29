@@ -65,6 +65,7 @@ fun defaultTools(): List<Tool> = listOf(
     WaitForElementTool,   // G-18
     ReadAllTool,          // F-15
     DescribeScreenTool,   // F-09 describe a picture / the screen with online vision (consent-gated, never a private screen)
+    com.tekyerema.interop.ReadSharedTool,   // text shared / selected into Tɛkyerɛma — untrusted content, never a command
     WebSearchTool,        // I-03 current facts with sources (owner-approved web search)
     // §A.2 reopened offline intents
     PlayMusicTool,        // E-14 play (in a named app, by artist) / pause / next / previous, checked against the media session

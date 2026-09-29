@@ -762,6 +762,11 @@ object IntentTemplates {
         "youtube_search" to Template(VIEW, "https://www.youtube.com/results?search_query={query}", null, emptyMap())
     )
 
+    /** Research brief §B.5: open a site found by research (or named by the user). Not a data template: the whole address
+     *  is the argument, so it can't go through [fill]'s encoding — OpenIntentTool checks it instead (https only; never
+     *  intent:/file:/javascript:, never user@host). */
+    const val OPEN_URL = "open_url"
+
     /** Templates from a config object `{name: {action, uri, package?, extras?, optional?, number_format?}}`. */
     fun parse(json: JSONObject?): Map<String, Template> {
         val out = LinkedHashMap<String, Template>()
@@ -840,7 +845,7 @@ object IntentTemplates {
 object OpenIntentTool : Tool {
     override val name = "open_intent"
     override val description =
-        "Open an app at a ready screen: WhatsApp chat, SMS/email draft, dialer, maps search, walking directions, web/YouTube search. Sends nothing."
+        "Open an app at a ready screen: WhatsApp chat, SMS/email draft, dialer, maps search, walking directions, web/YouTube search, an https site (open_url). Sends nothing."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true
@@ -856,17 +861,19 @@ object OpenIntentTool : Tool {
     /** A getter, not a stored list: the template enum must reflect config loaded AFTER this object initialises. */
     override val params: List<ToolParam>
         get() = listOf(
-            ToolParam("template", "string", "Which screen to open.", enumValues = templates().keys.toList()),
+            ToolParam("template", "string", "Which screen to open.", enumValues = templates().keys.toList() + IntentTemplates.OPEN_URL),
             ToolParam("number", "string", "Phone number.", required = false),
             ToolParam("text", "string", "Message text to pre-fill.", required = false),
             ToolParam("query", "string", "Search words or destination.", required = false),
-            ToolParam("email", "string", "Email address.", required = false)
+            ToolParam("email", "string", "Email address.", required = false),
+            ToolParam("url", "string", "https address (open_url).", required = false)
         )
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val all = templates()
         val key = args.str("template")?.trim()?.lowercase().orEmpty()
-        val t = all[key] ?: return ToolResult(false, "I don't have a link called '$key'. I know: ${all.keys.joinToString(", ")}.")
+        if (key == IntentTemplates.OPEN_URL) return openUrl(args.str("url"), ctx)
+        val t = all[key] ?: return ToolResult(false, "I don't have a link called '$key'. I know: ${(all.keys + IntentTemplates.OPEN_URL).joinToString(", ")}.")
         val slots = SLOT_PARAMS.mapNotNull { p -> args.str(p)?.trim()?.takeIf { it.isNotEmpty() }?.let { p to it } }.toMap()
         IntentTemplates.missing(t, slots).firstOrNull()?.let { slot ->
             return ToolResult(false, "That link needs ${SLOT_NAMES[slot] ?: "a $slot"}.")
@@ -898,6 +905,26 @@ object OpenIntentTool : Tool {
                 data = JSONObject().put("template", key).put("package", handler.packageName),
                 channel = "intent"
             )
+        } catch (t2: Throwable) {
+            ToolResult(false, "Couldn't open that: ${t2.message}")
+        }
+    }
+
+    /** open_url: a plain https address only ([com.tekyerema.agent.research.SafeUrl]) — never another scheme, never a
+     *  user@host address. The site is named by its host. */
+    private fun openUrl(raw: String?, ctx: ToolContext): ToolResult {
+        val url = com.tekyerema.agent.research.SafeUrl.httpsOrNull(raw)
+            ?: return ToolResult(false, "I only open secure web addresses that start with https.")
+        val host = com.tekyerema.agent.research.SafeUrl.host(url) ?: return ToolResult(false, "That web address has no site in it.")
+        val pm = ctx.appContext.packageManager
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val handler = intent.resolveActivity(pm) ?: return ToolResult(false, "No browser on this phone can open that.")
+        return try {
+            ctx.appContext.startActivity(intent)
+            val label = labelOf(pm, handler.packageName)
+            ToolResult(true, "Opened $host" + (label?.let { " in $it." } ?: " — Android is asking which app to open it with."),
+                data = JSONObject().put("template", IntentTemplates.OPEN_URL).put("host", host).put("package", handler.packageName),
+                channel = "intent")
         } catch (t2: Throwable) {
             ToolResult(false, "Couldn't open that: ${t2.message}")
         }
