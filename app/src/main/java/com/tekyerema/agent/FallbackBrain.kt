@@ -113,6 +113,11 @@ class FallbackBrain(
             val dog = launch {
                 delay(watchdogMs)
                 while (call.isActive) {
+                    // The brain is pacing on purpose (every key at its per-minute cap): no request is in flight, so the
+                    // silence says nothing about the link (A20e 2026-09-29: a pacing wait was abandoned as "internet
+                    // isn't answering"). Look again once the wait is over.
+                    val pausedFor = BrainActivity.pauseLeftMs()
+                    if (pausedFor > 0) { delay(pausedFor + 500L); continue }
                     if (linkCheck() == false) {
                         Log.w("Tekyerema", "[BRAIN] no answer for ${watchdogMs / 1000}s and the internet isn't answering — abandoning the call")
                         linkDead = true
@@ -156,6 +161,13 @@ class FallbackBrain(
         /** True for connectivity failures (worth one retry), false for quota/HTTP/parse errors. */
         fun isNetworkError(reason: String): Boolean = NETWORK.containsMatchIn(reason)
     }
+}
+
+/** A brain that waits on purpose (rate-limit pacing) says so, so silence during the wait isn't read as a dead link. */
+object BrainActivity {
+    @Volatile private var pauseUntil = 0L
+    fun pausingFor(ms: Long, now: Long = System.currentTimeMillis()) { pauseUntil = maxOf(pauseUntil, now + ms) }
+    fun pauseLeftMs(now: Long = System.currentTimeMillis()): Long = (pauseUntil - now).coerceAtLeast(0L)
 }
 
 /**

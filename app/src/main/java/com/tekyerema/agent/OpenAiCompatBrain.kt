@@ -123,6 +123,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                     "The AI service is rate-limited right now. Please try again in a moment."
                 )
                 android.util.Log.w("Tekyerema", "[LLM] all ${keys.size} keys cooling — pacing ${waitMs}ms (wait $pacedWaits)")
+                // A deliberate wait, not a silent network: the FallbackBrain watchdog must not take it for a dead link.
+                BrainActivity.pausingFor(waitMs)
                 delay(waitMs)
                 continue
             }

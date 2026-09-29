@@ -150,6 +150,17 @@ class HybridOfflineTest {
         assertTrue("the link was checked while waiting", probes >= 1)
     }
 
+    @Test fun a_brain_pacing_on_purpose_is_not_abandoned_as_a_dead_link() = runBlocking {
+        // A20e 2026-09-29: every key at its per-minute cap → an 8 s pacing wait → the watchdog probed, and abandoned it
+        val pacing = object : AgentBrain {
+            override suspend fun decide(ctx: BrainContext): AgentDecision {
+                com.tekyerema.agent.BrainActivity.pausingFor(300); delay(300); return AgentDecision.Done("after the wait")
+            }
+        }
+        val d = FallbackBrain(listOf(pacing), linkCheck = { false }, watchdogMs = 50, health = ProviderCooling()).decide(ctx("x"))
+        assertEquals(AgentDecision.Done("after the wait"), d)
+    }
+
     @Test fun fallback_checks_the_link_before_trying_the_next_provider() = runBlocking {
         val timeout = AgentDecision.Fail("LLM request failed: timeout")
         val gemini = FakeBrain(AgentDecision.Done("gemini"))
