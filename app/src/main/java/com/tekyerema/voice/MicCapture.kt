@@ -208,6 +208,13 @@ class MicCapture(
         val pcm = normalizeRms(rawPcm)
         val speechMs = (pcm.size / bytesPerSample.toLong()) * 1000 / sampleRate
         // §3.3/§3.8/§3.11 — end reason, pre/post RMS, and a per-utterance timing line for regression tracking.
+        // B-19: the turn's capture numbers (the first capture of a turn wins; a later yes/no listen doesn't overwrite them)
+        val tookMs = android.os.SystemClock.uptimeMillis() - captureStart
+        com.tekyerema.core.telemetry.Telemetry.update {
+            voice.putIfAbsent("captureMs", tookMs); voice.putIfAbsent("speechMs", speechMs)
+            voice.putIfAbsent("endReason", endReason); voice.putIfAbsent("vad", vadName)
+            voice.putIfAbsent("hangoverMs", strat?.hangoverMs ?: VadStrategy.NORMAL.hangoverMs)
+        }
         Log.i("Tekyerema", "[VOICE] end=$endReason captured ${pcm.size}B PCM (~${speechMs}ms speech) " +
             "preRms=${"%.0f".format(preRms)} postRms=${"%.0f".format(pcmRms(pcm))} tookMs=${android.os.SystemClock.uptimeMillis() - captureStart} ${stats()}")
         if (pcm.isEmpty()) return@withContext CaptureResult.NoSpeech

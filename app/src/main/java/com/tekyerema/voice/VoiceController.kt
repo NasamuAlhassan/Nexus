@@ -704,7 +704,10 @@ class VoiceController(
             agent.prewarm()   // N-04: open the brain's connection while the user talks
             val cap = mic.capture(
                 onListening = { cues.listening(); set(VoiceState.LISTENING, ack) },   // tone once the mic is open
-                onSpeechStart = { _state.update { it.copy(state = VoiceState.LISTENING, partialHint = ack, speechDetected = true) } }
+                onSpeechStart = {
+                    com.tekyerema.core.telemetry.Telemetry.mark("speech_start")   // B-19: speech → end_of_turn is the endpoint wait
+                    _state.update { it.copy(state = VoiceState.LISTENING, partialHint = ack, speechDetected = true) }
+                }
             )
             val wav = when (cap) {
                 is CaptureResult.Success -> cap.wav

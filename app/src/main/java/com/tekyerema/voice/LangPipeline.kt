@@ -321,6 +321,7 @@ object LanguagePipeline {
         // Kofi"). Only the canonical goal changes; the raw transcript stays as heard.
         val fixed = try { EntityCorrector.correct(normalized, vocabulary()) } catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
         val canonical = fixed.text
+        if (fixed.fixes.isNotEmpty()) try { com.tekyerema.core.telemetry.Telemetry.update { voice["nameFixes"] = fixed.fixes.size } } catch (_: Throwable) {}
         val entities = try { Entities.derive(canonical, lang) } catch (t: Throwable) { emptyList() }
         return Transcript(raw = raw, canonical = canonical, language = lang, reason = reason, entities = entities, backend = backend,
             asrMs = asrMs, corrections = fixed.fixes.map { "${it.kind.name.lowercase()}:${it.from}→${it.to}" })
