@@ -43,7 +43,7 @@ import com.tekyerema.ui.components.SettingRow
 import com.tekyerema.ui.components.SwitchRow
 import com.tekyerema.ui.theme.Tk
 
-private enum class Page { ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP }
+private enum class Page { ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP, KEYBOARD }
 
 /** Six things: Language, Voice, Permissions, Accessibility, Privacy (J-15 / H-12 / Q-07 / Q-08), Help. */
 @Composable
@@ -59,6 +59,8 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
             Hairline(inset = PageMargin)
             SettingRow("Language", value = remember(version) { languageLabel(settings.languageMode) }) { page = Page.LANGUAGE }
             SettingRow("Voice", value = remember(version) { rateLabel(settings.speechRate) }) { page = Page.VOICE }
+            // G-05: the Twi keyboard's setup and options live in ime/ (TwiKeyboardPage).
+            SettingRow("Twi keyboard", value = com.tekyerema.ime.rememberTwiKeyboardStatusLabel()) { page = Page.KEYBOARD }
             SettingRow("Permissions", value = permissionsSummary(context)) { page = Page.PERMISSIONS }
             SettingRow("Accessibility") { page = Page.ACCESSIBILITY }
             SettingRow("Privacy") { page = Page.PRIVACY }
@@ -70,6 +72,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.ACCESSIBILITY -> AccessibilityPage(settings) { page = Page.ROOT }
         Page.PRIVACY -> PrivacyPage(settings) { page = Page.ROOT }
         Page.HELP -> HelpPage { page = Page.ROOT }
+        Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
     }
 }
 
