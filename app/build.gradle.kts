@@ -70,17 +70,19 @@ android {
         buildConfigField("String", "DEFAULT_GROQ_REASONING_EFFORT", "\"$defaultGroqReasoningEffort\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_URL", "\"$defaultAsrOnlineUrl\"")
         buildConfigField("String", "DEFAULT_ASR_ONLINE_MODEL", "\"$defaultAsrOnlineModel\"")
-        buildConfigField("String", "SPEECH_SECRETS_JSON", "\"" + speechSecretsJson.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
     }
 
     buildTypes {
         debug {
             isMinifyEnabled = false
             secretBuildFields.forEach { (name, value) -> buildConfigField("String", name, "\"$value\"") }
+            buildConfigField("String", "SPEECH_SECRETS_JSON", "\"" + speechSecretsJson.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
         }
         release {
-            // No key is ever baked into a release APK (see secretBuildFields).
+            // No key is ever baked into a release APK (see secretBuildFields). The SPEECH_* secrets (the UG HCI Lab token)
+            // used to sit in defaultConfig and so shipped in release builds too (found 2026-09-29) — debug-only now.
             secretBuildFields.keys.forEach { name -> buildConfigField("String", name, "\"\"") }
+            buildConfigField("String", "SPEECH_SECRETS_JSON", "\"{}\"")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
