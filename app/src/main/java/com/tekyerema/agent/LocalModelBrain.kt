@@ -43,7 +43,7 @@ class LocalModelBrain(
         step++
         if (step > 1) {
             // Speak the tool's own outcome (its verified message, or the honest failure).
-            val last = ctx.history.lastOrNull().orEmpty()
+            val last = LocalBrain.lastStep(ctx.history)
             val msg = LocalBrain.resultMessage(last).ifEmpty { "Done." }
             return if (last.contains("→ fail")) AgentDecision.CannotDo(LocalBrain.ACTION_FAILED, msg) else AgentDecision.Done(msg)
         }

@@ -65,7 +65,10 @@ class RoutingBrain(
          *  A "partial" step (moved on, claim not met yet — G-21) is a deviation too: the local rules' routine expected
          *  that claim, so the rest of the task goes to the planner that can explore. */
         fun deviated(history: List<String>): Boolean {
-            val last = history.lastOrNull() ?: return false
+            // The last STEP's line, not the last line: the engine adds its own notes after a step (Workstream B's recovery
+            // ladder, the plan). With lastOrNull, a failed local play_music ("play the playlist on the screen") was never
+            // handed to the planner, and the task ended claiming "Playing …" (A20e 2026-09-29).
+            val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return false
             return last.contains("verified=false") || last.contains("verified=partial") ||
                 Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
         }
@@ -78,7 +81,7 @@ class RoutingBrain(
          * "to finish sending money" (the policy asked first; the owner stopped it). Pure.
          */
         fun pinHandoff(history: List<String>): String? {
-            val last = history.lastOrNull() ?: return null
+            val last = LocalBrain.lastStep(history).ifEmpty { return null }
             if (!last.startsWith("momo_send(") || !last.contains("→ success")) return null
             return LocalBrain.resultMessage(last).ifBlank { "The Mobile Money PIN screen is up — enter your PIN yourself. I never handle the PIN." }
         }

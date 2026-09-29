@@ -157,7 +157,10 @@ class LocalBrain : AgentBrain {
         }
         RE_PLAY_TRACK.find(raw)?.let { m ->
             val q = m.groupValues.last().trim().trimEnd('.', '!', '?')
-            if (q.isNotEmpty() && !RE_ON_APP.containsMatchIn(q)) {
+            // "play the playlist on the screen", "play this song", "play the video I'm looking at" point at something on the
+            // screen — that is the planner's job (look, then tap Play), never a search for those words (A20e 2026-09-29:
+            // YouTube Music searched "the playlist on the screen right now").
+            if (q.isNotEmpty() && !RE_ON_APP.containsMatchIn(q) && !RE_DEICTIC_MEDIA.containsMatchIn(q)) {
                 doneLine = if (twi) "Merebɔ $q." else "Playing $q."
                 return call("play_music", JSONObject().put("query", q), "play track")
             }
@@ -305,7 +308,7 @@ class LocalBrain : AgentBrain {
      * separately by the engine's completion gating → "…but I couldn't confirm it", §1.7.)
      */
     private fun finishLine(ctx: BrainContext): AgentDecision {
-        val last = ctx.history.lastOrNull().orEmpty()
+        val last = lastStep(ctx.history)
         if (!last.contains("→ fail")) return AgentDecision.Done(doneLine)
         // The one action this intent needed FAILED — that is an honest "can't", not a completion (reporting it as
         // Done made the engine say "<failure> — but I could not confirm it").
@@ -313,7 +316,7 @@ class LocalBrain : AgentBrain {
     }
 
     private fun speakToolResult(ctx: BrainContext): AgentDecision {
-        val msg = resultMessage(ctx.history.lastOrNull().orEmpty())
+        val msg = resultMessage(lastStep(ctx.history))
         return AgentDecision.Done(if (msg.isNotEmpty()) msg else doneLine)
     }
 
@@ -557,6 +560,15 @@ class LocalBrain : AgentBrain {
          * whole. The planner-only recovery hint (Recovery.hint) and the J-07 untrusted marker are stripped: they must
          * never be spoken (same class as the §1.7 UNVERIFIED-prefix leak). Pure.
          */
+        /**
+         * The last STEP's history line ("tool(args) → success|fail …"). The engine appends its own notes after a step —
+         * Workstream B's recovery ladder, plan notes — so the plain last line is often a note: a failed local play_music
+         * then read as a success and the task ended "Playing …" (A20e 2026-09-29).
+         */
+        fun lastStep(history: List<String>): String =
+            history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: history.lastOrNull().orEmpty()
+        private val STEP_LINE = Regex("^[a-z_]+\\(")
+
         fun resultMessage(last: String): String {
             val v = last.indexOf("verified=")
             val cut = if (v >= 0) last.indexOf("); ", v) else -1
@@ -699,6 +711,10 @@ class LocalBrain : AgentBrain {
         private val RE_CURRENCY_AMOUNT = Regex("(?i)(?:(?:gh₵|₵|ghs)\\s*\\d+(?:\\.\\d{1,2})?|(?<![\\d.])\\d+(?:\\.\\d{1,2})?\\s*(?:ghana\\s+)?(?:cedis?|pesewas?|ghs|gh₵)\\b)")
         private val RE_PLAY_MUSIC = Regex("^\\s*$LEADIN(?:play|bɔ|to)\\s+(?:me\\s+|some\\s+|my\\s+)?(?:music|songs?|nnwom|a\\s+song)\\s*$", RegexOption.IGNORE_CASE)
         // §P2.4 named track: "play <track>". The last group is the track query.
+        /** A "play …" that points at what's on the screen rather than naming something to search for. */
+        private val RE_DEICTIC_MEDIA = Regex("\\b(?:on|in) (?:the|my|this) screen\\b|\\b(?:you can|i can) see\\b|" +
+            "^(?:this|that|these|those|it)\\b|\\b(?:showing|displayed|in front of me|i'?m (?:looking at|on))\\b|" +
+            "^(?:the )?(?:first|second|third|top|next|last|other) (?:one|song|video|playlist|result|track)\\b", RegexOption.IGNORE_CASE)
         private val RE_PLAY_TRACK = Regex("^\\s*$LEADIN(?:play|bɔ)\\s+(?:me\\s+|some\\s+)?(.+)$", RegexOption.IGNORE_CASE)
         private val RE_ON_APP = Regex("\\bon\\s+(youtube|yutu\\S*|spotify|boomplay|audiomack|tiktok|instagram|soundcloud|apple\\s+music)\\b", RegexOption.IGNORE_CASE)
         /**

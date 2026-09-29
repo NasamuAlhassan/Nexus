@@ -227,6 +227,26 @@ class BrainLogicTest {
 
     /** Owner, A20e 2026-09-29: "play the playlist on the screen right now" was answered with a description of YouTube
      *  — "on the screen" alone meant "read it". Doing something WITH the screen goes to the planner. */
+    /** A20e 2026-09-29 (new build): "play the playlist on the screen right now" became a YouTube Music SEARCH for those
+     *  words, failed, and the task still ended "Playing the playlist…" — B's recovery note came after the step line. */
+    @Test fun playing_what_is_on_screen_goes_to_the_planner_and_a_failed_step_is_never_a_success() = runBlocking {
+        for (g in listOf("play the playlist on the screen right now", "Play the playlist, you can see on my screen right now.",
+                         "play this song", "play the first video", "play the video I'm looking at")) {
+            val d = decide(LocalBrain(), g)
+            assertFalse("$g → $d", d is AgentDecision.CallTool && d.name == "play_music")
+        }
+        assertEquals("play_music", tool(decide(LocalBrain(), "play Sarkodie")).name)   // a real name is still searched
+        // A failed step followed by an engine note: still a deviation, still a failure.
+        val h = listOf("play_music({query=x}) → fail [intent]; verified=false (x); the search opened but nothing plays",
+            "recovery: FAILED → ALT_ROUTE — try another route")
+        assertTrue(RoutingBrain.deviated(h))
+        assertTrue(LocalBrain.lastStep(h).startsWith("play_music("))
+        val b = LocalBrain()
+        b.decide(ctx("play Sarkodie"))
+        val second = b.decide(BrainContext("play Sarkodie", JSONObject(), h, JSONArray(), JSONArray()))
+        assertFalse("a failed play is never reported as playing: $second", second is AgentDecision.Done)
+    }
+
     @Test fun an_action_on_something_on_screen_is_not_a_screen_reading() = runBlocking {
         for (g in listOf("Play the playlist on the screen right now.", "Play the playlist, you can see on my screen right now.",
                          "can you play the video on my screen", "tap the first song on the screen",
