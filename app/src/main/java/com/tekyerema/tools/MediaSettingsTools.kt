@@ -216,6 +216,10 @@ object OpenSettingTool : Tool {
 
     private fun norm(target: String) = target.trim().lowercase().replace(" ", "_")
 
+    /** True when [target] names a settings screen this tool can open — lets the fast path send "open Bluetooth
+     *  settings" here instead of opening the Settings app's front page. */
+    fun knows(target: String): Boolean = actionFor(target) != null
+
     /** Map a target to (intent action, spoken label). Panel actions land on a togglable surface where they exist.
      *  E-11: `os.settings.map` in config can add targets ({"target": {"action": "...", "label": "..."}}). */
     private fun actionFor(target: String): Pair<String, String>? {

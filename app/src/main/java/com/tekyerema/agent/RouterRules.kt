@@ -32,7 +32,8 @@ object RouterRules {
             FastIntent.LockScreen, FastIntent.Notifications, FastIntent.AnswerCall, FastIntent.EndCall,
             FastIntent.LastSms, FastIntent.WhereAmI, FastIntent.Connectivity, FastIntent.NowPlaying, FastIntent.ShowAlarms,
             FastIntent.Screenshot, FastIntent.PowerMenu, FastIntent.TakePhoto, FastIntent.TakeSelfie, FastIntent.CalendarToday, FastIntent.LockQuery,
-            FastIntent.WhatChanged, FastIntent.ListSchedules, FastIntent.Undo, FastIntent.MemoryQuery
+            FastIntent.WhatChanged, FastIntent.ListSchedules, FastIntent.Undo, FastIntent.MemoryQuery,
+            FastIntent.ListRoutines, FastIntent.Resume
         ).associateBy { it.name }
     }
 
@@ -81,6 +82,10 @@ object RouterRules {
         "RINGER" -> arg?.takeIf { it in setOf("silent", "vibrate", "normal") }?.let { FastIntent.Ringer(it) }
         // E-14: a locale rule for "play …" — the arg is what to play (blank = the user's music).
         "PLAY_MUSIC" -> FastIntent.PlayMusic(arg?.trim()?.takeIf { it.isNotEmpty() })
+        // Overnight [S]: locale rules (e.g. verified Twi phrasings) can reach the catch-up, help and describe paths.
+        "DIGEST" -> FastIntent.Digest(arg?.takeIf { it in setOf("last", "recent", "today") } ?: "last")
+        "HELP" -> FastIntent.Help(here = arg == "here")
+        "DESCRIBE_SCREEN" -> FastIntent.DescribeScreen(null, picture = arg == "picture")
         else -> null
     }
 

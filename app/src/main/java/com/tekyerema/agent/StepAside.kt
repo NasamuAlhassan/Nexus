@@ -17,6 +17,8 @@ object StepAside {
         FastIntent.Recents, FastIntent.Notifications, FastIntent.LockScreen, FastIntent.PowerMenu, FastIntent.TakePhoto,
         FastIntent.ShowAlarms, FastIntent.WhatChanged, FastIntent.TakeSelfie -> true
         is FastIntent.OpenApp, is FastIntent.Magnify, is FastIntent.PlayMusic, is FastIntent.AskApp -> true
+        // F-09: the picture sent must be the app's screen, not ours; E-11: the settings screen must land in front.
+        is FastIntent.DescribeScreen, is FastIntent.OpenSetting -> true
         else -> false
     }
 }

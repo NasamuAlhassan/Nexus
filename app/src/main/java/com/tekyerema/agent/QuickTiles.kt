@@ -31,6 +31,10 @@ object QuickTiles {
         Tile("night_light", "Night Light", setOf("night light", "eye comfort", "eye comfort shield", "blue light filter",
             "eye protection"), listOf("night light", "eye comfort", "blue light")),
         Tile("nfc", "NFC", setOf("nfc"), listOf("nfc")),
+        // Data is expensive in Ghana: Data saver stops apps using mobile data in the background. Not on every phone's
+        // panel — when it isn't there the fast path hands over to the agent (which goes through Settings).
+        Tile("data_saver", "Data saver", setOf("data saver", "data saving", "data saving mode", "data saver mode"),
+            listOf("data saver", "data saving")),
         // No spoken phrase: reached only as the fallback when Android refuses a direct Bluetooth toggle (API 33+).
         Tile("bluetooth", "Bluetooth", emptySet(), listOf("bluetooth")),
     )
