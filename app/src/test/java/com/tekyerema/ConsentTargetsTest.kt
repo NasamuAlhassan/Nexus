@@ -52,6 +52,15 @@ class ConsentTargetsTest {
         assertEquals(RiskTier.TIER2, tier("Deactivate"))
     }
 
+    /** A20e 2026-09-29: the fallback model tapped the Play Store's "Use biometrics" card while looking for search. */
+    @Test fun biometric_and_unlock_setup_is_confirmed() {
+        for (l in listOf("Use biometrics", "Use biometrics - fingerprint or face -", "Fingerprints", "Face recognition",
+                "Screen lock", "Require authentication", "Turn on 2-Step Verification", "Create a passkey"))
+            assertEquals(l, RiskTier.TIER2, tier(l))
+        assertEquals(Consent.SECURITY, TargetSemantics.consentKind("Use biometrics"))
+        assertEquals(null, TargetSemantics.consentKind("Search apps & games"))
+    }
+
     @Test fun trials_upgrades_and_renewals_are_spends() {
         for (l in listOf("Start free trial", "Start your 7-day free trial", "Try it free", "Upgrade", "Upgrade to Premium",
                 "Renew", "Pre-order", "Go Premium"))

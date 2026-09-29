@@ -212,9 +212,12 @@ object TargetSemantics {
      *  ACCOUNT — signs in, signs up, links a device, or shares the user's account with an app (SSO / OAuth);
      *  INSTALL — installs or activates something (an app, a device-admin, a profile);
      *  PERMISSION — grants a permission, approves a request, pairs a device;
-     *  REMOVE — wipes an app's data or turns a protection off.
+     *  REMOVE — wipes an app's data or turns a protection off;
+     *  SECURITY — sets up or changes how the phone or an account is unlocked or approved (fingerprint, face, screen
+     *    lock, purchase authentication, two-step sign-in). Added 2026-09-29: looking for the Play Store's search, the
+     *    fallback model tapped a "Use biometrics — fingerprint or face" card unasked.
      */
-    enum class Consent { ACCOUNT, INSTALL, PERMISSION, REMOVE }
+    enum class Consent { ACCOUNT, INSTALL, PERMISSION, REMOVE, SECURITY }
 
     /**
      * Consent vocabulary (generic UI words, no app names). An agent must hand these back to the person: Anthropic's
@@ -228,7 +231,9 @@ object TargetSemantics {
             "continue as|continue with|use (?:this|another|my) account|link (?:a |this |new |another )?device|link (?:your |my )?account",
         Consent.INSTALL to "install|activate",
         Consent.PERMISSION to "grant|authori[sz]e|approve|permit|while using (?:the )?app|only this time|pair",
-        Consent.REMOVE to "deactivate|clear (?:data|storage|all data)"
+        Consent.REMOVE to "deactivate|clear (?:data|storage|all data)",
+        Consent.SECURITY to "use biometrics?|biometrics?|fingerprints?|face (?:unlock|recognition|id)|screen lock|" +
+            "(?:purchase|require) authentication|two[- ]step|2[- ]step|passkeys?|security key"
     )
     private val consentAny = Regex(CONSENT.joinToString("|", "\\b(?:", ")\\b") { it.second }, RegexOption.IGNORE_CASE)
     private val consentLead = Regex(CONSENT.joinToString("|", "^\\s*(?:", ")\\b") { it.second }, RegexOption.IGNORE_CASE)

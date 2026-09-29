@@ -107,6 +107,7 @@ object ActionSemantics {
                 TargetSemantics.Consent.INSTALL -> return "$shown This installs or turns on something on your phone."
                 TargetSemantics.Consent.PERMISSION -> return "$shown This gives a permission or approves a request."
                 TargetSemantics.Consent.REMOVE -> return "$shown This removes data or turns a protection off, and may not be undone."
+                TargetSemantics.Consent.SECURITY -> return "$shown This changes how your phone or account is unlocked or approved, like fingerprint or face."
                 null -> {}
             }
             if (TargetSemantics.isSpendCaption(text, target)) return "$shown This may charge you money."
