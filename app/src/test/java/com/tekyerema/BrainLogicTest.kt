@@ -166,6 +166,19 @@ class BrainLogicTest {
             val d = decide(LocalBrain(), g)
             assertTrue("$g → $d", d is AgentDecision.Done && d.summary.contains("Ghana mobile number has 10"))
         }
+        // The owner's live send: "use 'Prince' as the reference" went out as "Payment".
+        val ref = tool(decide(LocalBrain(), "Send 0.1 cedis to 0552093690 use 'Prince' as the reference"))
+        assertEquals("momo_send", ref.name); assertEquals("0.1", ref.args.getString("amount"))
+        assertEquals("0552093690", ref.args.getString("number")); assertEquals("prince", ref.args.getString("reference").lowercase())
+        assertEquals("school fees", tool(decide(LocalBrain(), "send 5 cedis to 0244123456 reference school fees")).args.getString("reference").lowercase())
+        assertEquals("rent", tool(decide(LocalBrain(), "send 5 cedis to 0244123456 with reference: rent")).args.getString("reference").lowercase())
+        // After momo_send stops at the PIN, the task is over — nothing plans past it (a live send, 2026-09-29).
+        val h = listOf("momo_send({number=0552093690}) → success [native]; verified=false (no expectation given); " +
+            "I've entered everything. The Mobile Money PIN screen is up — enter your PIN to send 0.1 cedis to 0552093690. I never handle the PIN.")
+        assertTrue(com.tekyerema.agent.RoutingBrain.pinHandoff(h)!!.contains("enter your PIN"))
+        assertNull(com.tekyerema.agent.RoutingBrain.pinHandoff(listOf("momo_send({}) → fail [none]; verified=false (x); The menu didn't respond")))
+        assertNull(com.tekyerema.agent.RoutingBrain.pinHandoff(listOf("open_app({app=WhatsApp}) → success [intent]; verified=true (x); Opened")))
+        assertTrue(com.tekyerema.policy.TargetSemantics.credentialField.containsMatchIn("Total Amount is GHS 0.10. Enter MM # for next"))
         val M = com.tekyerema.tools.MoMoSendTool
         assertNull(M.numberProblem("0244123456")); assertNull(M.numberProblem("233244123456"))
         assertTrue(M.numberProblem("0553238")!!.contains("7 digits"))

@@ -139,7 +139,7 @@ object MoMoSendTool : Tool {
      *  can't slip past the literal word "PIN". */
     private fun isPinScreen(dlg: Ussd): Boolean =
         dlg.hasPassword ||
-        Regex("\\bpin\\b|enter your pin|enter pin|momo pin|mobile money pin|passcode|secret code|\\botp\\b|password",
+        Regex("\\bpin\\b|enter your pin|enter pin|momo pin|mobile money pin|\\benter mm\\b|passcode|secret code|\\botp\\b|password",
             RegexOption.IGNORE_CASE).containsMatchIn(dlg.text)
 
     /** The success hand-off at the PIN: everything is entered; the USER types the PIN. */

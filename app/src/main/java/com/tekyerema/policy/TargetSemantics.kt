@@ -50,8 +50,10 @@ object TargetSemantics {
     val communicationField = Regex("\\b(message|reply|chat|comment|caption|post|tweet|status)\\b", RegexOption.IGNORE_CASE)
 
     /** Credential inputs the operator must never type into, whatever the model says. */
+    // "enter mm": MTN's Mobile Money PIN prompt reads "… Total Amount is GHS 0.10. Enter MM # for next" — no word "PIN"
+    // (A20e 2026-09-29, a live send), so Secure Input never engaged on it.
     val credentialField = Regex(
-        "\\b(pin|otp|password|passcode|passphrase|cvv|verification code|one[- ]time|security code)\\b",
+        "\\b(pin|otp|password|passcode|passphrase|cvv|verification code|one[- ]time|security code|enter mm)\\b",
         RegexOption.IGNORE_CASE
     )
 

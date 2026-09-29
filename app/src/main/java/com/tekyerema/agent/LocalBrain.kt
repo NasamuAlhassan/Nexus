@@ -455,9 +455,16 @@ class LocalBrain : AgentBrain {
         if (after.isEmpty()) return null
         // reference: after "for"/"reference"/"ref"/"narration". Split it off FIRST so its digits can't pollute
         // the recipient number (e.g. "for order 5").
-        val refMark = Regex("\\b(?:for|reference|ref|narration|remark)\\b", RegexOption.IGNORE_CASE).find(after)
-        val recipientPart = refMark?.let { after.substring(0, it.range.first) } ?: after
-        val reference = refMark?.let { after.substring(it.range.last + 1).trim(':', ' ', '.', '!', '?') }?.takeIf { it.isNotBlank() }
+        // "use 'Prince' as the reference" names it BEFORE the word (the owner's live send, A20e 2026-09-29, went out
+        // with the default "Payment" because only "reference X" was understood).
+        val asRef = Regex("\\b(?:use|with|put|make it|make)\\s+(.+?)\\s+as\\s+(?:the\\s+|my\\s+)?(?:reference|ref|narration|remark)\\b",
+            RegexOption.IGNORE_CASE).find(after)
+        val refMark = if (asRef != null) null else Regex("\\b(?:for|reference|ref|narration|remark)\\b", RegexOption.IGNORE_CASE).find(after)
+        val recipientPart = asRef?.let { after.substring(0, it.range.first) } ?: refMark?.let { after.substring(0, it.range.first) } ?: after
+        val reference = (asRef?.groupValues?.get(1) ?: refMark?.let { after.substring(it.range.last + 1) })
+            ?.trim(':', ' ', '.', '!', '?', ',', '\'', '"', '‘', '’', '“', '”')
+            ?.replace(Regex("^(?:is|of|as|should be)\\s+", RegexOption.IGNORE_CASE), "")?.trim('\'', '"', '‘', '’', '“', '”', ' ')
+            ?.takeIf { it.isNotBlank() }
         val digits = ghanaMobile(recipientPart.filter { it.isDigit() })
         if (digits.length >= 7 && digits.length != 10) {
             // A Ghana mobile number is 10 digits. A short or long one is a mishearing (or a number said in two

@@ -70,6 +70,19 @@ class RoutingBrain(
                 Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
         }
 
+        /**
+         * SECURE BOUNDARY: momo_send stopped at the Mobile Money PIN — the task is OVER. Its own words ("enter your PIN
+         * to send …") are the reply; no brain plans another step. A20e 2026-09-29: after a live 0.1-cedi send reached
+         * MTN's PIN prompt ("… Enter MM # for next", no word "PIN" in it, so the credential-screen guard didn't fire),
+         * the step read as "not verified", the router escalated to the cloud planner, and it tried to tap the PIN field
+         * "to finish sending money" (the policy asked first; the owner stopped it). Pure.
+         */
+        fun pinHandoff(history: List<String>): String? {
+            val last = history.lastOrNull() ?: return null
+            if (!last.startsWith("momo_send(") || !last.contains("→ success")) return null
+            return LocalBrain.resultMessage(last).ifBlank { "The Mobile Money PIN screen is up — enter your PIN yourself. I never handle the PIN." }
+        }
+
         /** Reason class of a local request the offline router could not do (spoken detail differs by case). */
         const val OFFLINE_UNKNOWN = "offline_unknown_command"
 
@@ -97,6 +110,7 @@ class RoutingBrain(
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         // N-09: the user answered our "should I find out when the internet is back?" offer.
         offered?.let { return answerOffer(ctx, it) }
+        pinHandoff(ctx.history)?.let { return AgentDecision.Done(it) }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
 
         // Cloud-first: hand EVERYTHING to the cloud brain (the relay = Claude), skipping LocalBrain. Sticky so
