@@ -128,7 +128,10 @@ class WakeWordService : Service() {
                     // The user is typing a PIN and TalkBack is speaking the keys — never open the mic by ourselves now.
                     Log.i(TAG, "[WAKE] detection ignored: a PIN is being entered")
                 } else if (fired) {
-                    Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (hey=${"%.3f".format(scores[WakeScorer.FIRE_HEAD])}) → activating")
+                    Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (hey=${"%.3f".format(scores[WakeScorer.FIRE_HEAD])}, " +
+                        "peak=${"%.4f".format(gate.lastFirePeak)}${if (gate.lastFirePeak < WakeSignal.marginalBelow()) " marginal" else ""}) → activating")
+                    // Addressedness: the turn this wake opens knows how clearly it was said (voice/Addressedness.kt WakeSignal).
+                    WakeSignal.fired(gate.lastFirePeak)
                     release()                                        // hand the mic over before the turn opens it
                     onWake()
                 }

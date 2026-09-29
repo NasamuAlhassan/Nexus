@@ -376,14 +376,16 @@ class VoiceController(
      * request is already being heard, so nothing more is started.
      */
     fun start() {
+        // Addressedness: a turn opened by a wake that only just cleared the bar is judged like a follow-up (voice/Addressedness.kt).
+        val origin = WakeSignal.consume()
         when (route()) {
             NewRequest.Route.ANSWER -> respond()
             NewRequest.Route.INTERJECT -> interject()
-            NewRequest.Route.START -> { followUpChain = 0; launchTurn { runOnce() } }
+            NewRequest.Route.START -> { followUpChain = 0; launchTurn { runOnce(origin = origin) } }
             NewRequest.Route.PREEMPT -> if (_state.value.state in NewRequest.TALKING_OR_RESTING) {
                 Log.i("Tekyerema", "[VOICE] new request while ${_state.value.state} — stopping the reply to listen")
                 followUpChain = 0
-                launchTurn { runOnce() }
+                launchTurn { runOnce(origin = origin) }
             }
             NewRequest.Route.WAIT -> Log.i("Tekyerema", "[VOICE] start ignored: the turn is acting on what was just said")
         }
@@ -398,7 +400,7 @@ class VoiceController(
         if (!canPreempt) { cancel(); return }
         Log.i("Tekyerema", "[VOICE] reply interrupted by a tap — listening")
         followUpChain = 0
-        launchTurn { runOnce(quiet = true) }
+        launchTurn { runOnce(quiet = true, origin = Addressedness.Origin.USER) }   // a tap: the user's own turn, never gated
     }
 
     /**
@@ -860,7 +862,13 @@ class VoiceController(
         }
     }
 
-    private suspend fun runOnce(quiet: Boolean = false) {
+    /** [origin]: who opened this listen — one Tɛkyerɛma opened by itself (a follow-up) is gated by [Addressedness];
+     *  [questionPending]: the reply before it asked the user something. */
+    private suspend fun runOnce(
+        quiet: Boolean = false,
+        origin: Addressedness.Origin = if (quiet) Addressedness.Origin.FOLLOW_UP else Addressedness.Origin.USER,
+        questionPending: Boolean = false
+    ) {
         try {
             if (!hasMicPermission()) {
                 if (quiet) { idle(""); return }
@@ -931,6 +939,17 @@ class VoiceController(
                 say(if ((forceLanguage() ?: sessionLanguage()) == Lang.TWI) "Yoo." else "Okay.")
                 idle("")
                 return
+            }
+            // Addressedness (a judge's session, A20e 2026-09-29): a listen WE opened heard the room — "I will eat today." was
+            // answered "Okay, enjoy your meal!". Not said to us → rest quietly: no model call, no reply (voice/Addressedness.kt).
+            if (origin.gated) {
+                val v = Addressedness.check(tr.canonical, origin, questionPending, alt = tr.raw)
+                if (!v.addressed) {
+                    Log.i("Tekyerema", "[VOICE] ignored: not addressed (${origin.label}) — ${v.reason}" +
+                        if (com.tekyerema.core.Privacy.logContent()) " '${tr.canonical}'" else "")
+                    idle("")
+                    return
+                }
             }
             // J-15: what the user said stays out of logcat in release builds.
             if (com.tekyerema.core.Privacy.logContent())
@@ -1078,7 +1097,7 @@ class VoiceController(
                 }
                 // Reopen the mic only for a SPOKEN turn; a TYPED turn is answered by typing (card stays until then).
                 if (source == InputSource.ASR && speakAloud() && hasMicPermission()) {
-                    try { runOnce(quiet = true) } finally { if (!invitesMore) hideAsking() }
+                    try { runOnce(quiet = true, questionPending = true) } finally { if (!invitesMore) hideAsking() }
                 }
             } else if (interruption == null && outcome.status == AgentStatus.COMPLETED) {
                 // Habits (agent/habits): only a VERIFIED success is noted — never an unverified or failed one.

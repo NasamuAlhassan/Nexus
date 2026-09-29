@@ -22,18 +22,27 @@ class WakeGate(private val bar: Float = bar()) {
     private var above = 0
     private var refractory = 0
     private var recentRms = 0f
+    /** Highest score of the hits in the current run of hits. */
+    private var runPeak = 0f
+    /** Addressedness (2026-09-29): the peak score of the run that last fired — how clearly it was "Hey Tɛkyerɛma"
+     *  ([WakeSignal]: a wake that only just cleared the bar gets its turn gated like a follow-up). */
+    var lastFirePeak = 0f
+        private set
 
-    fun reset() { above = 0; refractory = 0; recentRms = 0f }
+    fun reset() { above = 0; refractory = 0; recentRms = 0f; runPeak = 0f }
 
     /** One 80 ms frame: its raw RMS and the scorer's output. Returns true exactly on the frame that fires. */
     fun feed(rms: Float, scores: Map<String, Float>): Boolean {
         recentRms = maxOf(rms, recentRms * RMS_DECAY)
         if (scores.isEmpty()) return false                 // scorer gated the window (too quiet / not full)
-        val hit = (scores[WakeScorer.FIRE_HEAD] ?: 0f) >= bar && recentRms >= MIN_RMS
-        if (refractory > 0) { refractory--; above = 0; return false }
-        if (!hit) { above = 0; return false }
+        val score = scores[WakeScorer.FIRE_HEAD] ?: 0f
+        val hit = score >= bar && recentRms >= MIN_RMS
+        if (refractory > 0) { refractory--; above = 0; runPeak = 0f; return false }
+        if (!hit) { above = 0; runPeak = 0f; return false }
+        runPeak = maxOf(runPeak, score)
         if (++above < TRIGGER_FRAMES) return false
         above = 0; refractory = REFRACTORY_FRAMES
+        lastFirePeak = runPeak; runPeak = 0f
         return true
     }
 
