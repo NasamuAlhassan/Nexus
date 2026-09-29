@@ -84,6 +84,11 @@ class ConsentTargetsTest {
         assertTrue(ActionSemantics.confirmation("tap", btn(1, "Install"), null, screen)!!.contains("installs"))
         assertTrue(ActionSemantics.confirmation("tap", btn(1, "While using the app"), null, screen)!!.contains("permission"))
         assertTrue(ActionSemantics.confirmation("tap", btn(1, "Start free trial"), null, screen)!!.contains("charge you money"))
+        // A20e 2026-09-29: "Tap “Continue with Google”?" didn't say where — the app is named
+        val jiji = UiSnapshot("com.olx.ssa.gh", "Jiji", listOf(btn(1, "Continue with Google")), 0L, PerceptionRoute("tree", "test"),
+            appName = "Jiji.com.gh")
+        val google = ActionSemantics.confirmation("tap", btn(1, "Continue with Google"), null, jiji)!!
+        assertTrue(google, google.startsWith("Tap “Continue with Google” in Jiji.com.gh?"))
         // Existing read-backs are unchanged.
         assertEquals("Allow “Allow”?", ActionSemantics.confirmation("tap", btn(1, "Allow"), null, screen))
     }

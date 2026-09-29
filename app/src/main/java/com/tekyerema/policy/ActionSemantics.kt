@@ -101,7 +101,9 @@ object ActionSemantics {
         }
         // Consent and money: someone who can't see the screen must hear what pressing it MEANS, not just its caption.
         if (text.isNotBlank()) {
-            val shown = "Tap “${text.take(60)}”?"
+            // Name the app too ("… in Jiji.com.gh?"): "Continue with Google" means little without knowing WHERE.
+            val inApp = before?.appName?.takeIf { it.isNotBlank() && !text.contains(it, ignoreCase = true) }?.let { " in $it" }.orEmpty()
+            val shown = "Tap “${text.take(60)}”$inApp?"
             when (TargetSemantics.consentKind(text, target, anchoredOk = target == null || (target.clickable && !target.editable))) {
                 TargetSemantics.Consent.ACCOUNT -> return "$shown This signs you in, makes an account, or shares your account with this app."
                 TargetSemantics.Consent.INSTALL -> return "$shown This installs or turns on something on your phone."
