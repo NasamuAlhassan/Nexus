@@ -95,13 +95,15 @@ class HonestResultsEngineTest {
     }
 
     @Test fun send_sms_speaks_its_own_evidence_and_the_rest_of_the_summary_stays() = runTest {
-        val job = launch { AgentEngine.runForTest("text Ama see you at 6 and set an alarm", ScriptedBrain(
+        // (ClaimCheck, 2026-09-29: this fixture used to claim "and set an alarm for 6" with no alarm step — now refused as a
+        // false claim; the remainder here is a true sentence.)
+        val job = launch { AgentEngine.runForTest("text Ama see you at 6", ScriptedBrain(
             { tool("send_sms", JSONObject().put("contact", "Ama").put("message", "see you at 6")) },
-            { AgentDecision.Done("I've texted Ama and set an alarm for 6.") })) }
+            { AgentDecision.Done("I've texted Ama. She'll see it when her phone is on.") })) }
         advanceUntilIdle()
         AgentEngine.confirm(true, state().confirmationSeq)
         advanceUntilIdle(); job.join()
-        assertEquals("The phone network accepted your text to Ama — 'see you at 6'. I also set an alarm for 6.", result())
+        assertEquals("The phone network accepted your text to Ama — 'see you at 6'. She'll see it when her phone is on.", result())
     }
 
     @Test fun two_failures_in_a_row_offer_the_helper_once() = runTest {

@@ -869,6 +869,19 @@ object AgentEngine {
                             journalCheckpoint()
                             continue
                         }
+                        // Claim check (A20e 2026-09-29: "I opened Chrome and searched…" after only opening Chrome): a reply may
+                        // only claim what a step did — refused once with what's missing, then ended honestly (agent/ClaimCheck).
+                        val unsupported = ClaimCheck.check(runCtx.goal, decision.summary, history)
+                        if (unsupported != null && runCtx.claimRefusals++ == 0) {
+                            log(LogEntry.Kind.INFO, "completion gate: the reply says '${unsupported.said}' but no step did the ${unsupported.noun} — not done yet")
+                            history.add(unsupported.note)
+                            continue
+                        }
+                        if (unsupported != null) {
+                            log(LogEntry.Kind.INFO, "CANNOT DO [unsupported_claim] the reply claimed '${unsupported.said}' twice with no step that did it")
+                            log(LogEntry.Kind.RESULT, unsupported.honestLine); pushConvo("Tɛkyerɛma: ${unsupported.honestLine}")
+                            finish(AgentStatus.CANNOT_DO, stats); return
+                        }
                         val planOpen = (planGate as? com.tekyerema.agent.plan.PlanTracker.Gate.Unverified)?.open
                         // B: if a smaller backup model did part of the task, the spoken result says so (once).
                         val spokenSummary = decision.summary + route.disclosure()
@@ -2018,6 +2031,8 @@ object AgentEngine {
         var journal: com.tekyerema.agent.journal.TaskRun? = null
         /** Honest results (2026-09-29): this run's message sends and what the screen showed after each ([SendReport]). */
         val sends = SendReport.Tracker()
+        /** [ClaimCheck]: how often a done-reply claimed something no step did. */
+        var claimRefusals = 0
     }
 
     @Volatile private var activeRun: RunCtx? = null
