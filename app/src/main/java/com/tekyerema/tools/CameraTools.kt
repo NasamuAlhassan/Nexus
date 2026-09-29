@@ -108,8 +108,20 @@ object TakePhotoTool : Tool {
         val want = if (front) CameraUi.Facing.FRONT else CameraUi.Facing.BACK
         var facingNote = ""
         CameraUi.switchTo(screen, want)?.takeIf { CameraUi.facing(screen) != want }?.let { sw ->
+            fun onWantedSide(s: UiSnapshot) = s.appPackage == cameraPkg && CameraUi.facing(s) == want && CameraUi.shutter(s) != null
             ctrl.clickElement(sw.id)
-            screen = awaitScreen(ctrl, 3_000L) { s -> s.appPackage == cameraPkg && CameraUi.facing(s) == want && CameraUi.shutter(s) != null }
+            var flipped = awaitScreen(ctrl, 1_500L) { s -> onWantedSide(s) }
+            if (flipped == null) {
+                // Samsung Camera (A20e, 2026-09-29) ignores the node click on its switch. Tap it once — only while the SAME
+                // switch is still there, still saying it goes to the other side (so a slow flip is never flipped back).
+                val still = try { ctrl.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null }
+                val again = still?.let { CameraUi.switchTo(it, want) }?.takeIf {
+                    CameraUi.facing(still) != want && it.label == sw.label && it.bounds.overlaps(sw.bounds) && !it.bounds.isEmpty()
+                }
+                if (again != null) ctrl.tap(again.bounds.centerX, again.bounds.centerY)
+                flipped = awaitScreen(ctrl, 3_000L) { s -> onWantedSide(s) }
+            }
+            screen = flipped
                 ?: return ToolResult(false, "I couldn't switch to the $side.", JSONObject().put("taken", false), recoverable = true, channel = "a11y")
         }
         if (CameraUi.facing(screen) == CameraUi.Facing.UNKNOWN) facingNote = " I couldn't confirm which camera was on."
@@ -120,10 +132,14 @@ object TakePhotoTool : Tool {
         val button = CameraUi.shutter(shot)!!
         // ONE press only (no blind re-tap — that could take a second photo). Its effect is a new thumbnail / changed
         // controls or an announcement; an unchanged screen is reported as "couldn't tell", not as a photo.
-        val pressed = ctrl.clickElement(button.id) || (!button.bounds.isEmpty() && ctrl.tap(button.bounds.centerX, button.bounds.centerY))
-        val reacted = pressed && awaitScreen(ctrl, 2_500L, intervalMs = 300L) { s ->
+        suspend fun reaction() = awaitScreen(ctrl, 2_500L, intervalMs = 300L) { s ->
             s.signature() != shot.signature() || s.announcements.isNotEmpty()
         } != null
+        val pressed = ctrl.clickElement(button.id) || (!button.bounds.isEmpty() && ctrl.tap(button.bounds.centerX, button.bounds.centerY))
+        var reacted = pressed && reaction()
+        // Samsung Camera can ignore the node click (its camera switch did, A20e 2026-09-29): with no reaction at all, one
+        // gesture tap on the same shutter. The worst case is a second photo, never anything sent or changed.
+        if (!reacted && !button.bounds.isEmpty()) reacted = ctrl.tap(button.bounds.centerX, button.bounds.centerY) && reaction()
         return if (reacted) ToolResult(true, "Took the photo with the $side — it's saved in your Gallery.$facingNote",
             JSONObject().put("taken", true).put("camera", if (front) "front" else "back"), channel = "a11y")
         else ToolResult(false, "I pressed the shutter but couldn't tell whether a photo was taken — check the Gallery.",
