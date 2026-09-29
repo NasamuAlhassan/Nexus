@@ -82,5 +82,11 @@ data class AgentUiState(
      *  paired computer over MCP ([com.tekyerema.mcp.RemoteGate]). */
     val origin: String? = null,
     /** Numbers each submitted goal (never reused in the process), so an observer can tell two runs of the same goal apart. */
-    val runSeq: Long = 0L
+    val runSeq: Long = 0L,
+    /** Voice-UX (2026-09-29): the app a step of run [AppSwitch.runSeq] last brought to the front — the voice layer says
+     *  "In WhatsApp." once per app per task, a blind user's stand-in for seeing where the phone is (voice/AppNote.kt). */
+    val appSwitch: AppSwitch? = null
 )
+
+/** An app a task brought to the front: [pkg], its launcher label [name], and the run ([AgentUiState.runSeq]) that did it. */
+data class AppSwitch(val pkg: String, val name: String?, val runSeq: Long)
