@@ -43,6 +43,9 @@ object NetworkMonitor {
         cm = mgr
         appContext = context.applicationContext
         LinkProbe.available = true
+        // Resolve the few hosts the app talks to now, off the request path (see CachingDns).
+        CachingDns.shared.prefetch(com.tekyerema.core.config.AppConfig.stringList("router.network.dns.prefetch",
+            listOf("api.groq.com", "generativelanguage.googleapis.com", "connectivitycheck.gstatic.com")))
         // VALIDATED is only re-checked now and then (AOSP re-probes on DNS-timeout streaks, not on a timer), so tell
         // Android what our traffic saw: it re-validates the network and, with the user's "switch to mobile data"
         // setting, may move to a network that works. A hint only — needs no permission beyond network state.

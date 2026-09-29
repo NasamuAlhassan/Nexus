@@ -19,6 +19,9 @@ import java.util.concurrent.TimeUnit
 object Http {
     val shared: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            // A slow resolver (the A20e's Private DNS took 5–11 s a lookup on the campus Wi-Fi) must not stall every new
+            // connection: known addresses are reused, and a slow lookup falls back to the last good one ([CachingDns]).
+            .dns(CachingDns.shared)
             // Idle connections are kept only a minute: the HTTP/2 pings below would otherwise keep the mobile radio
             // awake for the full idle time, and [prewarm] reopens the connection when the mic opens anyway.
             .connectionPool(ConnectionPool(5, com.tekyerema.core.config.AppConfig.long("router.network.poolKeepAliveSec", 60L), TimeUnit.SECONDS))
@@ -57,6 +60,8 @@ object Http {
             call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     if (observe && !call.isCanceled()) LinkHealth.failure(System.currentTimeMillis() - t0, e.message)
+                    // Refused / no route: the cached address may be stale — look it up again next time.
+                    if (e is java.net.ConnectException || e is java.net.NoRouteToHostException) CachingDns.shared.forget(call.request().url.host)
                     if (cont.isActive) cont.resumeWith(Result.failure(e))
                 }
                 override fun onResponse(call: Call, response: Response) {
