@@ -12,6 +12,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +30,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
@@ -48,6 +50,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
@@ -71,9 +74,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.tekyerema.ui.theme.LocalCalmMotion
+import com.tekyerema.ui.theme.Spectrum
 import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.theme.TkHaptic
 import com.tekyerema.ui.theme.TkMotion
+import com.tekyerema.ui.theme.glass
 import com.tekyerema.ui.theme.tkHaptic
 import kotlin.math.PI
 import kotlin.math.cos
@@ -81,20 +86,19 @@ import kotlin.math.sin
 
 /** Horizontal page margin, everywhere. */
 val PageMargin = 24.dp
-
-/** A pressed primary button: a cool grey under Ink text (≈14:1). */
-private val PressedFill = Color(0xFFD3DAEA)
-/** The navigation indicator pill: a lift of the ink, decorative (the label and icon carry the contrast). */
-private val NavPill = Color(0xFF1B2547)
+/** Glass cards sit a little wider than the text margin, so their text lines up with page titles. */
+val CardMargin = 16.dp
+private val CardShape = RoundedCornerShape(26.dp)
 
 // ---------------------------------------------------------------------------------------- brand
 
 /**
- * The Tɛkyerɛma mark drawn live: the white ear spiral and the cyan pulse from the supplied icon,
- * on a transparent background. Identical geometry to res/drawable/ic_launcher_foreground.xml.
+ * The Tɛkyerɛma mark drawn live: the ear spiral and the cyan pulse from the supplied icon, on a transparent
+ * background. Identical geometry to res/drawable/ic_launcher_foreground.xml. The ear follows the text colour, so the
+ * mark reads on both palettes.
  */
 @Composable
-fun BrandMark(size: Dp, modifier: Modifier = Modifier, ear: Color = Color.White, pulse: Color = Tk.Cyan) {
+fun BrandMark(size: Dp, modifier: Modifier = Modifier, ear: Color = Tk.Text, pulse: Color = Tk.Cyan) {
     Canvas(modifier.size(size).clearAndSetSemantics { }) {
         val s = this.size.minDimension / 108f
         fun ease(a: Float, b: Float, t: Float) = a + (b - a) * (1f - cos(PI.toFloat() * t)) / 2f
@@ -128,7 +132,7 @@ fun BrandRow(modifier: Modifier = Modifier) {
         modifier = modifier.semantics(mergeDescendants = true) { heading(); contentDescription = "Tɛkyerɛma" },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BrandMark(size = 36.dp)
+        BrandMark(size = 34.dp)
         Spacer(Modifier.width(2.dp))
         Text("Tɛkyerɛma", style = MaterialTheme.typography.titleSmall, color = Tk.Text)
     }
@@ -155,15 +159,18 @@ val HistoryIcon: ImageVector by lazy {
 }
 
 /**
- * Three quiet destinations under a hairline. Large targets; the current one is brighter and sits on a pill that
- * grows out from the icon on a spring (Material's navigation indicator), so the change of place is felt, not just seen.
+ * The tab bar: a floating pane of glass (Liquid Glass's "controls float above content"). The current place sits on a
+ * soft capsule of the accent that grows on a spring; large targets (64 dp tall), a label under every icon.
  */
 @Composable
 fun QuietNav(current: Section, onSelect: (Section) -> Unit, modifier: Modifier = Modifier) {
-    Column(modifier.fillMaxWidth()) {
-        Hairline()
+    Box(modifier.fillMaxWidth().padding(horizontal = 28.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp).semantics { contentDescription = "Navigation" },
+            modifier = Modifier
+                .fillMaxWidth()
+                .glass(RoundedCornerShape(34.dp), strong = true, elevation = 18.dp)
+                .padding(horizontal = 6.dp, vertical = 5.dp)
+                .semantics { contentDescription = "Navigation" },
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Section.entries.forEach { s -> NavItem(s, s == current) { onSelect(s) } }
@@ -177,40 +184,39 @@ private fun RowScope.NavItem(section: Section, selected: Boolean, onClick: () ->
     val focused by interaction.collectIsFocusedAsState()
     val calm = LocalCalmMotion.current
     val tint by animateColorAsState(if (selected) Tk.Text else Tk.TextTertiary, TkMotion.defaultEffects(), label = "nav tint")
-    // 0 → 1 on a bouncy spatial spring: the pill overshoots its width a touch, then settles (calm: it just fades).
     val grow by animateFloatAsState(if (selected) 1f else 0f,
-        if (calm) TkMotion.fastEffects() else TkMotion.fastSpatial(), label = "nav pill")
+        if (calm) TkMotion.fastEffects() else TkMotion.fastSpatial(), label = "nav capsule")
+    val capsule = Tk.Cyan.copy(alpha = if (Tk.Dark) 0.22f else 0.14f)
+    val focus = Tk.Focus
     Column(
         modifier = Modifier
             .weight(1f)
             .heightIn(min = 60.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .then(if (focused) Modifier.border(2.dp, Tk.Focus, RoundedCornerShape(14.dp)) else Modifier)
+            .clip(RoundedCornerShape(28.dp))
+            .drawBehind {
+                val g = grow.coerceIn(0f, 1.08f)
+                if (g > 0.01f) {
+                    val w = size.width * (if (calm) 1f else (0.55f + 0.45f * g))
+                    drawRoundRect(capsule.copy(alpha = capsule.alpha * grow.coerceIn(0f, 1f)),
+                        topLeft = Offset((size.width - w) / 2f, 0f),
+                        size = androidx.compose.ui.geometry.Size(w, size.height), cornerRadius = CornerRadius(size.height / 2f))
+                }
+            }
+            .then(if (focused) Modifier.border(2.dp, focus, RoundedCornerShape(28.dp)) else Modifier)
             .selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.Tab, onClick = onClick)
             .semantics { this.selected = selected; contentDescription = section.label }
-            .padding(vertical = 6.dp),
+            .padding(vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Box(
-            Modifier.size(width = 60.dp, height = 32.dp).drawBehind {
-                val g = grow.coerceIn(0f, 1.08f)
-                if (g > 0.01f) {
-                    val w = size.width * (if (calm) 1f else g)
-                    drawRoundRect(NavPill.copy(alpha = grow.coerceIn(0f, 1f)), topLeft = Offset((size.width - w) / 2f, 0f),
-                        size = androidx.compose.ui.geometry.Size(w, size.height), cornerRadius = CornerRadius(size.height / 2f))
-                }
-            },
-            contentAlignment = Alignment.Center
-        ) {
-            when (section) {
-                Section.HOME -> Icon(Icons.Outlined.Home, null, tint = tint, modifier = Modifier.size(22.dp))
-                Section.HISTORY -> Icon(HistoryIcon, null, tint = tint, modifier = Modifier.size(22.dp))
-                Section.SETTINGS -> Icon(Icons.Outlined.Settings, null, tint = tint, modifier = Modifier.size(22.dp))
-            }
+        when (section) {
+            Section.HOME -> Icon(Icons.Outlined.Home, null, tint = tint, modifier = Modifier.size(24.dp))
+            Section.HISTORY -> Icon(HistoryIcon, null, tint = tint, modifier = Modifier.size(24.dp))
+            Section.SETTINGS -> Icon(Icons.Outlined.Settings, null, tint = tint, modifier = Modifier.size(24.dp))
         }
         Spacer(Modifier.height(2.dp))
-        Text(section.label, style = MaterialTheme.typography.labelSmall, color = tint)
+        Text(section.label, style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium, color = tint)
     }
 }
 
@@ -222,21 +228,24 @@ fun Hairline(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
 }
 
 /**
- * Editorial page header: an optional back control on its own line, then a large left-aligned
- * title. Titles are TalkBack headings.
+ * Page header: an optional back control on its own line, then a large left-aligned title. Titles are TalkBack
+ * headings and the page's pane title.
  */
 @Composable
 fun PageTitle(text: String, onBack: (() -> Unit)? = null, modifier: Modifier = Modifier) {
     // K-17: the page title is also the pane title, so TalkBack announces "Voice", "Permissions"… on arrival.
     Column(modifier.fillMaxWidth().semantics { paneTitle = text }) {
         if (onBack != null) {
-            IconButton(onClick = onBack, modifier = Modifier.padding(start = 8.dp, top = 4.dp).size(52.dp)) {
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier.padding(start = 12.dp, top = 8.dp).size(48.dp).glass(CircleShape, elevation = 6.dp)
+            ) {
                 Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Tk.Text)
             }
-        } else Spacer(Modifier.height(24.dp))
+        } else Spacer(Modifier.height(20.dp))
         Text(
             text, style = MaterialTheme.typography.displaySmall, color = Tk.Text,
-            modifier = Modifier.semantics { heading() }.padding(start = PageMargin, end = PageMargin, top = 8.dp, bottom = 16.dp)
+            modifier = Modifier.semantics { heading() }.padding(start = PageMargin, end = PageMargin, top = 10.dp, bottom = 14.dp)
         )
     }
 }
@@ -246,7 +255,7 @@ fun PageTitle(text: String, onBack: (() -> Unit)? = null, modifier: Modifier = M
 fun Overline(text: String, modifier: Modifier = Modifier) {
     Text(
         text.uppercase(), style = MaterialTheme.typography.labelMedium, color = Tk.TextSecondary,
-        modifier = modifier.padding(start = PageMargin, end = PageMargin, top = 26.dp, bottom = 10.dp).semantics { heading() }
+        modifier = modifier.padding(start = PageMargin + 4.dp, end = PageMargin, top = 22.dp, bottom = 8.dp).semantics { heading() }
     )
 }
 
@@ -254,62 +263,122 @@ fun Overline(text: String, modifier: Modifier = Modifier) {
 @Composable
 fun Note(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary,
-        modifier = modifier.padding(horizontal = PageMargin, vertical = 10.dp))
+        modifier = modifier.padding(horizontal = PageMargin + 4.dp, vertical = 10.dp))
 }
 
 /**
- * Shared row chrome: full-width, 68 dp minimum, white focus outline, hairline below. A press lights the row with a
- * soft ink wash that fades back on release (there was no touch response at all), drawn in the draw phase only.
+ * A group of rows on one pane of glass, with an optional section name above it. Rows inside draw their own inset
+ * dividers; pass `divider = false` on the last one.
+ */
+@Composable
+fun GlassGroup(title: String? = null, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier.fillMaxWidth()) {
+        if (title != null) Overline(title) else Spacer(Modifier.height(8.dp))
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = CardMargin).glass(CardShape, elevation = 10.dp).clip(CardShape),
+            content = content
+        )
+    }
+}
+
+/**
+ * A small rounded tile holding a row's icon, tinted with one of the spectrum colours on a soft backing of the same —
+ * the quick visual anchor iOS Settings uses, sized for low vision (40 dp).
+ */
+@Composable
+fun IconTile(icon: ImageVector, tint: Color, modifier: Modifier = Modifier) {
+    val backing = tint.copy(alpha = Tk.palette.tileBacking + if (Tk.Dark) 0.06f else 0f)
+    Box(
+        modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(backing),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = if (Tk.Dark) tint else lerpDarker(tint), modifier = Modifier.size(22.dp))
+    }
+}
+
+/** On the pale palette the spectrum hues are deepened so the glyph keeps ≥3:1 against its tile. */
+private fun lerpDarker(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color(0xFF0D1326), 0.28f)
+
+/**
+ * Shared row chrome inside a glass group: 64 dp minimum, a focus outline, an inset hairline below. A press lights the
+ * row with a soft wash that fades on release, drawn in the draw phase only.
  */
 @Composable
 private fun RowShell(
     modifier: Modifier,
     interaction: MutableInteractionSource,
     divider: Boolean,
+    dividerInset: Dp = 20.dp,
     content: @Composable RowScope.() -> Unit
 ) {
     val focused by interaction.collectIsFocusedAsState()
     val pressed by interaction.collectIsPressedAsState()
     val wash by animateFloatAsState(if (pressed) 1f else 0f,
         if (pressed) TkMotion.fastEffects() else TkMotion.slowEffects(), label = "row press")
+    val washColor = Tk.Ink2
+    val focus = Tk.Focus
     Column {
         Row(
             modifier = modifier
                 .fillMaxWidth()
-                .drawBehind { if (wash > 0.01f) drawRect(Tk.Ink2.copy(alpha = wash)) }
-                .then(if (focused) Modifier.border(2.dp, Tk.Focus) else Modifier)
-                .defaultMinSize(minHeight = 68.dp)
-                .padding(horizontal = PageMargin, vertical = 14.dp),
+                .drawBehind { if (wash > 0.01f) drawRect(washColor.copy(alpha = washColor.alpha * wash)) }
+                .then(if (focused) Modifier.border(2.dp, focus, RoundedCornerShape(18.dp)) else Modifier)
+                .defaultMinSize(minHeight = 64.dp)
+                .padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             content = content
         )
-        if (divider) Hairline(inset = PageMargin)
+        if (divider) Hairline(inset = dividerInset)
     }
 }
 
-/** A settings row: label left, optional value right. TalkBack reads "label, value, button". */
+/** A settings row: optional icon tile, label, value, chevron. TalkBack reads "label, value, button". */
 @Composable
-fun SettingRow(label: String, value: String? = null, divider: Boolean = true, onClick: () -> Unit) {
+fun SettingRow(
+    label: String,
+    value: String? = null,
+    divider: Boolean = true,
+    icon: ImageVector? = null,
+    iconTint: Color = Spectrum.Azure,
+    description: String? = null,
+    onClick: () -> Unit
+) {
     val interaction = remember { MutableInteractionSource() }
     RowShell(
         modifier = Modifier.clickable(interactionSource = interaction, indication = null, role = Role.Button, onClick = onClick),
-        interaction = interaction, divider = divider
+        interaction = interaction, divider = divider, dividerInset = if (icon != null) 74.dp else 20.dp
     ) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text, modifier = Modifier.weight(1f))
-        if (value != null) {
-            Spacer(Modifier.width(16.dp))
+        if (icon != null) { IconTile(icon, iconTint); Spacer(Modifier.width(16.dp)) }
+        Column(Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
+            if (description != null) Text(description, style = MaterialTheme.typography.bodySmall, color = Tk.TextSecondary,
+                modifier = Modifier.padding(top = 2.dp))
+        }
+        if (!value.isNullOrEmpty()) {
+            Spacer(Modifier.width(12.dp))
             Text(value, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary, textAlign = TextAlign.End)
         }
+        Spacer(Modifier.width(4.dp))
+        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, contentDescription = null, tint = Tk.TextTertiary, modifier = Modifier.size(22.dp))
     }
 }
 
 @Composable
-fun SwitchRow(label: String, description: String? = null, checked: Boolean, divider: Boolean = true, onChange: (Boolean) -> Unit) {
+fun SwitchRow(
+    label: String,
+    description: String? = null,
+    checked: Boolean,
+    divider: Boolean = true,
+    icon: ImageVector? = null,
+    iconTint: Color = Spectrum.Azure,
+    onChange: (Boolean) -> Unit
+) {
     val interaction = remember { MutableInteractionSource() }
     RowShell(
         modifier = Modifier.toggleable(value = checked, interactionSource = interaction, indication = null, role = Role.Switch, onValueChange = onChange),
-        interaction = interaction, divider = divider
+        interaction = interaction, divider = divider, dividerInset = if (icon != null) 74.dp else 20.dp
     ) {
+        if (icon != null) { IconTile(icon, iconTint); Spacer(Modifier.width(16.dp)) }
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
             if (description != null) Text(description, style = MaterialTheme.typography.bodySmall, color = Tk.TextSecondary, modifier = Modifier.padding(top = 2.dp))
@@ -318,8 +387,8 @@ fun SwitchRow(label: String, description: String? = null, checked: Boolean, divi
         Switch(
             checked = checked, onCheckedChange = null,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = Tk.Ink, checkedTrackColor = Tk.Cyan,
-                uncheckedThumbColor = Tk.TextSecondary, uncheckedTrackColor = Color.Transparent, uncheckedBorderColor = Tk.TextTertiary
+                checkedThumbColor = Color.White, checkedTrackColor = Tk.Cyan, checkedBorderColor = Color.Transparent,
+                uncheckedThumbColor = Tk.TextSecondary, uncheckedTrackColor = Tk.Ink2, uncheckedBorderColor = Tk.TextTertiary
             )
         )
     }
@@ -333,6 +402,7 @@ fun ChoiceRow(label: String, description: String? = null, selected: Boolean, div
     val dot by animateFloatAsState(if (selected) 1f else 0f,
         if (calm) TkMotion.fastEffects() else TkMotion.fastSpatial(), label = "radio dot")
     val ring by animateColorAsState(if (selected) Tk.Cyan else Tk.TextTertiary, TkMotion.defaultEffects(), label = "radio ring")
+    val fill = Tk.Cyan
     RowShell(
         modifier = Modifier.selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.RadioButton, onClick = onSelect),
         interaction = interaction, divider = divider
@@ -345,17 +415,18 @@ fun ChoiceRow(label: String, description: String? = null, selected: Boolean, div
         Box(
             Modifier.size(24.dp).border(2.dp, ring, CircleShape).drawBehind {
                 val d = dot.coerceAtLeast(0f)
-                if (d > 0.01f) drawCircle(Tk.Cyan, radius = 6.dp.toPx() * (if (calm) 1f else d), alpha = d.coerceAtMost(1f))
+                if (d > 0.01f) drawCircle(fill, radius = 6.dp.toPx() * (if (calm) 1f else d), alpha = d.coerceAtMost(1f))
             }
         )
     }
 }
 
 /**
- * The one big action on a page (60 dp, full width). Filled = primary, outlined = secondary.
+ * The one big action on a page (60 dp). Filled = primary (the text colour as a solid capsule — white on dark,
+ * ink on light), outlined = secondary glass.
  *
- * It is physical: a press squashes it a little on a fast spring and it springs back when released (calm motion: it
- * only darkens), and a tap answers with the system's haptic for that kind of action ([haptic]).
+ * It is physical: a press squashes it a little on a fast spring and it springs back (calm motion: it only darkens),
+ * and a tap answers with the system's haptic for that kind of action ([haptic]).
  */
 @Composable
 fun BigButton(
@@ -374,25 +445,26 @@ fun BigButton(
     val shape = RoundedCornerShape(30.dp)
     val scale by animateFloatAsState(if (pressed && !calm) 0.95f else 1f,
         if (pressed) TkMotion.fastSpatial() else TkMotion.release(), label = "button press")
-    // Pressed: the white button dims to a cool grey (Ink text still ~14:1); the outlined one fills with ink.
+    val solid = Tk.Text
     val fill by animateColorAsState(
-        when { filled && pressed -> PressedFill; filled -> Tk.Text; pressed -> Tk.Ink2; else -> Color.Transparent },
+        when { filled && pressed -> solid.copy(alpha = 0.82f); filled -> solid; pressed -> Tk.Ink2; else -> Color.Transparent },
         TkMotion.fastEffects(), label = "button fill")
     Box(
         modifier = modifier
             .fillMaxWidth()
             .heightIn(min = 60.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale }
+            .then(if (filled) Modifier else Modifier.glass(shape, elevation = 6.dp))
             .clip(shape)
             .drawBehind { drawRect(fill) }
-            .border(if (focused) 3.dp else 1.5.dp, if (focused) Tk.Cyan else if (filled) Tk.Text else Tk.TextSecondary, shape)
+            .border(if (focused) 3.dp else 0.dp, if (focused) Tk.Cyan else Color.Transparent, shape)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button,
                 onClick = { view.tkHaptic(haptic); onClick() })
             .semantics { if (contentDescription != null) this.contentDescription = contentDescription }
             .padding(horizontal = 24.dp, vertical = 17.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Medium,
+        Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
             color = if (filled) Tk.Ink else Tk.Text, textAlign = TextAlign.Center)
     }
 }
@@ -400,9 +472,9 @@ fun BigButton(
 // --------------------------------------------------------------------------------- command field
 
 /**
- * The small typed-input surface at the foot of the voice screens. Secondary by design: one
- * line, a quiet pill, a send affordance that appears only once there is text. Submitting sends
- * the text to the SAME agent entry point an ASR transcript uses (see VoiceController.submitText).
+ * The typed-input pill at the foot of the voice screens: a floating pane of glass with a mic button (voice is still
+ * the first way in) that turns into Send once there is text. Submitting sends the text to the SAME agent entry point
+ * an ASR transcript uses (see VoiceController.submitText).
  *
  * [onSubmit] returns true if the text was accepted; the field then clears and the keyboard hides.
  * [onFocusChanged] lets the caller pause the microphone while the keyboard is open.
@@ -411,14 +483,15 @@ fun BigButton(
 fun CommandField(
     onSubmit: (String) -> Boolean,
     onFocusChanged: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onMic: (() -> Unit)? = null
 ) {
     var text by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val shape = RoundedCornerShape(26.dp)
+    val shape = RoundedCornerShape(30.dp)
     val submit = {
         if (onSubmit(text)) { text = ""; keyboard?.hide(); focusManager.clearFocus() }
     }
@@ -426,11 +499,10 @@ fun CommandField(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
-            .clip(shape)
-            .background(Tk.Ink2)
-            .border(if (focused) 2.dp else 1.dp, if (focused) Tk.Focus else Tk.Hairline, shape)
-            .padding(start = 20.dp, end = 6.dp),
+            .heightIn(min = 58.dp)
+            .glass(shape, strong = true, elevation = 12.dp)
+            .border(if (focused) 2.dp else 0.dp, if (focused) Tk.Focus else Color.Transparent, shape)
+            .padding(start = 22.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         androidx.compose.foundation.text.BasicTextField(
@@ -438,13 +510,13 @@ fun CommandField(
             onValueChange = { text = it },
             modifier = Modifier
                 .weight(1f)
-                .padding(vertical = 14.dp)
+                .padding(vertical = 16.dp)
                 .onFocusChanged { onFocusChanged(it.isFocused) }
                 .semantics { contentDescription = "Type a command to Tɛkyerɛma" },
             interactionSource = interaction,
             singleLine = true,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(color = Tk.Text),
-            cursorBrush = androidx.compose.ui.graphics.SolidColor(Tk.Cyan),
+            textStyle = MaterialTheme.typography.bodyLarge.copy(color = Tk.Text),
+            cursorBrush = SolidColor(Tk.Cyan),
             // No autocorrect: what reaches the agent must be exactly what was typed (Twi words like
             // "bue" would otherwise be silently rewritten by the keyboard).
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
@@ -455,15 +527,41 @@ fun CommandField(
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { submit() }),
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) Text("Type a command…", style = MaterialTheme.typography.bodyMedium, color = Tk.TextTertiary)
+                    if (text.isEmpty()) Text("Ask Tɛkyerɛma…", style = MaterialTheme.typography.bodyLarge, color = Tk.TextTertiary)
                     inner()
                 }
             }
         )
-        if (text.isNotBlank()) {
-            IconButton(onClick = submit, modifier = Modifier.size(48.dp)) {   // A11Y-M4: 48dp Android min touch target
-                Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send command", tint = Tk.Cyan, modifier = Modifier.size(24.dp))
+        val accent = Tk.Cyan
+        val onAccent = Tk.OnAccent
+        when {
+            text.isNotBlank() -> IconButton(onClick = submit, modifier = Modifier.size(48.dp)) {   // A11Y-M4: 48dp min target
+                Box(Modifier.size(40.dp).clip(CircleShape).background(accent), contentAlignment = Alignment.Center) {
+                    Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send command", tint = onAccent, modifier = Modifier.size(20.dp))
+                }
             }
-        } else Spacer(Modifier.width(14.dp))
+            onMic != null -> IconButton(onClick = onMic, modifier = Modifier.size(48.dp)) {
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(
+                        Brush.linearGradient(listOf(Spectrum.Cyan, Spectrum.Violet), start = Offset.Zero, end = Offset(90f, 90f))
+                    ),
+                    contentAlignment = Alignment.Center
+                ) { MicGlyph(Color.White, Modifier.size(20.dp)) }
+            }
+            else -> Spacer(Modifier.width(14.dp))
+        }
+    }
+}
+
+/** A microphone glyph (not in the core icon set), drawn so it needs no extra dependency. */
+@Composable
+private fun MicGlyph(color: Color, modifier: Modifier) {
+    Canvas(modifier.semantics { contentDescription = "Talk" }) {
+        val w = size.width; val h = size.height
+        val stroke = Stroke(width = w * 0.1f, cap = StrokeCap.Round)
+        drawRoundRect(color, topLeft = Offset(w * 0.34f, h * 0.06f), size = androidx.compose.ui.geometry.Size(w * 0.32f, h * 0.52f),
+            cornerRadius = CornerRadius(w * 0.16f))
+        drawArc(color, 0f, 180f, false, topLeft = Offset(w * 0.2f, h * 0.24f), size = androidx.compose.ui.geometry.Size(w * 0.6f, h * 0.5f), style = stroke)
+        drawLine(color, Offset(w * 0.5f, h * 0.74f), Offset(w * 0.5f, h * 0.92f), strokeWidth = w * 0.1f, cap = StrokeCap.Round)
     }
 }

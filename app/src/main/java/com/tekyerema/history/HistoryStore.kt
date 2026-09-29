@@ -48,7 +48,11 @@ object HistoryStore {
 
     private fun file(): File? = appContext?.let { File(it.filesDir, "history/history.enc") }
 
+    /** The debug build's scripted test scenarios ("[TEST SCENARIO] STOP_MID_TASK") are not the user's history. */
+    fun isTestEntry(title: String): Boolean = title.trimStart().startsWith("[TEST SCENARIO]", ignoreCase = true)
+
     fun record(goal: String, outcome: Outcome, timeMs: Long = System.currentTimeMillis()) {
+        if (isTestEntry(goal)) return
         val entry = HistoryEntry(timeMs, titleFor(goal, outcome.done), outcome)
         val next = prune(listOf(entry) + _entries.value)
         _entries.value = next

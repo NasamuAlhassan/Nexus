@@ -813,7 +813,7 @@ class VoiceController(
                 tel.endTurn(if (fast.ok) "full" else "failed", byVoice = true)
                 _state.update {
                     // A command with nothing to say (the camera reader announces itself) is not a missing voice.
-                    it.copy(state = VoiceState.IDLE, spoken = fast.spoken,
+                    it.copy(state = VoiceState.IDLE, spoken = fast.spoken, spokenAt = System.currentTimeMillis(),
                         partialHint = if (spoke || !speakAloud() || fast.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
                 }
                 return
@@ -838,7 +838,7 @@ class VoiceController(
             } catch (c: CancellationException) { throw c } catch (e: Exception) { false }
             tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
-                it.copy(state = VoiceState.IDLE, spoken = outcome.spoken,
+                it.copy(state = VoiceState.IDLE, spoken = outcome.spoken, spokenAt = System.currentTimeMillis(),
                     partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
             }
             // B-07: the user spoke over the reply — what they said is the next turn.

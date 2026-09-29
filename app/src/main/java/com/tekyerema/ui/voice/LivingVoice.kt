@@ -30,6 +30,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -40,28 +42,31 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.tekyerema.ui.theme.Spectrum
 import com.tekyerema.ui.theme.Tk
+import com.tekyerema.ui.theme.TkPalette
 import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
-import kotlin.math.exp
 import kotlin.math.pow
 import kotlin.math.sin
 
 /**
- * The living voice interface — Tɛkyerɛma's identity. The brand mark (an open "ear" ring and a cyan pulse) unfolds
- * into four layered rings over a slow aurora of light, threaded by a horizontal pulse line that carries the user's
- * voice (live microphone level), the assistant's speech, and — while acting — the brand's travelling pulse.
+ * The living voice — a liquid-glass orb (redesign 2026-09-29, after the new Siri orb and Apple's Liquid Glass).
  *
- * Everything that moves is a spring in [PresenceSim]: states flow into one another with momentum, the rings form a
- * chain that the voice ripples through (inner ring first), and each change of state plays a small physical gesture
- * (lean in, draw in, bloom, head-shake, nudge). Drawing happens in the draw phase only — one frame clock, no
- * recomposition per frame — so it holds 60 fps on the Galaxy A20e.
+ * A sphere of glass holding swirling coloured light. Four soft lights (cyan, azure, violet, rose) drift inside it and
+ * glow around it; the user's voice — and the assistant's own speech — becomes a multicolour waveform across its
+ * middle; thinking sends a highlight racing around the rim; a request for the user's OK warms everything to gold; an
+ * error greys it. The glass itself is drawn from gradients: a dark (or pearl) core, a bright rim catching the light
+ * top-left, and a specular highlight — no blur, so it holds 60 fps on the Galaxy A20e.
  *
- * Accessibility: the whole visual is one large button. Its label and state description come from the caller; the
- * animation is decorative. [reduceMotion] (the in-app setting OR the system's "Remove animations") makes it calm:
- * shapes snap to each state and stay still, only colour and light cross-fade, and nothing is drawn per frame once
- * it has settled.
+ * Everything that moves is a spring in [PresenceSim], unchanged: states flow into each other with momentum and each
+ * change plays a small gesture (lean in, draw in, bloom, shake, nudge). Drawing happens in the draw phase only — one
+ * frame clock, no recomposition per frame.
+ *
+ * Accessibility: the whole visual is one large button; label and state come from the caller, the animation is
+ * decorative. [reduceMotion] (in-app or the system's "Remove animations") makes it calm: nothing swirls, the light
+ * only cross-fades, and nothing is drawn per frame once it has settled.
  */
 @Composable
 fun LivingVoice(
@@ -83,6 +88,7 @@ fun LivingVoice(
     val currentPresence by rememberUpdatedState(presence)
     val currentPressed by rememberUpdatedState(pressed)
     val currentLevel by rememberUpdatedState(level)
+    val palette = Tk.palette
     // Bumped once per simulated frame and read only inside the draw lambda: a redraw, never a recomposition.
     var frame by remember { mutableLongStateOf(0L) }
 
@@ -124,32 +130,47 @@ fun LivingVoice(
     ) {
         Spacer(
             Modifier.fillMaxSize().drawWithCache {
-                // Built once per size: the gradients are drawn tinted and transformed, never re-created per frame.
-                val min = size.minDimension
-                val threadWidth = min * BASE_R * 2.7f
-                val threadX0 = size.width / 2f - threadWidth / 2f
-                val kit = DrawKit(
+                // Built once per size and palette: every gradient is drawn tinted and transformed, never re-created.
+                val kit = OrbKit(
                     glow = Brush.radialGradient(
-                        0f to Color.White, 0.35f to Color.White.copy(alpha = 0.55f), 0.7f to Color.White.copy(alpha = 0.14f),
+                        0f to Color.White, 0.3f to Color.White.copy(alpha = 0.6f), 0.65f to Color.White.copy(alpha = 0.16f),
                         1f to Color.Transparent, center = Offset.Zero, radius = UNIT
                     ),
-                    thread = Brush.horizontalGradient(
-                        0f to Color.Transparent, 0.2f to Color.White, 0.8f to Color.White, 1f to Color.Transparent,
-                        startX = threadX0, endX = threadX0 + threadWidth
+                    body = if (palette.dark) Brush.radialGradient(
+                        0f to Color(0xFF26337A), 0.65f to Color(0xFF121B45), 1f to Color(0xFF0A1028),
+                        center = Offset(-0.18f * UNIT, -0.22f * UNIT), radius = UNIT * 1.25f
+                    ) else Brush.radialGradient(
+                        0f to Color(0xFFFFFFFF), 0.65f to Color(0xFFEFF3FF), 1f to Color(0xFFDCE4FA),
+                        center = Offset(-0.18f * UNIT, -0.22f * UNIT), radius = UNIT * 1.25f
                     ),
-                    threadX0 = threadX0, threadWidth = threadWidth,
-                    threadGlow = Stroke(width = 9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    threadCore = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
-                    ringStrokes = Array(4) { k -> Stroke(width = RING_STROKE_DP[k].dp.toPx(), cap = StrokeCap.Round) },
-                    haloStroke = Stroke(width = RING_STROKE_DP[3].dp.toPx() * 2.6f, cap = StrokeCap.Round),
+                    // The glass's weight: a soft darkening toward the lower edge, so it reads as a sphere, not a disc.
+                    depth = Brush.radialGradient(
+                        0f to Color.Transparent, 0.72f to Color.Transparent,
+                        1f to (if (palette.dark) Color(0x8C000000) else Color(0x331B2A55)),
+                        center = Offset(0f, -0.12f * UNIT), radius = UNIT * 1.08f
+                    ),
+                    rim = Brush.sweepGradient(
+                        0f to Color.White.copy(alpha = 0.10f), 0.30f to Color.White.copy(alpha = 0.05f),
+                        0.55f to Color.White.copy(alpha = 0.30f), 0.62f to Color.White.copy(alpha = 0.95f),
+                        0.72f to Color.White.copy(alpha = 0.35f), 1f to Color.White.copy(alpha = 0.10f),
+                        center = Offset.Zero
+                    ),
+                    spec = Brush.radialGradient(
+                        0f to Color.White.copy(alpha = if (palette.dark) 0.55f else 0.85f), 1f to Color.Transparent,
+                        center = Offset.Zero, radius = UNIT
+                    ),
+                    rimStroke = Stroke(width = 1.6.dp.toPx()),
+                    waveStroke = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
+                    waveGlow = Stroke(width = 9.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round),
                     ripple = Stroke(width = 1.5.dp.toPx()),
                     bloom = Stroke(width = 2.5.dp.toPx()),
                     focus = Stroke(width = 3.dp.toPx()),
-                    path = Path()
+                    clip = Path(), wave = Path(),
+                    blend = if (palette.dark) BlendMode.Plus else BlendMode.SrcOver
                 )
                 onDrawBehind {
                     if (frame == Long.MIN_VALUE) return@onDrawBehind     // reading it subscribes this draw to the frame clock
-                    drawPresence(sim, kit, focused, reduceMotion)
+                    drawOrb(sim, kit, palette, focused, reduceMotion)
                 }
             }
         )
@@ -157,68 +178,60 @@ fun LivingVoice(
 }
 
 /** Everything the draw pass reuses frame to frame. */
-private class DrawKit(
-    val glow: Brush, val thread: Brush, val threadX0: Float, val threadWidth: Float,
-    val threadGlow: Stroke, val threadCore: Stroke, val ringStrokes: Array<Stroke>, val haloStroke: Stroke,
-    val ripple: Stroke, val bloom: Stroke, val focus: Stroke, val path: Path
+private class OrbKit(
+    val glow: Brush, val body: Brush, val depth: Brush, val rim: Brush, val spec: Brush,
+    val rimStroke: Stroke, val waveStroke: Stroke, val waveGlow: Stroke, val ripple: Stroke, val bloom: Stroke,
+    val focus: Stroke, val clip: Path, val wave: Path, val blend: BlendMode
 )
 
 private const val UNIT = 100f
-/** Ring radius as a share of the smaller side; everything else scales from it. Stays inside the circular clip. */
-private const val BASE_R = 0.335f
-private val RING_FACTORS = floatArrayOf(1.12f, 0.97f, 0.82f, 0.66f)     // outermost first
-private val RING_STROKE_DP = floatArrayOf(2.2f, 3f, 4.5f, 7f)
-private val RING_ALPHAS = floatArrayOf(0.32f, 0.5f, 0.7f, 0.95f)
-private val AURORA_ALPHAS = floatArrayOf(0.34f, 0.28f, 0.22f)
-private val Indigo = Color(0xFF2A3A8F)
-private val Violet = Color(0xFF8B7CFF)
-private val ErrorGrey = Color(0xFF56607A)
-/** The pulse line's taper toward its ends (sin^1.4), computed once. Clamped: sin(π) is a tiny negative → NaN. */
-private val THREAD_WINDOW = FloatArray(PresenceSim.THREAD_POINTS) { j ->
-    sin(PI.toFloat() * j / (PresenceSim.THREAD_POINTS - 1f)).coerceAtLeast(0f).pow(1.4f)
+/** Orb radius as a share of the smaller side; the aura reaches ~1.55× that, inside the square. */
+private const val BASE_R = 0.30f
+private val LIGHTS = arrayOf(Spectrum.Cyan, Spectrum.Azure, Spectrum.Violet, Spectrum.Rose)
+private val ErrorGrey = Color(0xFF6B7490)
+/** The waveform's taper toward the rim (sin^1.6). Clamped: sin(π) is a tiny negative → NaN. */
+private val WAVE_WINDOW = FloatArray(PresenceSim.THREAD_POINTS) { j ->
+    sin(PI.toFloat() * j / (PresenceSim.THREAD_POINTS - 1f)).coerceAtLeast(0f).pow(1.6f)
 }
 
-private fun DrawScope.drawPresence(s: PresenceSim, kit: DrawKit, focused: Boolean, calm: Boolean) {
+private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focused: Boolean, calm: Boolean) {
     val min = size.minDimension
     val appear = s.appear.value
     val cx = size.width / 2f + s.shake.value * min * 0.02f
     val cy = size.height / 2f
     val rBase = min * BASE_R
-    val r = rBase * s.scale.value * s.press.value * (0.82f + 0.18f * appear)
-    val warmth = s.warmth.value.coerceIn(0f, 1f)
+    val r = rBase * s.scale.value * s.press.value * (0.84f + 0.16f * appear) *
+        (1f + 0.04f * s.rings[0].value.coerceIn(-1f, 1.5f))          // the voice swells the glass a little
     val attention = s.attention.value.coerceIn(0f, 1f)
     val dim = s.dim.value.coerceIn(0f, 1f)
-    val alphaScale = (1f - 0.6f * dim) * appear.coerceIn(0f, 1f)
+    val alphaScale = (1f - 0.55f * dim) * appear.coerceIn(0f, 1f)
     val time = s.time
     val light = s.light()
     val bloom = s.bloom
+    val energy = s.energy.value
+    val twoPi = 2f * PI.toFloat()
 
-    // Colour temperature: calm blue → active cyan; attention warms toward amber; an error greys it down.
-    fun tone(base: Color, active: Color): Color =
-        lerp(lerp(lerp(base, active, warmth), Tk.Attention, attention * 0.85f), ErrorGrey, dim * 0.5f)
+    // Colour: attention (needs your OK) warms every light to gold; an error greys it down.
+    fun tone(c: Color): Color = lerp(lerp(c, Spectrum.Gold, attention * 0.8f), ErrorGrey, dim * 0.7f)
 
-    // 1. The aurora — three soft lights drifting behind the rings, brighter with the voice (strobe-guarded).
-    //    Additive, so where they overlap the light deepens like a real glow; no blur, so it is cheap on old GPUs.
-    for (b in 0 until 3) {
-        val phase = b * 2.094f
-        val dir = if (b == 1) -1f else 1f
-        val orbitAngle = time * (0.21f + 0.07f * b) * dir + phase
-        val orbit = r * (0.16f + 0.08f * sin(time * 0.37f + phase)) * (0.6f + 0.6f * s.wobble.value)
-        val radius = r * (1.02f + 0.06f * sin(time * 0.5f + phase * 1.3f) + 0.22f * s.voiceGlow.value)
-            .coerceAtMost(1.38f)
-        val color = when (b) {
-            0 -> tone(Tk.Blue, Tk.Cyan)
-            1 -> tone(Tk.BlueDeep, Tk.BlueBright)
-            else -> tone(Indigo, Violet)
-        }
-        val a = (light * AURORA_ALPHAS[b] * alphaScale).coerceIn(0f, 1f)
+    // Swirl speed: slow drift at rest, quicker while thinking/acting, lively with a voice. Calm: no swirl.
+    val swirl = if (calm) 0f else time * (0.22f + 0.9f * energy * energy + 0.5f * s.voiceGlow.value)
+
+    // 1. The aura — four soft lights orbiting behind the glass, brighter and wider with the voice.
+    val auraAlpha = if (pal.dark) 0.30f else 0.26f
+    for (b in 0 until 4) {
+        val phase = b * (twoPi / 4f)
+        val ang = swirl * (if (b % 2 == 0) 1f else -0.8f) + phase
+        val orbit = r * (0.28f + 0.10f * sin(time * 0.33f + phase) * (if (calm) 0f else 1f))
+        val radius = r * (1.18f + 0.07f * sin(time * 0.5f + phase * 1.3f) + 0.30f * s.voiceGlow.value).coerceAtMost(r * 1.6f)
+        val a = ((0.35f + light) * auraAlpha * alphaScale).coerceIn(0f, 1f)
         if (a <= 0.003f) continue
         withTransform({
-            translate(cx + orbit * cos(orbitAngle), cy + orbit * sin(orbitAngle))
+            translate(cx + orbit * cos(ang), cy + orbit * sin(ang))
             scale(radius / UNIT, radius / UNIT, Offset.Zero)
         }) {
             drawCircle(kit.glow, radius = UNIT, center = Offset.Zero, alpha = a,
-                colorFilter = ColorFilter.tint(color), blendMode = BlendMode.Plus)
+                colorFilter = ColorFilter.tint(tone(LIGHTS[b])), blendMode = kit.blend)
         }
     }
 
@@ -228,130 +241,108 @@ private fun DrawScope.drawPresence(s: PresenceSim, kit: DrawKit, focused: Boolea
             val age = s.rippleAge(i)
             if (age < 0f) continue
             val eased = 1f - (1f - age) * (1f - age)
-            drawCircle(
-                color = Tk.Cyan.copy(alpha = (0.38f * (1f - age) * (1f - age) * alphaScale * s.actMix.value).coerceIn(0f, 1f)),
-                radius = r * (0.95f + 0.45f * eased), center = Offset(cx, cy), style = kit.ripple
-            )
+            drawCircle(tone(Spectrum.Cyan).copy(alpha = (0.45f * (1f - age) * (1f - age) * alphaScale * s.actMix.value).coerceIn(0f, 1f)),
+                radius = r * (1.02f + 0.5f * eased), center = Offset(cx, cy), style = kit.ripple)
         }
     }
 
-    // 3. The pulse thread (under the rings, so the inner ring reads as the ear on top).
-    drawThread(s, kit, cx, cy, rBase, time, warmth, attention, alphaScale, bloom)
-
-    // 4. Four layered rings, outermost first. The innermost is the brand's ear: thick and white.
-    val open = s.open.value.coerceIn(0f, 1f)
-    val split = s.split.value.coerceIn(0f, 1f)
-    val wobble = s.wobble.value
-    for (k in 0 until 4) {
-        val i = 3 - k                                            // 0 = innermost
-        val chain = s.rings[i].value
-        val breath = 1f +
-            0.018f * sin(2f * PI.toFloat() * StrobeGuard.IDLE_BREATH_HZ * time + i * 0.9f) * (0.4f + s.energy.value) +
-            chain * 0.12f * (1.1f - 0.2f * i) + bloom * 0.04f * (1f - 0.25f * i)
-        val radius = r * RING_FACTORS[k] * breath
-        // Off-centre drift: the layers slosh like liquid, more when a voice moves them.
-        val drift = r * (0.022f * wobble + 0.03f * chain.coerceIn(0f, 1f))
-        val rcx = cx + drift * sin(time * (0.9f + 0.23f * i) + i * 1.7f)
-        val rcy = cy + drift * cos(time * (0.7f + 0.19f * i) + i * 2.3f)
-        // Unfold on arrival: the inner ring first, then outward.
-        val unfold = ((appear - i * 0.08f) / 0.76f).coerceIn(0f, 1f)
-        val sweep = ((360f * (1f - open * (0.45f + 0.15f * i)) * (1f - bloom) + 360f * bloom) * unfold).coerceAtMost(360f)
-        val color = when (i) {
-            0 -> tone(Color.White, lerp(Color.White, Tk.Cyan, 0.18f))
-            1 -> tone(Color(0xFFDCE6FF), lerp(Color.White, Tk.Cyan, 0.55f))
-            2 -> tone(Tk.BlueBright, Tk.Cyan)
-            else -> tone(Tk.Blue, Tk.Cyan)
-        }
-        val a = ((RING_ALPHAS[k] + 0.3f * bloom).coerceAtMost(1f) * alphaScale).coerceIn(0f, 1f)
-        val stroke = kit.ringStrokes[k]
-        if (i == 0) drawDashes(color.copy(alpha = 0.10f * a), rcx, rcy, radius, s.angles[i], sweep, split, kit.haloStroke)
-        drawDashes(color.copy(alpha = a), rcx, rcy, radius, s.angles[i], sweep, split, stroke)
+    // 3. The glass body.
+    withTransform({ translate(cx, cy); scale(r / UNIT, r / UNIT, Offset.Zero) }) {
+        drawCircle(kit.body, radius = UNIT, center = Offset.Zero, alpha = appear.coerceIn(0f, 1f))
     }
 
-    // 5. Thinking: one bright thought orbits the ear ring, trailing a short tail.
-    val think = s.thinkMix.value
-    if (!calm && think > 0.01f) {
-        val rr = r * RING_FACTORS[3]
-        val head = time * 3.5f
-        for (k in 0 until 5) {
-            val ang = head - k * 0.13f
-            val fade = (1f - k / 5f)
-            drawCircle(Color.White.copy(alpha = (0.9f * think * fade * fade * alphaScale).coerceIn(0f, 1f)),
-                radius = (4.5f - 0.6f * k).dp.toPx(), center = Offset(cx + rr * cos(ang), cy + rr * sin(ang)))
+    // 4. The liquid inside — clipped to the sphere.
+    kit.clip.reset()
+    kit.clip.addOval(androidx.compose.ui.geometry.Rect(Offset(cx, cy), r))
+    clipPath(kit.clip) {
+        for (b in 0 until 4) {
+            val phase = b * (twoPi / 4f) + 0.6f
+            val ang = swirl * 1.4f * (if (b % 2 == 0) -1f else 1f) + phase
+            val orbit = r * (0.42f + 0.12f * sin(time * 0.41f + phase) * (if (calm) 0f else 1f))
+            val radius = r * (0.86f + 0.14f * s.voiceGlow.value)
+            val a = ((0.48f + 0.5f * light) * (if (pal.dark) 0.92f else 0.62f) * alphaScale).coerceIn(0f, 1f)
+            withTransform({
+                translate(cx + orbit * cos(ang), cy + orbit * sin(ang) + r * 0.08f)
+                scale(radius / UNIT, radius / UNIT, Offset.Zero)
+            }) {
+                drawCircle(kit.glow, radius = UNIT, center = Offset.Zero, alpha = a,
+                    colorFilter = ColorFilter.tint(tone(LIGHTS[(b + 1) % 4])), blendMode = kit.blend)
+            }
         }
-        drawCircle(Tk.Cyan.copy(alpha = (0.25f * think * alphaScale).coerceIn(0f, 1f)), radius = 11.dp.toPx(),
-            center = Offset(cx + rr * cos(head), cy + rr * sin(head)))
+        // 5. The waveform: the user's voice (or the reply being spoken) as three coloured strands.
+        drawWaves(s, kit, cx, cy, r, time, alphaScale, ::tone)
+        // The glass's weight toward its lower edge.
+        withTransform({ translate(cx, cy); scale(r / UNIT, r / UNIT, Offset.Zero) }) {
+            drawCircle(kit.depth, radius = UNIT, center = Offset.Zero)
+        }
     }
 
-    // 6. Done: a ring of light is released outward.
+    // 6. The rim — light catching the edge of the glass. While thinking, the bright spot races around it.
+    val rimTurn = 215f + (if (calm) 0f else s.thinkMix.value * time * 260f + s.actMix.value * time * 90f)
+    withTransform({ translate(cx, cy) }) {
+        rotate(rimTurn, Offset.Zero) {
+            drawCircle(kit.rim, radius = r, center = Offset.Zero, style = kit.rimStroke,
+                alpha = ((if (pal.dark) 0.9f else 1f) * appear).coerceIn(0f, 1f))
+        }
+    }
+    // A faint outline so the sphere keeps its edge on the pale page.
+    if (!pal.dark) drawCircle(Color(0x221B2A55), radius = r, center = Offset(cx, cy), style = kit.ripple)
+
+    // 7. The specular highlight, top-left.
+    withTransform({
+        translate(cx - r * 0.36f, cy - r * 0.52f)
+        scale(r * 0.40f / UNIT, r * 0.20f / UNIT, Offset.Zero)
+    }) {
+        drawCircle(kit.spec, radius = UNIT, center = Offset.Zero, alpha = (0.9f * appear).coerceIn(0f, 1f))
+    }
+
+    // 8. Done: a ring of light is released outward.
     if (!calm && bloom > 0f) {
         val e = 1f - bloom
         val eased = 1f - (1f - e) * (1f - e)
-        drawCircle(Color.White.copy(alpha = (0.55f * bloom * bloom * alphaScale).coerceIn(0f, 1f)),
-            radius = r * (0.7f + 0.7f * eased), center = Offset(cx, cy), style = kit.bloom)
+        drawCircle(tone(Spectrum.Cyan).copy(alpha = (0.65f * bloom * bloom * alphaScale).coerceIn(0f, 1f)),
+            radius = r * (1.0f + 0.6f * eased), center = Offset(cx, cy), style = kit.bloom)
     }
 
-    // 7. Keyboard / switch-access focus: an unmistakable white ring outside everything else.
-    if (focused) drawCircle(Tk.Focus, radius = rBase * 1.28f, center = Offset(size.width / 2f, cy), style = kit.focus)
+    // 9. Keyboard / switch-access focus: an unmistakable ring outside everything else.
+    if (focused) drawCircle(pal.focus, radius = rBase * 1.5f, center = Offset(size.width / 2f, cy), style = kit.focus)
 }
 
-/**
- * A ring arc that tears into two chasing dashes as [split] rises. Below a small threshold it is one arc (two round
- * caps touching would overlap into a bright bead); past it the dashes part and slide to opposite sides.
- */
-private fun DrawScope.drawDashes(color: Color, cx: Float, cy: Float, radius: Float, start: Float, sweep: Float,
-                                 split: Float, stroke: Stroke) {
-    if (sweep <= 0.5f || color.alpha <= 0.003f) return
-    val topLeft = Offset(cx - radius, cy - radius)
-    val size = Size(radius * 2f, radius * 2f)
-    val capGap = (stroke.width / radius) * (180f / PI.toFloat()) + 2f
-    if (split < 0.06f || sweep > 360f - 2f * capGap) {
-        drawArc(color, start, sweep, false, topLeft, size, style = stroke)
-        return
-    }
-    val len = sweep / 2f * (1f - 0.25f * split)
-    val gap = capGap + split * (180f - len - capGap).coerceAtLeast(0f)
-    drawArc(color, start, len, false, topLeft, size, style = stroke)
-    drawArc(color, start + len + gap, len, false, topLeft, size, style = stroke)
-}
-
-private fun DrawScope.drawThread(
-    s: PresenceSim, kit: DrawKit, cx: Float, cy: Float, rBase: Float, time: Float,
-    warmth: Float, attention: Float, alphaScale: Float, bloom: Float
+/** Three coloured strands across the orb's middle, shaped by the voice history; a hairline hum at rest. */
+private fun DrawScope.drawWaves(
+    s: PresenceSim, kit: OrbKit, cx: Float, cy: Float, r: Float, time: Float, alphaScale: Float, tone: (Color) -> Color
 ) {
     val n = PresenceSim.THREAD_POINTS
-    val path = kit.path
-    path.reset()
-    val idleRipple = 1.5.dp.toPx()
-    val twoPi = 2f * PI.toFloat()
-    val energy = s.energy.value
     val voiceMix = s.voiceMix.value
-    val actMix = s.actMix.value
     val thinkMix = s.thinkMix.value
-    val pulsePos = ((time * 0.55f) % 1.3f) - 0.15f          // acting: the brand pulse travels left→right
-    val x0 = kit.threadX0 + (cx - size.width / 2f)          // follows the head-shake
-    for (j in 0 until n) {
-        val u = j / (n - 1f)
-        val x = x0 + u * kit.threadWidth
-        val window = THREAD_WINDOW[j]
-        var y = idleRipple * sin(twoPi * (u * 1.3f + time / 6f)) * (0.5f + energy)
-        if (voiceMix > 0.01f) {
-            val amp = rBase * (0.05f * energy + 0.42f * s.history[j])
-            val texture = sin(twoPi * (u * 5f - time * 2.5f)) * (0.75f + 0.25f * sin(twoPi * (u * 11f + time * 3.1f)))
-            y += voiceMix * window * amp * texture
+    val energy = s.energy.value
+    val twoPi = 2f * PI.toFloat()
+    val x0 = cx - r * 0.98f
+    val w = r * 1.96f
+    val colors = arrayOf(Spectrum.Cyan, Spectrum.Violet, Spectrum.Rose)
+    for (k in 0 until 3) {
+        val path = kit.wave
+        path.reset()
+        val phase = k * 2.1f
+        val freq = 1.6f + 0.55f * k
+        val dir = if (k == 1) -1f else 1f
+        for (j in 0 until n) {
+            val u = j / (n - 1f)
+            val x = x0 + u * w
+            val window = WAVE_WINDOW[j]
+            // At rest: a slow, shallow hum so the glass never looks switched off.
+            var y = r * 0.025f * sin(twoPi * (u * 1.2f + dir * time / 5f) + phase) * (0.5f + energy)
+            if (voiceMix > 0.01f) {
+                val amp = r * (0.05f * energy + 0.55f * s.history[j]) * (1f - 0.18f * k)
+                y += voiceMix * window * amp * sin(twoPi * (u * freq - dir * time * (1.6f + 0.4f * k)) + phase)
+            }
+            if (thinkMix > 0.01f) y += thinkMix * window * r * 0.05f * sin(twoPi * (u * 2.5f + time * 0.9f) + phase)
+            if (j == 0) path.moveTo(x, cy + y) else path.lineTo(x, cy + y)
         }
-        if (actMix > 0.01f) {
-            val d = (u - pulsePos) / 0.055f
-            y += actMix * -rBase * 0.20f * exp(-d * d) * sin(twoPi * (u - pulsePos) * 11f) * window.coerceAtLeast(0.35f)
-        }
-        if (thinkMix > 0.01f) y += thinkMix * window * rBase * 0.02f * sin(twoPi * (u * 3f + time * 0.8f))
-        if (j == 0) path.moveTo(x, cy + y) else path.lineTo(x, cy + y)
+        val base = (0.07f + 0.85f * voiceMix + 0.25f * thinkMix).coerceAtMost(1f)
+        val a = (base * alphaScale * (1f - 0.25f * k)).coerceIn(0f, 1f)
+        val c = tone(colors[k])
+        drawPath(path, c, alpha = 0.22f * a, style = kit.waveGlow, blendMode = kit.blend)
+        drawPath(path, lerp(c, Color.White, 0.25f), alpha = a, style = kit.waveStroke)
     }
-    val base = lerp(lerp(Tk.Cyan, Color.White, 0.25f * warmth), Tk.Attention, attention)
-    val a = ((0.55f + 0.35f * warmth + 0.4f * s.voice.value + 0.3f * bloom).coerceAtMost(1f) * alphaScale *
-        (1f - 0.55f * thinkMix)).coerceIn(0f, 1f)
-    val tint = ColorFilter.tint(base)
-    // Faded at both ends (the gradient brush), so the line emerges from and dissolves into the dark.
-    drawPath(path, kit.thread, alpha = 0.18f * a, style = kit.threadGlow, colorFilter = tint)
-    drawPath(path, kit.thread, alpha = a, style = kit.threadCore, colorFilter = tint)
 }

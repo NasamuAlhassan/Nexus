@@ -178,10 +178,12 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     BackHandler { dismiss() }
 
     val outsideInteraction = remember { MutableInteractionSource() }
+    val scrimColor = Tk.Ink
+    com.tekyerema.ui.SystemBarsFollowTheme()
     Box(
         Modifier
             .fillMaxSize()
-            .drawBehind { drawRect(Tk.Ink.copy(alpha = scrim)) }     // draw phase: no recomposition per frame
+            .drawBehind { drawRect(scrimColor.copy(alpha = scrim)) }     // draw phase: no recomposition per frame
             // The backdrop is the close control: anywhere outside the circle, any time you are not mid-sentence.
             .clickable(
                 interactionSource = outsideInteraction, indication = null, role = Role.Button,

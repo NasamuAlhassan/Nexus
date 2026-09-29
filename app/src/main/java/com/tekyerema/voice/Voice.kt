@@ -104,6 +104,8 @@ data class VoiceUiState(
     val lastCanonical: String = "",
     val language: String = Lang.GH_EN,
     val spoken: String = "",
+    /** When [spoken] was set (wall clock), so Home can let an old reply give way to a greeting. */
+    val spokenAt: Long = 0L,
     val failedStage: VoiceStage = VoiceStage.NONE,
     val error: String = "",
     /** True from the moment the VAD hears the user start talking until the turn moves on. */

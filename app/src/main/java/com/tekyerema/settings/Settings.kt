@@ -225,6 +225,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_REDUCE_MOTION, false)
         set(v) = put { putBoolean(KEY_REDUCE_MOTION, v) }
 
+    /** Light, dark, or follow the phone ("system", the default). */
+    var appearance: String
+        get() = prefs.getString(KEY_APPEARANCE, APPEARANCE_SYSTEM) ?: APPEARANCE_SYSTEM
+        set(v) = put { putString(KEY_APPEARANCE, v) }
+
     /** The floating "Talk to Tɛkyerɛma" trigger shown over other apps while screen control is on. */
     var floatingTrigger: Boolean
         get() = prefs.getBoolean(KEY_FLOATING, true)
@@ -260,6 +265,10 @@ class Settings(context: Context) {
         private const val KEY_HAPTICS = "haptics"
         private const val KEY_SOUNDS = "sounds"
         private const val KEY_REDUCE_MOTION = "reduce_motion"
+        private const val KEY_APPEARANCE = "appearance"
+        const val APPEARANCE_SYSTEM = "system"
+        const val APPEARANCE_LIGHT = "light"
+        const val APPEARANCE_DARK = "dark"
         private const val KEY_FLOATING = "floating_trigger"
         private const val KEY_ONBOARDED = "onboarding_done"
         private const val ENC = "enc1:"

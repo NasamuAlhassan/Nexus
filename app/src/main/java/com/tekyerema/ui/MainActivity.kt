@@ -64,11 +64,26 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Status and navigation bar icons follow the palette: dark icons over the light theme, light over the dark one. */
+@Composable
+fun SystemBarsFollowTheme() {
+    val dark = com.tekyerema.ui.theme.Tk.Dark
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.SideEffect {
+        val window = (view.context as? android.app.Activity)?.window ?: return@SideEffect
+        androidx.core.view.WindowCompat.getInsetsController(window, view).apply {
+            isAppearanceLightStatusBars = !dark
+            isAppearanceLightNavigationBars = !dark
+        }
+    }
+}
+
 @Composable
 private fun App() {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
     var onboarded by remember { mutableStateOf(settings.onboardingDone) }
+    SystemBarsFollowTheme()
 
     val calm = LocalCalmMotion.current
     Box(Modifier.fillMaxSize().pageBackground().systemBarsPadding().imePadding()) {
