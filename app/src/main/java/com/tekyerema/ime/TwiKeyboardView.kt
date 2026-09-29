@@ -147,6 +147,10 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         v.setTag(TAG_ACTIONS, ids)
         v.setOnClickListener { listener.onKey(key) }
         v.setOnLongClickListener { listener.onKeyLongPress(key) }
+        // Only keys that DO something on a long-press say so: otherwise TalkBack would add "double-tap and hold to long
+        // press" to every letter, which is noise a blind typist hears hundreds of times a day.
+        v.isLongClickable = key.variants.isNotEmpty() ||
+            key.kind in setOf(KeyKind.SHIFT, KeyKind.BACKSPACE, KeyKind.SPACE, KeyKind.LANGUAGE)
         if (key.kind == KeyKind.BACKSPACE) {
             v.setOnTouchListener { view, e ->
                 when (e.actionMasked) {
