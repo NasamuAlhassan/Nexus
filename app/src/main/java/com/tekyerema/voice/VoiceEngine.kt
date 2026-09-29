@@ -99,6 +99,16 @@ object VoiceEngine {
         // if already granted). Refreshed again whenever a listen starts (cheap no-op inside its TTL).
         scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} }
         vocabRefresh = { scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} } }
+        // B-19 speculative recognition: start the on-device decode during the end-of-turn silence (MicCapture.onPause).
+        // Only when this turn would be recognised ON the phone anyway — never a second call to a quota'd online API
+        // (a forced-Twi turn with the HCI Lab online skips it). `speech.asr.speculative` = false turns it off.
+        val speculate: (ByteArray) -> Unit = { wav ->
+            if (com.tekyerema.core.config.AppConfig.bool("speech.asr.speculative", true) && sherpa.ready &&
+                onlineAsrFor(settings.forcedLanguage) == null)
+                scope.launch(Dispatchers.Default) { try { sherpa.speculate(wav, settings.forcedLanguage) } catch (_: Throwable) {} }
+        }
+        mic.onPause = speculate
+        answerMic.onPause = speculate
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
             "language layer: ${layer.summary()} | " +

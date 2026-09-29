@@ -165,26 +165,63 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
 
     private fun decodeLocked(wav: ByteArray, forceLanguage: String?): String? {
         val lang = langKey(forceLanguage)
-        val r = rec(lang) ?: return null
         val (raw, sr) = readWav(wav) ?: return null
-        val samples = padFor(lang, raw, sr)                       // §3.9 per-model padding (not a fixed 30 s)
+        // B-19: the speculative decode of this very utterance (started during the end-of-turn silence) — reuse it when
+        // this audio is that snapshot plus only the silence after it.
+        val sp = spec; spec = null
+        if (sp != null) {
+            val hit = sp.lang == lang && sp.text != null && isContinuation(raw, sp.samples, sr)
+            com.tekyerema.core.telemetry.Telemetry.update { voice.putIfAbsent("asrSpeculative", if (hit) "hit" else "miss") }
+            Log.i("Tekyerema", "[ASR] speculative ${if (hit) "HIT" else "miss"} (snapshot ${sp.samples.size * 1000L / sr}ms of ${raw.size * 1000L / sr}ms)")
+            if (hit) return sp.text!!.ifEmpty { null }
+        }
         val t0 = SystemClock.uptimeMillis()
+        val out = decodeSamples(lang, raw, sr) ?: return null
+        val decodeMs = SystemClock.uptimeMillis() - t0
+        com.tekyerema.core.telemetry.Telemetry.update {   // B-19: numbers only
+            voice.putIfAbsent("asrAudioMs", raw.size * 1000L / sr); voice.putIfAbsent("asrDecodeMs", decodeMs)
+            voice.putIfAbsent("asrModel", lang)
+        }
+        Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${decodeMs}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
+        return out.ifEmpty { null }
+    }
+
+    /** One decode of [raw] (the post-processed text, "" when nothing was recognised), or null if the model can't run. */
+    private fun decodeSamples(lang: String, raw: FloatArray, sr: Int): String? {
+        val r = rec(lang) ?: return null
+        val samples = padFor(lang, raw, sr)                       // §3.9 per-model padding (not a fixed 30 s)
         val s = r.createStream()
         return try {
             s.acceptWaveform(samples, sr)
             r.decode(s)
-            val out = guardRepetition(trimRestart(depua(r.getResult(s).text).trim()))   // §3.10 / B-19 stop runaway loops and restarts
-            val decodeMs = SystemClock.uptimeMillis() - t0
-            com.tekyerema.core.telemetry.Telemetry.update {   // B-19: numbers only
-                voice.putIfAbsent("asrAudioMs", raw.size * 1000L / sr); voice.putIfAbsent("asrDecodeMs", decodeMs)
-                voice.putIfAbsent("asrModel", lang)
-            }
-            Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
-            out.ifEmpty { null }
+            guardRepetition(trimRestart(depua(r.getResult(s).text).trim()))   // §3.10 / B-19 stop runaway loops and restarts
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa decode failed: ${t.message}"); null
         } finally {
             try { s.release() } catch (_: Throwable) {}
+        }
+    }
+
+    /** B-19: the last speculative decode (one at a time; consumed by the next real decode, hit or miss). */
+    private class Spec(val lang: String, val samples: FloatArray, val text: String?)
+    @Volatile private var spec: Spec? = null
+
+    /**
+     * B-19 — decode a snapshot of the utterance while the end-of-turn silence is still being waited out (see
+     * [MicCapture.onPause]). Runs under the same lock as real decodes, so the real one simply waits for it and then
+     * finds the answer ready. Local only: nothing here ever touches the network.
+     */
+    suspend fun speculate(wav: ByteArray, forceLanguage: String?) {
+        if (!ready) return
+        withContext(Dispatchers.Default) {
+            lock.withLock {
+                val lang = langKey(forceLanguage)
+                val (raw, sr) = readWav(wav) ?: return@withLock
+                val t0 = SystemClock.uptimeMillis()
+                val text = decodeSamples(lang, raw, sr)
+                spec = Spec(lang, raw, text)
+                Log.i("Tekyerema", "[ASR] speculative decode ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms")
+            }
         }
     }
 
@@ -290,6 +327,16 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
          * word after it repeats the transcript's own opening words; the last repeated word may be cut short ("100
          * cedis. 100 ced"). Only a repeat of the OPENING is trimmed, so "Stop. Stop the music." is left alone. Pure.
          */
+        /**
+         * B-19 — is [final] the speculative [snapshot] plus only what came after it (the end-of-turn silence, ≤ 2 s)?
+         * MicCapture builds both with one gain, so the shared part is sample-for-sample identical. Pure.
+         */
+        internal fun isContinuation(final: FloatArray, snapshot: FloatArray, sr: Int): Boolean {
+            if (snapshot.isEmpty() || final.size < snapshot.size || final.size - snapshot.size > 2 * sr) return false
+            for (i in snapshot.indices) if (final[i] != snapshot[i]) return false
+            return true
+        }
+
         internal fun trimRestart(text: String): String {
             val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
             if (words.size < 2) return text

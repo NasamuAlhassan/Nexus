@@ -108,6 +108,34 @@ class AsrAccuracyTest {
         assertEquals(listOf("contact:coffee→Kofi"), tr.corrections)
     }
 
+    // ---------------------------------------------------------------- speculative recognition
+
+    private fun pcm(vararg s: Int) = ByteArray(s.size * 2).also { b -> s.forEachIndexed { i, v -> b[2 * i] = (v and 0xFF).toByte(); b[2 * i + 1] = ((v shr 8) and 0xFF).toByte() } }
+
+    @Test fun one_gain_for_snapshot_and_final_keeps_the_shared_audio_identical() {
+        val speech = pcm(*IntArray(800) { i -> ((i % 40) - 20) * 30 })                 // quiet speech, RMS ≈ 350
+        val silence = pcm(*IntArray(400) { i -> (i % 3) - 1 })
+        val g = com.tekyerema.voice.PcmGain.gainFor(speech.copyOf())
+        assertTrue(g > 1.05)
+        val snap = com.tekyerema.voice.PcmGain.apply(speech.copyOf(), g)
+        val fin = com.tekyerema.voice.PcmGain.apply(speech + silence, g)
+        assertTrue(snap.contentEquals(fin.copyOf(snap.size)))
+        // the recomputed gain over speech + silence differs — which is why the snapshot's gain is kept
+        assertTrue(Math.abs(com.tekyerema.voice.PcmGain.gainFor(speech + silence) - g) > 0.01)
+        assertEquals(1.0, com.tekyerema.voice.PcmGain.gainFor(pcm(1, -1, 2, -2, 0)), 0.0)   // silence: never amplified
+    }
+
+    @Test fun speculative_result_is_reused_only_for_the_same_utterance() {
+        val sr = 16000
+        val snap = FloatArray(sr) { (it % 50) / 100f }
+        val fin = snap + FloatArray(sr / 2)
+        assertTrue(SherpaAsr.isContinuation(fin, snap, sr))                          // + 0.5 s of end-of-turn silence
+        assertTrue(!SherpaAsr.isContinuation(fin.copyOf().also { it[10] = 0.9f }, snap, sr))   // different audio
+        assertTrue(!SherpaAsr.isContinuation(snap + FloatArray(3 * sr), snap, sr))  // the user kept going
+        assertTrue(!SherpaAsr.isContinuation(snap.copyOf(sr / 2), snap, sr))       // shorter than the snapshot
+        assertTrue(!SherpaAsr.isContinuation(fin, FloatArray(0), sr))
+    }
+
     @Test fun twi_call_verb_is_a_name_slot() {
         assertEquals("frɛ Kwame", fix("frɛ Kwami"))
     }

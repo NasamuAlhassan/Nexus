@@ -39,6 +39,9 @@ class EnergyVad(
     private var speechFrames = 0
     private var totalSpeechFrames = 0
 
+    /** B-19: consecutive non-speech frames inside an utterance (the hangover so far); 0 while talking or idle. */
+    val pauseFrames: Int get() = if (speaking) silenceRun else 0
+
     /** Frames of speech seen so far in the current utterance (for duration reporting). */
     val capturedSpeechMs: Long get() = (totalSpeechFrames * frameMs).toLong()
 
