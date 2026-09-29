@@ -269,11 +269,11 @@ class PlanTrackerTest {
         assertFalse(PlanTracker.looksMultiStep("open WhatsApp"))
         val m = TaskMemory()
         m.wantPlan = true
-        assertTrue(m.render().contains("include `plan`"))
+        assertTrue(m.render().contains("Add the `plan` argument"))
         m.plan.offer(planText)
         val r = m.render()
         assertTrue(r, r.startsWith("PLAN (x=done"))
-        assertFalse(r.contains("include `plan`"))
+        assertFalse(r.contains("Add the `plan` argument"))
         m.visitLine = "VISITS: you've been on this screen 2 times"
         assertTrue(m.render().contains("VISITS:"))
     }

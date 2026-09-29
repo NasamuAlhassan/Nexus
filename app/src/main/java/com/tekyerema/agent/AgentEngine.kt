@@ -796,7 +796,9 @@ object AgentEngine {
                     before = taskRecovery.onObserved(before)
                     before = runPendingLocate(taskRecovery, ctxApp, before, history)
                     taskMemory.visitLine = taskRecovery.visits.line(before)
-                    if (step > 2) taskMemory.wantPlan = false   // the "include a plan" nudge is for the first steps only
+                    // The "include a plan" nudge is for the first steps only — three, since a goal naming an app spends step 1
+                    // opening it on the phone before the planner's first call (A20e 2026-09-29: no plan was ever sent).
+                    if (step > 3) taskMemory.wantPlan = false
                 }
                 stats = stats.copy(steps = step, perceptionRoutes = bump(stats.perceptionRoutes, before.perception.source))
                 taskMemory.noteScreen(before.appPackage, before.screenTitle)   // Phase II P0: track current app/screen

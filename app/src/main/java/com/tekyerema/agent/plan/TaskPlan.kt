@@ -226,7 +226,10 @@ class PlanTracker(
      * this once per planning call. [hintMultiStep]: no plan yet and the goal looks like several parts.
      */
     fun promptBlock(hintMultiStep: Boolean = false): String {
-        if (!hasPlan) return if (hintMultiStep) "PLAN: none yet — this goal has several parts: include `plan` with this action." else ""
+        // A20e 2026-09-29: gpt-oss-120b ignored the one-line hint on a 3-part goal; the hint now shows the exact form.
+        if (!hasPlan) return if (hintMultiStep) "PLAN: none yet — this goal has several parts. Add the `plan` argument to THIS tool " +
+            "call: 3–7 items as 'subgoal => how you'll know it's done; …' (e.g. 'open About phone => Model name shows; read the " +
+            "model => said to the user')." else ""
         val sb = StringBuilder("PLAN (x=done, >=now, -=skipped):")
         val act = active
         for (it in items) {
