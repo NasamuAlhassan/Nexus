@@ -51,17 +51,27 @@ object LinkProbe {
      * @return true/false, or null when probing isn't available here (JVM tests, before init, or switched off) — callers
      *   then behave as they did before this existed.
      */
-    suspend fun check(timeoutMs: Long = AppConfig.long("router.network.probe.timeoutMs", 4_000L)): Boolean? {
+    suspend fun check(timeoutMs: Long = AppConfig.long("router.network.probe.timeoutMs", 6_000L)): Boolean? {
         if (!enabled()) return null
-        // On a link already known to be slow (EDGE: DNS + TCP + TLS + one exchange ≈ 3–4 s) a working-but-slow link
-        // must not be mistaken for a dead one: give it twice the time.
-        val budget = if (try { NetworkMonitor.isWeak() } catch (_: Throwable) { false }) timeoutMs * 2 else timeoutMs
+        val budget = budget(timeoutMs, try { NetworkMonitor.isWeak() } catch (_: Throwable) { false },
+            try { LinkHealth.tracker.lastProbeMs() } catch (_: Throwable) { 0L })
         val d = synchronized(this) {
             inflight?.takeIf { it.isActive } ?: scope.async { probe(budget) }.also {
                 inflight = it; lastStartAt = System.currentTimeMillis()
             }
         }
         return d.await()
+    }
+
+    /**
+     * How long one probe may take. On a link already known to be slow (EDGE: DNS + TCP + TLS + one exchange ≈ 3–4 s) a
+     * working-but-slow link must not be mistaken for a dead one: twice the time. And never less than 2.5× what a good
+     * probe took on this link — the campus Wi-Fi (A20e, 2026-09-29) answers the probe in ~3.7 s, so a fixed 4 s budget
+     * called it dead and abandoned a model call that was about to answer. Capped so a dead link is still noticed. Pure.
+     */
+    internal fun budget(timeoutMs: Long, weak: Boolean, lastGoodMs: Long, capMs: Long = 12_000L): Long {
+        val base = if (weak) timeoutMs * 2 else timeoutMs
+        return maxOf(base, minOf(lastGoodMs * 5 / 2, capMs)).coerceAtMost(maxOf(capMs, base))
     }
 
     /** Fire-and-forget probe, at most once per `router.network.probe.minIntervalMs` — used to notice the link coming back. */

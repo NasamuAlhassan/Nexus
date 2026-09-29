@@ -65,6 +65,15 @@ class HybridOfflineTest {
         assertEquals(LinkHealthTracker.Verdict.GOOD, t.verdict(41_000))
     }
 
+    @Test fun probe_budget_follows_how_long_a_good_probe_takes_on_this_link() {
+        val p = com.tekyerema.core.LinkProbe
+        assertEquals(6_000L, p.budget(6_000L, weak = false, lastGoodMs = 0L))          // nothing measured yet
+        assertEquals(12_000L, p.budget(6_000L, weak = true, lastGoodMs = 0L))          // a known-slow link: twice
+        // campus Wi-Fi 2026-09-29: good probes take ~3.7 s, so the budget must not stop at 4–6 s
+        assertEquals(9_250L, p.budget(6_000L, weak = false, lastGoodMs = 3_700L))
+        assertEquals("capped: a dead link is still noticed", 12_000L, p.budget(6_000L, weak = false, lastGoodMs = 9_000L))
+    }
+
     @Test fun link_one_quick_blip_is_only_suspect_two_in_a_row_stall() {
         val t = tracker()
         t.success(now = 1_000, elapsedMs = 200)

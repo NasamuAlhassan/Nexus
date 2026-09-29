@@ -18,7 +18,7 @@
         "enabled": true,
         "url": "https://connectivitycheck.gstatic.com/generate_204",
         "expectCode": 204,
-        "timeoutMs": 4000,
+        "timeoutMs": 6000,
         "minIntervalMs": 10000
       }
     },

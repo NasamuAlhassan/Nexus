@@ -94,6 +94,9 @@ class LinkHealthTracker(
     @Synchronized
     fun slowProbe(): Boolean = lastProbeMs >= weakProbeMs()
 
+    /** Total time of the last successful probe on this link, 0 = none yet (a new process or a new network). */
+    @Synchronized fun lastProbeMs(): Long = lastProbeMs
+
     /** When the open circuit half-opens (0 = not open). */
     @Synchronized fun openUntil(): Long = openUntil
 }
