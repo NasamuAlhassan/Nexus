@@ -89,7 +89,8 @@ object PlayStore {
     /** A price where Install would be: "GH₵ 12.00", "$1.99", "Buy GHS 5" (never tapped — a purchase is not an install). */
     private val PRICE = Regex("^(?:buy(?: for)?\\s+)?(?:gh₵|ghs|ghc|₵|us\\$|\\$|€|£|₦|ngn|ksh|zar)\\s?\\d[\\d.,]*$|^\\d[\\d.,]*\\s?(?:gh₵|ghs|₵|€|£)$",
         RegexOption.IGNORE_CASE)
-    private val PROGRESS = Regex("(?i)\\b(pending|installing|downloading|waiting for (?:download|wi-?fi|network)|verifying|optimi[sz]ing)\\b|\\d{1,3}\\s?%")
+    private val DOWNLOAD_PERCENT = Regex("^\\d{1,3}\\s?%$")
+    private val PROGRESS =Regex("(?i)\\b(pending|installing|downloading|waiting for (?:download|wi-?fi|network)|verifying|optimi[sz]ing)\\b|\\d{1,3}\\s?%")
     private val UNAVAILABLE = Regex("(?i)item not found|isn'?t available|not available (?:in|for|on)|device isn'?t compatible|" +
         "not compatible with|pre-?register|coming soon|couldn'?t find|we couldn'?t find")
 
@@ -103,6 +104,9 @@ object PlayStore {
         // Order matters: while downloading, newer Play pages show "Cancel" next to a greyed "Open" — that is
         // progress, not "installed". Installed = "Uninstall", or Open/Play/Update with no Cancel and no Install.
         if (installs.isEmpty() && AppUi.has(snap, "cancel")) return Page(State.IN_PROGRESS)
+        // The install sheet keeps an "Install" node in the tree while it shows the download's own percentage ("8%" —
+        // A20e 2026-09-29: Jiji downloaded while install_app said "the download didn't start"). A bare percentage is it.
+        if (snap.elements.any { !it.editable && it.label?.trim()?.let(DOWNLOAD_PERCENT::matches) == true }) return Page(State.IN_PROGRESS)
         if (AppUi.has(snap, "uninstall")) return Page(State.INSTALLED)
         if (installs.isEmpty() && AppUi.anyLabel(snap, PROGRESS)) return Page(State.IN_PROGRESS)
         if (installs.isEmpty() && AppUi.has(snap, "open", "play", "update")) return Page(State.INSTALLED)

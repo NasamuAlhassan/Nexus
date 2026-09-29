@@ -99,6 +99,9 @@ class AppTasksTest {
         // While downloading, a greyed "Open" sits next to "Cancel" — that's progress, not installed.
         assertEquals(PlayStore.State.IN_PROGRESS, PlayStore.page(snap(v, el("Cancel", 300), el("Open", 300, 300, 500))).state)
         assertEquals(PlayStore.State.IN_PROGRESS, PlayStore.page(snap(v, el("Pending…", 250, clickable = false))).state)
+        // A20e 2026-09-29: the install sheet keeps its "Install" node while showing the download's percentage
+        assertEquals(PlayStore.State.IN_PROGRESS, PlayStore.page(snap(v, el("Jiji Ghana: Buy & Sell Online", 50, clickable = false),
+            el("8%", 250, clickable = false), el("Install", 300))).state)
         val paid = PlayStore.page(snap(v, el("GH₵ 12.00", 300)))
         assertEquals(PlayStore.State.PAID, paid.state); assertEquals("GH₵ 12.00", paid.price)
         assertEquals(PlayStore.State.PAID, PlayStore.page(snap(v, el("$1.99", 300))).state)
