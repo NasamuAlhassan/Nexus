@@ -139,8 +139,13 @@ object LinkHealth {
      * 2026-09-29) four Groq 429 replies took ~10 s, the watchdog then probed, the probe timed out, and a working link
      * was called dead. Otherwise [LinkProbe.check] (null = can't tell).
      */
-    suspend fun answering(recentMs: Long = AppConfig.long("router.network.watchdogMs", 8_000L)): Boolean? =
-        if (okWithin(recentMs)) true else LinkProbe.check()
+    suspend fun answering(recentMs: Long = AppConfig.long("router.network.watchdogMs", 8_000L)): Boolean? {
+        if (okWithin(recentMs)) return true
+        val probed = LinkProbe.check()
+        // A reply that got through WHILE the probe ran proves the link too (A20e 2026-09-29: a Groq answer landed 0.5 s
+        // into a probe that then timed out, and the step was abandoned on a working link).
+        return if (probed == false && okWithin(recentMs)) true else probed
+    }
     fun suspect(): Boolean = tracker.suspect(now())
     fun verdict(): LinkHealthTracker.Verdict = tracker.verdict(now())
     fun reset() = tracker.reset()
