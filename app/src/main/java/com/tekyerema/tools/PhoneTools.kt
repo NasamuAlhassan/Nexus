@@ -338,13 +338,17 @@ object SendSmsTool : Tool {
         ctrl: com.tekyerema.accessibility.AccessibilityController, pkgs: Set<String>, message: String, who: String, appName: String
     ): ToolResult? {
         val screen = awaitScreen(ctrl, AppConfig.long("os.sms.composerWaitMs", 8_000L)) { s ->
-            (pkgs.isEmpty() || s.appPackage in pkgs) && (ComposerSend.composerWith(s, message) != null || ComposerSend.notOnWhatsApp(s))
+            (pkgs.isEmpty() || s.appPackage in pkgs) &&
+                (ComposerSend.composerWith(s, message) != null || ComposerSend.notOnWhatsApp(s) || ComposerSend.cantConnect(s))
         }
         if (screen == null) {
             // The box may hold our text PLUS an old draft, or the app opened somewhere else: never send that.
             Log.i(TAG, "[SEND] $appName draft not found as expected — leaving it for the user")
             return null
         }
+        if (ComposerSend.cantConnect(screen) && ComposerSend.composerWith(screen, message) == null)
+            return ToolResult(false, "$appName couldn't connect to the internet, so the message to $who wasn't sent. Try again when " +
+                "the connection is better.", data = JSONObject().put("sent", false), recoverable = false, channel = "a11y")
         if (ComposerSend.notOnWhatsApp(screen))
             return ToolResult(false, "$who's number isn't on WhatsApp. I can send it as an ordinary text (SMS) instead.",
                 data = JSONObject().put("sent", false), recoverable = false, channel = "a11y")

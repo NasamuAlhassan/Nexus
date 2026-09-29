@@ -118,6 +118,11 @@ object ComposerSend {
     /** WhatsApp's "this number isn't on WhatsApp" dialog (wording varies; keyed on the phrase, not an id). */
     private val NOT_ON_WHATSAPP = Regex("(?i)(isn'?t|is not|not) on whatsapp|not a whatsapp user|isn'?t registered|invalid phone number")
     fun notOnWhatsApp(snap: UiSnapshot): Boolean = AppUi.anyLabel(snap, NOT_ON_WHATSAPP)
+
+    // The app's own "no connection" dialog (A20e 2026-09-29: WhatsApp showed "Couldn't connect. Please try again later.").
+    private val CANT_CONNECT = Regex("(?i)couldn'?t connect|could not connect|no internet connection|check your (?:internet|phone'?s) connection|" +
+        "you'?re offline|unable to connect")
+    fun cantConnect(snap: UiSnapshot): Boolean = AppUi.anyLabel(snap, CANT_CONNECT)
 }
 
 /**
