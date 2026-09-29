@@ -189,6 +189,21 @@ class HybridOfflineTest {
         assertNull("not offered offline days later", c.stale("how old is the president of Ghana"))
     }
 
+    @Test fun date_questions_the_phone_leaves_to_the_model_are_short_lived_too() {
+        // The phone answers most date questions itself now (LocalDates); the rest must not be repeated a week later.
+        var now = 0L
+        val c = AnswerCache(maxEntries = 8, clock = { now })
+        c.put("when is Eid al-Fitr", "Eid al-Fitr is expected on 9 March 2027.")
+        c.put("how many years since Ghana's independence", "69 years.")
+        c.put("what's the time difference between Ghana and Brazil", "Brazil is 3 hours behind.")
+        assertNull("never kept", c.fresh("what's the time difference between Ghana and Brazil"))
+        now = 2 * 3_600_000L
+        assertNull(c.fresh("when is Eid al-Fitr"))
+        assertNull(c.fresh("how many years since Ghana's independence"))
+        now = 3 * 24 * 3_600_000L
+        assertNull("not offered offline days later", c.stale("when is Eid al-Fitr"))
+    }
+
     @Test fun cache_fresh_then_stale_with_its_age() {
         var now = 0L
         val c = AnswerCache(maxEntries = 8, clock = { now })

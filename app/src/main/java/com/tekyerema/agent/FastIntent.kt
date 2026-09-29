@@ -46,6 +46,14 @@ sealed class FastIntent(val name: String) {
     data class Calculate(val answer: String) : FastIntent("CALCULATE")
     /** "How do you say thank you in Twi?" / "what does akwaaba mean?" — from [TwiPhrasebook], no model. */
     data class TwiPhrase(val answer: String) : FastIntent("TWI_PHRASE")
+    /** "How many days until Christmas?", "what day is 6 March 2027?", "how old is someone born in 1990?" ([LocalDates]). */
+    data class DateAnswer(val answer: String) : FastIntent("DATE_ANSWER")
+    /** "Convert 10 km to miles", "30 degrees Celsius in Fahrenheit" ([UnitConvert]). */
+    data class Convert(val answer: String) : FastIntent("CONVERT")
+    /** "Spell accommodation" ([Spelling]). */
+    data class Spell(val answer: String) : FastIntent("SPELL")
+    /** "What time is it in London?" ([WorldClock]). */
+    data class WorldTime(val answer: String) : FastIntent("WORLD_TIME")
     // ---- W4 deterministic phone actions (E-02, E-05, E-06, E-09, E-12, E-13, E-14, E-18, E-21, E-22, E-28, E-29) ----
     object AnswerCall : FastIntent("ANSWER_CALL")
     object EndCall : FastIntent("END_CALL")
@@ -188,6 +196,14 @@ object FastIntentClassifier {
             quickToggle(g) != null -> quickToggle(g)
             LocalMath.answer(g) != null -> FastIntent.Calculate(LocalMath.answer(g)!!)
             TwiPhrasebook.answer(g) != null -> FastIntent.TwiPhrase(TwiPhrasebook.answer(g)!!)
+            // Questions with one right answer the phone can work out — before the time/day/date rules, which would
+            // otherwise read out the time and date HERE and TODAY for "what time is it in London" / "what day is Christmas".
+            WorldClock.answer(g) != null -> FastIntent.WorldTime(WorldClock.answer(g)!!)
+            WorldClock.asksElsewhere(g) -> null        // a place not in the table: the model, not the time here
+            LocalDates.answer(g) != null -> FastIntent.DateAnswer(LocalDates.answer(g)!!)
+            LocalDates.asksOtherDay(g) -> null         // "what day is Eid": the model, not "today is Tuesday"
+            UnitConvert.answer(g) != null -> FastIntent.Convert(UnitConvert.answer(g)!!)
+            Spelling.answer(g) != null -> FastIntent.Spell(Spelling.answer(g)!!)
             // E-09 ringer mode before the volume rules ("silent mode" is the ringer, not muting the media volume).
             ringerMode(g) != null -> FastIntent.Ringer(ringerMode(g)!!)
             RE_TIME.containsMatchIn(g) -> FastIntent.Time
