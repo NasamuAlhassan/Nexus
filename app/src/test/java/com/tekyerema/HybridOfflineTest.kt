@@ -356,6 +356,20 @@ class HybridOfflineTest {
         assertEquals("the weather is bad and I'm staying home", t.args.getString("message"))
     }
 
+    /** Owner, A20e 2026-09-29: "text Prince on WhatsApp to send me the PDF" went looking for a PDF to send. */
+    @Test fun a_text_asking_someone_to_do_something_is_a_message_not_a_file() {
+        val p = LocalBrain.parseSms("Text Prince on whatsapp to send the pdf, I'm waiting for him")!!
+        assertEquals("Prince", p.contact); assertTrue(p.whatsApp)
+        assertEquals("Please send the pdf. I'm waiting for you.", p.message)
+        assertEquals("Please call your mother.", LocalBrain.parseSms("tell Kwame to call his mother")!!.message)
+        assertEquals("Please send me Priscilla's PDF.", LocalBrain.parseSms("message Prince to send me Priscilla's PDF")!!.message)
+        assertEquals("Please bring the charger.", LocalBrain.parseSms("ask Kofi to bring the charger")!!.message)
+        assertNull("an app, not a person", LocalBrain.parseSms("ask ChatGPT to write a poem"))
+        assertNull("a recipient, not a request", LocalBrain.parseSms("send a text to Ama"))
+        // The existing 'saying' form still wins
+        assertEquals("hello", LocalBrain.parseSms("text Prince saying hello")!!.message)
+    }
+
     @Test fun install_requests_go_straight_to_install_app() {
         val t = LocalBrain::installTarget
         assertEquals("Claude", t("install the Claude app from the Play Store"))

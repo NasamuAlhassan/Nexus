@@ -546,7 +546,8 @@ class LocalBrain : AgentBrain {
          */
         fun parseSms(raw: String): Sms? {
             val s = raw.trim().trimEnd('.', '!').replace(Regex("\\s+"), " ")
-            val m = SMS_STRONG.firstNotNullOfOrNull { it.find(s) } ?: SMS_WEAK.firstNotNullOfOrNull { it.find(s) } ?: return null
+            val m = SMS_STRONG.firstNotNullOfOrNull { it.find(s) } ?: SMS_WEAK.firstNotNullOfOrNull { it.find(s) }
+                ?: return parseRelay(s)
             var who = m.groupValues[1].trim().removePrefix("to ").trim()
             var whatsApp = RE_VIA_WHATSAPP.containsMatchIn(s.substring(0, m.groups[2]!!.range.first))
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
@@ -555,6 +556,35 @@ class LocalBrain : AgentBrain {
             val digits = who.filter { it.isDigit() }
             val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
             return Sms(if (isNumber) null else who, if (isNumber) (if (who.trim().startsWith("+")) "+$digits" else digits) else null, msg, whatsApp)
+        }
+
+        /**
+         * "Text Prince on WhatsApp to send the PDF, I'm waiting for him" / "tell Ama to call me" / "ask Kofi to bring the
+         * charger": a message ASKING the person to do something — never the user sending a file. The owner's request
+         * (A20e, 2026-09-29) was read the other way: the planner went looking for a PDF to send. The message is composed
+         * from the user's words as a polite request, with the person's own pronouns turned to "you" ("call his mother"
+         * → "call your mother"); the confirmation reads it back before anything is sent. Pure.
+         */
+        internal fun parseRelay(s: String): Sms? {
+            val m = RE_RELAY.matchEntire(s) ?: return null
+            var who = m.groupValues[2].trim()
+            var whatsApp = m.groupValues[1].equals("whatsapp", ignoreCase = true) || m.groupValues[3].isNotEmpty() &&
+                m.groupValues[3].contains("whatsapp", ignoreCase = true)
+            RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
+            if (who.isEmpty() || who.split(' ').size > 4 || RE_NOT_A_PERSON.matches(who.lowercase())) return null
+            val rest = m.groupValues[4].trim()
+            if (rest.split(' ').size < 2) return null                         // "to Ama" is a recipient, not a request
+            val parts = rest.split(Regex("\\s*[,;]\\s*|\\s+(?:because|since|as)\\s+"), limit = 2)
+            fun toYou(t: String) = t.replace(Regex("\\b(him|her|them)\\b", RegexOption.IGNORE_CASE), "you")
+                .replace(Regex("\\b(his|their)\\b", RegexOption.IGNORE_CASE), "your")
+            val ask = toYou(parts[0]).trim().trimEnd('.')
+            val body = buildString {
+                append("Please ").append(ask).append('.')
+                parts.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }?.let { append(' ').append(toYou(it).replaceFirstChar(Char::uppercaseChar)).append('.') }
+            }
+            val digits = who.filter { it.isDigit() }
+            val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
+            return Sms(if (isNumber) null else who, if (isNumber) (if (who.trim().startsWith("+")) "+$digits" else digits) else null, body, whatsApp)
         }
 
         /** Does a text's body carry another request after it ("I'm late then call Kofi")? Pure. */
@@ -675,6 +705,13 @@ class LocalBrain : AgentBrain {
         private val SMS_STRONG = smsPatterns(MARK_STRONG)
         private val SMS_WEAK = smsPatterns(MARK_WEAK)
         private val RE_VIA_WHATSAPP = Regex("\\bwhatsapp\\b", RegexOption.IGNORE_CASE)
+        // "text|message|whatsapp|tell|ask <who> [on WhatsApp] to <request>" — the request must start with a verb-like word
+        // (not "to Ama"), so "text Ama to say hi" is a relay and "send a text to Ama" never reaches here.
+        private val RE_RELAY = Regex("^\\s*$LEADIN(text|sms|message|whatsapp|tell|ask)\\s+(.+?)(\\s+(?:on|via|through|by)\\s+(?:whatsapp|sms|text))?\\s+to\\s+" +
+            "((?:please\\s+)?[a-z]+\\b.*)$", RegexOption.IGNORE_CASE)
+        // Not people: "ask ChatGPT to write a poem" is a question for an app (ask_app), never a text message.
+        private val RE_NOT_A_PERSON = Regex("^(?:me|myself|it|this|that|the app|a message|a text|an sms|the message|" +
+            "chat ?gpt|gemini|claude|google|siri|alexa|bixby|copilot|perplexity|meta ai|t[ɛe]kyer[ɛe]ma)$")
         private val RE_VIA_TAIL = Regex("\\s+(?:on|via|by|through|using|in|over)\\s+(whatsapp|sms|text)$", RegexOption.IGNORE_CASE)
         // N-09 clause boundaries of a compound request. Twi "na" (and/then), but not after a question word ("dɛn na …").
         private val RE_CLAUSE_SPLIT = Regex("\\s*[,;]?\\s*\\b(?:and\\s+then|and\\s+also|and|then|after\\s+that|afterwards)\\b\\s*|\\s*;\\s*|" +

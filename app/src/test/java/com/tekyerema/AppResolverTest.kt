@@ -31,6 +31,14 @@ class AppResolverTest {
 
     private fun one(q: String): String? = (AppResolver.match(apps, q) as? Match.One)?.app?.label
 
+    /** Owner, A20e 2026-09-29: "open TikTok" was asked "which app?" — a recogniser writes the name many ways. */
+    @Test fun tiktok_as_a_recogniser_writes_it() {
+        val withTikTok = apps + AppInfo("TikTok", "com.zhiliaoapp.musically")
+        for (heard in listOf("TikTok", "tik tok", "tick tock", "Tic Toc", "tic tac", "tik talk"))
+            assertEquals(heard, "com.zhiliaoapp.musically",
+                (AppResolver.match(withTikTok, heard) as? AppResolver.Match.One)?.app?.packageName)
+    }
+
     @Test fun absent_app_is_none_not_a_filler_word_hit() {
         for (q in listOf("the zorblax app", "zorblax app", "zorblax", "zorblax messenger", "the app", "app", "my app"))
             assertEquals(q, Match.None, AppResolver.match(apps, q))
