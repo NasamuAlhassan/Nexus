@@ -41,6 +41,23 @@ class HelpAndLeftOffTest {
         assertTrue(other, other.startsWith("In My Bank you can say “read the screen”"))
     }
 
+    @Test fun the_general_tour_is_current_and_short() {
+        // Voice-UX (2026-09-29): today's features, each as a phrase that works — in about 20 seconds.
+        val g = ContextHelp.GENERAL
+        for (s in listOf("WhatsApp", "text", "reading it back first", "Mobile Money up to the PIN, which you enter",
+            "messages and notifications", "apps and settings", "reminders, routines and alerts", "“play my downloads”",
+            "“take a selfie”", "“check my phone”", "“call my helper”", "“speak Twi”", "“what can I say here?”"))
+            assertTrue(s, g.contains(s))
+        // At the phone's normal pace (~16.6 characters a second, about 175 words a minute) — a little over 20 seconds at
+        // most; the old tour ran past 30.
+        assertTrue("${g.length} chars", g.length <= 380)
+        assertTrue("${g.split(" ").size} words", g.split(" ").size <= 66)
+        assertFalse("no numbers or counts spoken", g.any { it.isDigit() })
+        // Every quoted phrase is a request the fast path knows.
+        for (p in listOf("play my downloads", "take a selfie", "check my phone", "what can I say here", "call the ambulance"))
+            assertTrue(p, com.tekyerema.agent.FastIntentClassifier.classify(p) != null)
+    }
+
     @Test fun left_off_phrasings() {
         for (s in listOf("where did i leave off", "where was i", "where were we", "what was i doing", "what was my last request",
             "pick up where we left off"))

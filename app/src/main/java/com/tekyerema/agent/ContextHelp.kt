@@ -54,14 +54,17 @@ object ContextHelp {
     /** The home screen: the tour is more useful there than "open an app". */
     private val LAUNCHERS = setOf("com.sec.android.app.launcher", "com.google.android.apps.nexuslauncher", "com.android.launcher3")
 
-    /** The spoken tour of what Tɛkyerɛma can do, with the emergency line last so it is heard even in a hurry. */
-    const val GENERAL = "I can tell you the time and your battery, and catch you up: say “what did I miss”. " +
-        "I read the screen, your messages and your texts; I call and text people, and I can learn who “my mother” is. " +
-        "I open apps, play music, set reminders like “remind me in 20 minutes to check the food”, and describe pictures when you're online. " +
-        "You can teach me a routine: “when I say good morning, tell me the time, the weather and my messages”. " +
-        "Inside any app, ask “what can I say here?”. " +
-        // Phone care: the self-test is only useful if a blind user can find it (A20e 2026-09-29).
-        "If something isn't working, say “check my phone”. In an emergency, say “call the ambulance”."
+    /**
+     * The spoken tour of what Tɛkyerɛma can do, with the emergency line last so it is heard even in a hurry. Voice-UX
+     * (2026-09-29): rewritten for today's features — Mobile Money up to the PIN, alerts, "check my phone", the helper,
+     * "speak Twi" — and cut to about 20 seconds (the old tour ran over 30 and missed most of them). Each quoted phrase
+     * works as said; the app-by-app detail stays in [forApp] ("what can I say here?"). No numbers or counts (spoken-output
+     * rule). Measured in HelpAndLeftOffTest.
+     */
+    const val GENERAL = "I call, text and WhatsApp, reading it back first, and do Mobile Money up to the PIN, which you enter. " +
+        "I read messages and notifications, open apps and settings, and set reminders, routines and alerts. " +
+        "Try “play my downloads”, “take a selfie”, “check my phone”, “call my helper” or “speak Twi”. " +
+        "Anywhere, ask “what can I say here?”. In an emergency, say “call the ambulance”."
 
     /** What to say for the app in front ([pkg], shown as [label]); the general tour when there's no app or it's ours. */
     fun forApp(pkg: String?, label: String?, ownPkg: String = "com.tekyerema"): String {
