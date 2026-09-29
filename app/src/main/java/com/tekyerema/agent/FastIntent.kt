@@ -103,6 +103,33 @@ sealed class FastIntent(val name: String) {
     object ClearHistory : FastIntent("CLEAR_HISTORY")
     /** Flip a Quick Settings tile ([QuickTiles]) to [on]. */
     data class QuickToggle(val key: String, val on: Boolean) : FastIntent("TOGGLE_${key.uppercase()}")
+    // ---- Overnight [S]: what the big assistants don't do for a blind user on an A20e (docs/agent/research/overnight_features.md)
+    /** E-15 / H-09: "what did I miss?" — [scope] "last" (since the last catch-up), "recent" (the last hours) or "today". */
+    data class Digest(val scope: String) : FastIntent("DIGEST")
+    /** C-03 / H-08: "remember that Ama Mensah is my mother" ([said] = the word used, [explicit] = asked in so many words). */
+    data class SetRelation(val relation: String, val said: String, val contact: String, val explicit: Boolean) : FastIntent("SET_RELATION")
+    /** "who is my mother" ([relation]); "" = every relation. */
+    data class RelationQuery(val relation: String) : FastIntent("RELATION_QUERY")
+    data class ForgetRelation(val relation: String) : FastIntent("FORGET_RELATION")
+    /** K-01 / K-10: "what can I say here?" ([here]) or "what can you do?". */
+    data class Help(val here: Boolean) : FastIntent("HELP")
+    /** H-02: a routine taught by voice, run by its name, listed, deleted. */
+    data class CreateRoutine(val routine: String, val steps: List<String>) : FastIntent("CREATE_ROUTINE")
+    data class RunRoutine(val routine: String) : FastIntent("RUN_ROUTINE")
+    object ListRoutines : FastIntent("LIST_ROUTINES")
+    data class DeleteRoutine(val routine: String) : FastIntent("DELETE_ROUTINE")
+    /** H-10: "where did I leave off?" */
+    object Resume : FastIntent("RESUME")
+    /** F-09: describe the picture / the screen in front, or answer [question] about it (online vision). */
+    data class DescribeScreen(val question: String?, val picture: Boolean) : FastIntent("DESCRIBE_SCREEN")
+    /** E-11: "open Bluetooth settings" → that settings screen, not the Settings app's front page. */
+    data class OpenSetting(val target: String) : FastIntent("OPEN_SETTING")
+    /** "is WhatsApp installed?", "do I have Telegram?" */
+    data class AppInstalled(val app: String) : FastIntent("APP_INSTALLED")
+    /** "is battery saver on?" / "is data saver on?" — [kind] "battery" | "data". */
+    data class SaverQuery(val kind: String) : FastIntent("SAVER_QUERY")
+    /** "help me save data", "my battery is dying" — the state plus what to say next. [kind] "battery" | "data". */
+    data class SaveHelp(val kind: String) : FastIntent("SAVE_HELP")
 }
 
 /**
@@ -117,11 +144,21 @@ sealed class FastIntent(val name: String) {
  */
 object FastIntentClassifier {
 
-    fun classify(raw: String): FastIntent? {
-        val g = raw.trim().lowercase().replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
+    /** [routines] = false when resolving a routine's own steps / validating its name (no routine inside a routine). */
+    fun classify(raw: String, routines: Boolean = true): FastIntent? {
+        val g = raw.trim().lowercase().replace('’', '\'').replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
         if (g.isEmpty()) return null
         // X-03: phrasings from the per-locale rule files come first (config, not code).
         if (com.tekyerema.core.config.FeatureFlags.isEnabled("X-03", true)) RouterRules.match(g)?.let { return it }
+        // H-02: a routine the user taught, by its name — then a new routine being taught. Both are whole utterances and
+        // come before the compound check: "when I say good morning, tell me the time and the weather" is ONE request.
+        if (routines && com.tekyerema.core.config.FeatureFlags.isEnabled(Routines.FEATURE, true)) {
+            Routines.match(g, Routines.names())?.let { return FastIntent.RunRoutine(it) }
+            Routines.parseDefinition(raw)?.let { return FastIntent.CreateRoutine(it.name, it.steps) }
+            if (Routines.isList(g)) return FastIntent.ListRoutines
+            Routines.parseDelete(g)?.let { return FastIntent.DeleteRoutine(it) }
+        }
+        overnight(g, raw)?.let { return it }
         // W7, before the compound check: a schedule's goal may itself be compound (the trigger re-checks what may run).
         scheduleIntent(g, raw)?.let { return it }
         if (RE_LIST_SCHEDULES.containsMatchIn(g)) return FastIntent.ListSchedules
@@ -226,6 +263,93 @@ object FastIntentClassifier {
             else -> openApp(g)
         }
     }
+
+    /**
+     * Overnight [S] intents — every pattern is a WHOLE utterance (anchored), so a compound request ("what did I miss and
+     * call Ama back") never matches and still reaches the agent. Checked before the W7/W8 rules on purpose: "forget who
+     * my mother is" is a relation, not "forget a person's messages"; "is battery saver on" is not the battery level.
+     */
+    private fun overnight(g: String, raw: String): FastIntent? {
+        // C-03 / H-08 relationship contacts.
+        com.tekyerema.android.Relations.parseForget(g)?.let { return FastIntent.ForgetRelation(it) }
+        com.tekyerema.android.Relations.parseQuery(g)?.let { return FastIntent.RelationQuery(it) }
+        com.tekyerema.android.Relations.parseSet(raw)?.let { r -> return FastIntent.SetRelation(r.relation, r.said, r.name, r.explicit) }
+        // E-15 / H-09 the catch-up.
+        digestScope(g)?.let { return FastIntent.Digest(it) }
+        // K-01 / K-10 help, H-10 resume.
+        ContextHelp.classify(g)?.let { return FastIntent.Help(it) }
+        if (LeftOff.matches(g)) return FastIntent.Resume
+        // F-09 describe the picture / screen.
+        describe(g)?.let { return it }
+        // Battery and data helpers — before the battery-level and toggle rules.
+        RE_SAVER_QUERY.matchEntire(g)?.let { m -> return FastIntent.SaverQuery(if (m.groupValues[1].startsWith("data")) "data" else "battery") }
+        if (RE_SAVE_DATA.matches(g)) return FastIntent.SaveHelp("data")
+        if (RE_SAVE_BATTERY.matches(g)) return FastIntent.SaveHelp("battery")
+        // E-11 a settings screen by name, and "is X installed?".
+        RE_OPEN_SETTING.matchEntire(g)?.let { m ->
+            val target = m.groupValues[1].trim()
+            if (com.tekyerema.tools.OpenSettingTool.knows(target)) return FastIntent.OpenSetting(target)
+        }
+        for (re in RE_INSTALLED) re.matchEntire(g)?.let { m ->
+            val app = m.groupValues[1].trim()
+            if (app.isNotEmpty() && app.split(' ').size <= 3 && !RE_APP_HAS_VERB.containsMatchIn(app)) return FastIntent.AppInstalled(app)
+        }
+        return null
+    }
+
+    // ---- E-15 / H-09 digest. "read my messages" is the catch-up; "read my messages from Ama" (a person) is the agent's.
+    private val RE_DIGEST_LAST = Regex("^(?:(?:so |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:what did i miss|what have i missed|" +
+        "did i miss anything|have i missed anything|anything i missed|catch me up|fill me in|" +
+        "(?:do i have|have i got|did i get|are there|is there) (?:any )?(?:new )?(?:messages|notifications|anything new)|" +
+        "any (?:new )?(?:messages|notifications)|anything new|did anyone message me|has anyone messaged me|" +
+        // Twi "nkra bɛn na aba?" (which messages have come?) — PENDING NATIVE REVIEW.
+        "nkra b[ɛe]n na aba)(?: (?:while i was away|for me))?(?: please)?$")
+    private val RE_DIGEST_RECENT = Regex("^(?:please )?(?:(?:read|check|go through|tell me|give me) (?:all )?(?:of )?my (?:new |latest |recent |unread )?" +
+        "(?:messages|notifications)|summari[sz]e my (?:messages|notifications)|what are my notifications|(?:my )?notifications? summary|" +
+        "who (?:has )?(?:messaged|written to|contacted) me)(?: please)?$")
+    private val RE_DIGEST_TODAY = Regex("^(?:what did i miss|what(?:'s| has) come in|who messaged me|what messages did i get) today$")
+
+    private fun digestScope(g: String): String? = when {
+        RE_DIGEST_TODAY.matches(g) -> "today"
+        RE_DIGEST_LAST.matches(g) -> "last"
+        RE_DIGEST_RECENT.matches(g) -> "recent"
+        else -> null
+    }
+
+    // ---- F-09 describe. A named picture/photo/image or "the screen"; a question that ends "in this picture".
+    private const val PIC = "(?:picture|photo|image|pic|photograph)"
+    private val RE_DESCRIBE_PIC = Regex("^(?:please |can you |could you )?(?:describe (?:this|the|that) $PIC(?: for me| to me)?|" +
+        "what(?:'s| is) (?:in|on) (?:this|the|that) $PIC|what does (?:this|the|that) $PIC show|tell me what(?:'s| is) in (?:this|the|that) $PIC|" +
+        "what is this $PIC(?: of)?|who(?:'s| is) in (?:this|the|that) $PIC)(?: please)?$")
+    private val RE_DESCRIBE_SCREEN = Regex("^(?:please |can you |could you )?(?:describe (?:the|my|this) screen(?: for me| to me)?|" +
+        "describe what(?:'s| is) on (?:the|my|this) screen|what does (?:the|my|this) screen look like)(?: please)?$")
+    private val RE_PIC_QUESTION = Regex("^((?:what|who|how many|how much|is there|are there|which|where|does|do|can you see|what colou?r)\\b.{2,80}?) " +
+        "(?:in|on) (?:this|the|that) $PIC$")
+
+    private fun describe(g: String): FastIntent? = when {
+        RE_DESCRIBE_PIC.matches(g) -> FastIntent.DescribeScreen(null, picture = true)
+        RE_DESCRIBE_SCREEN.matches(g) -> FastIntent.DescribeScreen(null, picture = false)
+        else -> RE_PIC_QUESTION.matchEntire(g)?.let { FastIntent.DescribeScreen(g, picture = true) }
+    }
+
+    // ---- battery / data helpers
+    private val RE_SAVER_QUERY = Regex("^(?:is|check if|check whether) (?:my |the )?(battery saver|battery saving|power saving|power saver|data saver|data saving)" +
+        "(?: mode)? (?:on|enabled|turned on|active)$")
+    private val RE_SAVE_DATA = Regex("^(?:please )?(?:help me |how (?:can|do) i |i (?:want|need) to )?(?:save|reduce|use less) (?:my |mobile )?data(?: usage)?$|" +
+        "^(?:i'm|i am) running out of data$|^my data is (?:finishing|running out|almost finished|low)$|^my (?:data )?bundle is (?:finishing|running out|low)$")
+    private val RE_SAVE_BATTERY = Regex("^(?:please )?(?:help me |how (?:can|do) i |i (?:want|need) to )?(?:save|conserve) (?:my )?(?:battery|power)$|" +
+        "^make (?:my |the )?battery last(?: longer)?$|^(?:my )?(?:battery|phone) is (?:low|dying|running out|finishing|almost dead)$|^(?:i'm|i am) running out of battery$")
+
+    // ---- E-11 "open Bluetooth settings"; "is WhatsApp installed?"
+    private val RE_OPEN_SETTING = Regex("^(?:(?:please|can you|could you)\\s+)*(?:open|go to|take me to|show me|bring up|launch)\\s+(?:the\\s+|my\\s+)?" +
+        "(.{2,30}?)\\s+settings?(?:\\s+(?:page|screen|menu))?(?:\\s+please)?$")
+    private val RE_INSTALLED = listOf(
+        Regex("^(?:is|are) (?:the )?(.{2,30}?)(?: app)? installed(?: on (?:my|this) phone)?$"),
+        Regex("^do i have (?:the )?(.{2,30}?)(?: app)? (?:installed|on (?:my|this) phone)$"),
+        Regex("^do i have (?:the )?(.{2,30}?) app$"),
+        Regex("^have i got (?:the )?(.{2,30}?)(?: app)? (?:installed|on (?:my|this) phone)$"),
+        Regex("^is there (?:an? )?(.{2,30}?) app (?:on|in) (?:my|this) phone$")
+    )
 
     /** "turn on do not disturb", "switch auto-rotate off", "enable battery saver" → a Quick Settings tile. */
     private fun quickToggle(g: String): FastIntent.QuickToggle? {

@@ -42,6 +42,9 @@ class LocalFastRouter(
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
         if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
+        // The user's routine names and relations must be known before classifying (encrypted files, read once).
+        Routines.ensureLoaded(appContext)
+        com.tekyerema.android.Relations.ensureLoaded(appContext)
         val intent = FastIntentClassifier.classify(text) ?: run {
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
@@ -155,6 +158,22 @@ class LocalFastRouter(
         FastIntent.MemoryQuery -> memoryQuery()
         is FastIntent.Forget -> forget(intent)
         FastIntent.ClearHistory -> clearHistory()
+        // ---- Overnight [S] (docs/agent/research/overnight_features.md)
+        is FastIntent.Digest -> digest(intent)
+        is FastIntent.SetRelation -> setRelation(intent)
+        is FastIntent.RelationQuery -> relationQuery(intent)
+        is FastIntent.ForgetRelation -> forgetRelation(intent)
+        is FastIntent.Help -> help(intent)
+        is FastIntent.CreateRoutine -> createRoutine(intent)
+        is FastIntent.RunRoutine -> runRoutine(intent)
+        FastIntent.ListRoutines -> listRoutines()
+        is FastIntent.DeleteRoutine -> deleteRoutine(intent)
+        FastIntent.Resume -> resume()
+        is FastIntent.DescribeScreen -> describeScreen(intent)
+        is FastIntent.OpenSetting -> runTool("open_setting", org.json.JSONObject().put("target", intent.target), action = true)
+        is FastIntent.AppInstalled -> appInstalled(intent)
+        is FastIntent.SaverQuery -> saverQuery(intent)
+        is FastIntent.SaveHelp -> saveHelp(intent)
     }
 
     // ---------------------------------------------------------------- W8: audit, undo, memory controls
@@ -206,6 +225,12 @@ class LocalFastRouter(
         FastIntent.ClearSchedules -> "cancelled your schedules"
         is FastIntent.WatchSender -> if (intent.on) "started watching for ${intent.who}'s messages" else "stopped watching for ${intent.who}'s messages"
         FastIntent.ClearHistory -> "cleared your history"
+        is FastIntent.SetRelation -> "remembered who your ${intent.said} is"
+        is FastIntent.ForgetRelation -> "forgot who your ${intent.relation} is"
+        is FastIntent.CreateRoutine -> "saved the routine “${intent.routine}”"
+        is FastIntent.DeleteRoutine -> "deleted the routine “${intent.routine}”"
+        is FastIntent.RunRoutine -> "ran your “${intent.routine}” routine"
+        is FastIntent.OpenSetting -> "opened ${intent.target} settings"
         else -> null
     }
 
@@ -238,6 +263,11 @@ class LocalFastRouter(
         val turns = AgentEngine.conversationTurns()
         if (turns > 0) parts.add("our conversation from the last little while ($turns lines)")
         if (s.emergencyContactName.isNotBlank()) parts.add("your emergency contact, ${s.emergencyContactName}")
+        // C-03 / H-08: who "my mother" is — personal, so it is listed (and "forget everything" removes it).
+        if (com.tekyerema.android.Relations.all().isNotEmpty()) parts.add("that " + com.tekyerema.android.Relations.spokenAll())
+        Routines.names().takeIf { it.isNotEmpty() }?.let { n ->
+            parts.add("${n.size} routine${if (n.size == 1) "" else "s"}: " + Routines.spokenSteps(n.map { "“$it”" }))
+        }
         when (s.speechRate) { 0 -> parts.add("that you like me to speak slowly"); 2 -> parts.add("that you like me to speak fast") }
         if (s.verbosity == "brief") parts.add("that you like short answers") else if (s.verbosity == "detailed") parts.add("that you like more detail")
         val schedules = com.tekyerema.agent.triggers.ScheduledTasks.list(appContext).count { it.enabled }
@@ -272,7 +302,9 @@ class LocalFastRouter(
                 com.tekyerema.core.telemetry.Trajectories.clear(appContext)
                 ScreenMemory.clear()
                 ScreenReadCursor.clear()
-                "Okay, I've forgotten our conversations and the messages I was keeping. Your settings, schedules and emergency contact stay — change them in Settings."
+                com.tekyerema.android.Relations.clear()   // who "my mother" is: personal, like the conversation
+                "Okay, I've forgotten our conversations, the messages I was keeping and who your family are. " +
+                    "Your settings, schedules, routines and emergency contact stay — change them in Settings."
             }
         }
         return action(intent.name, line)
@@ -291,9 +323,22 @@ class LocalFastRouter(
     /** A-13: store and arm a schedule. Only read-only goals will ever run by themselves; the rest are spoken reminders. */
     private fun createSchedule(intent: FastIntent.CreateSchedule): FastOutcome? {
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled(com.tekyerema.agent.triggers.ScheduledTasks.FEATURE, true)) return null
+        // "remind me in 20 minutes …" / "tomorrow at 7 …": the due time is pinned now and read back with the clock time.
+        when (val rel = RelativeReminder.parse(intent.text, System.currentTimeMillis())) {
+            is RelativeReminder.Result.Ask -> return handled(intent, rel.line)
+            is RelativeReminder.Result.Ok -> {
+                val stored = com.tekyerema.agent.triggers.ScheduledTasks.add(appContext, rel.parsed.schedule)
+                    ?: return handled(intent, "I couldn't save that reminder. Please say it another way.")
+                extraInverses.add(com.tekyerema.audit.Inverse.RemoveSchedule(stored.id))   // J-13
+                val runsAlone = com.tekyerema.agent.triggers.TriggerSafety.reminderLine(stored.goal) != null ||
+                    com.tekyerema.agent.triggers.TriggerSafety.isReadOnlyGoal(stored.goal)
+                return action(intent.name, "Okay. " + rel.parsed.spoken + if (runsAlone) "" else " At that time I'll remind you — I won't do it by myself.")
+            }
+            null -> {}
+        }
         val parsed = com.tekyerema.agent.triggers.ScheduleParser.parse(intent.text)
-            ?: return handled(intent, "Tell me the time too — for example: at 6 pm remind me to take my medicine. " +
-                "I can do a time today or repeating days, not a date yet.")
+            ?: return handled(intent, "Tell me when — for example: remind me in 20 minutes to check the food, " +
+                "at 6 pm remind me to take my medicine, or tomorrow at 7 remind me to call Ama.")
         val stored = com.tekyerema.agent.triggers.ScheduledTasks.add(appContext, parsed)
             ?: return handled(intent, "I couldn't save that schedule. Please say it another way.")
         extraInverses.add(com.tekyerema.audit.Inverse.RemoveSchedule(stored.id))   // J-13
@@ -415,6 +460,258 @@ class LocalFastRouter(
             else -> "Okay."
         }
         return handled(p, line)
+    }
+
+    // ---------------------------------------------------------------- Overnight [S]
+    private fun granted(p: String) = appContext.checkSelfPermission(p) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    private fun clock(ms: Long): String = android.text.format.DateFormat.getTimeFormat(appContext).format(Date(ms))
+
+    /** E-15 / H-09: the spoken catch-up — missed calls from the call log, messages grouped by app and person. */
+    private fun digest(intent: FastIntent.Digest): FastOutcome {
+        val notifOn = com.tekyerema.ui.Perms.notifications(appContext)
+        val callsOn = granted(android.Manifest.permission.READ_CALL_LOG)
+        if (!notifOn && !callsOn) return handled(intent,
+            "I can't see your notifications or calls yet — turn on notification access for Tɛkyerɛma in Settings.")
+        val prefs = appContext.getSharedPreferences(DIGEST_PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        val hours = com.tekyerema.core.config.AppConfig.long("notifications.digest.windowHours", 12L).coerceIn(1L, 72L)
+        val windowStart = now - hours * 3_600_000L
+        val last = prefs.getLong("last_digest", 0L)
+        val (since, label) = when {
+            intent.scope == "today" -> java.util.Calendar.getInstance().apply {
+                set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis to "today"
+            intent.scope == "last" && last > windowStart -> last to "since you last asked, at ${clock(last)}"
+            else -> windowStart to "in the last $hours hours"
+        }
+        val ignore = com.tekyerema.notifications.NotificationDigest.DEFAULT_IGNORE +
+            com.tekyerema.core.config.AppConfig.stringList("notifications.digest.ignorePackages", emptyList())
+        val msgs = if (!notifOn) emptyList() else capturedMessages().filter {
+            it.t > since && !com.tekyerema.notifications.NotificationDigest.isNoise(it, appContext.packageName, ignore)
+        }
+        val calls = (if (callsOn) missedCallsSince(since) else null)
+            ?: com.tekyerema.notifications.NotificationDigest.callsFromNotifications(msgs)
+        var line = com.tekyerema.notifications.NotificationDigest.build(msgs, calls, label)
+        if (!notifOn) line += " I can only see your calls — turn on notification access to hear your messages too."
+        prefs.edit().putLong("last_digest", now).apply()
+        return handled(intent, line)
+    }
+
+    /** The persistent index (H-09, survives dismissal and restarts); the live ring only when the index is switched off. */
+    private fun capturedMessages(): List<com.tekyerema.notifications.IndexedMessage> =
+        if (com.tekyerema.core.config.FeatureFlags.isEnabled("H-09", true)) com.tekyerema.notifications.MessageIndex.all()
+        else com.tekyerema.notifications.NotificationStore.recent(50).map {
+            com.tekyerema.notifications.IndexedMessage(it.postTime, it.packageName, it.appLabel, it.sender, it.title, it.text)
+        }
+
+    /** Missed calls after [since] from the call log (cached name, else the number); null when it can't be read. */
+    private fun missedCallsSince(since: Long): List<com.tekyerema.notifications.NotificationDigest.MissedCall>? = try {
+        val out = ArrayList<com.tekyerema.notifications.NotificationDigest.MissedCall>()
+        appContext.contentResolver.query(android.provider.CallLog.Calls.CONTENT_URI,
+            arrayOf(android.provider.CallLog.Calls.NUMBER, android.provider.CallLog.Calls.CACHED_NAME, android.provider.CallLog.Calls.DATE),
+            "${android.provider.CallLog.Calls.TYPE} = ? AND ${android.provider.CallLog.Calls.DATE} > ?",
+            arrayOf(android.provider.CallLog.Calls.MISSED_TYPE.toString(), since.toString()),
+            "${android.provider.CallLog.Calls.DATE} DESC")?.use { cur ->
+            val ni = cur.getColumnIndex(android.provider.CallLog.Calls.NUMBER)
+            val nm = cur.getColumnIndex(android.provider.CallLog.Calls.CACHED_NAME)
+            val di = cur.getColumnIndex(android.provider.CallLog.Calls.DATE)
+            while (out.size < 20 && cur.moveToNext()) {
+                val name = if (nm >= 0) cur.getString(nm) else null
+                val number = if (ni >= 0) cur.getString(ni).orEmpty() else ""
+                // Digits spaced so the voice reads "0 2 4 4…", not "twenty-four million…".
+                val who = name?.takeIf { it.isNotBlank() } ?: number.filter { it.isDigit() || it == '+' }.toCharArray().joinToString(" ").ifBlank { "an unknown number" }
+                out.add(com.tekyerema.notifications.NotificationDigest.MissedCall(if (di >= 0) cur.getLong(di) else since, who))
+            }
+        }
+        out
+    } catch (t: Throwable) { null }
+
+    /** C-03 / H-08: "remember that Ama Mensah is my mother" — one clear contact, or an honest question. */
+    private fun setRelation(i: FastIntent.SetRelation): FastOutcome? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-03", true)) return null
+        if (!granted(android.Manifest.permission.READ_CONTACTS))
+            return if (i.explicit) handled(i, "I need contacts access to find ${i.contact} — allow it for Tɛkyerɛma in Settings.") else null
+        val names = try { com.tekyerema.android.ContactResolver.resolve(appContext, i.contact) } catch (_: Throwable) { emptyList() }
+            .map { it.name }.distinct()
+        return when {
+            // "my mother is sick" said in passing: not a contact → not a relation; the agent answers it as usual.
+            names.isEmpty() -> if (i.explicit) handled(i, "I couldn't find ${i.contact} in your contacts.") else null
+            names.size > 1 -> handled(i, "More than one contact matches ${i.contact}: ${com.tekyerema.audit.AuditLog.joinAnd(names.take(3))}. " +
+                "Say the full name — for example: remember that my ${i.said} is ${names[0]}.")
+            else -> {
+                com.tekyerema.android.Relations.set(i.relation, names[0])
+                action(i.name, "Okay. ${names[0]} is your ${i.said}. Now you can say “call my ${i.said}”.")
+            }
+        }
+    }
+
+    private fun relationQuery(i: FastIntent.RelationQuery): FastOutcome {
+        val all = com.tekyerema.android.Relations.all()
+        val line = if (i.relation.isEmpty()) {
+            if (all.isEmpty()) "You haven't told me who anyone is yet. Say, for example: remember that Ama Mensah is my mother."
+            else "You've told me that " + com.tekyerema.android.Relations.spokenAll(all) + "."
+        } else all[i.relation]?.let { "Your ${i.relation} is $it." }
+            ?: "You haven't told me who your ${i.relation} is. Say, for example: remember that Ama Mensah is my ${i.relation}."
+        return handled(i, line)
+    }
+
+    private fun forgetRelation(i: FastIntent.ForgetRelation): FastOutcome =
+        action(i.name, if (com.tekyerema.android.Relations.remove(i.relation))
+            "Okay, I've forgotten who your ${i.relation} is. Your contacts haven't changed."
+        else "You hadn't told me who your ${i.relation} is.")
+
+    /** K-01 / K-10: what works in the app in front (the app under our own screen when that's what shows). */
+    private fun help(i: FastIntent.Help): FastOutcome {
+        if (!i.here) return handled(i, ContextHelp.GENERAL)
+        val c = controller()
+        val own = appContext.packageName
+        val pkg = c?.foregroundPackage()?.takeUnless { it == own } ?: c?.priorForegroundPackage()
+        return handled(i, ContextHelp.forApp(pkg, pkg?.let { appLabel(it) }, own))
+    }
+
+    private fun appLabel(pkg: String): String? = try {
+        val pm = appContext.packageManager
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString().takeIf { it.isNotBlank() && it != pkg }
+    } catch (_: Throwable) { null }
+
+    /** H-02: save a routine taught by voice — only the steps that can run by themselves; the rest are named. */
+    private fun createRoutine(i: FastIntent.CreateRoutine): FastOutcome {
+        if (i.steps.size > Routines.MAX_STEPS)
+            return handled(i, "That's a lot of steps — a routine can have up to ${Routines.MAX_STEPS}. Please say it again with fewer.")
+        val ok = i.steps.filter { Routines.resolve(it) != null }
+        val left = i.steps.filter { Routines.resolve(it) == null }
+        if (ok.isEmpty()) return handled(i, "I can't do ${quoted(left)} by myself in a routine, so I didn't save it. A routine can read " +
+            "things to you, look up the weather or the news, and change things like Do Not Disturb, the volume or the brightness.")
+        val replaced = Routines.get(i.routine) != null
+        Routines.put(Routines.Routine(i.routine, ok))
+        val leftLine = if (left.isEmpty()) "" else " I left out ${quoted(left)}: a routine can't do that by itself — " +
+            "sending, calling and paying always need you to say yes each time."
+        return action(i.name, "Okay. When you say “${i.routine}”, I'll do this: ${Routines.spokenSteps(ok)}.$leftLine" +
+            if (replaced) " That replaces your old “${i.routine}” routine." else "")
+    }
+
+    private fun quoted(xs: List<String>) = Routines.spokenSteps(xs.map { "“$it”" })
+
+    /** H-02: run each step in order, speak one combined answer. A step that can't run says so and the rest go on. */
+    private suspend fun runRoutine(i: FastIntent.RunRoutine): FastOutcome? {
+        val r = Routines.get(i.routine) ?: return null
+        val lines = ArrayList<String>()
+        var anyOk = false
+        for (step in r.steps) {
+            when (val s = Routines.resolve(step)) {
+                is Routines.Step.Fast -> {
+                    val out = try { execute(s.intent) } catch (t: Throwable) { null }
+                    when {
+                        out == null -> lines.add("I couldn't do “$step” just now.")
+                        out.spoken.isNotBlank() -> { lines.add(out.spoken); anyOk = anyOk || out.ok }
+                        else -> anyOk = true
+                    }
+                }
+                is Routines.Step.Web -> {
+                    if (!com.tekyerema.core.NetworkMonitor.isOnline()) { lines.add("I couldn't check ${s.said} — you're offline."); continue }
+                    val out = runTool("web_search", org.json.JSONObject().put("query", s.query))
+                    if (out != null && out.ok) { lines.add(out.spoken); anyOk = true } else lines.add("I couldn't check ${s.said} just now.")
+                }
+                null -> lines.add("I can't do “$step” in a routine any more.")
+            }
+        }
+        return FastOutcome(i.name, lines.joinToString(" "), systemVoice = false, ok = anyOk)
+    }
+
+    private fun listRoutines(): FastOutcome {
+        val all = Routines.all()
+        if (all.isEmpty()) return handled(FastIntent.ListRoutines, "You have no routines yet. Teach me one: " +
+            "when I say good morning, tell me the time, the weather and my messages.")
+        val each = all.take(5).joinToString(" ") { "“${it.name}”: ${Routines.spokenSteps(it.steps)}." }
+        return handled(FastIntent.ListRoutines, "You have ${all.size} routine${if (all.size == 1) "" else "s"}. $each")
+    }
+
+    private fun deleteRoutine(i: FastIntent.DeleteRoutine): FastOutcome =
+        action(i.name, if (Routines.remove(i.routine)) "Okay, I've deleted the “${i.routine}” routine."
+        else "You don't have a routine called “${i.routine}”. Say “what routines do I have” to hear them.")
+
+    /** H-10: what the user was doing — the app, a paused reading, the last request and how it ended. */
+    private fun resume(): FastOutcome {
+        val now = System.currentTimeMillis()
+        val last = com.tekyerema.history.HistoryStore.entries.value.firstOrNull()?.takeIf { now - it.timeMs < 2 * 86_400_000L }
+        val c = controller()
+        val own = appContext.packageName
+        // The app under our own screen (or behind the home screen) is where they were — not whatever is in front now.
+        val fg = c?.foregroundPackage()
+        val app = if (fg == null || fg == own || fg in LAUNCHERS) c?.priorForegroundPackage()?.takeUnless { it == own || it in LAUNCHERS } else null
+        return handled(FastIntent.Resume, LeftOff.line(last, ScreenReadCursor.pending, app?.let { appLabel(it) }, now))
+    }
+
+    /** F-09: the picture or screen described online. Offline, "describe the screen" goes on to the on-phone reader. */
+    private suspend fun describeScreen(i: FastIntent.DescribeScreen): FastOutcome? {
+        val s = com.tekyerema.settings.Settings(appContext)
+        val cloudOk = com.tekyerema.core.NetworkMonitor.isOnline() && s.allowGeminiBackup && s.geminiApiKey.isNotBlank()
+        if (!cloudOk && !i.picture && i.question == null) return null   // the agent / LocalBrain reads the screen's text instead
+        val args = org.json.JSONObject().put("picture", i.picture)
+        i.question?.let { args.put("question", it) }
+        return runTool("describe_screen", args)
+    }
+
+    /** "is WhatsApp installed?" — from the launcher list, with what to say next. */
+    private fun appInstalled(i: FastIntent.AppInstalled): FastOutcome {
+        val line = when (val m = AppResolver.resolveDetailed(appContext, i.app)) {
+            is AppResolver.Match.One -> "Yes, ${m.app.label} is installed. Say “open ${m.app.label}” to open it."
+            is AppResolver.Match.Ambiguous -> "A few apps match ${i.app}: ${com.tekyerema.audit.AuditLog.joinAnd(m.options.take(3).map { it.label })}."
+            AppResolver.Match.None -> "No, I can't find ${i.app} on this phone. Say “install ${i.app}” and I'll get it from the Play Store after you say yes."
+        }
+        return handled(i, line)
+    }
+
+    private fun powerSaveOn(): Boolean? = try {
+        (appContext.getSystemService(Context.POWER_SERVICE) as? android.os.PowerManager)?.isPowerSaveMode
+    } catch (_: Throwable) { null }
+
+    /** Data saver: DISABLED = off; WHITELISTED (we're exempt) and ENABLED both mean it is on for the phone. */
+    private fun dataSaverOn(): Boolean? = try {
+        val cm = appContext.getSystemService(android.net.ConnectivityManager::class.java)
+        cm?.restrictBackgroundStatus?.let { it != android.net.ConnectivityManager.RESTRICT_BACKGROUND_STATUS_DISABLED }
+    } catch (_: Throwable) { null }
+
+    private fun saverQuery(i: FastIntent.SaverQuery): FastOutcome? {
+        val on = (if (i.kind == "data") dataSaverOn() else powerSaveOn()) ?: return null
+        val name = if (i.kind == "data") "Data saver" else "Battery saver"
+        return handled(i, if (on) "$name is on." else "$name is off. Say “turn on ${name.lowercase()}” to switch it on.")
+    }
+
+    /** Ghana-first: data bundles are expensive and power cuts drain phones — the state, then the one thing to say. */
+    private fun saveHelp(i: FastIntent.SaveHelp): FastOutcome {
+        if (i.kind == "battery") {
+            val tip = when (powerSaveOn()) {
+                true -> " Battery saver is already on; saying “lower the brightness” helps too."
+                false -> " To make it last longer, say “turn on battery saver”, and “lower the brightness”."
+                null -> ""
+            }
+            return handled(i, batteryText(lowHint = false) + tip)
+        }
+        val via = try {
+            val cm = appContext.getSystemService(android.net.ConnectivityManager::class.java)
+            val caps = cm?.activeNetwork?.let { cm.getNetworkCapabilities(it) }
+            when {
+                caps == null -> "offline"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile"
+                else -> "other"
+            }
+        } catch (_: Throwable) { "other" }
+        val saver = dataSaverOn()
+        val line = when (via) {
+            "offline" -> "You're offline right now, so no data is being used."
+            "wifi" -> "You're on Wi-Fi, so your data bundle isn't being used right now." +
+                if (saver == false) " For when you're on mobile data, say “turn on data saver” to stop apps using data in the background." else ""
+            else -> "You're using mobile data." + when (saver) {
+                false -> " Data saver is off — say “turn on data saver” to stop apps using data in the background, and use Wi-Fi when you can."
+                true -> " Data saver is on, so apps can't use data in the background. Use Wi-Fi when you can."
+                null -> " Use Wi-Fi when you can."
+            }
+        }
+        return handled(i, line)
     }
 
     // ---------------------------------------------------------------- W4: tool-backed fast actions
@@ -546,14 +843,26 @@ class LocalFastRouter(
         }
     }
 
-    private fun batteryText(): String {
+    /** The level, whether it is charging and — when the phone can estimate it — how long until it's full; when low
+     *  and not charging ([lowHint]), the one thing to say to make it last. */
+    private fun batteryText(lowHint: Boolean = true): String {
         val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
         if (pct < 0 || pct > 100) return "I couldn't read the battery level right now."
         val status = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
             ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
         val charging = status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL
-        return "Your battery is at $pct percent" + (if (charging) " and charging." else ".")
+        var line = "Your battery is at $pct percent" + (if (charging) " and charging" else "")
+        // API 28+: the platform's own estimate; -1 when it has none (then nothing is said rather than a guess).
+        if (charging && pct < 100 && Build.VERSION.SDK_INT >= 28) {
+            val ms = try { bm?.computeChargeTimeRemaining() ?: -1L } catch (_: Throwable) { -1L }
+            if (ms > 0) line += ", full in about " + RelativeReminder.spokenWait(((ms + 59_999L) / 60_000L).toInt().coerceAtLeast(1))
+        }
+        line += "."
+        if (lowHint && !charging && pct <= com.tekyerema.core.config.AppConfig.int("os.battery.lowPercent", 20)) {
+            line += if (powerSaveOn() == true) " Battery saver is on." else " It's getting low — say “turn on battery saver” to make it last longer."
+        }
+        return line
     }
 
     // ---------------------------------------------------------------- audio
@@ -858,7 +1167,10 @@ class LocalFastRouter(
     companion object {
         private const val TAG = "Tekyerema"
         /** Commands that must not become an undo group themselves (undoing an undo would flip-flop). */
-        private val NOT_UNDOABLE: Set<FastIntent> = setOf(FastIntent.Undo, FastIntent.MemoryQuery, FastIntent.ListSchedules)
+        private val NOT_UNDOABLE: Set<FastIntent> = setOf(FastIntent.Undo, FastIntent.MemoryQuery, FastIntent.ListSchedules,
+            FastIntent.ListRoutines, FastIntent.Resume)
+        private const val DIGEST_PREFS = "tekyerema_digest"
+        private val LAUNCHERS = setOf("com.sec.android.app.launcher", "com.google.android.apps.nexuslauncher", "com.android.launcher3")
     }
 }
 

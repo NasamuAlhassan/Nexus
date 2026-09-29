@@ -44,7 +44,8 @@ object GeminiVision {
     /** Shared connection pool; per-call timeouts come from config via newBuilder(). */
     private val shared: OkHttpClient by lazy { OkHttpClient() }
 
-    suspend fun describe(jpeg: ByteArray, apiKey: String, model: String): VisionResult = withContext(Dispatchers.IO) {
+    /** [prompt]: the camera's default, or F-09's screen/picture prompt (DescribeScreenTool). */
+    suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT): VisionResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext VisionResult.Failed("no Gemini key")
         val timeoutSec = AppConfig.long("camera.describe.timeoutSec", 30L).coerceAtLeast(5L)
         val client = shared.newBuilder()
@@ -56,7 +57,7 @@ object GeminiVision {
         // The key travels in a header, never the URL (URLs end up in proxy and error logs).
         val base = AppConfig.string("providers.gemini.baseUrl", "https://generativelanguage.googleapis.com/v1beta").trimEnd('/')
         val body = requestBody(
-            PROMPT,
+            prompt,
             Base64.encodeToString(jpeg, Base64.NO_WRAP),
             AppConfig.double("camera.describe.temperature", 0.2)
         )
