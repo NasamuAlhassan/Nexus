@@ -142,6 +142,11 @@ class PureLogicGapsTest {
         assertFalse(empty.malicious)
         assertNull(empty.score)
         assertEquals(60, Sentinel.parse("x".repeat(200)).detail.length)
+        // Groq's prompt-guard answers probed on 2026-09-29, and the exponent form a tiny score can take.
+        assertFalse(Sentinel.parse("0.0004146497813053429").malicious)
+        assertTrue(Sentinel.parse("0.9883115887641907").malicious)
+        assertFalse("4.1e-05 is tiny, not 1.0", Sentinel.parse("4.146497813053429e-05").malicious)
+        assertEquals(4.146497813053429e-05, Sentinel.parse("4.146497813053429e-05").score!!, 1e-12)
     }
 
     // ---------------------------------------------------------------- Privacy.sweep (J-15 retention)

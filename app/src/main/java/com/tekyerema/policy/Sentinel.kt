@@ -25,7 +25,10 @@ object Sentinel {
     /** Pure: read a guard response's content — a label ("MALICIOUS"/"BENIGN"/"INJECTION"/"JAILBREAK") or a score. */
     fun parse(content: String): Verdict {
         val c = content.trim()
-        val score = Regex("([01](?:\\.\\d+)?)").find(c)?.value?.toDoubleOrNull()
+        // Groq's prompt-guard answers with a bare score ("0.0004146…", "0.988…" — probed 2026-09-29). Parse the whole number
+        // first: the old "first 0 or 1" pattern read a tiny score in exponent form ("4.1e-05") as 1.0 — a false stop.
+        val score = c.toDoubleOrNull()
+            ?: Regex("(?<![\\d.])\\d+(?:\\.\\d+)?(?:[eE][-+]?\\d+)?").find(c)?.value?.toDoubleOrNull()
         val labelBad = Regex("(?i)\\b(malicious|injection|jailbreak|unsafe)\\b").containsMatchIn(c)
         val labelOk = Regex("(?i)\\b(benign|safe)\\b").containsMatchIn(c)
         val threshold = AppConfig.double("policy.sentinel.threshold", 0.8)

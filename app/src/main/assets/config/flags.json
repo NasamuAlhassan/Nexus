@@ -135,7 +135,7 @@
     "J-15": {"enabled": true},
     "J-17": {"enabled": true},
     "J-18": {"enabled": true},
-    "J-19": {"enabled": false},
+    "J-19": {"enabled": true},
     "J-20": {"enabled": true},
     "K-01": {"enabled": true},
     "K-02": {"enabled": true},
