@@ -312,6 +312,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         val root = try { rootInActiveWindow } catch (t: Throwable) { null } ?: return UiSnapshot.EMPTY
         nodeMap.clear(); boundsMap.clear()
         val (sw, sh) = screenSize()
+        val rootPkg = root.packageName?.toString()
         val elements = ArrayList<UiElement>()
         var idCounter = 0
         var visited = 0
@@ -340,7 +341,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 val b = Box(r.left, r.top, r.right, r.bottom)
                 // Drop zero-size and fully off-screen nodes: a classic hidden-text carrier.
                 val onScreen = !b.isEmpty() && b.right > 0 && b.bottom > 0 && b.left < sw && b.top < sh
-                if (onScreen) {
+                // Research §2.2 h: a sliver of a node (tiny), a paragraph crammed into a dot, or a description that tells
+                // TalkBack something other than the visible text (Perceivability). Tiny ones go the way of off-screen ones.
+                val unseen = if (!onScreen) null else Perceivability.check(b, sw, sh,
+                    Sanitize.label(node.text?.toString()), Sanitize.label(node.contentDescription?.toString()))
+                if (onScreen && unseen != Perceivability.TINY) {
                     val id = idCounter++
                     nodeMap[id] = node
                     boundsMap[id] = b
@@ -368,7 +373,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                             hint = if (node.isEditable) try { node.hintText?.toString()?.takeIf { it.isNotBlank() } } catch (t: Throwable) { null } else null,
                             heading = isHeading(node),
                             link = webRole(node)?.contains("link", true) == true,
-                            customActions = customActionsOf(node)
+                            customActions = customActionsOf(node),
+                            unseen = unseen,
+                            pkg = node.packageName?.toString()?.takeIf { it != rootPkg }
                         )
                     )
                 } else if (label != null) {

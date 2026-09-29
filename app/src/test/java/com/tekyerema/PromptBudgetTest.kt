@@ -25,7 +25,9 @@ class PromptBudgetTest {
         // load only with the "apps" tool-search group; the per-step subset guard below is unchanged.
         // 28k (overnight 2026-09-29): + tap_sequence (several predictable taps per LLM call) and describe_screen (online
         // vision on one screenshot). The model only ever gets a per-step subset (guarded below at 9k).
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 28_000)
+        // 28.5k (Workstream D, 2026-09-29): + read_shared (text shared / selected into Tɛkyerɛma), which loads only with the
+        // "shared" tool-search group; the per-step subset guard below is unchanged.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 28_500)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
     }
 
