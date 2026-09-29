@@ -172,6 +172,10 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // Drive confirmation / stop over ADB during testing.
         intent.getStringExtra("stop")?.let { AgentEngine.stop(); return }
+        // A fresh conversation (the Settings "reset" button), so one test's turns don't colour the next request.
+        intent.getStringExtra("reset_conversation")?.let {
+            AgentEngine.resetConversation(); android.util.Log.i("Tekyerema", "[DEBUG] conversation reset"); return
+        }
         intent.getStringExtra("confirm")?.let {
             AgentEngine.confirm(it.equals("yes", true) || it.equals("true", true))
             return
