@@ -19,8 +19,51 @@ internal typealias Reply = Triple<Int, String, okhttp3.Headers>
 /**
  * Product planner over any OpenAI-compatible Chat Completions endpoint (Groq by default; also
  * OpenRouter / Together / a local Ollama server). Same seam a future on-device model plugs into.
+ *
+ * B (quota-aware routing): with a [route], a COMPLEX step stays on the capable model(s) and waits out a per-minute
+ * limit up to `router.quota.complexMaxWaitMs` (~20 s) instead of dropping to gpt-oss-20b; the weaker model is used only
+ * through [decideWeak], which [FallbackBrain] calls per the operator's weak-model policy. Without a route (tests, old
+ * callers) nothing changes.
  */
-class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
+class OpenAiCompatBrain(
+    private val settings: Settings,
+    private val route: com.tekyerema.agent.routing.TaskRoute? = null
+) : AgentBrain, com.tekyerema.agent.routing.QuotaAware {
+
+    /** Models that must not carry a complex task on their own (C-08's fast model is one). */
+    private fun weakModels(): List<String> = AppConfig.stringList("models.planner.weakModels", listOf("openai/gpt-oss-20b"))
+
+    /** The primary model plus any configured fallback that isn't a weak one. */
+    internal fun capableModels(): List<String> =
+        capableOf(settings.groqModel, AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS), weakModels())
+
+    override val weakModel: String?
+        get() = weakOf(settings.groqModel, AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS),
+            AppConfig.string("models.planner.fastModel", "openai/gpt-oss-20b"), weakModels())
+
+    override fun capableReadyInMs(now: Long): Long? {
+        val keys = settings.groqApiKeys
+        if (keys.isEmpty()) return null
+        val soonest = capableModels().minOf { m -> keys.minOf { coolUntil["$m|$it"] ?: 0L } } - now
+        return when { soonest <= 0L -> 0L; soonest > 90_000L -> null; else -> soonest }
+    }
+
+    override suspend fun decideWeak(ctx: BrainContext): AgentDecision {
+        val m = weakModel ?: return AgentDecision.Fail("no weaker model configured ($DAILY_MARKER)")
+        return decideWith(m, ctx, canFallBack = true, maxWaitMs = route?.policy?.complexMaxWaitMs ?: 1500L)
+    }
+
+    /** B: a complex step on a pinned task — capable models only, a per-minute limit waited out up to ~20 s. */
+    private suspend fun decideCapable(ctx: BrainContext, r: com.tekyerema.agent.routing.TaskRoute): AgentDecision {
+        var last: AgentDecision = AgentDecision.Fail("no model configured")
+        for (model in capableModels()) {
+            last = decideWith(model, ctx, canFallBack = true, maxWaitMs = r.policy.complexMaxWaitMs)
+            val daily = last is AgentDecision.Fail && last.reason.contains(DAILY_MARKER)
+            val paced = last is AgentDecision.Fail && last.reason.contains(PACE_MARKER)
+            if (!daily && !paced) return last
+        }
+        return last
+    }
 
     // 200s: a shared/free-tier GPU (e.g. a Kaggle T4) processing the full real prompt — long
     // system message + full multi-tool schema, ~3k tokens — can take well over a minute on
@@ -37,6 +80,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
      *  on every key while gpt-oss-20b answered fresh). The free Gemini tier is only 20 requests/day, so this is the
      *  fallback that actually carries a multi-step task. */
     override suspend fun decide(ctx: BrainContext): AgentDecision {
+        // B: a complex step of a routed task never slides onto the weak model here (FallbackBrain decides that, per policy).
+        if (route != null && com.tekyerema.agent.routing.ModelRouting.complex(ctx)) return decideCapable(ctx, route)
         var models = (listOf(settings.groqModel) + AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS)).distinct()
         val fast = AppConfig.string("models.planner.fastModel", "openai/gpt-oss-20b")
         // C-08: a simple step (a direct knowledge answer) goes to the fast model first, keeping the deep model's own
@@ -76,7 +121,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         return last
     }
 
-    private suspend fun decideWith(model: String, ctx: BrainContext, canFallBack: Boolean = false): AgentDecision = withContext(Dispatchers.IO) {
+    private suspend fun decideWith(model: String, ctx: BrainContext, canFallBack: Boolean = false,
+                                   maxWaitMs: Long = AppConfig.long("router.quota.maxWaitMs", 1500L)): AgentDecision = withContext(Dispatchers.IO) {
         val keys = settings.groqApiKeys
         if (keys.isEmpty()) return@withContext AgentDecision.Fail("No Groq/OpenAI API key configured.")
         val url = settings.groqBaseUrl.trimEnd('/') + "/chat/completions"
@@ -116,7 +162,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                 )
                 // A2 (device 2026-09-29): three keys on the daily cap and the fourth per-minute limited paced 8 s at a time
                 // for a minute while the next model's separate quota sat unused. Move on instead of waiting long.
-                if (canFallBack && soonest - now > AppConfig.long("router.quota.maxWaitMs", 1500L))
+                if (canFallBack && soonest - now > maxWaitMs)
                     return@withContext AgentDecision.Fail("The AI service is busy right now ($PACE_MARKER).")
                 val waitMs = (soonest - now).coerceIn(250L, 8000L)
                 if (++pacedWaits > 8) return@withContext AgentDecision.Fail(
@@ -188,6 +234,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             // Q-03 / N-03 / Q-10: every call counts; tokens (incl. cached) and the key's remaining minute budget when given.
             val usage = if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromOpenAi(text) else null
             com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", usage, remaining)
+            // B / sovereignty: every answered cloud call counts toward the operator's daily budget (OperatorPolicy).
+            if (code in 200..299) com.tekyerema.operator.OperatorPolicy.recordUsage("groq", (usage?.prompt ?: 0) + (usage?.completion ?: 0))
             // N-03: one line per call, so the phone run shows latency and how much of each prompt Groq served from its
             // prefix cache (cached tokens are faster and don't count toward the per-minute cap).
             android.util.Log.i("Tekyerema", "[LLM] ${usageLine(model, chosen, keys.size, code, System.currentTimeMillis() - t0, usage, effort)}")
@@ -261,14 +309,37 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
     }
 
     companion object {
+        /** B: the models that may carry a complex step — the primary, then fallbacks that aren't weak. Pure. */
+        fun capableOf(primary: String, fallbacks: List<String>, weak: Collection<String>): List<String> =
+            (listOf(primary) + fallbacks.filter { it !in weak }).distinct()
+
+        /** B: the weaker model FallbackBrain may hand a complex step to (per policy), or null. Pure. */
+        fun weakOf(primary: String, fallbacks: List<String>, fast: String, weak: Collection<String>): String? =
+            (fallbacks + fast).distinct().firstOrNull { it in weak && it != primary }
+
         /**
          * N-03: a step's messages — the fixed system prompt, then this step's message (task-fixed parts first, the screen
          * last: [BrainPrompts.userText]). With the tool list ([ToolSelector.select]'s cache-stable order) this is what
          * Groq's prefix cache sees; nothing in front of the step's own message varies between the steps of a task.
          */
-        fun messagesFor(ctx: BrainContext): JSONArray = JSONArray()
-            .put(JSONObject().put("role", "system").put("content", BrainPrompts.SYSTEM))
-            .put(JSONObject().put("role", "user").put("content", BrainPrompts.userText(ctx)))
+        fun messagesFor(ctx: BrainContext, nonce: String = BrainPrompts.nonce()): JSONArray {
+            val msgs = JSONArray().put(JSONObject().put("role", "system").put("content", BrainPrompts.SYSTEM))
+            // B / injection hardening (A/B flag `llm.injection.screenInOwnMessage`, default OFF): the screen — third-party
+            // text — leaves the user's message for a message of its own behind a per-request random delimiter; by default
+            // as the result of a synthetic read_state call (the tool role is the lowest rung of gpt-oss's instruction
+            // hierarchy), else as a second user message. Still last, so the prompt-cache prefix is unchanged.
+            if (!BrainPrompts.screenInOwnMessage()) return msgs.put(JSONObject().put("role", "user").put("content", BrainPrompts.userText(ctx)))
+            msgs.put(JSONObject().put("role", "user").put("content", BrainPrompts.userText(ctx, screenSeparate = true, nonce = nonce)))
+            val offered = (0 until ctx.openAiTools.length()).any { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function")?.optString("name") == "read_state" }
+            val screen = BrainPrompts.screenBlock(ctx, nonce)
+            if (BrainPrompts.screenRole() == "tool" && offered) {
+                val id = "obs_$nonce"
+                msgs.put(JSONObject().put("role", "assistant").put("content", "").put("tool_calls", JSONArray().put(JSONObject()
+                    .put("id", id).put("type", "function").put("function", JSONObject().put("name", "read_state").put("arguments", "{}")))))
+                msgs.put(JSONObject().put("role", "tool").put("tool_call_id", id).put("content", screen))
+            } else msgs.put(JSONObject().put("role", "user").put("content", screen))
+            return msgs
+        }
 
         /** The chat-completions body. Pure, so the prefix a step shares with the one before it is unit-tested. gpt-oss puts
          *  the reasoning effort at the very top of its prompt, so a step at a different effort starts a cache of its own. */

@@ -24,6 +24,10 @@ object ModelRoles {
     fun plannerChain(): List<String> =
         AppConfig.stringList("models.planner.chain", listOf(GROQ, GEMINI)).map { it.trim().lowercase() }.distinct()
 
+    /** B / sovereignty: the chain the operator allows — none when the cloud is off, only the providers they permit. */
+    fun plannerChainAllowed(policy: com.tekyerema.operator.OperatorPolicy = com.tekyerema.operator.OperatorPolicy): List<String> =
+        com.tekyerema.agent.routing.ModelRouting.allowedChain(plannerChain(), policy.providers, policy.cloudAllowed)
+
     /** The model for [role], from `models.<role>.model`, else [default]. */
     fun model(role: String, default: String): String = AppConfig.string("models.$role.model", default).ifBlank { default }
 }

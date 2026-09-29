@@ -12,6 +12,11 @@ class ToolRegistry(
     val installed: List<Tool>,
     private val available: (Tool) -> Boolean = { ToolManifest.isAvailable(it) }
 ) {
+    companion object {
+        /** The optional plan argument (see [com.tekyerema.agent.AgentDecision.PLAN_ARG]). */
+        const val PLAN_PARAM = "plan"
+    }
+
     private val byName = installed.associateBy { it.name }
 
     val all: List<Tool> get() = installed.filter(available)
@@ -35,6 +40,12 @@ class ToolRegistry(
                     props.put(p.name, schema)
                     if (p.required) required.put(p.name)
                 }
+                // B (agenticness plan): an acting tool — one that takes an `expects` claim — may also carry the model's
+                // plan for a multi-step goal. No description: the system prompt's PLAN rule names `plan` and its format,
+                // and ~25 characters per tool is what the per-step schema budget can spare. The engine lifts it out before
+                // argument validation and execution (AgentDecision.fromToolCall), so no tool ever sees it.
+                if (props.has("expects") && !props.has(PLAN_PARAM) && planEnabled())
+                    props.put(PLAN_PARAM, JSONObject().put("type", "string"))
                 val paramsObj = JSONObject().put("type", "object").put("properties", props)
                 if (required.length() > 0) paramsObj.put("required", required)
                 decl.put("parameters", paramsObj)
@@ -43,6 +54,8 @@ class ToolRegistry(
         }
         return arr
     }
+
+    private fun planEnabled(): Boolean = com.tekyerema.core.config.AppConfig.bool("agent.plan.enabled", true)
 
     /** D-07: the tool's description plus up to two worked examples from tools.json (`examples`), when it has any. */
     internal fun describe(t: Tool): String {

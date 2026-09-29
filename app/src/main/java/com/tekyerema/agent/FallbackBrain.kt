@@ -1,6 +1,8 @@
 package com.tekyerema.agent
 
 import android.util.Log
+import com.tekyerema.agent.routing.ModelRouting
+import com.tekyerema.agent.routing.QuotaAware
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -43,9 +45,68 @@ class FallbackBrain(
     /** Is the internet answering? null = can't tell here (JVM tests, probing off) → the chain behaves as it used to. */
     private val linkCheck: suspend () -> Boolean? = { com.tekyerema.core.LinkHealth.answering() },
     private val watchdogMs: Long = com.tekyerema.core.config.AppConfig.long("router.network.watchdogMs", 8_000L),
-    private val health: ProviderCooling = ProviderCooling.shared
+    private val health: ProviderCooling = ProviderCooling.shared,
+    /** B: this task's quota-aware routing (pinned model, weak-model policy). null = the old chain: move on only on a Fail. */
+    private val route: com.tekyerema.agent.routing.TaskRoute? = null,
+    private val budgetExhausted: () -> Boolean = { com.tekyerema.operator.OperatorPolicy.budgetExhausted() },
+    private val sleep: suspend (Long) -> Unit = { delay(it) },
+    private val clock: () -> Long = { System.currentTimeMillis() }
 ) : AgentBrain {
+    /**
+     * B — the routing policy (docs/agent/research/agenticness_reliability_state.md, routing table), on top of the chain:
+     * budget → CannotDo budget_exhausted; a simple step as before (its quota failure is quota_exhausted); a complex step
+     * on the capable providers with the pinned one first, then a TPM reset ≤ 60 s waited for, then the weak model only
+     * per the operator's policy (NEVER → pause, ASK → ask the user once, ALLOW → carry on and say so).
+     */
     override suspend fun decide(ctx: BrainContext): AgentDecision {
+        val r = route ?: return decideChain(ctx)
+        if (budgetExhausted()) return AgentDecision.CannotDo(ModelRouting.BUDGET_EXHAUSTED, ModelRouting.BUDGET_TEXT)
+        if (!ModelRouting.complex(ctx)) {
+            val d = decideChain(ctx)
+            return if (d is AgentDecision.Fail && ModelRouting.isQuota(d.reason)) AgentDecision.CannotDo(ModelRouting.QUOTA_EXHAUSTED, ModelRouting.QUOTA_TEXT) else d
+        }
+        // The user answered the router's own "carry on with a smaller AI?" question.
+        if (r.weakAsked && !r.weakApproved) ModelRouting.pendingAnswer(ctx.history)?.let { ans ->
+            if (ModelRouting.weakAnswer(ans) == true) {
+                r.weakApproved = true
+                Log.i("Tekyerema", "[ROUTE] the user chose to carry on with the smaller model")
+            } else return AgentDecision.CannotDo(ModelRouting.NO_CAPABLE_MODEL, ModelRouting.PAUSED_BY_USER_TEXT)
+        }
+        val first = decideChain(ctx)
+        if (first !is AgentDecision.Fail || !quotaHit(first)) return first
+        // Every capable provider is out of quota right now. A per-minute window refills within a minute: wait for it.
+        val qa = brains.firstNotNullOfOrNull { it as? QuotaAware }
+        val ready = qa?.capableReadyInMs(clock())
+        if (ready != null && ready <= r.policy.tpmResetMaxWaitMs) {
+            Log.i("Tekyerema", "[ROUTE] capable model back in ${ready} ms — waiting for it rather than downgrading")
+            BrainActivity.pausingFor(ready + 250L)
+            sleep(ready + 250L)
+            val again = decideChain(ctx)
+            if (again !is AgentDecision.Fail || !quotaHit(again)) return again
+        }
+        return when (val w = ModelRouting.weakDecision(r, ctx.effort, qa?.weakModel != null)) {
+            is ModelRouting.Weak.Use -> {
+                Log.w("Tekyerema", "[ROUTE] no capable model left → this step on the smaller model (${r.policy.weakModelPolicy})")
+                val d = qa!!.decideWeak(ctx)
+                when {
+                    d !is AgentDecision.Fail -> { r.weakSteps++; r.degraded = true; d }
+                    isNetworkError(d.reason) -> AgentDecision.CannotDo(NETWORK_LOST, STALLED_MESSAGE)
+                    else -> AgentDecision.CannotDo(ModelRouting.QUOTA_EXHAUSTED, ModelRouting.PAUSED_TEXT)
+                }
+            }
+            is ModelRouting.Weak.Ask -> { r.weakAsked = true; ModelRouting.askDecision() }
+            is ModelRouting.Weak.Pause -> AgentDecision.CannotDo(w.reasonClass, w.text)
+        }
+    }
+
+    /** Every provider failed, and at least one for capacity (a quota, a rate limit, an overloaded 503) — not the network. */
+    private fun quotaHit(d: AgentDecision.Fail): Boolean =
+        !isNetworkError(d.reason) && (ModelRouting.isQuota(d.reason) || lastFails.any { ModelRouting.isQuota(it.reason) })
+
+    /** The failures of the last chain pass (for [quotaHit]). */
+    @Volatile private var lastFails: List<AgentDecision.Fail> = emptyList()
+
+    private suspend fun decideChain(ctx: BrainContext): AgentDecision {
         val t0 = System.currentTimeMillis()
         val first = chain(ctx)
         if (first !is AgentDecision.Fail || !isNetworkError(first.reason)) return first   // incl. a confirmed-dead link
@@ -64,13 +125,18 @@ class FallbackBrain(
 
     private fun key(i: Int) = "$i:${brains[i].javaClass.simpleName}"
 
+    /** "groq" / "gemini" — for the journal's pinned model. */
+    private fun label(i: Int) = brains[i].javaClass.simpleName.removeSuffix("Brain").lowercase().replace("openaicompat", "groq")
+
     private suspend fun chain(ctx: BrainContext): AgentDecision {
         val fails = ArrayList<AgentDecision.Fail>()
         val now = System.currentTimeMillis()
         // Stable: providers that timed out lately move to the back; otherwise the configured order stands.
-        val order = brains.indices.sortedBy { if (health.cooling(key(it), now)) 1 else 0 }
+        // B: a task's pinned provider goes first (unless it just timed out) — one model per task, not per step.
+        val pinned = route?.pinnedIndex?.takeIf { ModelRouting.complex(ctx) && it in brains.indices }
+        val order = brains.indices.sortedWith(compareBy<Int> { if (health.cooling(key(it), now)) 1 else 0 }.thenBy { if (it == pinned) 0 else 1 })
         if (order.isNotEmpty() && order.first() != 0)
-            Log.i("Tekyerema", "[BRAIN] cloud #1 timed out recently → starting with #${order.first() + 1} this step")
+            Log.i("Tekyerema", "[BRAIN] starting with cloud #${order.first() + 1} this step" + if (order.first() == pinned) " (pinned for this task)" else " (#1 timed out recently)")
         for ((n, i) in order.withIndex()) {
             val b = brains[i]
             val started = System.currentTimeMillis()
@@ -78,7 +144,13 @@ class FallbackBrain(
             val d = try { guarded(b, ctx) }
                 catch (ce: CancellationException) { throw ce }
                 catch (t: Throwable) { AgentDecision.Fail("brain error: ${t.javaClass.simpleName}: ${t.message}") }
-            if (d !is AgentDecision.Fail) { health.ok(key(i)); return d }
+            if (d !is AgentDecision.Fail) {
+                health.ok(key(i))
+                if (route != null && ModelRouting.complex(ctx)) route.pin(i, label(i))
+                return d
+            }
+            // B: the pinned provider is out for the day — the next capable answer re-pins the task.
+            if (route != null && route.pinnedIndex == i && ModelRouting.isDaily(d.reason)) route.unpin()
             if (d.reason == WATCHDOG_REASON) {
                 // The link itself was checked and is down: no provider can answer, so don't make the user wait for each.
                 health.networkFail(key(i), System.currentTimeMillis())
@@ -98,6 +170,7 @@ class FallbackBrain(
             if (n < order.lastIndex)
                 Log.w("Tekyerema", "[BRAIN] cloud #${i + 1}/${brains.size} failed (${d.reason.take(80)}) → trying next")
         }
+        lastFails = fails.toList()
         // Report the most informative failure: a later provider's quota 429 (the free Gemini tier is 20 requests/day)
         // must not mask a different, real problem upstream.
         return fails.firstOrNull { !RATE_LIMIT.containsMatchIn(it.reason) } ?: fails.lastOrNull()

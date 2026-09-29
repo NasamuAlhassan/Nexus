@@ -94,10 +94,11 @@ object ActionChain {
      * The text field a chained `type` goes into (its target is unknown when the chain is planned): the focused editable,
      * else the only editable on screen; null when it's ambiguous or absent (the chain then stops and the planner looks).
      * Password fields are never picked here — and the policy gate would block typing into one anyway.
+     * [focusedOnly]: only the focused field (after a vision tap aimed at a field, the field it focused — B, 2026-09-29).
      */
-    fun typeTarget(screen: UiSnapshot): Int? {
+    fun typeTarget(screen: UiSnapshot, focusedOnly: Boolean = false): Int? {
         val fields = screen.elements.filter { it.editable && it.source == ElementSource.TREE && !it.password }
-        return (fields.firstOrNull { it.focused } ?: fields.singleOrNull())?.id
+        return (fields.firstOrNull { it.focused } ?: if (focusedOnly) null else fields.singleOrNull())?.id
     }
 
     /**

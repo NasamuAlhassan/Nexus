@@ -15,6 +15,7 @@
       "model": "openai/gpt-oss-120b",
       "fallbacks": ["openai/gpt-oss-20b"],
       "fastModel": "openai/gpt-oss-20b",
+      "weakModels": ["openai/gpt-oss-20b"],
       "chain": ["groq", "gemini"],
       "temperature": 0.2,
       "requestTokens": 4800,

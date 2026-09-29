@@ -3,6 +3,13 @@
   "router": {
     "tiers": ["fast_path", "direct_answer", "retrieval", "local_brain", "cloud_operator"],
     "escalation": { "onDeviation": true },
+    "quota": {
+      "_note": "Workstream B routing: a SIMPLE step (direct answer) may move to the next model after maxWaitMs of per-minute cooling (C-08/N-15). A COMPLEX step stays on the pinned capable model and waits up to complexMaxWaitMs; then the other capable provider (Gemini, if allowed); then a per-minute reset up to tpmResetMaxWaitMs; only then the weak model, per OperatorPolicy.weakModelPolicy.",
+      "maxWaitMs": 1500,
+      "complexMaxWaitMs": 20000,
+      "tpmResetMaxWaitMs": 60000
+    },
+    "weak": { "_note": "Degraded mode: at most this many steps of a complex task on the weak model; never a recovery (effort=high) step.", "maxSteps": 5 },
     "network": {
       "weakKbps": 400,
       "fastModelWhenWeak": true,
