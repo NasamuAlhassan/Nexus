@@ -7,6 +7,11 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -97,7 +102,18 @@ val TkShapes = Shapes(
     large = RoundedCornerShape(28.dp)
 )
 
+/**
+ * The theme also decides, once for every screen under it, whether motion is calm ([LocalCalmMotion]): the in-app
+ * Reduce motion setting or the system's "Remove animations", both followed live.
+ */
 @Composable
 fun TekyeremaTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = Scheme, typography = TkTypography, shapes = TkShapes, content = content)
+    val context = LocalContext.current
+    val settings = remember(context) { com.tekyerema.settings.Settings(context) }
+    val version by settings.changes.collectAsState()
+    val userReduce = remember(version) { settings.reduceMotion }
+    val calm = MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
+    CompositionLocalProvider(LocalCalmMotion provides calm) {
+        MaterialTheme(colorScheme = Scheme, typography = TkTypography, shapes = TkShapes, content = content)
+    }
 }
