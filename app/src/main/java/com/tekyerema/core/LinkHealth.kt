@@ -94,6 +94,9 @@ class LinkHealthTracker(
     @Synchronized
     fun slowProbe(): Boolean = lastProbeMs >= weakProbeMs()
 
+    /** Some exchange (any HTTP answer, even a 429) completed within the last [ms] — the link carries traffic. */
+    @Synchronized fun okWithin(now: Long, ms: Long): Boolean = lastOkAt != 0L && now - lastOkAt <= ms
+
     /** Total time of the last successful probe on this link, 0 = none yet (a new process or a new network). */
     @Synchronized fun lastProbeMs(): Long = lastProbeMs
 
@@ -129,6 +132,15 @@ object LinkHealth {
     fun onStalled(listener: () -> Unit) { stalledListeners.add(listener) }
 
     fun stalled(): Boolean = tracker.stalled(now())
+    fun okWithin(ms: Long): Boolean = tracker.okWithin(now(), ms)
+
+    /**
+     * Is the internet answering? Traffic that just got through says yes without a probe: on the campus Wi-Fi (A20e,
+     * 2026-09-29) four Groq 429 replies took ~10 s, the watchdog then probed, the probe timed out, and a working link
+     * was called dead. Otherwise [LinkProbe.check] (null = can't tell).
+     */
+    suspend fun answering(recentMs: Long = AppConfig.long("router.network.watchdogMs", 8_000L)): Boolean? =
+        if (okWithin(recentMs)) true else LinkProbe.check()
     fun suspect(): Boolean = tracker.suspect(now())
     fun verdict(): LinkHealthTracker.Verdict = tracker.verdict(now())
     fun reset() = tracker.reset()

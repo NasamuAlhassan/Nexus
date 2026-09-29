@@ -65,6 +65,15 @@ class HybridOfflineTest {
         assertEquals(LinkHealthTracker.Verdict.GOOD, t.verdict(41_000))
     }
 
+    @Test fun a_reply_that_just_got_through_proves_the_link() {
+        // campus Wi-Fi 2026-09-29: four quick 429 replies, then a probe timeout called the working link dead
+        val t = LinkHealthTracker()
+        assertFalse(t.okWithin(10_000L, 8_000L))
+        t.success(now = 10_000L, elapsedMs = 250L)
+        assertTrue(t.okWithin(15_000L, 8_000L))
+        assertFalse("old traffic proves nothing", t.okWithin(19_000L, 8_000L))
+    }
+
     @Test fun probe_budget_follows_how_long_a_good_probe_takes_on_this_link() {
         val p = com.tekyerema.core.LinkProbe
         assertEquals(6_000L, p.budget(6_000L, weak = false, lastGoodMs = 0L))          // nothing measured yet

@@ -41,7 +41,7 @@ class FallbackBrain(
     private val networkRetryDelayMs: Long = 1500L,
     private val retryWithinMs: Long = com.tekyerema.core.config.AppConfig.long("models.planner.networkRetryWithinMs", 10_000L),
     /** Is the internet answering? null = can't tell here (JVM tests, probing off) → the chain behaves as it used to. */
-    private val linkCheck: suspend () -> Boolean? = { com.tekyerema.core.LinkProbe.check() },
+    private val linkCheck: suspend () -> Boolean? = { com.tekyerema.core.LinkHealth.answering() },
     private val watchdogMs: Long = com.tekyerema.core.config.AppConfig.long("router.network.watchdogMs", 8_000L),
     private val health: ProviderCooling = ProviderCooling.shared
 ) : AgentBrain {
