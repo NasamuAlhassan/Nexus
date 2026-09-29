@@ -93,6 +93,12 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         var corrected = false
         var emptyRetried = false
         var pacedWaits = 0
+        // The reply allowance counts toward Groq's per-request TPM check (prompt + max completion ≤ 8k on the free tier):
+        // with no cap its default reserve pushed a 6.3k-token step to "Requested 8106, Limit 8000" (HTTP 413, A20e
+        // 2026-09-29). A planner reply, reasoning included, is ~100–300 tokens; "high" effort gets more room.
+        var completionCap = AppConfig.int(if (ctx.effort == "high") "models.planner.maxCompletionHigh" else "models.planner.maxCompletion",
+            if (ctx.effort == "high") 2048 else 1024)
+        var shrunk = false
         while (true) {
             val now = System.currentTimeMillis()
             // freshest usable key, preferring the last good one (sticky), skipping any that are still cooling
@@ -125,7 +131,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             var coolKey = "$model|$apiKey"   // limits are per model per org
             // C-21: a debug override wins; else this step's effort (raised by the engine after failures); else the default.
             val effort = settings.reasoningEffortOverride?.takeIf { it.isNotBlank() } ?: ctx.effort ?: settings.groqReasoningEffort
-            val body = requestBody(model, messages, ctx.openAiTools, AppConfig.double("models.planner.temperature", 0.2), effort)
+            val body = requestBody(model, messages, ctx.openAiTools, AppConfig.double("models.planner.temperature", 0.2), effort, completionCap)
 
             val payload = body.toString()
             fun requestFor(key: String) = Request.Builder()
@@ -195,6 +201,17 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                     coolUntil[coolKey] = System.currentTimeMillis() + cool
                     android.util.Log.w("Tekyerema", "[LLM] 429 on key #${chosen + 1}/${keys.size} → cooling ${cool}ms${if (daily) " (daily quota)" else ""}")
                 }
+                // Still over the per-request limit: lower the reply allowance by the overshoot once and resend.
+                code == 413 && !shrunk && TOO_LARGE.containsMatchIn(text) -> {
+                    shrunk = true
+                    val m = TOO_LARGE.find(text)!!
+                    val over = m.groupValues[2].toInt() - m.groupValues[1].toInt()
+                    val next = completionCap - over - 64
+                    if (next < 384) return@withContext AgentDecision.Fail("LLM HTTP 413: this step's screen is too large for the model's limit")
+                    android.util.Log.w("Tekyerema", "[LLM] request ${over} tokens over the per-request limit — reply allowance $completionCap → $next, resending")
+                    completionCap = next
+                    continue
+                }
                 code == 400 && text.contains("tool_use_failed") && !corrected -> {
                     // The model invented an invalid tool. Nudge it and retry once.
                     corrected = true
@@ -227,6 +244,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                     // "too many requests" for what was really an empty reply.
                     if (d is AgentDecision.Fail && d.reason.contains("neither a tool call nor text") && !emptyRetried) {
                         emptyRetried = true
+                        // It may have been cut off by the reply allowance: give the retry twice the room, within the limit.
+                        usage?.let { u -> completionCap = maxOf(completionCap, minOf(completionCap * 2, 7_900 - u.prompt)) }
                         messages.put(JSONObject().put("role", "user").put("content",
                             "Your last reply was empty. Call exactly one tool now, or reply with one short sentence."))
                         continue
@@ -251,7 +270,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
 
         /** The chat-completions body. Pure, so the prefix a step shares with the one before it is unit-tested. gpt-oss puts
          *  the reasoning effort at the very top of its prompt, so a step at a different effort starts a cache of its own. */
-        fun requestBody(model: String, messages: JSONArray, tools: JSONArray, temperature: Double, effort: String?): JSONObject {
+        fun requestBody(model: String, messages: JSONArray, tools: JSONArray, temperature: Double, effort: String?,
+                        maxCompletion: Int? = null): JSONObject {
             val body = JSONObject()
                 .put("model", model)
                 .put("messages", messages)
@@ -259,8 +279,13 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                 .put("tool_choice", "auto")
                 .put("temperature", temperature)
             if (!effort.isNullOrBlank()) body.put("reasoning_effort", effort)
+            // After the fields the prompt cache sees, so a cap change never breaks a shared prefix.
+            if (maxCompletion != null && maxCompletion > 0) body.put("max_completion_tokens", maxCompletion)
             return body
         }
+
+        /** Groq's "Request too large … (TPM): Limit 8000, Requested 8106". */
+        internal val TOO_LARGE = Regex("(?i)limit (\\d+), requested (\\d+)")
 
         /** Turn a chat-completions response into a decision. Pure (no instance state), so it is unit-tested. */
         fun parseResponse(text: String): AgentDecision {

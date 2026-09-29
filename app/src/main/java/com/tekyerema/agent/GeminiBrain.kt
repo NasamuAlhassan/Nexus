@@ -54,7 +54,13 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
             }
             com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini",
                 if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromGemini(text) else null)   // Q-03 / N-03
+            // One line per call, like Groq's: a Gemini failure used to be invisible in the log (A20e 2026-09-29).
+            android.util.Log.i("Tekyerema", "[LLM] gemini/${settings.model} http=$code" +
+                (if (code !in 200..299) " ${text.replace(Regex("\\s+"), " ").take(120)}" else ""))
+            // The free tier's DAILY request cap: waiting can't help — let the chain report it at once.
+            val dailyCap = code == 429 && Regex("(?i)per ?day|PerDay").containsMatchIn(text)
             when {
+                dailyCap -> return@withContext AgentDecision.Fail("Gemini HTTP 429: daily quota used up")
                 code == 429 && rateAttempts < 6 && totalWaitMs < maxWaitMs -> {
                     rateAttempts++
                     val waitMs = minOf(((parseRetrySeconds(text) ?: 8).coerceIn(2, 30)) * 1000L, maxWaitMs - totalWaitMs)

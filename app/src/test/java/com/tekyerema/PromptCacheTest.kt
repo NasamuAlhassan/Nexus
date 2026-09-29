@@ -53,6 +53,15 @@ class PromptCacheTest {
 
     // ---------------------------------------------------------------- (1) prefix stability
 
+    /** A20e 2026-09-29: "Requested 8106, Limit 8000" (HTTP 413) — the uncapped reply allowance counted toward the limit. */
+    @Test fun the_reply_allowance_is_capped_and_a_413_says_by_how_much() {
+        val ctx = BrainContext("open chrome", F.settingsHome.toCompactJson(), emptyList(), JSONArray(), JSONArray(), emptyList())
+        val b = OpenAiCompatBrain.requestBody("openai/gpt-oss-120b", OpenAiCompatBrain.messagesFor(ctx), JSONArray(), 0.2, null, 1024)
+        assertEquals(1024, b.getInt("max_completion_tokens"))
+        val m = OpenAiCompatBrain.TOO_LARGE.find("Request too large for model `openai/gpt-oss-120b` … on tokens per minute (TPM): Limit 8000, Requested 8106, please reduce")!!
+        assertEquals(8000, m.groupValues[1].toInt()); assertEquals(8106, m.groupValues[2].toInt())
+    }
+
     @Test fun consecutive_steps_of_a_task_differ_only_after_the_step_record() {
         val goal = "send a WhatsApp message to Kofi saying I'm on my way"
         val s2 = step(goal, F.whatsappChats, listOf(F.openWhatsapp), setOf("open_app"))
