@@ -321,6 +321,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         val maxVisited = 1200
         val maxCollected = 220
         val maxDepth = com.tekyerema.core.config.AppConfig.int("perception.tree.maxDepth", 60).coerceIn(10, 120)
+        // SECURE: the USSD reply box is a plain EditText on Android 11 (no password flag), so the MoMo PIN a user types
+        // there is plain text in the tree. In a phone/USSD/SIM-toolkit window the CONTENTS of any entry box never enter a
+        // snapshot — so no read-out, log, LLM, OCR hand-off or paired computer can ever see a PIN typed there
+        // (research 2026-09-29, docs/agent/research/secure_payment_auth.md). Nothing reads it back (MoMo only types).
+        val telephonyWindow = isTelephonyPackage(root.packageName?.toString())
 
         // Each stack entry carries whether an ancestor is clickable, so "tap-able via parent" is
         // known without walking parent chains (every getParent() is an IPC round trip).
@@ -355,7 +360,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                         UiElement(
                             id = id,
                             role = roleOf(node.className),
-                            label = if (node.isPassword) "(password field, redacted)" else label,
+                            label = when {
+                                node.isPassword -> "(password field, redacted)"
+                                telephonyWindow && node.isEditable && !node.text.isNullOrEmpty() -> "(entry box, contents hidden)"
+                                else -> label
+                            },
                             bounds = b,
                             source = ElementSource.TREE,
                             editable = node.isEditable,
@@ -464,6 +473,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             else packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString()
         name.takeIf { it.isNotBlank() && it != pkg }?.also { appNames[pkg] = it }
     } catch (_: Throwable) { null }
+
+    /** The phone app's USSD dialog, the dialer, the in-call screen, SIM toolkit menus. */
+    private fun isTelephonyPackage(pkg: String?): Boolean = TelephonyWindows.matches(pkg)
 
     private fun rawLabelOf(n: AccessibilityNodeInfo): String? {
         n.text?.toString()?.takeIf { it.isNotBlank() }?.let { return it }
