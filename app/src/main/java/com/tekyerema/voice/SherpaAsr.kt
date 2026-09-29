@@ -95,6 +95,12 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] bundled extract failed ($lang): ${t.message}") }
     }
 
+    /** Encoder tail padding in 10 ms feature frames, or null for sherpa's default (1000). Twi keeps its 300 (§3.9). */
+    private fun tailPaddingsFor(lang: String): Int? {
+        val v = com.tekyerema.core.config.AppConfig.int("speech.asr.tailPaddings.$lang", if (lang == "twi") 300 else -1)
+        return if (v > 0) v.coerceIn(50, 2000) else null
+    }
+
     /** whisper has no Twi token — the fine-tune decoded through a Latin proxy (en for English, sw else). */
     private fun tokenLang(lang: String) = if (lang == "eng") "en" else "sw"
     private fun langKey(force: String?) = if (force == Lang.TWI) "twi" else "eng"
@@ -111,15 +117,21 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         // §3.9 per-model tail padding: Twi-type models need a small trailing pad (300) so a short word like
         // "kofi" isn't truncated to "kof"; Gh-EN uses the sherpa default. The big speedup comes from NOT
         // zero-padding the waveform to 30 s (see rawTranscript) — sherpa 1.13.8 encodes the real length.
+        // B-19 (2026-09-28 tail bench, phase2/voice_overnight): the Gh-EN default (1000 frames = 10 s of zero features)
+        // looks wasteful but is NOT — with 600/450/300 this fine-tune stops finding the end of the sentence, repeats
+        // itself up to sherpa's token cap and gets SLOWER as well as worse (unseen Gh-EN: 1.03 s → 1.9-2.7 s mean on the
+        // desktop, WER 0.48 → 0.55-0.73). Both stay configurable (`speech.asr.tailPaddings.<eng|twi>`) for on-phone A/B.
         val whisper = OfflineWhisperModelConfig(
             encoder = File(d, "tiny-encoder.onnx").absolutePath,      // fp32 on purpose
             decoder = File(d, "tiny-decoder.int8.onnx").absolutePath,
             language = tokenLang(lang), task = "transcribe"
-        ).let { if (lang == "twi") it.copy(tailPaddings = 300) else it }
+        ).let { w -> tailPaddingsFor(lang)?.let { w.copy(tailPaddings = it) } ?: w }
         val cfg = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 whisper = whisper,
-                tokens = File(d, "tiny-tokens.txt").absolutePath, numThreads = 2,
+                // 2 = the A20e's two fast (A73) cores; `speech.asr.numThreads` lets the phone try 4 (the extra threads
+                // land on the slow A53s, which can make ORT's even split slower — measure before changing the default).
+                tokens = File(d, "tiny-tokens.txt").absolutePath, numThreads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads", 2).coerceIn(1, 8),
                 modelType = "whisper"),
             decodingMethod = "greedy_search")
         return try {
@@ -161,7 +173,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         return try {
             s.acceptWaveform(samples, sr)
             r.decode(s)
-            val out = guardRepetition(depua(r.getResult(s).text).trim())   // §3.10 stop runaway loops
+            val out = guardRepetition(trimRestart(depua(r.getResult(s).text).trim()))   // §3.10 / B-19 stop runaway loops and restarts
             Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
             out.ifEmpty { null }
         } catch (t: Throwable) {
@@ -266,6 +278,30 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
          * Coffee." / "wo wo wo …"). Collapse an immediately-repeating trailing token run (≥3×) to a single
          * instance and cap absurd length, so a decode artefact can't become a spoken stutter. Pure → tested.
          */
+        /**
+         * B-19 — Whisper-tiny's other decode artefact: having finished the sentence it starts it AGAIN into the padding
+         * ("What time is it? What", "No, cancel. No, cancel", "That cost 12 cedis. That cost 12" — the Gh-EN model on
+         * the owner's clips with a short tail pad, audit/padding_experiment). Cut at a sentence end (. ? !) when every
+         * word after it repeats the transcript's own opening words; the last repeated word may be cut short ("100
+         * cedis. 100 ced"). Only a repeat of the OPENING is trimmed, so "Stop. Stop the music." is left alone. Pure.
+         */
+        internal fun trimRestart(text: String): String {
+            val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (words.size < 2) return text
+            val cores = words.map { w -> w.lowercase().filter { it.isLetterOrDigit() || it == '\'' } }
+            for (i in 1 until words.size) {
+                val prev = words[i - 1]
+                if (prev.last() != '.' && prev.last() != '?' && prev.last() != '!') continue
+                val tail = cores.subList(i, cores.size)
+                if (tail.size > i) continue                          // the "repeat" is longer than what it repeats
+                val repeats = tail.withIndex().all { (j, t) ->
+                    t.isNotEmpty() && (t == cores[j] || (j == tail.size - 1 && cores[j].startsWith(t)))
+                }
+                if (repeats) return words.subList(0, i).joinToString(" ")
+            }
+            return text
+        }
+
         internal fun guardRepetition(text: String): String {
             if (text.isBlank()) return text
             val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }

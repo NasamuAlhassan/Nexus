@@ -316,8 +316,16 @@ object LanguagePipeline {
             Lang.GH_EN, Lang.TWI -> forceLanguage to "explicit"
             else -> Lid.resolve(raw, sessionDefault = sessionLanguage)
         }
-        val canonical = Normalizer.normalize(raw, lang)
+        val normalized = Normalizer.normalize(raw, lang)
+        // B-19: names in a name slot are checked against this phone's contacts and apps ("message coffee" → "message
+        // Kofi"). Only the canonical goal changes; the raw transcript stays as heard.
+        val fixed = try { EntityCorrector.correct(normalized, vocabulary()) } catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
+        val canonical = fixed.text
         val entities = try { Entities.derive(canonical, lang) } catch (t: Throwable) { emptyList() }
-        return Transcript(raw = raw, canonical = canonical, language = lang, reason = reason, entities = entities, backend = backend, asrMs = asrMs)
+        return Transcript(raw = raw, canonical = canonical, language = lang, reason = reason, entities = entities, backend = backend,
+            asrMs = asrMs, corrections = fixed.fixes.map { "${it.kind.name.lowercase()}:${it.from}→${it.to}" })
     }
+
+    /** The names to correct against — [SpeechVocabulary]'s in-memory snapshot (empty in unit tests unless set). */
+    @Volatile var vocabulary: () -> EntityCorrector.Vocab = { SpeechVocabulary.current() }
 }
