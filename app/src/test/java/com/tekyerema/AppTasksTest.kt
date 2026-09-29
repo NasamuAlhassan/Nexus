@@ -195,9 +195,10 @@ class AppTasksTest {
 
     @Test fun text_confirmation_names_app_person_number_and_words() {
         val t = SendSmsTool
-        assertEquals("Ama Mensah on 024 412 3456", t.recipientWords("Ama Mensah", "0244123456"))
-        assertEquals("024 412 3456", t.recipientWords(null, "0244123456"))
-        assertEquals("024 412 3456", t.recipientWords("0244123456", "0244123456"))
+        // Money safety pass (2026-09-29): numbers are read in 3-3-4 groups, digits apart (NumberSpeech).
+        assertEquals("Ama Mensah on 0 2 4, 4 1 2, 3 4 5 6", t.recipientWords("Ama Mensah", "0244123456"))
+        assertEquals("0 2 4, 4 1 2, 3 4 5 6", t.recipientWords(null, "0244123456"))
+        assertEquals("0 2 4, 4 1 2, 3 4 5 6", t.recipientWords("0244123456", "0244123456"))
         val a = JSONObject().put("contact", "Ama").put("message", "On my way").put("_to", "Ama Mensah on 024 412 3456")
         assertEquals("Text Ama Mensah on 024 412 3456: \"On my way\"?", t.confirmationPrompt(a))
         assertEquals("WhatsApp Ama Mensah on 024 412 3456: \"On my way\"?", t.confirmationPrompt(a.put("via", "whatsapp")))

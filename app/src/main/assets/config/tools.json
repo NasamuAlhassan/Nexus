@@ -60,7 +60,7 @@
     "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true},
     "describe_screen": {"feature": "F-09", "idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
     "read_shared": {"idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
-    "resultLimits": {"read_shared": 1500},
+    "resultLimits": {"read_shared": 1500, "momo_send": 400},
     "search": {
       "groups": {
         "shared": {

@@ -107,7 +107,9 @@ object MakeCallTool : Tool {
     }
 
     override fun confirmationPrompt(args: JSONObject): String {
-        val who = args.str("contact") ?: args.str("number") ?: "this number"
+        // A number is read in the groups people check it in ("0 5 5, 3 2 3, 8 0 1 1"), never as one long figure.
+        val who = args.str("contact") ?: args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
+            ?.let { com.tekyerema.agent.NumberSpeech.spoken(it) } ?: "this number"
         return "Call $who?"
     }
 }

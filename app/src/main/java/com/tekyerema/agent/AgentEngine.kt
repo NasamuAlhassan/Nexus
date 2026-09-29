@@ -512,6 +512,9 @@ object AgentEngine {
         // Decisions the engine already knows, taken before asking the brain again (I-03 web-first; G-11 queued sub-steps).
         // Each one still goes through the whole pipeline below — policy gate, confirmation, execution, verification.
         val planned = ArrayDeque<AgentDecision>()
+        // Money safety (2026-09-29): numbers the user corrected during a confirmation ("the middle is 4 5 6") — they said
+        // it, so the read-back must not call it "a number you didn't say" (ActionSemantics.recipientNotice).
+        var saidNumbers = ""
         // G-11: the steps of a tap_sequence still to run, and how the chain is going (ActionChain).
         val chain = ArrayDeque<AgentDecision.CallTool>()
         var chainTotal = 0
@@ -666,6 +669,9 @@ object AgentEngine {
                 else maxOf(maxSteps, firstStep - 1 + com.tekyerema.core.config.AppConfig.int("agent.resume.minSteps", 10))
             for (step in firstStep..lastStep) {
                 coroutineContext.ensureActive()
+                // Money safety (2026-09-29): momo_send ended the task — MTN's confirmation is said before the PIN, before any
+                // pause or look at the screen (endAtMoneyStep).
+                if (endAtMoneyStep(history, stats)) return
                 // C-12: a pause holds the task HERE, between steps — never mid-action.
                 if (paused.value) {
                     setStatus(AgentStatus.PAUSED)
@@ -1302,7 +1308,7 @@ object AgentEngine {
                                 val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
                                     com.tekyerema.policy.ActionSemantics.withRecipientNotice(
                                     plainPrompt, com.tekyerema.policy.ActionSemantics.recipientNotice(decision.name, decision.args,
-                                        resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal, tags)))
+                                        resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal + saidNumbers, tags)))
                                 // §A.1 — a Twi rendering of the SAME action, built from structure (verbatim
                                 // name + digit-by-digit number), for the core confirmable intents. Null for
                                 // anything we can't render structurally → the English line is used.
@@ -1339,6 +1345,10 @@ object AgentEngine {
                                         // (which confirms again). No action leaks: nothing consequential runs without a fresh yes.
                                         log(LogEntry.Kind.POLICY, "User revised instead of approving: \"${reply.text}\"")
                                         pushConvo("User: ${reply.text}")
+                                        // Money safety (2026-09-29): "the middle is 4 5 6" fixes the number exactly and proposes the
+                                        // action again — through the whole gate, read back in full (requeueNumberFix).
+                                        val fixedNumber = requeueNumberFix(decision, reply.text, prompt, history, planned)
+                                        if (fixedNumber != null) { saidNumbers += " $fixedNumber"; setStatus(AgentStatus.THINKING); continue }
                                         history.add(
                                             "You proposed: \"$prompt\". The user did NOT approve it — they said: \"${reply.text}\". " +
                                             "Treat that as a correction or replacement of that pending action: change the recipient, app, " +
@@ -2123,9 +2133,42 @@ object AgentEngine {
         return true
     }
 
-    /** Read a phone number as separate characters so it is unambiguous when spoken ("0 2 4 …"). */
+    /**
+     * Money safety (2026-09-29): a reply to a pending confirmation that fixes ONE group of its number ("the middle is
+     * 4 5 6", "the last four is 8 0 1 1", "change 323 to 332", the whole number again) is applied here, exactly — a model
+     * never repairs digits (NumberCorrection) — and the corrected action is queued to be proposed AGAIN: it goes through
+     * the whole gate and is read back in full, so a changed number is always confirmed again. Returns the new number, or
+     * null when the reply isn't such a fix (the planner then revises as before).
+     */
+    private fun requeueNumberFix(decision: AgentDecision.CallTool, reply: String, prompt: String,
+                                 history: MutableList<String>, planned: ArrayDeque<AgentDecision>): String? {
+        val fixed = NumberCorrection.revise(decision.name, decision.args, reply) ?: return null
+        log(LogEntry.Kind.POLICY, "Number corrected by the user — reading it back again.")
+        history.add("You proposed: \"$prompt\". The user corrected the number to ${fixed.number}; it is being proposed " +
+            "again with that number and will be confirmed again.")
+        planned.addFirst(decision.copy(args = fixed.args, rationale = "the user corrected the number"))
+        return fixed.number
+    }
+
+    /**
+     * Money safety (2026-09-29): the task ends at the Mobile Money step — momo_send handed the PIN to the user (MTN's own
+     * confirmation, with the recipient's registered name, is the reply) or its walk failed / was cancelled (nothing was
+     * sent; no planner improvises in a money menu). Said NOW, before the loop looks at the screen again: at the PIN screen
+     * the Secure Input boundary used to take over first, so MTN's confirmation was only spoken after the PIN was typed.
+     * True when the task was finished here.
+     */
+    private fun endAtMoneyStep(history: List<String>, stats: RunStats): Boolean {
+        val (status, line) = RoutingBrain.moneyEnd(history) ?: return false
+        log(LogEntry.Kind.RESULT, line)
+        pushConvo("Tɛkyerɛma: $line")
+        finish(status, stats)
+        return true
+    }
+
+    /** Read a phone number as separate digits in the groups people check it in ("0 5 5, 3 2 3, 8 0 1 1") — money safety
+     *  pass 2026-09-29 (NumberSpeech); a group is what the user can correct ("the middle is 4 5 6"). */
     private fun spokenDigits(number: String): String =
-        number.map { if (it == '+') "plus" else it.toString() }.joinToString(" ")
+        NumberSpeech.spoken(number).ifBlank { number.map { if (it == '+') "plus" else it.toString() }.joinToString(" ") }
 
     /**
      * §A.1 — structured confirmation slots for the core confirmable intents, so the Twi confirmation can be
@@ -2145,13 +2188,18 @@ object AgentEngine {
             // Mobile Money (§A.2) carries confirmation slots so the readback names the resolved recipient
             // and amount in the user's language.
             "mobile_money" -> when (args.str("_kind")) {
-                "send_money" -> Spec(Spec.Kind.SEND_MONEY, name = args.str("_recipient"), number = args.str("_number"), amount = args.str("_amount"))
+                "send_money" -> if (args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
+                        ?.let { NumberSpeech.moneyReadBack(it).second } != null) null   // "check the number" is English-only (see momo_send)
+                    else Spec(Spec.Kind.SEND_MONEY, name = args.str("_recipient"), number = args.str("_number"), amount = args.str("_amount"))
                 "buy_airtime" -> Spec(Spec.Kind.BUY_AIRTIME, amount = args.str("_amount"))
                 else -> null
             }
             // Deterministic *170# send driver: read back the CEDI amount + recipient number digit-by-digit so a
             // units (pesewa/cedi) or wrong-number mistake is caught BEFORE it drives the menu.
-            "momo_send" -> Spec(Spec.Kind.SEND_MONEY, number = args.str("number"), amount = args.str("amount"))
+            // (money safety 2026-09-29: a "check the number" line — unknown prefix, another network than the SIM — can't be
+            // carried by the Twi template, so the English read-back is spoken then.)
+            "momo_send" -> if (com.tekyerema.tools.MoMoSendTool.networkWarning(args) != null) null
+                else Spec(Spec.Kind.SEND_MONEY, number = args.str("number"), amount = args.str("amount"))
             // E-03: an SMS names its recipient and its words, like a reply.
             "send_sms" -> Spec(Spec.Kind.SEND_MESSAGE, name = args.str("contact") ?: args.str("number"), message = args.str("message"))
             // §A.1 — the recipient must be named in the readback. ReplyToNotificationTool declares `sender`

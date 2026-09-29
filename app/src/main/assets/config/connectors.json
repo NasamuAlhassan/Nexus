@@ -3,6 +3,12 @@
   "connectors": {
     "mobileMoney": {
       "_note": "Root codes and the MTN send sequence were owner-confirmed on 2026-09-21; verify with a 10-pesewa run after any change. A network without sendSequence is never driven automatically (M-03).",
+      "_prefixes_note": "Ghana mobile prefixes per network (NCA numbering, 2026; research: african_voice_and_protocols.md). A money read-back names the network ('an MTN number') and says so when a number's prefix is unknown or on another network than the SIM. Keys match networks below.",
+      "prefixes": {
+        "mtn": ["024", "025", "053", "054", "055", "059"],
+        "telecel": ["020", "050"],
+        "airteltigo": ["026", "027", "056", "057"]
+      },
       "networks": {
         "mtn": {
           "names": ["mtn"],

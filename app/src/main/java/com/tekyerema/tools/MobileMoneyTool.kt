@@ -135,10 +135,20 @@ object MobileMoneyTool : Tool {
     // wording matches reality: we OPEN Mobile Money, the user finishes the amount and PIN).
     override fun confirmationPrompt(args: JSONObject): String {
         val amt = args.str("_amount")?.let { "$it cedis" } ?: "money"
-        val to = args.str("_recipient") ?: args.str("_number")
-        return if (args.str("_kind") == "buy_airtime")
-            "Buy $amt of airtime with Mobile Money? I'll go through the menu; you'll enter your PIN."
-        else
-            "Send $amt${to?.let { " to $it" } ?: ""} with Mobile Money? I'll go through the menu; you'll enter your PIN."
+        if (args.str("_kind") == "buy_airtime")
+            return "Buy $amt of airtime with Mobile Money? I'll go through the menu; you'll enter your PIN."
+        // Money safety (2026-09-29): a number is read in groups with its network ("0 5 5, 3 2 3, 8 0 1 1, an MTN number"),
+        // and an unknown prefix is said so the user checks it.
+        val name = args.str("_recipient")?.trim()?.takeIf { it.isNotEmpty() }
+        val number = args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
+        val (said, warn) = number?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it) } ?: (null to null)
+        val to = when {
+            name != null && said != null && name.filter(Char::isDigit) != number.orEmpty().filter(Char::isDigit) -> " to $name on $said,"
+            said != null -> " to $said,"
+            name != null -> " to $name"
+            else -> ""
+        }
+        return "Send $amt$to with Mobile Money?" + (warn?.let { "\n$it I'll go through the menu; you'll enter your PIN." }
+            ?: " I'll go through the menu; you'll enter your PIN.")
     }
 }

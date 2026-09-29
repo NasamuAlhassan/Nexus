@@ -254,9 +254,10 @@ object SendSmsTool : Tool {
         }
     }
 
-    /** "Ama Mensah on 024 412 3456" / "024 412 3456" — pure, unit-tested. */
+    /** "Ama Mensah on 0 2 4, 4 1 2, 3 4 5 6" / "0 2 4, 4 1 2, 3 4 5 6" — pure, unit-tested. The number is read in the groups
+     *  people check it in, digits apart, so a voice never says "four hundred and twelve" (money safety pass, 2026-09-29). */
     internal fun recipientWords(name: String?, number: String): String {
-        val spoken = CallLogFormat.spokenNumber(number)
+        val spoken = com.tekyerema.agent.NumberSpeech.spoken(number).ifBlank { CallLogFormat.spokenNumber(number) }
         return name?.trim()?.takeIf { it.isNotEmpty() && it.filter(Char::isDigit) != number.filter(Char::isDigit) }
             ?.let { "$it on $spoken" } ?: spoken
     }
@@ -475,7 +476,7 @@ object SendSmsTool : Tool {
 
     override fun confirmationPrompt(args: JSONObject): String {
         val contact = args.str("contact")?.trim()?.takeIf { it.isNotEmpty() }
-        val number = args.str("number")?.takeIf { n -> n.count { it.isDigit() } >= 3 }?.let { CallLogFormat.spokenNumber(it) }
+        val number = args.str("number")?.takeIf { n -> n.count { it.isDigit() } >= 3 }?.let { com.tekyerema.agent.NumberSpeech.spoken(it) }
         // [ARG_TO] (set by preflight) is the RESOLVED person + number — what will actually be texted.
         val who = args.str(ARG_TO) ?: when {
             contact != null && number != null -> "$contact on $number"   // the number is what will actually be texted

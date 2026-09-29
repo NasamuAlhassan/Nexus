@@ -91,8 +91,39 @@ object TargetSemantics {
         val hasInput = screen.elements.any { it.editable }
         if (!hasInput) return false
         val texts = screen.elements.mapNotNull { it.label } + listOfNotNull(screen.screenTitle)
-        return texts.any { credentialField.containsMatchIn(it) }   // e.g. "Enter MoMo PIN", "OTP", "password"
+        if (texts.any { credentialField.containsMatchIn(it) }) return true   // e.g. "Enter MoMo PIN", "OTP", "password"
+        return isUssdMoneyConfirmation(screen)
     }
+
+    /**
+     * Fail closed (money safety, 2026-09-29): a USSD / phone dialog with an input box that shows a money figure AND the
+     * wording of a final payment screen — a total, a fee, a tax or levy, "Enter MM", a PIN, a confirmation — is a
+     * credential screen WHATEVER its prompt says. MTN's PIN prompt said "Enter MM # for next", no "PIN" (A20e, live send);
+     * the next wording change must not slip past either. A menu that merely mentions money ("1) Transfer Money
+     * 2) MoMoPay …", "Enter amount") has no figure + final-screen cue and stays operable. Dialog found by structure:
+     * the phone / dialer / SIM-toolkit process, or a lone input box with a Send/OK + Cancel pair.
+     */
+    fun isUssdMoneyConfirmation(screen: UiSnapshot): Boolean {
+        val inputs = screen.elements.count { it.editable }
+        if (inputs == 0) return false
+        val pkg = screen.appPackage.orEmpty()
+        val buttons = screen.elements.filter { it.clickable && !it.editable }.mapNotNull { it.label?.trim()?.lowercase() }
+        val dialogShape = inputs == 1 && buttons.any { it in USSD_SUBMIT } && buttons.any { it == "cancel" }
+        if (!ussdPackage.containsMatchIn(pkg) && !dialogShape) return false
+        val text = (screen.elements.filter { !it.editable }.mapNotNull { it.label } + listOfNotNull(screen.screenTitle)).joinToString("\n")
+        return isMoneyConfirmationText(text)
+    }
+
+    /** The words of a final payment screen: a money figure plus a total / fee / tax / "Enter MM" / PIN / confirm cue. */
+    fun isMoneyConfirmationText(text: String): Boolean = moneyFigure.containsMatchIn(text) && finalMoneyCue.containsMatchIn(text)
+
+    private val ussdPackage = Regex("(?i)^com\\.android\\.phone$|dialer|\\.phone$|telephony|\\.stk\\b|simtoolkit|incallui")
+    private val USSD_SUBMIT = setOf("send", "ok", "reply", "submit", "answer")
+    /** "GHS 0.10", "GH₵5", "0.10 GHS", "5 cedis". */
+    private val moneyFigure = Regex("(?i)(?:GH\\s?₵|GH\\s?¢|GHS|GHC|₵|¢)\\s*\\d|\\d(?:[\\d,]*\\.?\\d*)?\\s*(?:GHS|GHC|cedis?)\\b")
+    /** A final payment screen's words — never "transfer" or "send money" alone (those are menu items too). */
+    private val finalMoneyCue = Regex("(?i)\\btotal\\b|\\bfees?\\b|\\btax\\b|\\blevy\\b|\\bcharges?\\b|\\benter mm\\b|\\bmm pin\\b|" +
+        "\\bpin\\b|\\bconfirm\\b|\\bauthori[sz]e\\b")
 
     /** G-13: a "prove you're human" check. The agent never solves these; the user takes over, like a PIN screen. */
     private val humanCheck = Regex(
@@ -116,6 +147,8 @@ object TargetSemantics {
             humanCheck.containsMatchIn(texts) -> "captcha"
             Regex("\\b(otp|one[- ]time|verification code|security code)\\b").containsMatchIn(texts) -> "otp"
             Regex("\\b(momo|mobile money)\\b").containsMatchIn(texts) || (dialerLike && Regex("\\bpin\\b").containsMatchIn(texts)) -> "momo_pin"
+            // MTN's own prompt ("… Enter MM # for next") or any USSD payment screen: it is the Mobile Money PIN, not "your password".
+            Regex("\\benter mm\\b|\\bmm pin\\b").containsMatchIn(texts) || isUssdMoneyConfirmation(screen) -> "momo_pin"
             Regex("\\b(pin|passcode)\\b").containsMatchIn(texts) -> "pin"
             else -> "password"
         }

@@ -83,6 +83,29 @@ class RoutingBrain(
             return LocalBrain.resultMessage(last).ifBlank { "The Mobile Money PIN screen is up — enter your PIN yourself. I never handle the PIN." }
         }
 
+        /**
+         * Money safety (2026-09-29): the momo_send step that ENDS the task, as (status, the line to say) — the hand-off at
+         * the PIN ([pinHandoff]: MTN's own confirmation with the recipient's registered name), or a walk of the menu that
+         * failed or was cancelled because MTN's screen didn't match (nothing was sent — no planner improvises inside a
+         * money menu afterwards; the user can simply ask again). A preflight refusal (a misheard number) is not an end:
+         * the planner asks for the number again. AgentEngine checks this at the top of every step, before the screen is
+         * looked at, so the confirmation is said BEFORE the PIN rather than after the Secure Input hand-off. Pure.
+         */
+        fun moneyEnd(history: List<String>): Pair<AgentStatus, String>? {
+            // The last STEP's line — the engine may add its own notes (recovery, plan) after it.
+            val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
+            if (!last.startsWith("momo_send(")) return null
+            pinHandoff(listOf(last))?.let { return AgentStatus.COMPLETED to it }
+            if (!last.contains("→ fail") || last.contains("[preflight]")) return null
+            val line = RECOVERY_HINT.split(LocalBrain.resultMessage(last), 2)[0].trim()
+            return AgentStatus.CANNOT_DO to line.ifBlank { "The Mobile Money send didn't finish. Nothing was sent." }
+        }
+
+        /** A step's own line in history ("momo_send(number=…) → success …"), as opposed to a note the engine added. */
+        private val STEP_LINE = Regex("^[a-z_]+\\(")
+        /** The engine's recovery advice appended to a failed step in history (Recovery.hint) — for the planner, never said. */
+        private val RECOVERY_HINT = Regex(" — (?:this route|re-observe|only the user|the '[^']*' accelerator)")
+
         /** Reason class of a local request the offline router could not do (spoken detail differs by case). */
         const val OFFLINE_UNKNOWN = "offline_unknown_command"
 

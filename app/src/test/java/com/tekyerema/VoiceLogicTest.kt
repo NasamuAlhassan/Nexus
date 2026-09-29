@@ -98,7 +98,8 @@ class VoiceLogicTest {
             com.tekyerema.voice.ConfirmTemplates.Spec.Kind.CALL, name = "Kwabɛna Owusu-Ansah", number = "0244000011")
         val q = com.tekyerema.voice.ConfirmTemplates.twi(spec)
         assertTrue("name must pass through verbatim", q.contains("Kwabɛna Owusu-Ansah"))
-        assertTrue("every digit must survive", q.contains("zero mmienu anan anan zero zero zero zero baako baako"))
+        // …in the 3-3-4 groups people check numbers in (money safety pass, 2026-09-29)
+        assertTrue("every digit must survive", q.contains("zero mmienu anan, anan zero zero, zero zero baako baako"))
         assertTrue("must be a Twi question", q.contains("Wopɛ sɛ mefrɛ") && q.contains("aane anaa daabi"))
         // send money: amount digit-by-digit, recipient verbatim
         val money = com.tekyerema.voice.ConfirmTemplates.twi(com.tekyerema.voice.ConfirmTemplates.Spec(
