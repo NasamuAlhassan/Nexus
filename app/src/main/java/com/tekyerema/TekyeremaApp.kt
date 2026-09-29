@@ -12,6 +12,8 @@ class TekyeremaApp : Application() {
         // X-02: versioned JSON config (assets/config) + local overrides — loaded before anything reads a tunable.
         com.tekyerema.core.config.AppConfig.load(this)
         com.tekyerema.core.config.Registrations.registerAll()   // X-01: capability registry (flags, API gates, checks)
+        // WS-C: the user's standing choices (execution mode, cloud, providers, budgets, scopes…) — before anything reads them.
+        com.tekyerema.operator.OperatorPolicy.init(com.tekyerema.operator.PrefsOperatorStore(this))
         com.tekyerema.core.DeviceProfile.init(this)             // N-08: RAM class → how many models stay resident
         NetworkMonitor.init(this)   // online/offline detection for hybrid routing (§32)
         // A-13 safety net: re-arm the user's schedules (an alarm can be lost to a force-stop or a clock change).

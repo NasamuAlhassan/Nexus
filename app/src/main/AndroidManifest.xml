@@ -212,6 +212,18 @@
                 android:resource="@xml/method" />
         </service>
 
+        <!-- WS-C data export: the user's history + activity log file (cache/exports only) handed to the share sheet with a
+             one-off read grant. Not exported; no other app can open anything else. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.exports"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/export_paths" />
+        </provider>
+
         <!-- A-13 schedules (owner-approved unattended triggers): fires the user's own schedules and re-arms them after
              a reboot, an update or a clock change. Not exported — system broadcasts still arrive, no other app can fire one. -->
         <receiver

@@ -64,6 +64,9 @@ object RemoteControl {
         if (started) return
         started = true
         app = ctx.applicationContext
+        // Every app start begins with the computer connection OFF. (merge C+D: C persists the switch, D assumed it reset with
+        // the process — without this, a connection left on came back by itself after a restart, until the idle timer.)
+        OperatorPolicy.remoteControlEnabled = false
         try {
             ContextCompat.registerReceiver(ctx.applicationContext, object : BroadcastReceiver() {
                 override fun onReceive(c: Context, i: Intent) { if (i.action == RemoteNotice.ACTION_OFF) turnOff("I've turned off the computer connection.") }

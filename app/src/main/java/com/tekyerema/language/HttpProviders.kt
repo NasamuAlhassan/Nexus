@@ -47,10 +47,13 @@ class HttpAsrProvider(
     private val ledger: QuotaLedger = QuotaLedger()
 ) : AsrProvider, HealthAware {
     override val name = "http:${spec.id}"
-    /** Worth trying now: not resting after a failure, and the plan has a request left ([QuotaLedger]). */
-    override fun available() = guard.health.available() && ledger.refusal(spec.id, spec.limits, QuotaLedger.Units()) == null
+    /** Worth trying now: not resting after a failure, and the plan has a request left ([QuotaLedger]). WS-C: never while
+     *  the user has the cloud off. */
+    override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available() &&
+        ledger.refusal(spec.id, spec.limits, QuotaLedger.Units()) == null
 
     override suspend fun transcribe(wav: ByteArray, sessionLanguage: String, forceLanguage: String?): Transcript {
+        if (!com.tekyerema.operator.OperatorPolicy.cloudAllowed) throw AsrException("$name: the cloud is off")   // WS-C
         val lang = forceLanguage ?: spec.fixedLanguage
         val code = HttpSpeech.languageCode(spec, lang)
         if (lang != null && code == null) throw AsrException("$name doesn't recognise ${Lang.label(lang)}")
@@ -117,7 +120,7 @@ class HttpTtsProvider(
     private val ledger: QuotaLedger = QuotaLedger()
 ) : TtsProvider, HealthAware {
     override val name = "http:${spec.id}"
-    override fun available() = guard.health.available() &&
+    override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available() &&   // WS-C
         ledger.refusal(spec.id, spec.limits, QuotaLedger.Units(chars = 1)) == null
     private val cache: MutableMap<String, ByteArray> = lru(spec.cacheEntries.coerceIn(0, 256))
 
@@ -168,7 +171,7 @@ class HttpTranslationProvider(
     private val guard: ProviderGuard
 ) : TranslationProvider, HealthAware {
     override val name = "http:${spec.id}"
-    override fun available() = guard.health.available()
+    override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available()   // WS-C
     private val cache: MutableMap<String, String> = lru(spec.cacheEntries.coerceIn(0, 512))
 
     override suspend fun translate(text: String, from: String, to: String): String? {

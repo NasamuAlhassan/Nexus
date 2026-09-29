@@ -141,7 +141,8 @@ object VisionLocate {
             val model = com.tekyerema.agent.ModelRoles.model("vision", s.model)
             val r = com.tekyerema.camera.GeminiVision.describe(jpeg, s.geminiApiKey, model, prompt(description))
             if (r !is com.tekyerema.camera.VisionResult.Described) return Result.Refused("vision call failed")
-            com.tekyerema.operator.OperatorPolicy.recordUsage("gemini", 0)
+            // WS-C: every model call is counted in one place (Telemetry.noteLlm → OperatorPolicy), never recorded twice.
+            com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini/vision", null)
             val (box, _) = parse(r.text) ?: return Result.NotFound
             val id = (current.elements.maxOfOrNull { it.id } ?: -1) + 1
             return toElement(box, w, h, id, description)?.let { Result.Found(it) } ?: Result.NotFound

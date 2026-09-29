@@ -23,6 +23,12 @@ object RouterTiers {
     const val CLOUD = "cloud_operator"
     val DEFAULT = listOf(FAST_PATH, DIRECT, RETRIEVAL, LOCAL, CLOUD)
 
+    /** Tiers that send the request to an online service (the cloud model or the web). */
+    val ONLINE = setOf(DIRECT, RETRIEVAL, CLOUD)
+
+    /** WS-C: "cloud off" (or today's budget spent — OperatorPolicy) removes the online tiers; the router then works on the
+     *  phone only. The user can only remove tiers here, never add one the config left out. */
     fun enabled(tier: String): Boolean =
-        tier in AppConfig.stringList("router.tiers", DEFAULT).map { it.trim().lowercase() }
+        tier in AppConfig.stringList("router.tiers", DEFAULT).map { it.trim().lowercase() } &&
+            (tier !in ONLINE || com.tekyerema.operator.OperatorPolicy.cloudUsable())
 }

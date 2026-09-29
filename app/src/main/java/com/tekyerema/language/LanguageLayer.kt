@@ -117,7 +117,8 @@ object LanguageLayer {
      * and skips providers that are resting after quota/auth/network failures, so a dead API costs no time.
      */
     fun onlineAsr(lang: String?, registry: Map<String, AsrProvider>, cloudAllowed: Boolean): AsrProvider? {
-        if (!cloudAllowed || registry.isEmpty()) return null
+        // WS-C: the user's "cloud off" (Settings › Control / "offline mode") keeps speech on the phone too.
+        if (!cloudAllowed || !com.tekyerema.operator.OperatorPolicy.cloudAllowed || registry.isEmpty()) return null
         val chain = SpeechProviders.resolve(SpeechProviders.onlineAsrIds(lang), registry) {
             Log.w(TAG, "[LANG] asr.online.${lang ?: "auto"}: no client '$it' (disabled or missing keys) — skipped")
         }.filter(::usable)

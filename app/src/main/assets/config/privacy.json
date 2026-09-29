@@ -14,7 +14,8 @@
     "budgets": { "asrMs": 1500, "routeMs": 200, "firstDecisionMs": 3500, "ttsStartMs": 800, "responseMs": 4000 }
   },
   "audit": {
-    "max": 300,
+    "_maxNote": "WS-C: the structured audit keeps several linked entries per step (proposed, answer, outcome, verification), so the cap is in entries, not tasks.",
+    "max": 2000,
     "undo": { "ttlMs": 600000 }
   },
   "memory": {

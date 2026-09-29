@@ -55,7 +55,6 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
             val usage = if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromGemini(text) else null
             com.tekyerema.core.telemetry.Telemetry.noteLlm("gemini", usage)   // Q-03 / N-03
             // B / sovereignty: an answered call counts toward the operator's daily budget.
-            if (code in 200..299) com.tekyerema.operator.OperatorPolicy.recordUsage("gemini", (usage?.prompt ?: 0) + (usage?.completion ?: 0))
             // One line per call, like Groq's: a Gemini failure used to be invisible in the log (A20e 2026-09-29).
             android.util.Log.i("Tekyerema", "[LLM] gemini/${settings.model} http=$code" +
                 (if (code !in 200..299) " ${text.replace(Regex("\\s+"), " ").take(120)}" else ""))

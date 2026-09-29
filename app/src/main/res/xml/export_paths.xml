@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WS-C: the only files the export FileProvider can hand out — the user's own export, in the app's cache. -->
+<paths>
+    <cache-path name="exports" path="exports/" />
+</paths>

@@ -235,7 +235,6 @@ class OpenAiCompatBrain(
             val usage = if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromOpenAi(text) else null
             com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", usage, remaining)
             // B / sovereignty: every answered cloud call counts toward the operator's daily budget (OperatorPolicy).
-            if (code in 200..299) com.tekyerema.operator.OperatorPolicy.recordUsage("groq", (usage?.prompt ?: 0) + (usage?.completion ?: 0))
             // N-03: one line per call, so the phone run shows latency and how much of each prompt Groq served from its
             // prefix cache (cached tokens are faster and don't count toward the per-minute cap).
             android.util.Log.i("Tekyerema", "[LLM] ${usageLine(model, chosen, keys.size, code, System.currentTimeMillis() - t0, usage, effort)}")

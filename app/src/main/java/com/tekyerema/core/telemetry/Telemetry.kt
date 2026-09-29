@@ -77,7 +77,13 @@ object Telemetry {
     fun update(block: Turn.() -> Unit) { val t = current ?: return; synchronized(lock) { t.block() } }
 
     /** Q-03 / N-03: one model call (success or not); usage when the provider returned it. */
-    fun noteLlm(provider: String, usage: LlmUsage?, quotaRemaining: Int? = null) = update {
+    fun noteLlm(provider: String, usage: LlmUsage?, quotaRemaining: Int? = null) {
+        // WS-C: the one place every model call reports — the user's daily usage, budgets and "decided by" (OperatorPolicy).
+        com.tekyerema.operator.OperatorPolicy.noteModelCall(provider, usage?.let { it.prompt + it.completion })
+        noteTurnLlm(provider, usage, quotaRemaining)
+    }
+
+    private fun noteTurnLlm(provider: String, usage: LlmUsage?, quotaRemaining: Int?) = update {
         llmCalls++
         this.provider = provider
         usage?.let { promptTokens += it.prompt; completionTokens += it.completion; cachedTokens += it.cached }

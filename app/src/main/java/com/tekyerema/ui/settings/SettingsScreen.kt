@@ -43,6 +43,7 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VerifiedUser
 import androidx.compose.material.icons.outlined.VolumeUp
 import com.tekyerema.ui.components.ChoiceRow
@@ -60,21 +61,33 @@ import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.theme.TkMotion
 
-private enum class Page { ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP, KEYBOARD, APPEARANCE }
+internal enum class Page {
+    ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP, KEYBOARD, APPEARANCE,
+    // WS-C: Control and its sub-pages.
+    CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT;
 
-/** Six things: Language, Voice, Permissions, Accessibility, Privacy (J-15 / H-12 / Q-07 / Q-08), Help. */
+    /** Where Back goes. */
+    val parent: Page get() = when (this) {
+        ROOT -> ROOT
+        PROVIDERS, KEYS, USAGE, DATA, AUDIT -> CONTROL
+        else -> ROOT
+    }
+    val depth: Int get() = if (this == ROOT) 0 else parent.depth + 1
+}
+
+/** Language, Voice, Permissions, Accessibility, Privacy (J-15 / H-12 / Q-07 / Q-08), Control (WS-C), Help. */
 @Composable
 fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
     var page by rememberSaveable { mutableStateOf(Page.ROOT) }
     val version by settings.changes.collectAsState()
-    BackHandler(enabled = page != Page.ROOT) { page = Page.ROOT }
+    BackHandler(enabled = page != Page.ROOT) { page = page.parent }
     val context = LocalContext.current
 
     // Deeper pages slide in from the right and back out to it (Material's shared axis X); calm motion cross-fades.
     val calm = LocalCalmMotion.current
     AnimatedContent(
         targetState = page,
-        transitionSpec = { TkMotion.sharedAxisX(forward = targetState != Page.ROOT, calm = calm) },
+        transitionSpec = { TkMotion.sharedAxisX(forward = targetState.depth > initialState.depth, calm = calm) },
         label = "settings page"
     ) { shown -> when (shown) {
         Page.ROOT -> Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
@@ -94,6 +107,10 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                 SettingRow("Accessibility", icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Mint, divider = false) { page = Page.ACCESSIBILITY }
             }
             GlassGroup("Privacy & safety") {
+                // WS-C: the user's say over what Tɛkyerɛma does, which AI it uses, what it spends and keeps.
+                SettingRow("Control", value = remember(version) { controlSummary() },
+                    icon = Icons.Outlined.Tune, iconTint = Spectrum.Violet,
+                    description = "How much it does on its own, which AI it uses, limits, and your data.") { page = Page.CONTROL }
                 SettingRow("Permissions", value = permissionsSummary(context),
                     icon = Icons.Outlined.VerifiedUser, iconTint = Spectrum.Gold) { page = Page.PERMISSIONS }
                 SettingRow("Privacy", icon = Icons.Outlined.Lock, iconTint = Spectrum.Azure, divider = false) { page = Page.PRIVACY }
@@ -110,7 +127,24 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.HELP -> HelpPage { page = Page.ROOT }
         Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
         Page.APPEARANCE -> AppearancePage(settings) { page = Page.ROOT }
+        Page.CONTROL -> ControlPage(settings, onBack = { page = Page.ROOT }) { page = it }
+        Page.PROVIDERS -> ProvidersPage(settings) { page = Page.CONTROL }
+        Page.KEYS -> KeysPage(settings) { page = Page.CONTROL }
+        Page.USAGE -> UsagePage(settings) { page = Page.CONTROL }
+        Page.DATA -> DataPage(settings, onBack = { page = Page.CONTROL }) { page = Page.AUDIT }
+        Page.AUDIT -> AuditPage { page = Page.CONTROL }
     } }
+}
+
+/** "Normal · cloud on" — the Control row's value. */
+private fun controlSummary(): String {
+    val op = com.tekyerema.operator.OperatorPolicy
+    val mode = when (op.executionMode) {
+        com.tekyerema.operator.ExecutionMode.STANDARD -> "Normal"
+        com.tekyerema.operator.ExecutionMode.ASK_EVERY_STEP -> "Ask every step"
+        com.tekyerema.operator.ExecutionMode.GUIDE_ONLY -> "Guide only"
+    }
+    return mode + if (op.cloudAllowed) "" else " · offline"
 }
 
 private fun languageLabel(mode: String) = when (mode) {
@@ -286,7 +320,6 @@ private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
     val reduce = remember(version) { settings.reduceMotion }
     val floating = remember(version) { settings.floatingTrigger }
     val wake = remember(version) { settings.wakeWordEnabled }
-    val gemini = remember(version) { settings.allowGeminiBackup }
     val context = LocalContext.current
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageTitle("Accessibility", onBack)
@@ -297,8 +330,8 @@ private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
         SwitchRow("Floating Talk button", "A button over other apps that starts Tɛkyerɛma. Needs screen control.", floating) { settings.floatingTrigger = it }
         // A-07: the hands-free wake word, switchable by the user (it was only reachable over ADB).
         SwitchRow("“Hey Tɛkyerɛma”", "Listen for the wake phrase so you can talk without touching the phone.", wake) { settings.wakeWordEnabled = it }
-        // J-18: keep requests off a provider whose free tier may use them to improve its products.
-        SwitchRow("Backup AI (Google Gemini)", "Used only when the main AI is busy. Google may use these requests to improve its products.", gemini) { settings.allowGeminiBackup = it }
+        // J-18: the Gemini backup switch moved to Settings › Control › AI provider and model (WS-C), with each provider's
+        // data statement next to it.
         // N-11: Samsung puts unused apps to sleep, which silently stops the wake word and background tasks.
         SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off", divider = false) { Perms.requestBatteryUnrestricted(context) }
         }

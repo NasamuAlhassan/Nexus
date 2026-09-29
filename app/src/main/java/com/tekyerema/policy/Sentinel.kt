@@ -35,6 +35,8 @@ object Sentinel {
 
     suspend fun check(texts: List<String>, settings: Settings): Verdict? {
         if (!FeatureFlags.isEnabled("J-19", false)) return null
+        // WS-C: the guard runs on Groq — not while the user has the cloud off or Groq out of their provider list.
+        if (!com.tekyerema.operator.OperatorPolicy.providerAllowed("groq")) return null
         val keys = settings.groqApiKeys
         val body = texts.joinToString("\n").take(2000)
         if (keys.isEmpty() || body.isBlank()) return null

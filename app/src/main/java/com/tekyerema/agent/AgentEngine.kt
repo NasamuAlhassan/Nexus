@@ -554,6 +554,7 @@ object AgentEngine {
         val effects = com.tekyerema.agent.journal.EffectGate(effectsTaskId, { com.tekyerema.agent.journal.JournalBoot.world })
         val resumedFrom = taskRun?.resumedFrom
         var resumeLookPending = resumedFrom != null   // the first look after "carry on" says whether the phone is where it was
+        com.tekyerema.audit.AuditHooks.taskStarted(source, runCtx.auditTask, goal, brainLabel)   // WS-C structured audit
         val discoveredTools = LinkedHashSet<String>()
         val history = ArrayList<String>()
         var stats = RunStats()
@@ -655,9 +656,10 @@ object AgentEngine {
                 log(LogEntry.Kind.RESULT, e.line); pushConvo("Tɛkyerɛma: ${e.line}")
                 finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats); return
             }
-            // G-15; B: never more than the operator's per-task step budget (OperatorPolicy.maxStepsPerTask).
-            val maxSteps = minOf(com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60),
-                com.tekyerema.operator.OperatorPolicy.maxStepsPerTask.coerceIn(1, 60))
+            // G-15; WS-C: the user's "steps per task" (Settings › Control) replaces the configured limit once they pick one
+            // (merge: C's stepLimit replaces B's smaller-of — OperatorPolicy owns the per-task budget).
+            val maxSteps = com.tekyerema.operator.OperatorPolicy.stepLimit(
+                com.tekyerema.core.config.AppConfig.int("agent.limits.maxSteps", MAX_STEPS).coerceIn(5, 60))
             // WS-A: a resumed task counts on from its checkpoint, with at least `agent.resume.minSteps` more steps.
             val firstStep = (resumedFrom?.step ?: 0) + 1
             val lastStep = if (resumedFrom == null) maxSteps
@@ -835,6 +837,9 @@ object AgentEngine {
 
                 when (decision) {
                     is AgentDecision.Done -> {
+                        // WS-C: after a Guide-only block the reply leads with "I haven't changed anything myself" (OperatorStops).
+                        @Suppress("NAME_SHADOWING")
+                        val decision = decision.copy(summary = com.tekyerema.operator.OperatorStops.doneSummary(runCtx.auditTask, decision.summary))
                         // B: completion gate — every plan subgoal must be done (checks re-run on this screen first) or
                         // skipped with a reason; otherwise the model is told exactly what's missing (agent/plan/TaskPlan).
                         val planGate = if (decision.summary.trim().endsWith("?")) com.tekyerema.agent.plan.PlanTracker.Gate.Accept
@@ -1037,6 +1042,8 @@ object AgentEngine {
                         if (!com.tekyerema.tools.ToolManifest.mayCall(tool, caller)) {
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "Blocked: ${decision.name} is not allowed in an unattended task")
+                            com.tekyerema.audit.AuditHooks.refused(source, runCtx.auditTask, step, tool, decision.args, decision.rationale,
+                                "a task that started by itself may only read and tell")   // WS-C
                             history.add("${decision.name} → BLOCKED: this task started without the user; it may only read and tell, never act for them.")
                             continue
                         }
@@ -1131,19 +1138,26 @@ object AgentEngine {
                         // floors and the payload injection check — one pure function the injection suite tests (StepGate).
                         val gate = com.tekyerema.policy.StepGate.assess(tool, decision.args, goal, before, untrustedRead,
                             resolved?.element, origin) { u ->
-                            policy.evaluate(tool, decision.args, hasUntrustedParams = u, targetTier = cls.tier, hardBlock = cls.block)
+                            // WS-C: the target's label/reason and the app in front let a switched-off capability cover the GUI route too.
+                            policy.evaluate(tool, decision.args, hasUntrustedParams = u, targetTier = cls.tier, hardBlock = cls.block,
+                                context = PolicyEngine.ActionContext(resolved?.element?.label ?: requestedLabel, cls.reason, before.appPackage))
                         }
                         val tags = gate.tags
                         val untrusted = gate.untrusted
                         if (untrusted) log(LogEntry.Kind.POLICY, "provenance: ${Provenance.describe(tags)}")
                         if (cls.tier != null) log(LogEntry.Kind.POLICY, "target semantics: ${cls.reason} → ${cls.tier}")
                         var pd = gate.decision   // (WS-A: the effect ledger below may still raise it to CONFIRM)
+                        // WS-C structured audit: the proposal with its policy verdict, provenance and deciding model (null for reads).
+                        // (merge: recorded here, before the effect ledger may raise it to CONFIRM; the approve/decline entries follow.)
+                        val stepAudit = com.tekyerema.audit.AuditHooks.proposed(source, runCtx.auditTask, step, tool, decision.args, pd,
+                            Provenance.describe(tags), decision.rationale, resolved?.element?.label ?: requestedLabel)
                         // J-11: nothing is operated OR READ inside a denied app (read_state / read_all return screen text,
                         // which would reach the cloud model); a guide-only app is read and explained, never acted on.
                         val appRule = com.tekyerema.policy.ScreenPrivacy.appRule(decision.name, tool.grounded, mutating,
                             before.appPackage, denyApps, guideOnlyApps)
                         if (appRule != null) {
                             stats = stats.copy(blocked = stats.blocked + 1)
+                            stepAudit?.blocked(appRule)   // WS-C
                             log(LogEntry.Kind.POLICY, "Blocked: $appRule")
                             history.add("${decision.name}(${shortArgs(decision.args)}) → BLOCKED: $appRule.")
                             if (mutating) { mutatingCount++; lastMutatingVerified = false }
@@ -1159,6 +1173,7 @@ object AgentEngine {
                         if (com.tekyerema.policy.StepGate.injectionStop(gate, sentinelBad, injectionSource)) {
                             val src = if (payloadInjection != null) "the text I was about to use" else injectionSource!!
                             stats = stats.copy(blocked = stats.blocked + 1)
+                            stepAudit?.blocked("injection stop: $src contained instructions")   // WS-C
                             log(LogEntry.Kind.POLICY, "INJECTION_STOP: ${decision.name} with a payload from untrusted content that contained instructions (${payloadInjection ?: injectionSource})")
                             log(LogEntry.Kind.RESULT, "I stopped: $src contained instructions trying to direct me, so I didn't act on it. Nothing was sent.")
                             pushConvo("Tɛkyerɛma: I stopped because $src tried to give me instructions.")
@@ -1176,6 +1191,7 @@ object AgentEngine {
                         if (effectSpec != null) when (val v = effects.check(effectSpec, before)) {
                             is com.tekyerema.agent.journal.EffectGate.Verdict.Refuse -> {
                                 log(LogEntry.Kind.POLICY, "Effect ledger: ${decision.name} ${v.log}")
+                                stepAudit?.blocked("effect ledger: ${v.log}")   // WS-C (merge: on A's duplicate refusal)
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → ${v.note}")
                                 continue
                             }
@@ -1196,11 +1212,15 @@ object AgentEngine {
                             PolicyOutcome.BLOCK -> {
                                 stats = stats.copy(blocked = stats.blocked + 1)
                                 log(LogEntry.Kind.POLICY, "Blocked: ${pd.reason}")
-                                if (mutating) com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.BLOCKED,
-                                    com.tekyerema.audit.ActionWords.describe(decision.name, decision.args, resolved?.element?.label), runCtx.auditTask)
+                                stepAudit?.blocked(pd.reason)   // J-12 / WS-C: with the policy reason (pd may have been raised after the proposal)
+                                // WS-C: a capability the user switched off ends the task with their reason (spoken as is);
+                                // Guide only lets the model explain first (operator/OperatorStops).
+                                com.tekyerema.operator.OperatorStops.afterBlock(runCtx.auditTask, pd.operatorRule)?.let { line ->
+                                    log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.CANNOT_DO, stats); return }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → BLOCKED by policy: ${pd.reason}. Do not retry it; if the goal needs it, call cannot_do.")
                                 // A blocked substantive action did not happen: a Done right after must not read as verified.
-                                if (mutating) { mutatingCount++; lastMutatingVerified = false }
+                                // (WS-C: not when the user's own mode blocked it — a guide-only explanation is a complete answer.)
+                                if (mutating && pd.operatorRule == null) { mutatingCount++; lastMutatingVerified = false }
                                 continue
                             }
                             PolicyOutcome.CONFIRM -> {
@@ -1211,6 +1231,7 @@ object AgentEngine {
                                 // navigation, so don't re-ask at every USSD menu step (it would time out). The PIN is
                                 // still hard-blocked by TargetSemantics, and the brain is told to stop at the PIN.
                                 log(LogEntry.Kind.POLICY, "Mobile Money already approved — continuing this menu step without asking again.")
+                                stepAudit?.approved(null, "covered by the Mobile Money approval")   // WS-C
                               } else {
                                 // §safety (2026-09-27 audit): momo_send takes the SAME single structural read-back as every
                                 // other consequential action — it is NOT bypassed. The brain gathers number + amount + reference,
@@ -1230,6 +1251,7 @@ object AgentEngine {
                                 val fresh = try { controller?.buildSnapshot() } catch (_: Throwable) { null }
                                 if (fresh?.appPackage != null && before.appPackage != null && fresh.appPackage != before.appPackage) {
                                     stats = stats.copy(staleRefusals = stats.staleRefusals + 1)
+                                    stepAudit?.notRun("the screen changed before it could be confirmed")   // WS-C
                                     log(LogEntry.Kind.POLICY, "screen changed before confirmation (was ${before.appPackage}, now ${fresh.appPackage}) — re-observing, not asking")
                                     history.add("${decision.name}(${shortArgs(decision.args)}) → not attempted: the screen changed " +
                                         "(now ${fresh.appName ?: fresh.appPackage}) before it could be confirmed — re-observe and decide again.")
@@ -1254,6 +1276,7 @@ object AgentEngine {
                                 // the chat on screen first; the gate itself is unchanged.
                                 if (semantic == com.tekyerema.policy.ActionSemantics.BARE_SEND) {
                                     stats = stats.copy(blocked = stats.blocked + 1)
+                                    stepAudit?.notRun("neither the recipient nor the message was readable, so it wasn't asked")   // WS-C
                                     log(LogEntry.Kind.POLICY, "send not asked: neither the recipient nor the message is readable on screen")
                                     history.add("${decision.name}(${shortArgs(decision.args)}) → not attempted: I can't read who this " +
                                         "message goes to or what it says, so the user couldn't check it. Get the chat with the typed " +
@@ -1304,11 +1327,12 @@ object AgentEngine {
                                 when (reply) {
                                     is ConfirmReply.Decline -> {
                                         log(LogEntry.Kind.POLICY, "Declined by user.")
-                                        com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)   // J-12 planned
+                                        // J-12 planned; WS-C: with the confirmation number the user answered.
+                                        stepAudit?.declined(seq, prompt) ?: com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)
                                         finish(AgentStatus.STOPPED, stats); return
                                     }
                                     is ConfirmReply.Revise -> {
-                                        com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)
+                                        stepAudit?.declined(seq, prompt, revised = true) ?: com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)
                                         // §8/§9/§13/§14 — the user answered with an instruction, not yes/no. Don't run the
                                         // pending action; re-plan. The brain sees this note + the proposal (in conversation
                                         // memory) and adjusts recipient/app/message/number, or cancels, then proposes again
@@ -1328,6 +1352,7 @@ object AgentEngine {
                                     }
                                     is ConfirmReply.Approve -> {
                                         log(LogEntry.Kind.POLICY, "Confirmed by user.")
+                                        stepAudit?.approved(seq, prompt)   // WS-C: the approval, with its confirmation number
                                         // The first approval of a Mobile-Money / dialer action unlocks the rest of the
                                         // USSD menu navigation for this run (guided navigation) — never the PIN.
                                         if (decision.name == "mobile_money" || isDialerNavigation(before)) {
@@ -1344,11 +1369,13 @@ object AgentEngine {
                                             val fresh = Perception.observe(controller, false)
                                             if (TargetSemantics.isCredentialScreen(fresh)) {
                                                 log(LogEntry.Kind.POLICY, "A credential screen appeared during confirmation — not acting.")
+                                                stepAudit?.notRun("a PIN or password screen appeared while you confirmed")   // WS-C
                                                 history.add("${decision.name}(${shortArgs(decision.args)}) → not executed; a credential screen appeared while you confirmed.")
                                                 continue
                                             }
                                             if (fresh.appPackage != before.appPackage) {
                                                 log(LogEntry.Kind.ACTION, "${decision.name} → refused: screen changed during confirmation (was '${before.appPackage}', now '${fresh.appPackage}').")
+                                                stepAudit?.notRun("the screen changed while you confirmed")   // WS-C
                                                 history.add("${decision.name}(${shortArgs(decision.args)}) → refused; the screen changed while you were confirming — re-observe and retry.")
                                                 continue
                                             }
@@ -1359,6 +1386,7 @@ object AgentEngine {
                                                 is ResolveOutcome.Found -> { resolved = rr.target; before = fresh }
                                                 else -> {
                                                     log(LogEntry.Kind.ACTION, "${decision.name} → refused: the target moved or disappeared during confirmation.")
+                                                    stepAudit?.notRun("the target moved while you confirmed")   // WS-C
                                                     history.add("${decision.name}(${shortArgs(decision.args)}) → refused; the target moved after you confirmed — re-observe and retry.")
                                                     continue
                                                 }
@@ -1375,6 +1403,7 @@ object AgentEngine {
                         if (tool.grounded && before.appPackage == ctxApp.packageName) {
                             val msg = "That screen is Tɛkyerɛma's own UI, not a target app — open the app you need first."
                             log(LogEntry.Kind.ACTION, "${decision.name} → refused: $msg")
+                            stepAudit?.notRun("that was Tɛkyerɛma's own screen")   // WS-C
                             history.add("${decision.name}(${shortArgs(decision.args)}) → refused; $msg")
                             if (mutating) { mutatingCount++; lastMutatingVerified = false }
                             continue
@@ -1389,6 +1418,7 @@ object AgentEngine {
                                 stats = stats.copy(staleRefusals = stats.staleRefusals + 1)
                                 val msg = "Screen changed (was '${before.appPackage}', now '$livePkg') before this action executed — re-observe and retry."
                                 log(LogEntry.Kind.ACTION, "${decision.name} → refused: $msg")
+                                stepAudit?.notRun("the screen changed before it ran")   // WS-C
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → refused (stale); $msg")
                                 if (mutating) { mutatingCount++; lastMutatingVerified = false }
                                 continue
@@ -1401,6 +1431,7 @@ object AgentEngine {
                                 if (pd.outcome == PolicyOutcome.CONFIRM || point.how == "vision" || point.nodeId == null) {
                                     stats = stats.copy(blocked = stats.blocked + 1)
                                     log(LogEntry.Kind.POLICY, "Blocked: an overlay from $overlay covers the target")
+                                    stepAudit?.notRun("another app's window covered the target")   // WS-C
                                     history.add("${decision.name}(${shortArgs(decision.args)}) → refused: another app ($overlay) is drawing over that " +
                                         "spot, so the tap could land on it instead. Ask the user to close that floating window, or call cannot_do.")
                                     if (mutating) { mutatingCount++; lastMutatingVerified = false }
@@ -1451,10 +1482,8 @@ object AgentEngine {
                         if (result.needsDisambiguation) References.noteOptions(References.optionsFrom(result.message))
                         stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, result.channel))
                         log(LogEntry.Kind.ACTION, "${decision.name} → ${if (result.success) "ok" else "failed"} [${result.channel}]: ${result.message}")
-                        // J-12: every device action in plain words; J-13: what can't be taken back is named for "undo".
-                        if (mutating) com.tekyerema.audit.AuditLog.record(source,
-                            if (result.success) com.tekyerema.audit.AuditLog.DONE else com.tekyerema.audit.AuditLog.FAILED,
-                            com.tekyerema.audit.ActionWords.describe(decision.name, decision.args, resolved?.element?.label), runCtx.auditTask)
+                        // J-12: every device action in plain words (WS-C: linked to its proposal); J-13: what can't be taken back is named for "undo".
+                        stepAudit?.executed(result.success)
                         if ((consequential || effect != null) && result.success) runCtx.irreversible.add(com.tekyerema.audit.ActionWords.noun(decision.name, decision.args))
                         // Phase II P0: remember durable entities the goal named so they survive step-to-step.
                         if (result.success) when (decision.name) {
@@ -1499,6 +1528,7 @@ object AgentEngine {
                         // WS-A: the ledger row settles — CONFIRMED when verified; otherwise the chat on screen may still tell
                         // (message still in the box = not sent), else UNKNOWN: reconciled before any retry, never retried blind.
                         effect?.let { effects.settled(it, vr.verified, vr.detail, afterSnap) }
+                        if (mutating) stepAudit?.verified(vr.verified, vr.detail)   // WS-C: the verification verdict
                         runCtx.trajectory?.step(before.toCompactJson(), decision.name, decision.args, result.message, vr.verified)   // Q-07 (opt-in)
                         if (tool.scope != com.tekyerema.policy.CapabilityScope.PERCEIVE) {
                             stats = if (vr.verified) stats.copy(verifiedTrue = stats.verifiedTrue + 1) else stats.copy(verifiedFalse = stats.verifiedFalse + 1)
@@ -1692,6 +1722,7 @@ object AgentEngine {
             log(LogEntry.Kind.STATS, stats.summary())
             runCtx.journal?.finish(com.tekyerema.agent.journal.TaskState.CANCELLED)   // WS-A: stopped by the user — not resumable
             if (activeRun === runCtx) { activeRun = null; com.tekyerema.core.telemetry.Telemetry.endTurn("stopped", byVoice = false) }
+            com.tekyerema.audit.AuditHooks.taskEnded(runCtx.source, runCtx.auditTask, AgentStatus.STOPPED.name)   // WS-C
             setStatus(AgentStatus.STOPPED)
             throw ce
         } catch (t: Throwable) {
@@ -1987,6 +2018,7 @@ object AgentEngine {
             else -> com.tekyerema.agent.journal.TaskState.FAILED
         })
         val tier = r?.let { tierOf(it) }
+        if (r != null) com.tekyerema.audit.AuditHooks.taskEnded(r.source, r.auditTask, status.name)   // WS-C structured audit
         // C-15: a typed result for this run (history, traces, triggers and the run report read it).
         val result = org.json.JSONObject()
             .put("status", status.name)
