@@ -404,6 +404,14 @@ class OpenAiCompatBrain(
          *  skipped by selection until then, so the pacer glides under the per-minute token cap. */
         private val coolUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
+        /**
+         * Phone care ("check my phone", A20e 2026-09-29: the judge's session ran on the backup model with nobody told why):
+         * ms until the first of [keys] may call [model] again — 0 when one is free now. Over ~90 s means the daily
+         * allowance. A read of the in-memory map only: no network call, and no key leaves this class.
+         */
+        fun coolingLeftMs(model: String, keys: List<String>, now: Long = System.currentTimeMillis()): Long =
+            if (keys.isEmpty()) 0L else (keys.minOf { coolUntil["$model|$it"] ?: 0L } - now).coerceAtLeast(0L)
+
         /** Tokens one full step costs (~prompt + completion). A key with fewer remaining is cooled so the
          *  next step doesn't fire a request that would 429. Sized to the ACTUAL step cost after the prompt
          *  trim (~4.4k typical); the old 6000 padded ~1.5k over reality and cooled each key ~18s instead of

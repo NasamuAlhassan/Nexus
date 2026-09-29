@@ -201,6 +201,8 @@ class LocalFastRouter(
         is FastIntent.AppInstalled -> io { appInstalled(intent) }
         is FastIntent.SaverQuery -> saverQuery(intent)
         is FastIntent.SaveHelp -> saveHelp(intent)
+        // Phone care (com.tekyerema.phonecare): the self-test, alert switches and "read it" — no model.
+        FastIntent.CheckPhone, FastIntent.ReadAlert, is FastIntent.AlertSwitch -> com.tekyerema.phonecare.PhoneCareIntents.execute(appContext, intent)
     }
 
     private suspend fun <T> io(block: () -> T): T = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { block() }

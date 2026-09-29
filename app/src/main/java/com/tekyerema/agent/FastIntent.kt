@@ -142,6 +142,15 @@ sealed class FastIntent(val name: String) {
     data class SaverQuery(val kind: String) : FastIntent("SAVER_QUERY")
     /** "help me save data", "my battery is dying" — the state plus what to say next. [kind] "battery" | "data". */
     data class SaveHelp(val kind: String) : FastIntent("SAVE_HELP")
+    // ---- Phone care (com.tekyerema.phonecare; A20e 2026-09-29: a Private DNS stall, an unbound accessibility service and a
+    // spent AI quota were never explained to the user)
+    /** "check my phone" — the spoken self-test ([com.tekyerema.phonecare.PhoneCheck]). */
+    object CheckPhone : FastIntent("CHECK_PHONE")
+    /** "tell me when I receive money" / "stop telling me about missed calls" — [kind] "money" | "missed_call" | "battery" |
+     *  "balance" | "private". */
+    data class AlertSwitch(val kind: String, val on: Boolean) : FastIntent("ALERT_SWITCH")
+    /** "read it" (just after a private alert) / "read my alerts". */
+    object ReadAlert : FastIntent("READ_ALERT")
 }
 
 /**
@@ -170,6 +179,9 @@ object FastIntentClassifier {
             if (Routines.isList(g)) return FastIntent.ListRoutines
             Routines.parseDelete(g)?.let { return FastIntent.DeleteRoutine(it) }
         }
+        // Phone care: before the older rules — "tell me about missed calls" is a switch, not the call history; "stop telling
+        // me about money" is not a person called Money; a bare "read it" only right after a private alert (else: the screen).
+        com.tekyerema.phonecare.PhoneCareIntents.classify(g, com.tekyerema.phonecare.PhoneAlerts.readItPending())?.let { return it }
         overnight(g, raw)?.let { return it }
         // W7, before the compound check: a schedule's goal may itself be compound (the trigger re-checks what may run).
         scheduleIntent(g, raw)?.let { return it }

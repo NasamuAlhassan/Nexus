@@ -161,7 +161,8 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
         GlassGroup("Runs by itself") {
             SwitchRow("Schedules", "Reminders and read-outs at times you set.", schedules,
                 icon = Icons.Outlined.Schedule, iconTint = Spectrum.Gold) { op.schedulesEnabled = it }
-            SwitchRow("Message alerts", "Tells you when someone you chose sends a message.", alerts,
+            // Phone care: this switch also silences the money and missed-call alerts (phonecare/PhoneAlerts).
+            SwitchRow("Message alerts", "Tells you when someone you chose sends a message, and your money and missed-call alerts.", alerts,
                 icon = Icons.Outlined.NotificationsActive, iconTint = Spectrum.Rose) { op.messageAlertsEnabled = it }
             SwitchRow("Routines", "Your own phrases, like “good morning”, that run several steps.", routines,
                 icon = Icons.Outlined.Repeat, iconTint = Spectrum.Violet) { op.routinesEnabled = it }
