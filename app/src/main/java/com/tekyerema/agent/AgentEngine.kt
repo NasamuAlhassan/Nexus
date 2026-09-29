@@ -423,10 +423,26 @@ object AgentEngine {
             RouterTiers.enabled(RouterTiers.DIRECT) && DirectAnswer.isKnowledgeQuestion(goal)
         if (direct) log(LogEntry.Kind.INFO, "Direct question — answering without observing the screen (T1).")
         // C-05: a direct question that needs fresh facts starts from the web, not the model's memory (T2).
-        val retrievalHint = if (direct && RouterTiers.enabled(RouterTiers.RETRIEVAL) &&
+        val retrievalNeed = if (direct && RouterTiers.enabled(RouterTiers.RETRIEVAL) &&
             com.tekyerema.core.config.FeatureFlags.isEnabled("C-05", true))
             RetrievalNeed.classify(goal).also { if (it != RetrievalNeed.Need.NONE) log(LogEntry.Kind.INFO, "retrieval need: $it") }
-                .let { RetrievalNeed.hint(it) } else null
+            else RetrievalNeed.Need.NONE
+        val retrievalHint = RetrievalNeed.hint(retrievalNeed)
+        // Decisions the engine already knows, taken before asking the brain again (I-03 web-first; G-11 queued sub-steps).
+        // Each one still goes through the whole pipeline below — policy gate, confirmation, execution, verification.
+        val planned = ArrayDeque<AgentDecision>()
+        // G-11: the steps of a tap_sequence still to run, and how the chain is going (ActionChain).
+        val chain = ArrayDeque<AgentDecision.CallTool>()
+        var chainTotal = 0
+        var chainDone = 0
+        var chainPrevOk = true
+        var chainTypeWaits = 0
+        // I-03: a self-contained one-fact question goes straight to web_search; its answer is what the user hears.
+        val webFirst = forcedBrain == null && online && WebFirst.enabled() && WebFirst.eligible(goal, retrievalNeed)
+        if (webFirst) {
+            log(LogEntry.Kind.INFO, "web-first: one fresh fact — searching directly, no planning call")
+            planned.add(AgentDecision.CallTool("web_search", JSONObject().put("query", WebFirst.query(goal)), "local:web-first"))
+        }
         if (forcedBrain == null && !direct) ensureOffOwnUi(ctxApp)
 
         // D-02: the tool schema is chosen per step (core primitives + needed groups + used + discovered).
@@ -510,6 +526,11 @@ object AgentEngine {
                     } else history.add("The user added while you were working: \"$extra\". Adjust the task to it (a changed recipient, " +
                         "amount or message will be confirmed again); if they want to stop, call cannot_do.")
                     pushConvo("User: $extra")
+                    // G-11: what the user just said may change the plan — the rest of a tap_sequence is not run blind.
+                    if (chain.isNotEmpty()) {
+                        history.add(ActionChain.stoppedNote(chainDone, chainTotal, chain.toList(), "the user added something"))
+                        chain.clear()
+                    }
                 }
                 // I-01: a direct question stays screen-free while the model only searches the web (seen on the A20e: the
                 // step after a web_search read and uploaded the screen for nothing). Asking to read the screen, or
@@ -535,13 +556,20 @@ object AgentEngine {
                 // credential screen before any capture (observeForVerify), and the boundary below re-checks the result.
                 if (!directStep && !before.perception.usedVision && Progress.stillLoading(appSwitched, before.actionableCount)) {
                     val t = SystemClock.uptimeMillis()
+                    val from = before.actionableCount
                     controller?.waitForSettle(com.tekyerema.core.config.AppConfig.long("executor.launch.settleMs", 1200L))
-                    val again = observeForVerify(controller, false)
-                    if (again.actionableCount > before.actionableCount) {
-                        log(LogEntry.Kind.INFO, "the new screen was still loading — waited ${SystemClock.uptimeMillis() - t} ms " +
-                            "(${before.actionableCount} → ${again.actionableCount} actionable elements)")
-                        before = again
+                    // G-10: then keep polling while it is still empty or still filling in (Progress.keepWaitingForLaunch).
+                    while (true) {
+                        val again = observeForVerify(controller, false)
+                        val grew = again.actionableCount > before.actionableCount
+                        if (grew) before = again
+                        if (TargetSemantics.isCredentialScreen(again)) { before = again; break }   // the boundary below takes it from here
+                        if (!Progress.keepWaitingForLaunch(SystemClock.uptimeMillis() - t, again.actionableCount, grew)) break
+                        kotlinx.coroutines.delay(com.tekyerema.core.config.AppConfig.long("executor.launch.pollMs", 400L))
                     }
+                    if (before.actionableCount > from)
+                        log(LogEntry.Kind.INFO, "the new screen was still loading — waited ${SystemClock.uptimeMillis() - t} ms " +
+                            "($from → ${before.actionableCount} actionable elements)")
                 }
                 appSwitched = false
                 // ===== SECURE INPUT BOUNDARY (MoMo PIN / password / OTP) =====
@@ -554,6 +582,7 @@ object AgentEngine {
                 // G-13: a "prove you're human" check is the user's to solve too — the agent never solves CAPTCHAs.
                 if (TargetSemantics.isCredentialScreen(before) || TargetSemantics.isHumanCheckScreen(before)) {
                     val reason = TargetSemantics.handoffReason(before, isDialerNavigation(before))
+                    chain.clear()   // G-11: nothing queued before the secret was entered runs after it
                     // Deliberately log a SAFE label only — never the screen text.
                     log(LogEntry.Kind.POLICY, "SENSITIVE_INPUT_DETECTED ($reason) — Secure Input Mode: pausing observation, brain and logging until you finish.")
                     val resumed = awaitSecureInput(reason)
@@ -592,10 +621,37 @@ object AgentEngine {
                     failStreak >= 2 -> com.tekyerema.core.config.AppConfig.string("llm.reasoning.struggling", "high")
                     else -> com.tekyerema.core.config.AppConfig.string("llm.reasoning.default", "")
                 }.ifBlank { null }
-                val openAiTools = registry.openAiTools(toolNames)
-                val geminiTools = registry.functionDeclarations(toolNames)
+                // N-03: in ToolSelector's cache-stable order (task base set first, tools loaded later appended at the end).
+                val openAiTools = ToolSelector.inOrder(registry.openAiTools(toolNames), toolNames) { it.optJSONObject("function")?.optString("name") }
+                val geminiTools = ToolSelector.inOrder(registry.functionDeclarations(toolNames), toolNames) { it.optString("name") }
+                // G-11: the next step of a tap_sequence, taken without a planning call — only while every earlier step of it
+                // ran and did something. It goes through the whole pipeline below like any other decision.
+                var chainStep: AgentDecision.CallTool? = null
+                if (chain.isNotEmpty() && planned.isEmpty()) {
+                    if (!chainPrevOk) {
+                        log(LogEntry.Kind.INFO, "tap_sequence stopped after step $chainDone of $chainTotal")
+                        history.add(ActionChain.stoppedNote(chainDone, chainTotal, chain.toList(), "that step was refused, failed or changed nothing"))
+                        chain.clear()
+                    } else {
+                        val next = chain.first()
+                        if (next.name == "type" && !next.args.has("element_id")) {
+                            val field = ActionChain.typeTarget(before)
+                            if (field != null) next.args.put("element_id", field)
+                            else if (chainTypeWaits++ < 3) {
+                                // The field the last tap opens may still be appearing: look again from the top of the loop
+                                // (through the Secure Input boundary), not here.
+                                kotlinx.coroutines.delay(com.tekyerema.core.config.AppConfig.long("executor.launch.pollMs", 400L))
+                                continue
+                            } else {
+                                history.add(ActionChain.stoppedNote(chainDone, chainTotal, chain.toList(), "no single text field was open to type into"))
+                                chain.clear()
+                            }
+                        }
+                        if (chain.isNotEmpty()) { chainStep = chain.removeFirst(); chainPrevOk = false; chainDone++ }
+                    }
+                }
                 val t0 = SystemClock.uptimeMillis()
-                val decision = brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo,
+                val decision = planned.removeFirstOrNull() ?: chainStep ?: brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo,
                     progress = (retrievalHint?.let { "$it\n" } ?: "") + taskMemory.render(), effort = effort, simple = directStep))
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
                 com.tekyerema.core.telemetry.Telemetry.mark("first_decision")   // Q-01 (only the first is kept)
@@ -714,6 +770,26 @@ object AgentEngine {
                             log(LogEntry.Kind.ACTION, "find_tool(\"$q\") → ${hits.joinToString { it.name }.ifEmpty { "nothing new" }}")
                             history.add("find_tool(\"$q\") → " + if (hits.isEmpty()) "no other tool matches; use the screen primitives or cannot_do."
                                 else "now available: " + hits.joinToString("; ") { it.name + " — " + it.description.take(90) })
+                            continue
+                        }
+                        // G-11: a tap_sequence becomes ordinary tap/type steps, each run through the full pipeline in the
+                        // following iterations (fresh observation + Secure Input boundary first) without a planning call.
+                        if (decision.name == TapSequenceTool.name) {
+                            usedTools += decision.name
+                            val x = if (ActionChain.enabled()) ActionChain.expand(decision.args, decision.expects)
+                                else ActionChain.Expansion.Rejected("tap_sequence is switched off — tap one item at a time")
+                            when (x) {
+                                is ActionChain.Expansion.Rejected -> {
+                                    log(LogEntry.Kind.ACTION, "tap_sequence → rejected: ${x.why}")
+                                    history.add("tap_sequence(${shortArgs(decision.args)}) → rejected: ${x.why}")
+                                }
+                                is ActionChain.Expansion.Steps -> {
+                                    chain.clear(); chain.addAll(x.steps)
+                                    chainTotal = x.steps.size; chainDone = 0; chainPrevOk = true; chainTypeWaits = 0
+                                    log(LogEntry.Kind.PLAN, "Step $step: tap_sequence → ${x.steps.size} steps, each checked: " +
+                                        x.steps.joinToString(" → ") { it.name + "(" + shortArgs(it.args) + ")" })
+                                }
+                            }
                             continue
                         }
                         usedTools += decision.name
@@ -1349,6 +1425,13 @@ object AgentEngine {
                                 (if (untrustedOut) "$UNTRUSTED_MARK " else "") + "${result.message.take(resultLimit(decision.name))}${recovery}" +
                                 (if (entities.isEmpty()) "" else " [${com.tekyerema.core.TextEntities.summary(entities)}]")
                         )
+                        // I-03 web-first: the search's own short answer IS the reply — no second planning call to restate it.
+                        // A failed search leaves the queue empty, so the planner takes over with the failure in its history.
+                        if (webFirst && decision.name == "web_search" && result.success)
+                            WebFirst.spoken(result.data?.optString("answer"))?.let { planned.add(AgentDecision.Done(it)) }
+                        // G-11: the chain goes on only if this step ran and did something (verified, or changed the screen).
+                        if (decision.rationale?.startsWith(ActionChain.TAG) == true)
+                            chainPrevOk = ActionChain.stepPassed(result.success, vr.verified, afterSig != null && afterSig != before.signature())
                     }
                 }
             }

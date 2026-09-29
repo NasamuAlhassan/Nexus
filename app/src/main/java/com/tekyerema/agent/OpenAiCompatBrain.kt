@@ -13,6 +13,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
+/** One HTTP reply: status code, body text, headers. */
+internal typealias Reply = Triple<Int, String, okhttp3.Headers>
+
 /**
  * Product planner over any OpenAI-compatible Chat Completions endpoint (Groq by default; also
  * OpenRouter / Together / a local Ollama server). Same seam a future on-device model plugs into.
@@ -40,8 +43,10 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         // per-model daily/minute quota for GUI tasks.
         if (ctx.simple && fast in models && com.tekyerema.core.config.FeatureFlags.isEnabled("C-08", true))
             models = listOf(fast) + (models - fast)
-        // N-10: on a weak connection the smaller model answers sooner (less to generate over a slow link).
-        else if (fast in models && com.tekyerema.core.config.FeatureFlags.isEnabled("N-10", true) &&
+        // N-10: on a weak connection the smaller model answers sooner (less to generate over a slow link) — but not for a
+        // step the engine raised to "high" effort because the task is failing: that is exactly when the deeper model
+        // earns its extra second (cascade: escalate on a failed verification, not by default — arXiv 2603.04445).
+        else if (fast in models && ctx.effort != "high" && com.tekyerema.core.config.FeatureFlags.isEnabled("N-10", true) &&
             AppConfig.bool("router.network.fastModelWhenWeak", true) && com.tekyerema.core.NetworkMonitor.isWeak()) {
             android.util.Log.i("Tekyerema", "[LLM] weak network → $fast first")
             models = listOf(fast) + (models - fast)
@@ -111,8 +116,8 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                 continue
             }
 
-            val apiKey = keys[chosen]
-            val coolKey = "$model|$apiKey"   // limits are per model per org
+            var apiKey = keys[chosen]
+            var coolKey = "$model|$apiKey"   // limits are per model per org
             val body = JSONObject()
                 .put("model", model)
                 .put("messages", messages)
@@ -123,35 +128,62 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
             val effort = settings.reasoningEffortOverride?.takeIf { it.isNotBlank() } ?: ctx.effort ?: settings.groqReasoningEffort
             if (effort.isNotBlank()) body.put("reasoning_effort", effort)
 
-            val request = Request.Builder()
+            val payload = body.toString()
+            fun requestFor(key: String) = Request.Builder()
                 .url(url)
-                .header("Authorization", "Bearer $apiKey")
-                .post(body.toString().toRequestBody("application/json".toMediaType()))
+                .header("Authorization", "Bearer $key")
+                .post(payload.toRequestBody("application/json".toMediaType()))
                 .build()
 
             // SEC-P1-4: the request body carries the full screen snapshot (private messages, contacts, notif
             // text). Log it ONLY in debug builds — never in the shared/release APK.
-            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-REQ] ${body.toString().take(4000)}")
+            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-REQ] ${payload.take(4000)}")
             // D-02: the request log is cut before the tool list, so name the tools this step offered (names only).
             if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-TOOLS] " + (0 until ctx.openAiTools.length())
                 .joinToString(",") { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() })
             var remaining: Int? = null; var limitTok: Int? = null; var resetMs: Long? = null; var retryMs: Long? = null
-            // Cancellable: stopping the task aborts this request instead of waiting for the model to answer.
-            val (code, text) = try {
-                val (c, body, headers) = com.tekyerema.core.Http.execute(client.newCall(request))
-                remaining = headers["x-ratelimit-remaining-tokens"]?.trim()?.toIntOrNull()
-                limitTok = headers["x-ratelimit-limit-tokens"]?.trim()?.toIntOrNull()
-                resetMs = parseDurationMs(headers["x-ratelimit-reset-tokens"])
-                retryMs = headers["retry-after"]?.trim()?.toDoubleOrNull()?.let { (it * 1000).toLong() }
-                c to body
-            } catch (ce: kotlinx.coroutines.CancellationException) { throw ce
-            } catch (t: Throwable) {
-                com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", null)
-                return@withContext AgentDecision.Fail("LLM request failed: ${t.message}")
+            // N-15 hedge: the pooled connection is the usual suspect when a call hangs (A20e, 2026-09-28: seven Groq calls in a
+            // row ran into the 35 s timeout while Gemini answered in 4 s). If this call hasn't answered after a few seconds
+            // — far past the normal 1–2 s — the same request also goes out on a FRESH connection with the next free key;
+            // the first response wins and the other is cancelled. Cancellable: stopping the task aborts both.
+            val callMs = AppConfig.long("models.planner.timeouts.callSec", 35) * 1000L
+            val backupIdx = hedgeKeyIndex(keys.size, chosen) { i -> (coolUntil["$model|${keys[i]}"] ?: 0L) <= System.currentTimeMillis() }
+            val hedgeMs = hedgeAfterMs(effort)
+            val t0 = System.currentTimeMillis()
+            val attempts = buildList<suspend () -> Result<Reply>> {
+                add { callOnce(client, requestFor(keys[chosen]), callMs) }
+                if (hedgeMs > 0 && com.tekyerema.core.config.FeatureFlags.isEnabled("N-15", true))
+                    add { callOnce(freshClient, requestFor(keys[backupIdx]), (callMs - hedgeMs).coerceAtLeast(5_000L)) }
             }
+            val race = Hedge.race(attempts, hedgeMs.coerceAtLeast(1L)) { it.isSuccess }
+            // The first request was slow (cancelled as the loser) or failed: drop the pooled connections, so a hung one can't
+            // serve the next step too (seen: seven consecutive timeouts on one stalled connection).
+            val primary = race.results.firstOrNull()
+            if (primary == null || primary.isFailure) evictPooled(client)
+            val reply = race.winner?.getOrNull()
+            if (reply == null) {
+                com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", null)
+                val err = race.results.firstNotNullOfOrNull { it?.exceptionOrNull() }
+                android.util.Log.w("Tekyerema", "[LLM] $model: no answer after ${System.currentTimeMillis() - t0} ms " +
+                    "(${race.started} attempt${if (race.started > 1) "s, one on a fresh connection" else ""}): ${err?.javaClass?.simpleName}")
+                return@withContext AgentDecision.Fail("LLM request failed: ${err?.message ?: "timeout"}")
+            }
+            if (race.winnerIndex == 1) {
+                chosen = backupIdx; apiKey = keys[chosen]; coolKey = "$model|$apiKey"
+                android.util.Log.w("Tekyerema", "[LLM] hedged: the fresh-connection request (key #${chosen + 1}) answered first " +
+                    "after ${System.currentTimeMillis() - t0} ms — the pooled connection was stalled")
+            }
+            val (code, text, headers) = reply
+            remaining = headers["x-ratelimit-remaining-tokens"]?.trim()?.toIntOrNull()
+            limitTok = headers["x-ratelimit-limit-tokens"]?.trim()?.toIntOrNull()
+            resetMs = parseDurationMs(headers["x-ratelimit-reset-tokens"])
+            retryMs = headers["retry-after"]?.trim()?.toDoubleOrNull()?.let { (it * 1000).toLong() }
             // Q-03 / N-03 / Q-10: every call counts; tokens (incl. cached) and the key's remaining minute budget when given.
-            com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model",
-                if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromOpenAi(text) else null, remaining)
+            val usage = if (code in 200..299) com.tekyerema.core.telemetry.LlmUsage.fromOpenAi(text) else null
+            com.tekyerema.core.telemetry.Telemetry.noteLlm("groq/$model", usage, remaining)
+            // N-03: one line per call, so the phone run shows latency and how much of each prompt Groq served from its
+            // prefix cache (cached tokens are faster and don't count toward the per-minute cap).
+            android.util.Log.i("Tekyerema", "[LLM] ${usageLine(model, chosen, keys.size, code, System.currentTimeMillis() - t0, usage, effort)}")
 
             when {
                 // Rate-limited: cool THIS key until its own reset (precise), then the loop picks another or waits.
@@ -249,6 +281,53 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
          *  trim (~4.4k typical); the old 6000 padded ~1.5k over reality and cooled each key ~18s instead of
          *  ~7s between steps. A too-low value only risks an occasional 429, which the 4-key rotation absorbs. */
         private val ONE_REQUEST_TOKENS get() = AppConfig.int("models.planner.requestTokens", 4800)
+
+        /** N-15 hedge: the backup request's client — same dispatcher, but its OWN connection pool, so it never inherits the
+         *  pooled connection the first request is hung on (it opens a new DNS + TCP + TLS path). */
+        private val freshClient: OkHttpClient by lazy {
+            com.tekyerema.core.Http.shared.newBuilder()
+                .connectionPool(okhttp3.ConnectionPool(2, 2, TimeUnit.MINUTES))
+                .connectTimeout(AppConfig.long("models.planner.timeouts.connectSec", 8), TimeUnit.SECONDS)
+                .readTimeout(AppConfig.long("models.planner.timeouts.callSec", 35), TimeUnit.SECONDS)
+                .callTimeout(AppConfig.long("models.planner.timeouts.callSec", 35), TimeUnit.SECONDS)
+                .build()
+        }
+
+        /** One request with a hard deadline; a network failure or the deadline is a failed [Result], never a throw. */
+        private suspend fun callOnce(c: OkHttpClient, req: Request, ms: Long): Result<Reply> = try {
+            Hedge.within(ms) { com.tekyerema.core.Http.execute(c.newCall(req)) }?.let { Result.success(it) }
+                ?: Result.failure(java.io.InterruptedIOException("timeout"))
+        } catch (ce: kotlinx.coroutines.CancellationException) { throw ce
+        } catch (t: Throwable) { Result.failure(t) }
+
+        private fun evictPooled(c: OkHttpClient) {
+            try { c.connectionPool.evictAll(); android.util.Log.i("Tekyerema", "[NET] dropped pooled connections after a stalled model call") }
+            catch (_: Throwable) {}
+        }
+
+        /**
+         * N-15 hedge: how long the first request may take before the backup goes out. The day's traces put a normal step at
+         * 1–2 s (p95 ≈ 5 s); "high" reasoning thinks longer, so it gets more room. 0 (config) switches hedging off.
+         */
+        fun hedgeAfterMs(effort: String?): Long {
+            val base = AppConfig.long("models.planner.hedgeAfterMs", 8_000L)
+            if (base <= 0L) return 0L
+            return if (effort == "high") (base * 7) / 4 else base
+        }
+
+        /** The key for the backup request: the next one after [chosen] that isn't cooling, else [chosen] itself (a fresh
+         *  connection alone is what helps when the pooled one is hung). Pure. */
+        fun hedgeKeyIndex(size: Int, chosen: Int, free: (Int) -> Boolean): Int {
+            for (n in 1 until size) { val i = (chosen + n) % size; if (free(i)) return i }
+            return chosen
+        }
+
+        /** "[LLM] groq/openai/gpt-oss-120b key#2/4 http=200 ms=1834 prompt=4630 cached=3584(77%) completion=212 effort=default". */
+        fun usageLine(model: String, keyIdx: Int, keys: Int, code: Int, ms: Long, u: com.tekyerema.core.telemetry.LlmUsage?, effort: String?): String {
+            val tok = if (u == null) "" else " prompt=${u.prompt} cached=${u.cached}" +
+                (if (u.prompt > 0) "(${u.cached * 100 / u.prompt}%)" else "") + " completion=${u.completion}"
+            return "groq/$model key#${keyIdx + 1}/$keys http=$code ms=$ms$tok effort=${effort?.ifBlank { null } ?: "default"}"
+        }
 
         /** Tried in order after the configured model when its daily quota is exhausted on every key. */
         private val FALLBACK_MODELS = listOf("openai/gpt-oss-20b")

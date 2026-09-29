@@ -74,7 +74,10 @@ class FallbackBrain(
         for ((n, i) in order.withIndex()) {
             val b = brains[i]
             val started = System.currentTimeMillis()
-            val d = guarded(b, ctx)
+            // A brain that throws (a parse bug, a client crash) is a Fail — the next provider still gets its turn.
+            val d = try { guarded(b, ctx) }
+                catch (ce: CancellationException) { throw ce }
+                catch (t: Throwable) { AgentDecision.Fail("brain error: ${t.javaClass.simpleName}: ${t.message}") }
             if (d !is AgentDecision.Fail) { health.ok(key(i)); return d }
             if (d.reason == WATCHDOG_REASON) {
                 // The link itself was checked and is down: no provider can answer, so don't make the user wait for each.

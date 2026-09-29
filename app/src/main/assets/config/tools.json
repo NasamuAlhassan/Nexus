@@ -11,6 +11,7 @@
     "pinch": {"feature": "G-04", "min_api": 24, "callers": ["planner", "local"]},
     "scroll": {"feature": "G-02", "callers": ["planner", "local"]},
     "type": {"feature": "G-05", "callers": ["planner", "local"]},
+    "tap_sequence": {"feature": "G-11", "callers": ["planner"]},
     "set_range": {"feature": "G-02", "min_api": 24, "callers": ["planner", "local"]},
     "key_event": {"feature": "E-18"},
     "open_app": {"feature": "E-01", "idempotent": true},

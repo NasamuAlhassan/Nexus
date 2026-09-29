@@ -23,10 +23,12 @@ object Http {
             // awake for the full idle time, and [prewarm] reopens the connection when the mic opens anyway.
             .connectionPool(ConnectionPool(5, com.tekyerema.core.config.AppConfig.long("router.network.poolKeepAliveSec", 60L), TimeUnit.SECONDS))
             .retryOnConnectionFailure(true)
-            // N-10: a model call gets no bytes back until its answer is ready, so a dead link and a slow model look the
-            // same — silence until the 35 s call timeout. An HTTP/2 PING is answered by the server's network stack, not the
-            // model, so a missing pong means the CONNECTION is dead (a Wi-Fi that stopped passing traffic): OkHttp fails
-            // the call after two intervals instead of waiting out the timeout. 0 turns it off.
+            // N-10 / N-15: a model call gets no bytes back until its answer is ready, so a dead link and a slow model look
+            // the same — silence until the call timeout; and a connection a Wi-Fi/NAT silently dropped stays "healthy" in
+            // the pool and hangs every later call (A20e, 2026-09-28: seven Groq timeouts in a row while Gemini answered in
+            // 4 s). An HTTP/2 PING is answered by the server's network stack, not the model: a missing pong fails the call
+            // after two intervals instead of the timeout, and keeps the NAT mapping alive. Idle connections are dropped
+            // after 60 s, so the pings don't keep the radio awake. 0 turns it off.
             .pingInterval(com.tekyerema.core.config.AppConfig.long("router.network.h2PingSec", 5L), TimeUnit.SECONDS)
             .build()
     }

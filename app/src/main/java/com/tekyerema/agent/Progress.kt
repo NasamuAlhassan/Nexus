@@ -110,6 +110,18 @@ object Progress {
     fun stillLoading(appSwitched: Boolean, actionable: Int, maxSparse: Int = AppConfig.int("executor.launch.sparseActionable", 5)): Boolean =
         appSwitched && actionable <= maxSparse
 
+    /**
+     * G-10: keep looking at a just-opened app while it is still drawing — one more poll is ~0.4 s, a planning call spent
+     * on it is 2–40 s. A20e, 2026-09-28 night (ma_chrome_search): Chrome still exposed 0 actionable elements after the
+     * single 1.2 s settle, so the model's whole next step was `wait 2 s` — one extra cloud call (39 s on that network).
+     * Keep polling while the screen is EMPTY or still GROWING and sparse, up to [maxMs]; a screen that is sparse but
+     * stopped changing is simply a small screen, so stop at once.
+     */
+    fun keepWaitingForLaunch(elapsedMs: Long, actionable: Int, grew: Boolean,
+                             maxMs: Long = AppConfig.long("executor.launch.maxWaitMs", 3500L),
+                             maxSparse: Int = AppConfig.int("executor.launch.sparseActionable", 5)): Boolean =
+        elapsedMs < maxMs && actionable <= maxSparse && (actionable == 0 || grew)
+
     /** Normalized labels of a snapshot's tree elements (vision OCR is too noisy to count as "new content"). */
     internal fun labelsOf(snap: UiSnapshot?): List<String> =
         snap?.elements.orEmpty().asSequence().filter { it.source == ElementSource.TREE }
