@@ -56,10 +56,14 @@ object ContactResolver {
     fun aliasesFor(name: String): List<String> {
         val key = name.trim().lowercase().removePrefix("my ").trim()
         val cfg = com.tekyerema.core.config.AppConfig.stringList("os.contacts.aliases.$key", emptyList())
-        return (listOf(name.trim()) + cfg + DEFAULT_ALIASES[key].orEmpty()).distinctBy { it.lowercase() }
+        // C-03 / H-08: a relationship the user told us ("Ama Mensah is my mother") comes FIRST — it is what they meant,
+        // even when some other contact happens to be saved as "Mum".
+        val told = listOfNotNull(Relations.contactFor(name))
+        return (told + listOf(name.trim()) + cfg + DEFAULT_ALIASES[key].orEmpty()).distinctBy { it.lowercase() }
     }
 
     fun resolve(context: Context, name: String): List<Contact> {
+        Relations.ensureLoaded(context)
         // C-03: try the name as said, then its family aliases, before fuzzy matching.
         for (candidate in aliasesFor(name)) {
             val hit = resolveOne(context, candidate)
