@@ -36,7 +36,9 @@ data class Transcript(
     val entities: List<Pair<String, String>> = emptyList(),
     val backend: String = "",
     val fallbackUsed: Boolean = false,
-    val asrMs: Long = 0
+    val asrMs: Long = 0,
+    /** B-19: names [EntityCorrector] changed in [canonical] ("contact:coffee→Kofi"). Diagnostic; content — debug logs only. */
+    val corrections: List<String> = emptyList()
 ) {
     val isBlank: Boolean get() = canonical.isBlank()
 }

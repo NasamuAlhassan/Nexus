@@ -50,6 +50,19 @@ class MicCapture(
     private val vadName = if (silero != null) "silero" else "energy"
     private fun segReset() { if (silero != null) silero.reset() else vad.reset() }
     private fun segProcess(f: ShortArray): EnergyVad.Event = silero?.process(f) ?: vad.process(f)
+    private fun segPause(): Int = silero?.pauseFrames ?: vad.pauseFrames
+
+    /**
+     * B-19 speculative recognition. The end-of-turn silence is Silero's 300 ms plus our hangover (400 ms for a
+     * request) — ~0.7 s during which the recogniser sat idle. Once the pause reaches `speech.asr.speculativeAfterMs`
+     * (default 100 ms into our hangover), the audio so far is handed here as a WAV so recognition can start while we
+     * keep listening. If the user carries on, the snapshot is dropped; if the turn ends, the final WAV is built with
+     * the SAME gain, so it is the snapshot plus the silence after it and [SherpaAsr] can reuse the result. The end of
+     * the turn itself is unchanged. Set by VoiceEngine (on-device routes only); null = off.
+     */
+    @Volatile var onPause: ((ByteArray) -> Unit)? = null
+    private fun speculateAfterFrames(): Int =
+        (com.tekyerema.core.config.AppConfig.int("speech.asr.speculativeAfterMs", 100) / (frame * 1000.0 / sampleRate)).toInt().coerceAtLeast(1)
     private val frame = vad.frameSamples
     private val bytesPerSample = 2
 
@@ -132,6 +145,10 @@ class MicCapture(
         // Capture diagnostics so a "didn't hear anything" is explainable from the log alone.
         var frames = 0; var maxRms = 0.0; var sumRms = 0.0
         var endReason = "?"                                       // §3.3
+        val specCb = onPause
+        val specAfter = speculateAfterFrames()
+        var specGain: Double? = null                              // B-19: the snapshot's gain while it is still valid
+        var specs = 0
         val captureStart = android.os.SystemClock.uptimeMillis()  // §3.11
         val guardFrames = (vadGuardMs / (frame * 1000.0 / sampleRate)).toInt()
         val toneFrames = (toneGuardMs / (frame * 1000.0 / sampleRate)).toInt()
@@ -183,7 +200,21 @@ class MicCapture(
                         preRoll.clear()
                         appendPcm(speech, f)
                     }
-                    EnergyVad.Event.SPEECH -> appendPcm(speech, f)
+                    EnergyVad.Event.SPEECH -> {
+                        appendPcm(speech, f)
+                        if (specCb != null) {
+                            val pause = segPause()
+                            if (pause == 0 && specGain != null) specGain = null       // the user carried on: stale
+                            else if (pause == specAfter && specGain == null && specs < 1) {
+                                // one snapshot per capture: a wasted decode holds the recogniser for a second or two
+                                val snap = speech.toByteArray()
+                                val g = PcmGain.gainFor(snap)
+                                PcmGain.apply(snap, g)
+                                specGain = g; specs++
+                                try { specCb(Wav.wrap(snap, sampleRate)) } catch (_: Throwable) {}
+                            }
+                        }
+                    }
                     EnergyVad.Event.SPEECH_END -> { appendPcm(speech, f); endReason = "SPEECH_END"; break }
                     EnergyVad.Event.TIMEOUT -> { appendPcm(speech, f); endReason = "TIMEOUT"; break }
                     EnergyVad.Event.TOO_SHORT -> {   // §3.4 a real blip, not silence — tell the caller so it can re-prompt
@@ -205,9 +236,18 @@ class MicCapture(
 
         val rawPcm = speech.toByteArray()
         val preRms = pcmRms(rawPcm)
-        val pcm = normalizeRms(rawPcm)
+        // B-19: a still-valid speculative snapshot fixes the gain, so the final audio = snapshot + the silence after it
+        val keptGain = specGain?.takeIf { endReason == "SPEECH_END" }
+        val pcm = PcmGain.apply(rawPcm, keptGain ?: PcmGain.gainFor(rawPcm))
         val speechMs = (pcm.size / bytesPerSample.toLong()) * 1000 / sampleRate
         // §3.3/§3.8/§3.11 — end reason, pre/post RMS, and a per-utterance timing line for regression tracking.
+        // B-19: the turn's capture numbers (the first capture of a turn wins; a later yes/no listen doesn't overwrite them)
+        val tookMs = android.os.SystemClock.uptimeMillis() - captureStart
+        com.tekyerema.core.telemetry.Telemetry.update {
+            voice.putIfAbsent("captureMs", tookMs); voice.putIfAbsent("speechMs", speechMs)
+            voice.putIfAbsent("endReason", endReason); voice.putIfAbsent("vad", vadName)
+            voice.putIfAbsent("hangoverMs", strat?.hangoverMs ?: VadStrategy.NORMAL.hangoverMs)
+        }
         Log.i("Tekyerema", "[VOICE] end=$endReason captured ${pcm.size}B PCM (~${speechMs}ms speech) " +
             "preRms=${"%.0f".format(preRms)} postRms=${"%.0f".format(pcmRms(pcm))} tookMs=${android.os.SystemClock.uptimeMillis() - captureStart} ${stats()}")
         if (pcm.isEmpty()) return@withContext CaptureResult.NoSpeech
@@ -267,28 +307,37 @@ class MicCapture(
         }
         return if (n == 0) 0.0 else kotlin.math.sqrt(sum / n)
     }
+}
 
-    /**
-     * §3.7 — RMS-based normalization with a peak CEILING. Pure peak-normalization let a single click/plosive
-     * (which sets the peak) leave the actual speech quiet. Instead scale to a target RMS (loudness the model
-     * trained near), but clamp the gain so the loudest sample never exceeds [peakCeiling] — so we get
-     * consistent loudness without clipping transients.
-     */
-    private fun normalizeRms(pcm: ByteArray, targetRms: Int = 3000, peakCeiling: Int = 30000): ByteArray {
-        if (pcm.size < 4) return pcm
-        val rms = pcmRms(pcm)
-        if (rms < 40.0) return pcm                 // essentially silence — don't amplify noise
-        var peak = 0; var i = 0
+/**
+ * §3.7 — RMS-based normalization with a peak CEILING. Pure peak-normalization let a single click/plosive
+ * (which sets the peak) leave the actual speech quiet. Instead scale to a target RMS (loudness the model
+ * trained near), but clamp the gain so the loudest sample never exceeds the ceiling — so we get
+ * consistent loudness without clipping transients. Split into [gainFor] + [apply] (B-19) so a speculative
+ * snapshot and the final capture can share one gain. Pure → unit-tested.
+ */
+internal object PcmGain {
+    /** The gain for PCM16-LE [pcm]; 1.0 = leave it (silence, or already loud enough). */
+    fun gainFor(pcm: ByteArray, targetRms: Int = 3000, peakCeiling: Int = 30000): Double {
+        if (pcm.size < 4) return 1.0
+        var sum = 0.0; var n = 0; var peak = 0; var i = 0
         while (i + 1 < pcm.size) {
             var s = (pcm[i].toInt() and 0xFF) or (pcm[i + 1].toInt() shl 8)
             if (s > 32767) s -= 65536
+            sum += s.toDouble() * s; n++
             val a = if (s < 0) -s else s; if (a > peak) peak = a
             i += 2
         }
-        if (peak == 0) return pcm
+        val rms = if (n == 0) 0.0 else kotlin.math.sqrt(sum / n)
+        if (rms < 40.0 || peak == 0) return 1.0    // essentially silence — don't amplify noise
         val gain = minOf(targetRms.toDouble() / rms, peakCeiling.toDouble() / peak)
-        if (gain <= 1.05) return pcm               // already loud enough — leave it
-        i = 0
+        return if (gain <= 1.05) 1.0 else gain     // already loud enough — leave it
+    }
+
+    /** Scale [pcm] in place by [gain] (clamped to PCM16); returns it. */
+    fun apply(pcm: ByteArray, gain: Double): ByteArray {
+        if (gain == 1.0) return pcm
+        var i = 0
         while (i + 1 < pcm.size) {
             var s = (pcm[i].toInt() and 0xFF) or (pcm[i + 1].toInt() shl 8)
             if (s > 32767) s -= 65536

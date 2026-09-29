@@ -95,6 +95,12 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] bundled extract failed ($lang): ${t.message}") }
     }
 
+    /** Encoder tail padding in 10 ms feature frames, or null for sherpa's default (1000). Twi keeps its 300 (§3.9). */
+    private fun tailPaddingsFor(lang: String): Int? {
+        val v = com.tekyerema.core.config.AppConfig.int("speech.asr.tailPaddings.$lang", if (lang == "twi") 300 else -1)
+        return if (v > 0) v.coerceIn(50, 2000) else null
+    }
+
     /** whisper has no Twi token — the fine-tune decoded through a Latin proxy (en for English, sw else). */
     private fun tokenLang(lang: String) = if (lang == "eng") "en" else "sw"
     private fun langKey(force: String?) = if (force == Lang.TWI) "twi" else "eng"
@@ -111,15 +117,22 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         // §3.9 per-model tail padding: Twi-type models need a small trailing pad (300) so a short word like
         // "kofi" isn't truncated to "kof"; Gh-EN uses the sherpa default. The big speedup comes from NOT
         // zero-padding the waveform to 30 s (see rawTranscript) — sherpa 1.13.8 encodes the real length.
+        // B-19 (2026-09-28 tail bench, phase2/voice_overnight): the Gh-EN default (1000 frames = 10 s of zero features)
+        // looks wasteful but is NOT — with 600/300 this fine-tune stops finding the end of the sentence and repeats
+        // itself up to sherpa's token cap, so the encoder time saved is eaten by the decoder (300: only 5-14% faster on
+        // the desktop) while WER nearly doubles (owner 0.29 → 0.55, unseen Gh-EN 0.48 → 0.73; asr_tail_summary_clean.md).
+        // Both stay configurable (`speech.asr.tailPaddings.<eng|twi>`) for an on-phone A/B.
         val whisper = OfflineWhisperModelConfig(
             encoder = File(d, "tiny-encoder.onnx").absolutePath,      // fp32 on purpose
             decoder = File(d, "tiny-decoder.int8.onnx").absolutePath,
             language = tokenLang(lang), task = "transcribe"
-        ).let { if (lang == "twi") it.copy(tailPaddings = 300) else it }
+        ).let { w -> tailPaddingsFor(lang)?.let { w.copy(tailPaddings = it) } ?: w }
         val cfg = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 whisper = whisper,
-                tokens = File(d, "tiny-tokens.txt").absolutePath, numThreads = 2,
+                // 2 = the A20e's two fast (A73) cores; `speech.asr.numThreads` lets the phone try 4 (the extra threads
+                // land on the slow A53s, which can make ORT's even split slower — measure before changing the default).
+                tokens = File(d, "tiny-tokens.txt").absolutePath, numThreads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads", 2).coerceIn(1, 8),
                 modelType = "whisper"),
             decodingMethod = "greedy_search")
         return try {
@@ -153,21 +166,63 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
 
     private fun decodeLocked(wav: ByteArray, forceLanguage: String?): String? {
         val lang = langKey(forceLanguage)
-        val r = rec(lang) ?: return null
         val (raw, sr) = readWav(wav) ?: return null
-        val samples = padFor(lang, raw, sr)                       // §3.9 per-model padding (not a fixed 30 s)
+        // B-19: the speculative decode of this very utterance (started during the end-of-turn silence) — reuse it when
+        // this audio is that snapshot plus only the silence after it.
+        val sp = spec; spec = null
+        if (sp != null) {
+            val hit = sp.lang == lang && sp.text != null && isContinuation(raw, sp.samples, sr)
+            com.tekyerema.core.telemetry.Telemetry.update { voice.putIfAbsent("asrSpeculative", if (hit) "hit" else "miss") }
+            Log.i("Tekyerema", "[ASR] speculative ${if (hit) "HIT" else "miss"} (snapshot ${sp.samples.size * 1000L / sr}ms of ${raw.size * 1000L / sr}ms)")
+            if (hit) return sp.text!!.ifEmpty { null }
+        }
         val t0 = SystemClock.uptimeMillis()
+        val out = decodeSamples(lang, raw, sr) ?: return null
+        val decodeMs = SystemClock.uptimeMillis() - t0
+        com.tekyerema.core.telemetry.Telemetry.update {   // B-19: numbers only
+            voice.putIfAbsent("asrAudioMs", raw.size * 1000L / sr); voice.putIfAbsent("asrDecodeMs", decodeMs)
+            voice.putIfAbsent("asrModel", lang)
+        }
+        Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${decodeMs}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
+        return out.ifEmpty { null }
+    }
+
+    /** One decode of [raw] (the post-processed text, "" when nothing was recognised), or null if the model can't run. */
+    private fun decodeSamples(lang: String, raw: FloatArray, sr: Int): String? {
+        val r = rec(lang) ?: return null
+        val samples = padFor(lang, raw, sr)                       // §3.9 per-model padding (not a fixed 30 s)
         val s = r.createStream()
         return try {
             s.acceptWaveform(samples, sr)
             r.decode(s)
-            val out = guardRepetition(depua(r.getResult(s).text).trim())   // §3.10 stop runaway loops
-            Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
-            out.ifEmpty { null }
+            guardRepetition(trimRestart(depua(r.getResult(s).text).trim()))   // §3.10 / B-19 stop runaway loops and restarts
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa decode failed: ${t.message}"); null
         } finally {
             try { s.release() } catch (_: Throwable) {}
+        }
+    }
+
+    /** B-19: the last speculative decode (one at a time; consumed by the next real decode, hit or miss). */
+    private class Spec(val lang: String, val samples: FloatArray, val text: String?)
+    @Volatile private var spec: Spec? = null
+
+    /**
+     * B-19 — decode a snapshot of the utterance while the end-of-turn silence is still being waited out (see
+     * [MicCapture.onPause]). Runs under the same lock as real decodes, so the real one simply waits for it and then
+     * finds the answer ready. Local only: nothing here ever touches the network.
+     */
+    suspend fun speculate(wav: ByteArray, forceLanguage: String?) {
+        if (!ready) return
+        withContext(Dispatchers.Default) {
+            lock.withLock {
+                val lang = langKey(forceLanguage)
+                val (raw, sr) = readWav(wav) ?: return@withLock
+                val t0 = SystemClock.uptimeMillis()
+                val text = decodeSamples(lang, raw, sr)
+                spec = Spec(lang, raw, text)
+                Log.i("Tekyerema", "[ASR] speculative decode ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms")
+            }
         }
     }
 
@@ -266,6 +321,40 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
          * Coffee." / "wo wo wo …"). Collapse an immediately-repeating trailing token run (≥3×) to a single
          * instance and cap absurd length, so a decode artefact can't become a spoken stutter. Pure → tested.
          */
+        /**
+         * B-19 — Whisper-tiny's other decode artefact: having finished the sentence it starts it AGAIN into the padding
+         * ("What time is it? What", "No, cancel. No, cancel", "That cost 12 cedis. That cost 12" — the Gh-EN model on
+         * the owner's clips with a short tail pad, audit/padding_experiment). Cut at a sentence end (. ? !) when every
+         * word after it repeats the transcript's own opening words; the last repeated word may be cut short ("100
+         * cedis. 100 ced"). Only a repeat of the OPENING is trimmed, so "Stop. Stop the music." is left alone. Pure.
+         */
+        /**
+         * B-19 — is [final] the speculative [snapshot] plus only what came after it (the end-of-turn silence, ≤ 2 s)?
+         * MicCapture builds both with one gain, so the shared part is sample-for-sample identical. Pure.
+         */
+        internal fun isContinuation(final: FloatArray, snapshot: FloatArray, sr: Int): Boolean {
+            if (snapshot.isEmpty() || final.size < snapshot.size || final.size - snapshot.size > 2 * sr) return false
+            for (i in snapshot.indices) if (final[i] != snapshot[i]) return false
+            return true
+        }
+
+        internal fun trimRestart(text: String): String {
+            val words = text.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+            if (words.size < 2) return text
+            val cores = words.map { w -> w.lowercase().filter { it.isLetterOrDigit() || it == '\'' } }
+            for (i in 1 until words.size) {
+                val prev = words[i - 1]
+                if (prev.last() != '.' && prev.last() != '?' && prev.last() != '!') continue
+                val tail = cores.subList(i, cores.size)
+                if (tail.size > i) continue                          // the "repeat" is longer than what it repeats
+                val repeats = tail.withIndex().all { (j, t) ->
+                    t.isNotEmpty() && (t == cores[j] || (j == tail.size - 1 && cores[j].startsWith(t)))
+                }
+                if (repeats) return words.subList(0, i).joinToString(" ")
+            }
+            return text
+        }
+
         internal fun guardRepetition(text: String): String {
             if (text.isBlank()) return text
             val words = text.split(Regex("\\s+")).filter { it.isNotBlank() }

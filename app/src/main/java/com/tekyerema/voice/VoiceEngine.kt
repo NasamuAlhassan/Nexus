@@ -34,6 +34,8 @@ object VoiceEngine {
     /** Kept for QA auditioning of the "thinking" filler clips over ADB (`--es play_fillers twi|en`). */
     @Volatile private var fillerPlayer: FillerPlayer? = null
     @Volatile private var sherpa: SherpaAsr? = null
+    /** B-19: reload contact names / app labels in the background (no-op while fresh). */
+    @Volatile private var vocabRefresh: () -> Unit = {}
 
     /** DEBUG QA: play every filler clip of a language in order so the owner can vet the audio. */
     fun auditionFillers(language: String) { fillerPlayer?.audition(language) }
@@ -93,6 +95,20 @@ object VoiceEngine {
         val sherpa = SherpaAsr(app).also { this.sherpa = it }
         // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
         scope.launch(Dispatchers.Default) { try { sherpa.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
+        // B-19: contact names + app labels for post-ASR name correction, loaded off the voice path (READ_CONTACTS only
+        // if already granted). Refreshed again whenever a listen starts (cheap no-op inside its TTL).
+        scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} }
+        vocabRefresh = { scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} } }
+        // B-19 speculative recognition: start the on-device decode during the end-of-turn silence (MicCapture.onPause).
+        // Only when this turn would be recognised ON the phone anyway — never a second call to a quota'd online API
+        // (a forced-Twi turn with the HCI Lab online skips it). `speech.asr.speculative` = false turns it off.
+        val speculate: (ByteArray) -> Unit = { wav ->
+            if (com.tekyerema.core.config.AppConfig.bool("speech.asr.speculative", true) && sherpa.ready &&
+                onlineAsrFor(settings.forcedLanguage) == null)
+                scope.launch(Dispatchers.Default) { try { sherpa.speculate(wav, settings.forcedLanguage) } catch (_: Throwable) {} }
+        }
+        mic.onPause = speculate
+        answerMic.onPause = speculate
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
             "language layer: ${layer.summary()} | " +
@@ -240,10 +256,10 @@ object VoiceEngine {
     }
 
     /** Tap on the living visual: start listening, or cancel whatever is in flight. */
-    fun toggle() = controller.toggle()
+    fun toggle() { vocabRefresh(); controller.toggle() }
     /** Talk: the reply to a waiting prompt, an interjection while a task runs (stop / pause / continue / status / a
      *  correction, C-12), or a new turn — cutting our own reply short if it is still being read (see NewRequest). */
-    fun start() = controller.start()
+    fun start() { vocabRefresh(); controller.start() }
     /** The circle tapped while Tɛkyerɛma talks: stop talking and listen. While a task works it stays the kill switch. */
     fun interrupt() = controller.interrupt()
     /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button). */

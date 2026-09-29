@@ -78,6 +78,10 @@ class SileroVad(
 
     val capturedSpeechMs: Long get() = (totalSpeech * frameMs).toLong()
 
+    /** B-19: consecutive non-speech frames inside an utterance (our hangover so far — Silero's own 300 ms of
+     *  minSilence has already passed by the time it counts); 0 while talking or idle. */
+    val pauseFrames: Int get() = if (speaking) silenceRun else 0
+
     /** Feed one raw PCM16 frame; return the transition event (mirrors EnergyVad). */
     fun process(frame: ShortArray): EnergyVad.Event {
         val v = vad ?: return EnergyVad.Event.SILENCE

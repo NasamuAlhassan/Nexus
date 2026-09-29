@@ -40,6 +40,9 @@ object Telemetry {
         var ocrRuns = 0
         var goal: String? = null
         val resources: Resources.Sample? = Resources.sample()
+        /** B-19: per-stage voice numbers (capture ms, speech ms, end reason, ASR audio/decode ms, route, name fixes).
+         *  Numbers and labels only — never words. */
+        val voice = LinkedHashMap<String, Any>()
     }
 
     private val lock = Any()
@@ -106,6 +109,7 @@ object Telemetry {
             val a = marks[from]; val b = marks[to]
             if (a != null && b != null && b >= a) out[name] = b - a
         }
+        span("speech", "speech_start", "end_of_turn")       // B-19: the user talking + the end-of-turn silence
         span("asr", "end_of_turn", "asr_final")
         span("route", "asr_final", "route")
         span("first_decision", "route", "first_decision")
@@ -140,6 +144,7 @@ object Telemetry {
                 .put("cached", t.cachedTokens).put("provider", t.provider ?: JSONObject.NULL)
                 .put("quotaRemaining", t.quotaRemaining ?: JSONObject.NULL))
             .put("vision", JSONObject().put("screenshots", t.screenshots).put("ocr", t.ocrRuns))
+        if (t.voice.isNotEmpty()) o.put("voice", JSONObject(t.voice as Map<*, *>))
         Resources.delta(t.resources, end)?.let { o.put("res", it.put("trim", lastTrimLevel)) }
         if (includeGoal && t.goal != null) o.put("goal", t.goal)
         return o
