@@ -28,6 +28,8 @@ object BrainPrompts {
         "ASK for the number (call ask_user — it waits for the answer and the task continues); an accelerator (open_app, search_contacts, make_call, set_alarm, set_timer, run_ussd, read_notifications, reply_to_notification, " +
         "mobile_money) is ONE sub-step — after it keep going until the goal is truly done, and if it finds nothing fall back to the app's own UI. " +
         "Taps you can already predict (a keypad entry, a menu path, a search button then its text) go in ONE tap_sequence call.\n\n" +
+        // Workstream E (ambiguity, agent/research): the one ask-vs-act rule — keep it to this sentence.
+        "Look before you ask (screen, contacts, apps, one web_search); ask_user only when 2+ options still fit and a wrong pick is costly: ≤3 short options, likeliest first, never the same question twice.\n\n" +
         "MOBILE MONEY (send money): gather number + amount + reference FIRST (ask if any is missing). With all three, call `momo_send` — ONE call walks *170# and " +
         "STOPS at the PIN; do NOT step through the menu yourself and do NOT ask your own yes/no — the policy layer speaks ONE recipient + amount " +
         "read-back for the user to approve before it sends. Use `mobile_money` only for a name-only recipient or airtime. NEVER type a PIN.\n\n" +

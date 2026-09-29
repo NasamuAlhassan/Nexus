@@ -292,6 +292,8 @@ class LocalFastRouter(
                 " from $who sender${if (who == 1) "" else "s"}, kept for a week")
         }
         if (s.trajectoryConsent) parts.add("${com.tekyerema.core.telemetry.Trajectories.count(appContext)} saved tasks you agreed to share for improving me")
+        // Workstream E: the sites the user picked (agent/research/ResolvedChoices).
+        if (com.tekyerema.agent.research.ResolvedChoices.store(appContext).size() > 0) parts.add("the websites you picked")
         val line = if (parts.isEmpty()) "I'm not keeping anything about you right now."
             else "I remember " + com.tekyerema.audit.AuditLog.joinAnd(parts) + ". Say “forget everything”, or “forget” and a name, to remove it."
         return handled(FastIntent.MemoryQuery, line)
@@ -299,16 +301,24 @@ class LocalFastRouter(
 
     /** H-12: forget the last exchange, a person, or everything the assistant keeps (settings stay). */
     private fun forget(intent: FastIntent.Forget): FastOutcome {
+        // Workstream E: the remembered site picks (agent/research/ResolvedChoices) are forgettable the same ways.
+        val choices = com.tekyerema.agent.research.ResolvedChoices.store(appContext)
         val line = when (intent.scope) {
-            "last" -> { AgentEngine.forgetLastTurn(); References.clear(); "Okay, I've forgotten that." }
+            "last" -> { AgentEngine.forgetLastTurn(); References.clear(); choices.forgetRecent(); "Okay, I've forgotten that." }
+            "choice" -> choices.forgetRecent()?.let { "Okay, I've forgotten $it as your choice. I'll ask next time." }
+                ?: "I don't have a choice from just now. Say forget and the site's name, like forget Sakai."
+            "choices" -> { choices.clear(); "Okay, I've forgotten the sites you picked. I'll ask again next time." }
             "person" -> {
                 val who = intent.who.orEmpty()
                 val n = com.tekyerema.notifications.MessageIndex.forget(who)
                 References.forget(who)
-                if (n > 0) "Okay, I've forgotten ${n} message${if (n == 1) "" else "s"} from $who." else "I wasn't keeping anything about $who."
+                val site = choices.forget(who)
+                if (n > 0) "Okay, I've forgotten ${n} message${if (n == 1) "" else "s"} from $who." + (if (site) " And the site I remembered for it." else "")
+                else if (site) "Okay, I've forgotten the site I remembered for $who. I'll ask next time."
+                else "I wasn't keeping anything about $who."
             }
             else -> {
-                AgentEngine.resetConversation(); References.clear()
+                AgentEngine.resetConversation(); References.clear(); choices.clear()
                 com.tekyerema.notifications.MessageIndex.clear()
                 com.tekyerema.core.telemetry.Trajectories.clear(appContext)
                 ScreenMemory.clear()
