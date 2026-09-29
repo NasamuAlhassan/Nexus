@@ -201,11 +201,13 @@ object InstallAppTool : Tool {
         val before = try { AppResolver.launchable(ctx.appContext, fresh = true).map { it.packageName }.toSet() } catch (_: Throwable) { emptySet() }
 
         // 1) The store page: straight to it for a known package; otherwise search and open the result that names it.
+        //    Waits are upper bounds (the check passes the moment the page shows): 25 s, because on the campus Wi-Fi
+        //    (A20e, 2026-09-29) a details page took longer than the old 12 s and a free app was reported "not found".
         var page: UiSnapshot? = null
         if (listing != null && openStore(ctx, PlayStore.detailsUrl(listing.pkg))) {
             // The page must NAME the app: for a moment the Play Store can still show whatever page it was left on
             // (another app's Install button), and that must never be the one pressed.
-            page = awaitScreen(ctrl, AppConfig.long("os.store.pageWaitMs", 12_000L)) { s ->
+            page = awaitScreen(ctrl, AppConfig.long("os.store.pageWaitMs", 25_000L)) { s ->
                 val p = PlayStore.page(s)
                 s.appPackage == PlayStore.PKG && p.state != PlayStore.State.UNKNOWN &&
                     (p.state == PlayStore.State.UNAVAILABLE || PlayStore.pageNames(s, listing.title, p.button))
@@ -216,7 +218,7 @@ object InstallAppTool : Tool {
         if (page == null) {
             if (!openStore(ctx, PlayStore.searchUrl(title)))
                 return ToolResult(false, "I couldn't open the Play Store.", recoverable = true)
-            val results = awaitScreen(ctrl, AppConfig.long("os.store.pageWaitMs", 12_000L)) { s ->
+            val results = awaitScreen(ctrl, AppConfig.long("os.store.pageWaitMs", 25_000L)) { s ->
                 s.appPackage == PlayStore.PKG && PlayStore.pickResult(s, title) != null
             }
             if (results == null) {
@@ -232,7 +234,7 @@ object InstallAppTool : Tool {
             // The details page, not the results list still on screen: the tapped row must be gone from where it was (a
             // results list has inline Install buttons of its own — pressing one could install a neighbouring app). By
             // position, not caption: the details page repeats the app's title.
-            page = awaitScreen(ctrl, AppConfig.long("os.store.pageWaitMs", 12_000L)) { s ->
+            page = awaitScreen(ctrl, AppConfig.long("os.store.pageWaitMs", 25_000L)) { s ->
                 s.appPackage == PlayStore.PKG && s.elements.none { it.label == row.label && it.bounds == row.bounds } &&
                     PlayStore.page(s).state != PlayStore.State.UNKNOWN && AppUi.exact(s, "install").size <= 2
             } ?: return ToolResult(false, "I opened ${row.label?.take(40)} in the Play Store, but its page didn't load.", channel = "a11y")
