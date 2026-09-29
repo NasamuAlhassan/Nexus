@@ -321,6 +321,18 @@ class HybridOfflineTest {
         assertEquals("the weather is bad and I'm staying home", t.args.getString("message"))
     }
 
+    @Test fun install_requests_go_straight_to_install_app() {
+        val t = LocalBrain::installTarget
+        assertEquals("Claude", t("install the Claude app from the Play Store"))
+        assertEquals("WhatsApp", t("install WhatsApp"))
+        assertEquals("Jiji", t("please download the Jiji app"))
+        assertEquals("Telegram", t("get Telegram from the Play Store"))
+        assertNull("not an install", t("download this song"))
+        assertNull(t("get me a taxi"))
+        assertNull("which app?", t("install the app"))
+        assertNull(t("install WhatsApp and message Ama"))
+    }
+
     @Test fun a_text_never_swallows_a_second_request() = runBlocking {
         // review #2: "…then call Kofi" is a second request, not part of the message
         assertTrue(LocalBrain.hasFollowOnCommand("I'm late then call Kofi"))

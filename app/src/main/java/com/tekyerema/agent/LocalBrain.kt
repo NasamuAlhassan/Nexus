@@ -188,6 +188,14 @@ class LocalBrain : AgentBrain {
             }
         }
 
+        // --- install an app: "install the Claude app (from the Play Store)" → install_app, which opens the store page,
+        //     reads the real listing back for a yes/no and taps only an exact "Install". The fallback model drove the Play
+        //     Store by hand instead (A20e, 2026-09-29) and tapped a biometrics card on the way. ---
+        installTarget(raw)?.let { app ->
+            pendingResultSpeak = true   // speak install_app's own checked outcome
+            return call("install_app", JSONObject().put("app", app), "install an app")
+        }
+
         // --- launch an app ---
         RE_OPEN.find(raw)?.let { m ->
             val app = m.groupValues[3].trim().trimEnd('.', '!', '?')
@@ -554,7 +562,25 @@ class LocalBrain : AgentBrain {
             val parts = message.trim().trimEnd('.', '!', '?').split(RE_CLAUSE_SPLIT).map { it.trim() }.filter { it.isNotEmpty() }
             return parts.drop(1).any { RE_COMMAND_LEAD.containsMatchIn(it) }
         }
-        private val RE_NO_APP_NAME = Regex("^(?:the |an? |this |that |my |some )?(?:app|apps|application|it|this|that|one|something)$")
+        /**
+         * "install WhatsApp", "install the Claude app from the Play Store", "download the Jiji app" → the app's name, or
+         * null. "download"/"get" only with the word "app" or a store named ("download this song" is not an install). Pure.
+         */
+        fun installTarget(raw: String): String? {
+            val s = raw.trim().trimEnd('.', '!', '?').trim()
+            val m = RE_INSTALL.matchEntire(s) ?: return null
+            val verb = m.groupValues[1].lowercase()
+            val name = m.groupValues[2].trim()
+            val saidApp = m.groupValues[3].isNotEmpty() || m.groupValues[4].isNotEmpty()
+            if (verb != "install" && verb != "reinstall" && !saidApp) return null
+            if (name.isEmpty() || name.split(Regex("\\s+")).size > 4 || RE_NO_APP_NAME.matches(name.lowercase())) return null
+            if (RE_APP_HAS_VERB.containsMatchIn(name)) return null
+            return name
+        }
+        private val RE_INSTALL = Regex("(?i)^(?:please\\s+|kindly\\s+|can\\s+you\\s+|could\\s+you\\s+|i\\s+want\\s+(?:you\\s+)?to\\s+|help\\s+me\\s+)*" +
+            "(install|reinstall|download|get)\\s+(?:me\\s+)?(?:the\\s+|an?\\s+)?(.+?)(\\s+app|\\s+application)?" +
+            "(\\s+(?:from|on|in|off|through)\\s+(?:the\\s+)?(?:google\\s+)?(?:play\\s*store|play|app\\s+store))?(?:\\s+please)?$")
+        private val RE_NO_APP_NAME =Regex("^(?:the |an? |this |that |my |some )?(?:app|apps|application|it|this|that|one|something)$")
         private val RE_COMMAND_LEAD =Regex("^(?:please\\s+)?(?:call|ring|dial|text|sms|message|whatsapp|email|open|launch|" +
             "remind|send|set|turn|play|read|take|search|find|check|frɛ|bue|kenkan)\\b", RegexOption.IGNORE_CASE)
 
