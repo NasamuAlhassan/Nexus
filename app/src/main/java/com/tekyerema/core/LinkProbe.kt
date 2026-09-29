@@ -60,7 +60,12 @@ object LinkProbe {
                 inflight = it; lastStartAt = System.currentTimeMillis()
             }
         }
-        return d.await()
+        // The call timeout can't interrupt a DNS lookup (A20e 2026-09-29: a "6 s" probe took 52 s behind a slow
+        // resolver), so the caller stops waiting at the budget; the probe finishes on its own and records its result.
+        return kotlinx.coroutines.withTimeoutOrNull(budget + 500L) { d.await() } ?: run {
+            android.util.Log.w("Tekyerema", "[NET] probe still running after ${budget}ms — treating the link as not answering")
+            false
+        }
     }
 
     /**

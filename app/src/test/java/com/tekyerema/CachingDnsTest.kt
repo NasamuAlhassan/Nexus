@@ -47,6 +47,17 @@ class CachingDnsTest {
         catch (_: UnknownHostException) {}
     }
 
+    @Test fun with_nothing_known_a_hung_lookup_is_bounded_and_still_fills_the_cache() {
+        // a "6 s" probe took 52 s behind the slow resolver: the call timeout can't interrupt a lookup
+        val dns = CachingDns(system = { Thread.sleep(600); listOf(a) }, clock = { 0L },
+            freshMs = { 300_000L }, staleMs = { 3_600_000L }, budgetMs = { 100L }, maxWaitMs = { 100L })
+        val t0 = System.currentTimeMillis()
+        try { dns.lookup("api.groq.com"); throw AssertionError("expected a DNS timeout") } catch (_: UnknownHostException) {}
+        assertTrue(System.currentTimeMillis() - t0 < 500)
+        Thread.sleep(800)
+        assertEquals("the finished lookup serves the next request", listOf(a), dns.lookup("api.groq.com"))
+    }
+
     @Test fun forget_makes_the_next_request_look_it_up_again() {
         val calls = AtomicInteger()
         val dns = CachingDns(system = { calls.incrementAndGet(); listOf(a) }, clock = { 0L },

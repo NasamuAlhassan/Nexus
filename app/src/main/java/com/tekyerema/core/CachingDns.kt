@@ -30,6 +30,9 @@ class CachingDns(
     private val freshMs: () -> Long = { AppConfig.long("router.network.dns.freshMs", 5 * 60_000L) },
     private val staleMs: () -> Long = { AppConfig.long("router.network.dns.staleMs", 6 * 3_600_000L) },
     private val budgetMs: () -> Long = { AppConfig.long("router.network.dns.budgetMs", 1_500L) },
+    /** With nothing known, how long a request waits for the lookup before failing (the lookup goes on and fills the
+     *  cache for the next request). OkHttp's call timeout can't interrupt a lookup, so this is what bounds it. */
+    private val maxWaitMs: () -> Long = { AppConfig.long("router.network.dns.maxWaitMs", 12_000L) },
     private val pool: ExecutorService = Executors.newCachedThreadPool { r -> Thread(r, "tekyerema-dns").apply { isDaemon = true } }
 ) : Dns {
     private class Entry(val addresses: List<InetAddress>, val at: Long)
@@ -49,10 +52,11 @@ class CachingDns(
         }
         val usable = known?.takeIf { now - it.at <= staleMs() }
         return try {
-            if (usable != null) job.get(budgetMs(), TimeUnit.MILLISECONDS) else job.get()
+            job.get(if (usable != null) budgetMs() else maxWaitMs(), TimeUnit.MILLISECONDS)
         } catch (_: TimeoutException) {
+            if (usable == null) throw UnknownHostException("$hostname: DNS lookup timed out after ${maxWaitMs()}ms")
             android.util.Log.i("Tekyerema", "[NET] DNS for $host slower than ${budgetMs()}ms — using its last known address")
-            usable!!.addresses
+            usable.addresses
         } catch (e: java.util.concurrent.ExecutionException) {
             val cause = e.cause
             if (usable != null) usable.addresses
