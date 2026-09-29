@@ -89,6 +89,31 @@ object SetTimerTool : Tool {
             ToolResult(false, "Failed to set timer: ${t.message}")
         }
     }
+
+    // The timer runs in the Clock app with no screen (EXTRA_SKIP_UI), so nothing on screen can confirm it: an on-screen
+    // check read it as "no effect" and sent a working timer to the cloud (A20e 2026-09-29, "set a timer for 3 minutes").
+    // The Clock's own running-timer notification confirms it; without notification access, the Clock accepting the
+    // standard request is the evidence.
+    override val verifiesOutcome = true
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        if (!result.success) return VerificationResult(false, "the timer wasn't started")
+        val listener = com.tekyerema.notifications.TekyeremaNotificationListener.instance
+            ?: return VerificationResult(true, "the Clock app accepted the timer (it runs without a screen)")
+        repeat(6) {
+            val running = try {
+                listener.activeNotifications?.any { sbn ->
+                    CLOCK.containsMatchIn(sbn.packageName) && (sbn.notification.extras.getCharSequence("android.title")?.toString()
+                        .orEmpty() + " " + sbn.notification.extras.getCharSequence("android.text")?.toString().orEmpty()).contains("timer", true)
+                } == true
+            } catch (_: Throwable) { false }
+            if (running) return VerificationResult(true, "the Clock app shows the timer running")
+            kotlinx.coroutines.delay(500L)
+        }
+        return VerificationResult(true, "the Clock app accepted the timer (no timer notification seen yet)")
+    }
+
+    private val CLOCK = Regex("clock|deskclock", RegexOption.IGNORE_CASE)
 }
 
 /**

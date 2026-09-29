@@ -65,6 +65,8 @@ sealed class FastIntent(val name: String) {
     /** [mode] = "vibrate" | "silent" | "normal". */
     data class Ringer(val mode: String) : FastIntent("RINGER")
     object ShowAlarms : FastIntent("SHOW_ALARMS")
+    /** "stop the timer" — the Clock's own dismiss request, no model (A20e 2026-09-29: it went to a spent cloud AI). */
+    object StopTimer : FastIntent("STOP_TIMER")
     object Screenshot : FastIntent("SCREENSHOT")
     object PowerMenu : FastIntent("POWER_MENU")
     /** E-21: take a photo now with the back camera (the camera app saves it). */
@@ -281,6 +283,7 @@ object FastIntentClassifier {
             RE_ONLINE.containsMatchIn(g) -> FastIntent.Connectivity
             RE_NOW_PLAYING.containsMatchIn(g) -> FastIntent.NowPlaying
             RE_SHOW_ALARMS.containsMatchIn(g) -> FastIntent.ShowAlarms
+            RE_STOP_TIMER.matches(g) -> FastIntent.StopTimer
             RE_SCREENSHOT.containsMatchIn(g) -> FastIntent.Screenshot
             RE_POWER_MENU.containsMatchIn(g) -> FastIntent.PowerMenu
             RE_SELFIE.containsMatchIn(g) -> FastIntent.TakeSelfie
@@ -561,6 +564,7 @@ object FastIntentClassifier {
     private val RE_WHERE_AM_I = Regex("\\b(?:where am i|where i am|what(?:'s| is) my (?:current )?location|my current location|what street am i on)\\b")
     private val RE_ONLINE = Regex("\\b(?:am i (?:online|connected)|(?:is|do i have) (?:the )?internet|internet connection|am i on (?:wi-?fi|data|mobile data)|what network am i on)\\b")
     private val RE_NOW_PLAYING = Regex("\\b(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|who (?:sings|is singing) this)\\b")
+    private val RE_STOP_TIMER = Regex("^(?:please |can you )?(?:stop|cancel|dismiss|end|turn off|switch off) (?:the |my |that )?timer(?: please| now)?$")
     private val RE_SHOW_ALARMS = Regex("\\b(?:show|open|list|check)\\b.*\\balarms\\b|^(?:my )?alarms$|\\bwhat alarms\\b")
     private val RE_SCREENSHOT = Regex("\\b(?:take|capture|grab|save)\\b.*\\bscreenshot\\b|^screenshot$")
     private val RE_POWER_MENU = Regex("\\b(?:power (?:menu|options)|power button menu|restart menu|shut ?down menu)\\b")

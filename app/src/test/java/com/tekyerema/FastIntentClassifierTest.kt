@@ -158,6 +158,10 @@ class FastIntentClassifierTest {
                 "how far is my home from Accra", "ka kyerɛ Kofi sɛ ɔnkɔ fie"))
             assertNotEquals(s, FastIntent.Home, c(s))
         assertEquals(FastIntent.Recents, c("Show recent apps."))
+        // A20e 2026-09-29 (voice): "stop the timer" went to a spent cloud AI.
+        for (s in listOf("stop the timer", "Stop the timer.", "cancel my timer", "turn off the timer please"))
+            assertEquals(s, FastIntent.StopTimer, c(s))
+        assertNotEquals(FastIntent.StopTimer, c("set a timer for 3 minutes"))
         assertEquals(FastIntent.ScrollDown, c("Scroll down."))
         assertEquals(FastIntent.ScrollUp, c("Scroll up."))
         assertEquals(FastIntent.ScrollUp, c("Go to the top."))

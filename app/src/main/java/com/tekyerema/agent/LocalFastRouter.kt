@@ -170,6 +170,7 @@ class LocalFastRouter(
         FastIntent.WhereAmI -> runTool("location", org.json.JSONObject().put("action", "where"))
         FastIntent.CalendarToday -> runTool("calendar", org.json.JSONObject().put("action", "today"))
         FastIntent.ShowAlarms -> runTool("show_alarms", org.json.JSONObject(), action = true)
+        FastIntent.StopTimer -> stopTimer(intent)
         FastIntent.Connectivity -> connectivity()
         FastIntent.NowPlaying -> nowPlaying()
         is FastIntent.Ringer -> ringer(intent.mode)
@@ -1247,6 +1248,14 @@ class LocalFastRouter(
 
     /** An information QUERY answer — spoken on the normal (Twi-capable) voice. */
     private fun handled(intent: FastIntent, text: String) = FastOutcome(intent.name, text, systemVoice = false)
+
+    /** "stop the timer": Android's own dismiss-timer request to the Clock app (API 28+); null → the agent tries on screen. */
+    private fun stopTimer(intent: FastIntent): FastOutcome? {
+        val i = android.content.Intent("android.intent.action.DISMISS_TIMER").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (i.resolveActivity(appContext.packageManager) == null) return null
+        return try { appContext.startActivity(i); handled(intent, "Okay, I've asked the Clock to stop the timer.") }
+        catch (_: Throwable) { null }
+    }
 
     /** A deterministic ACTION confirmation — spoken on the OFFLINE system engine so it's instant, never
      *  blocked by the online Twi voice on a slow network. */
