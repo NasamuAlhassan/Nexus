@@ -322,6 +322,9 @@ object LanguagePipeline {
         val fixed = try { EntityCorrector.correct(normalized, vocabulary()) } catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
         val canonical = fixed.text
         if (fixed.fixes.isNotEmpty()) try { com.tekyerema.core.telemetry.Telemetry.update { voice["nameFixes"] = fixed.fixes.size } } catch (_: Throwable) {}
+        // Spoken doubt (2026-09-29): a corrected name that turns out to be a call's / message's / payment's recipient is said
+        // once in the read-back ("I heard 'prints' — taking it as Prince.") — voice/HeardAs.
+        HeardAs.note(canonical, fixed.fixes)
         val entities = try { Entities.derive(canonical, lang) } catch (t: Throwable) { emptyList() }
         return Transcript(raw = raw, canonical = canonical, language = lang, reason = reason, entities = entities, backend = backend,
             asrMs = asrMs, corrections = fixed.fixes.map { "${it.kind.name.lowercase()}:${it.from}→${it.to}" })

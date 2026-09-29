@@ -217,6 +217,12 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
             SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak, divider = false,
                 icon = Icons.Outlined.VolumeUp, iconTint = Spectrum.Violet) { settings.speakAloud = it }
         }
+        // Private reading (2026-09-29): who a message is from, not what it says, when the phone's own speaker would read it.
+        val privateReading = remember(version) { settings.privateReading }
+        GlassGroup("Reading messages") {
+            SwitchRow("Private reading", "On the loudspeaker, say who your messages are from, not what they say. " +
+                "Say “read them” to hear them. Headphones read them in full.", privateReading, divider = false) { settings.privateReading = it }
+        }
         // K-11: one choice sets how much is said and how long Tɛkyerɛma waits for you.
         GlassGroup("Experience") { Column(Modifier.selectableGroup()) {
             ChoiceRow("New to Tɛkyerɛma", "Fuller explanations, and more time to finish speaking.", profile == "beginner") { settings.profile = "beginner" }

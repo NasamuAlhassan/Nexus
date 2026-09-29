@@ -494,6 +494,8 @@ class VoiceController(
             }
             AgentStatus.SECURE_INPUT ->
                 if (Confirmation.isCompletion(t)) { secureJob?.cancel(); cues.captured(); agent.secureInputDone(); TypedResult(route, accepted = true) }
+                // Trust (2026-09-29): the helper is never brought in at the PIN.
+                else if (com.tekyerema.agent.helper.HelperCommands.involvesHelper(t)) TypedResult(route, accepted = true, notice = com.tekyerema.agent.helper.HelperGate.PIN_LINE)
                 else TypedResult(route, accepted = true, notice = "Finish the secure step on the phone, then type done")
             else -> TypedResult(route, accepted = false)
         }
@@ -692,6 +694,10 @@ class VoiceController(
                             _state.update { it.copy(state = VoiceState.IDLE, speechDetected = false) }
                             agent.secureInputDone()
                             return
+                        }
+                        // Trust (2026-09-29): "call my helper" at the PIN is answered, never acted on (agent/helper/HelperGate).
+                        if (com.tekyerema.agent.helper.HelperCommands.involvesHelper(heard)) {
+                            try { tts.speak(com.tekyerema.agent.helper.HelperGate.PIN_LINE, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         }
                         // Not a completion word → gently re-prompt (do NOT treat anything else as the PIN).
                     }
@@ -1145,7 +1151,8 @@ class VoiceController(
         val text = resultText?.let { if (verbosity() == "brief" && !exact) SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
         return when (status) {
             AgentStatus.COMPLETED -> text ?: "Done."
-            AgentStatus.COMPLETED_UNVERIFIED -> (text ?: "I tried that") + " — but I could not confirm it."
+            // (Honest results 2026-09-29: a send's evidence line that already says "I can't confirm it went" isn't doubted twice.)
+            AgentStatus.COMPLETED_UNVERIFIED -> com.tekyerema.agent.SendReport.unverified(text ?: "I tried that")
             AgentStatus.CANNOT_DO -> text ?: "I can't do that."
             AgentStatus.FAILED -> text ?: "That didn't work."
             AgentStatus.STOPPED -> if (stopAlreadySaid) "" else "Stopped."   // a voice "no" was already acknowledged

@@ -538,6 +538,7 @@ object AgentEngine {
             trajectory = if (forcedBrain == null && com.tekyerema.core.telemetry.Trajectories.enabled(ctxApp))
                 com.tekyerema.core.telemetry.TrajectoryRecorder(goal) else null)
         activeRun = runCtx
+        com.tekyerema.agent.helper.HelperGate.runStarted()   // Trust (2026-09-29): this run hasn't reached a PIN (yet)
         // WS-A task journal: an attended GUI task is recorded (begin) or picked up again (resume) — so a pause for the cloud
         // or the process being killed leaves a checkpoint instead of nothing (audit §3). The effect gate is the ledger for
         // this run (a run that isn't journaled still dedupes within itself, under its own id).
@@ -839,7 +840,10 @@ object AgentEngine {
                     is AgentDecision.Done -> {
                         // WS-C: after a Guide-only block the reply leads with "I haven't changed anything myself" (OperatorStops).
                         @Suppress("NAME_SHADOWING")
-                        val decision = decision.copy(summary = com.tekyerema.operator.OperatorStops.doneSummary(runCtx.auditTask, decision.summary))
+                        // Honest results (2026-09-29): a message sent in this task is reported from the screen's evidence, not
+                        // the planner's paraphrase — "I sent it" becomes "WhatsApp shows your message to Ama — '…' — in the chat."
+                        val decision = decision.copy(summary = runCtx.sends.summary(
+                            com.tekyerema.operator.OperatorStops.doneSummary(runCtx.auditTask, decision.summary), before))
                         // B: completion gate — every plan subgoal must be done (checks re-run on this screen first) or
                         // skipped with a reason; otherwise the model is told exactly what's missing (agent/plan/TaskPlan).
                         val planGate = if (decision.summary.trim().endsWith("?")) com.tekyerema.agent.plan.PlanTracker.Gate.Accept
@@ -1299,7 +1303,10 @@ object AgentEngine {
                                 // computer's request says so first (ActionSemantics / RemoteGate).
                                 // WS-A: the ledger's "I already sent this to Ama at 10:02 — send it again?" leads the read-back
                                 // (after "Your computer is asking me…" for a remote task).
+                                // Spoken doubt (2026-09-29, voice/HeardAs): a recipient the recogniser's name fix chose is said
+                                // once — "I heard 'prints' — taking it as Prince." — before the read-back the user approves.
                                 val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
+                                    (com.tekyerema.voice.HeardAs.line(goal, decision.name, decision.args)?.let { "$it " } ?: "") +
                                     com.tekyerema.policy.ActionSemantics.withRecipientNotice(
                                     plainPrompt, com.tekyerema.policy.ActionSemantics.recipientNotice(decision.name, decision.args,
                                         resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal, tags)))
@@ -1528,6 +1535,8 @@ object AgentEngine {
                         // WS-A: the ledger row settles — CONFIRMED when verified; otherwise the chat on screen may still tell
                         // (message still in the box = not sent), else UNKNOWN: reconciled before any retry, never retried blind.
                         effect?.let { effects.settled(it, vr.verified, vr.detail, afterSnap) }
+                        // Honest results (2026-09-29): a message send keeps what the screen showed after it, for the reply (SendReport).
+                        runCtx.sends.note(decision.name, decision.args, result, effectSpec, resolved?.element, before, afterSnap)
                         if (mutating) stepAudit?.verified(vr.verified, vr.detail)   // WS-C: the verification verdict
                         runCtx.trajectory?.step(before.toCompactJson(), decision.name, decision.args, result.message, vr.verified)   // Q-07 (opt-in)
                         if (tool.scope != com.tekyerema.policy.CapabilityScope.PERCEIVE) {
@@ -1986,6 +1995,8 @@ object AgentEngine {
         val irreversible = ArrayList<String>()
         /** WS-A: this run's task-journal record (null = not journaled). */
         var journal: com.tekyerema.agent.journal.TaskRun? = null
+        /** Honest results (2026-09-29): this run's message sends and what the screen showed after each ([SendReport]). */
+        val sends = SendReport.Tracker()
     }
 
     @Volatile private var activeRun: RunCtx? = null
@@ -2009,6 +2020,10 @@ object AgentEngine {
     /** @param paused WS-A: the run ended because the task PAUSED (kept, resumable) — recorded in the typed result. */
     private fun finish(status: AgentStatus, stats: RunStats, paused: com.tekyerema.agent.journal.PauseReason? = null) {
         log(LogEntry.Kind.STATS, stats.summary())
+        // Trust (2026-09-29, agent/helper/TrustFast.kt): remember this task for "tell my helper what you did", end its PIN mark,
+        // and after a second failure in a row add "If you'd like, say “call my helper”" (once) to the spoken result.
+        com.tekyerema.agent.helper.HelperHooks.taskEnded(appContext, activeRun?.goal ?: _state.value.goal, status, paused != null,
+            activeRun?.auditTask, _state.value.log)?.let { withOffer -> _state.update { it.copy(log = withOffer) } }
         val summary = _state.value.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text ?: ""
         val r = activeRun.also { activeRun = null }
         // WS-A: the journal record ends with the run (a paused one stays PAUSED — it ended the loop, not the task).
@@ -2066,8 +2081,10 @@ object AgentEngine {
         drain(secureChannel)
         // J-15: while the user types the secret, no speech reaches logcat or a cloud recogniser (see Privacy.secureStep).
         com.tekyerema.core.Privacy.secureStep = true
+        com.tekyerema.agent.helper.HelperGate.atPin()   // Trust (2026-09-29): no helper at a PIN — until the user says "done"
         _state.update { it.copy(status = AgentStatus.SECURE_INPUT, handoffReason = reason) }
         val done = try { secureChannel.receive() } finally { com.tekyerema.core.Privacy.secureStep = false }
+        if (done) com.tekyerema.agent.helper.HelperGate.pinDone()
         _state.update { it.copy(handoffReason = null) }
         if (done) setStatus(AgentStatus.THINKING)
         return done
