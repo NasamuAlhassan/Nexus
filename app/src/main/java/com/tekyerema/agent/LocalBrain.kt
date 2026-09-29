@@ -29,8 +29,16 @@ class LocalBrain : AgentBrain {
     /** Set per request: when the command was Twi, spoken confirmations are phrased in Twi (§21). */
     private var twi = false
 
+    // N-09 — a compound request run here, clause by clause (see [startPlan]).
+    private var plan: List<String>? = null
+    private var planIdx = 0
+    private var planChild: LocalBrain? = null
+    private var planMark = 0                         // history size when the current clause started
+    private val planSaid = ArrayList<String>()
+
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         step++
+        if (plan != null) return continuePlan(ctx)
         if (pendingRead) return summarizeScreen(ctx.screen)   // 2nd step of "what's on my screen"
         if (pendingResultSpeak) return speakToolResult(ctx)   // §6.1 2nd step of read_notifications / find_contact
         if (step > 1) return finishLine(ctx)                   // §C.2 consult the tool result before any success line
@@ -63,17 +71,46 @@ class LocalBrain : AgentBrain {
             return call("read_screen", JSONObject().put("continue", ScreenReadIntent.isContinue(raw)), "read the screen")
         }
 
+        // --- N-09 "what can you do?" — a fixed answer, given on the phone (question-shaped, so before the network gate). ---
+        if (RE_CAPABILITIES.matches(g.trimEnd('.', '!', '?').trim())) return AgentDecision.Done(capabilityAnswer())
+
+        // --- N-09 send a text: SMS goes over the mobile network, no internet needed. Before the network gate and the
+        //     compound check, because the message itself may say "weather" or "and". send_sms is confirmed (TIER2) with
+        //     the resolved person and number read back, so a mis-heard split is caught before anything is sent. ---
+        smsDecision(raw)?.let { return it }
+
+        // --- N-09 "what did Kwame say?", "any messages from Ama?" — answered from the notifications on the phone
+        //     (question-shaped, so it used to be sent to the cloud and refused offline). A pronoun ("what did he say")
+        //     needs the conversation, so it stays with the planner. ---
+        RE_FROM_WHO.find(raw.trim().trimEnd('.', '!', '?'))?.let { m ->
+            val who = (m.groupValues[1].ifBlank { m.groupValues[2] }).trim()
+            if (who.isNotEmpty() && !RE_PRONOUN.matches(who) && who.split(Regex("\\s+")).size <= 3) {
+                pendingResultSpeak = true
+                return call("read_notifications", JSONObject().put("filter", who), "messages from a sender")
+            }
+        }
+
         if (OfflineCapability.needsInternet(raw)) return network(raw)
 
-        // --- compound / multi-step requests → let the cloud operator plan them (fast path is single-action) ---
-        if (RE_MULTISTEP.containsMatchIn(g) && !RE_READ_SCREEN.containsMatchIn(g)) return defer("multi-step request")
+        // --- compound / multi-step requests: run them here clause by clause when EVERY clause is a local intent
+        //     ("open WhatsApp and read my messages" — offline too); otherwise the cloud operator plans them. ---
+        if (RE_MULTISTEP.containsMatchIn(g)) {
+            startPlan(ctx)?.let { return it }
+            if (!RE_READ_SCREEN.containsMatchIn(g)) return defer("multi-step request")
+        }
 
         // --- greetings / acknowledgements → speak, don't operate ---
         if (RE_GREET.matches(g)) return AgentDecision.Done(greeting())
 
         // --- read notifications / messages (§6.1). Checked BEFORE screen-read so "Kenkan me nkra" (read my
-        //     messages) routes to notifications, not a launcher read (§6.6). ---
-        if (RE_READ_NOTIFS.containsMatchIn(g)) { pendingResultSpeak = true; return call("read_notifications", JSONObject(), "read notifications") }
+        //     messages) routes to notifications, not a launcher read (§6.6). "read my WhatsApp messages" reads only
+        //     WhatsApp's (the tool filters by app, sender or text). ---
+        if (RE_READ_NOTIFS.containsMatchIn(g)) {
+            pendingResultSpeak = true
+            val args = JSONObject()
+            RE_MSG_APP.find(g)?.let { args.put("filter", it.groupValues[1]) }
+            return call("read_notifications", args, "read notifications")
+        }
 
         // --- find a contact (§6.1) — the search_contacts accelerator; its RESULT is spoken at step 2. ---
         RE_FIND_CONTACT.find(raw)?.let { m ->
@@ -180,6 +217,68 @@ class LocalBrain : AgentBrain {
     private fun defer(detail: String) = AgentDecision.CannotDo(DEFER, detail)
     private fun network(goal: String) = AgentDecision.CannotDo(NETWORK, "\"$goal\" needs the internet.")
 
+    /** N-09 — "text Ama saying I'm on my way", "send a message to 0244123456 that I'm late" → send_sms, or null. */
+    private fun smsDecision(raw: String): AgentDecision? {
+        val p = parseSms(raw) ?: return null
+        val args = JSONObject().put("message", p.message)
+        if (p.number != null) args.put("number", p.number) else args.put("contact", p.contact)
+        if (p.whatsApp) args.put("via", "whatsapp")
+        pendingResultSpeak = true   // speak send_sms's own checked outcome ("Sent to Ama."), never a premature "Sent"
+        return call("send_sms", args, "send a text")
+    }
+
+    /**
+     * N-09 — start a compound request as a LOCAL plan when every clause is something this brain does by itself, e.g.
+     * "open WhatsApp and read my messages", "go home and open the camera", "set an alarm for 6 and turn the volume up".
+     * Each clause is dry-run first (a throwaway brain, nothing executed); one clause that isn't local, or isn't allowed
+     * in a plan, and the whole request goes to the planner exactly as before. After "open <app>", a following clause is
+     * about THAT app: only reading, scrolling and navigation (and app-independent alarms/settings) stay local —
+     * "open WhatsApp and call Ama" means a WhatsApp call, which is the planner's job — and "read my messages" there
+     * means reading the app's screen, not the notification shade. Returns the first step, or null (not a local plan).
+     */
+    private suspend fun startPlan(ctx: BrainContext): AgentDecision? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled("N-09", true)) return null
+        val clauses = splitClauses(ctx.goal) ?: return null
+        val resolved = ArrayList<String>()
+        var inApp = false
+        for (c in clauses) {
+            val clause = if (inApp) inAppClause(c) else c
+            val d = LocalBrain().decide(ctx.copy(goal = clause, history = emptyList())) as? AgentDecision.CallTool ?: return null
+            if (d.name !in PLAN_TOOLS || (inApp && d.name !in IN_APP_TOOLS)) return null
+            inApp = when (d.name) { "open_app" -> true; "key_event" -> false; else -> inApp }
+            resolved.add(clause)
+        }
+        plan = resolved; planIdx = 0; planChild = LocalBrain(); planMark = ctx.history.size; planSaid.clear()
+        return continuePlan(ctx)
+    }
+
+    /** Run the current clause's own step; when it's done, start the next; at the end, say what each part said. */
+    private suspend fun continuePlan(ctx: BrainContext): AgentDecision {
+        val steps = plan ?: return AgentDecision.CannotDo(DEFER, "no plan")
+        while (true) {
+            val clause = steps[planIdx]
+            val d = (planChild ?: LocalBrain().also { planChild = it })
+                .decide(ctx.copy(goal = clause, history = ctx.history.drop(planMark)))
+            when (d) {
+                is AgentDecision.CallTool -> return d.copy(rationale = "local plan ${planIdx + 1}/${steps.size}: ${d.rationale}")
+                is AgentDecision.Done -> {
+                    if (d.summary.isNotBlank()) planSaid.add(d.summary.trim())
+                    planIdx++
+                    if (planIdx >= steps.size) { plan = null; return AgentDecision.Done(planSaid.joinToString(" ").ifBlank { "Done." }) }
+                    planChild = LocalBrain(); planMark = ctx.history.size
+                }
+                is AgentDecision.CannotDo -> {
+                    plan = null
+                    // A step that FAILED is an honest stop (what was done, then why). A step the rules can't ground after
+                    // all goes to the planner online, with the history of what was already done (the router's escalation).
+                    return if (d.reasonClass == ACTION_FAILED) AgentDecision.CannotDo(ACTION_FAILED, (planSaid + d.detail).joinToString(" "))
+                        else AgentDecision.CannotDo(DEFER, "local plan stopped at \"$clause\": ${d.detail}")
+                }
+                else -> { plan = null; return d }
+            }
+        }
+    }
+
     /**
      * §6.1 — step 2 of a "read" accelerator. The AgentEngine records the tool's result message at the tail
      * of the last history line ("… ; <message>"), so lift it and speak it (the notifications, the matching
@@ -200,19 +299,7 @@ class LocalBrain : AgentBrain {
     }
 
     private fun speakToolResult(ctx: BrainContext): AgentDecision {
-        // History line: "name(args) → success [ch]; verified=X (detail); MESSAGE". The message follows the
-        // detail's ")" + "; ", so split there (robust to a message that itself contains "; ").
-        val last = ctx.history.lastOrNull().orEmpty()
-        // Strip the planner-only recovery hint the engine appends to a missed accelerator (Recovery.hint) —
-        // it must never be spoken to the user (same class as the §1.7 UNVERIFIED-prefix leak).
-        // The message starts after the verify detail's ")" — split at the FIRST "); " after "verified=", so a screen
-        // reading that itself contains "); " is spoken whole.
-        val v = last.indexOf("verified=")
-        val cut = if (v >= 0) last.indexOf("); ", v) else -1
-        val msg = (if (cut >= 0) last.substring(cut + 3) else if ("); " in last) last.substringAfterLast("); ") else last.substringAfterLast("; "))
-            .substringBefore(" — the '")
-            .removePrefix(AgentEngine.UNTRUSTED_MARK)   // J-07 planner-only marker, never spoken
-            .trim()
+        val msg = resultMessage(ctx.history.lastOrNull().orEmpty())
         return AgentDecision.Done(if (msg.isNotEmpty()) msg else doneLine)
     }
 
@@ -404,6 +491,9 @@ class LocalBrain : AgentBrain {
     private fun looksTwi(s: String): Boolean = TWI_HINT.containsMatchIn(s.lowercase())
     private fun greeting(): String = if (twi) "Mewɔ ha. Dɛn na wopɛ sɛ meyɛ?" else "I'm here. What would you like to do?"
 
+    /** A text to send, as heard: exactly one of [contact] / [number], the [message], and whether it goes by WhatsApp. */
+    data class Sms(val contact: String?, val number: String?, val message: String, val whatsApp: Boolean)
+
     companion object {
         /** Router-only reason classes (never surfaced verbatim to the user). */
         const val DEFER = "defer_local"
@@ -411,12 +501,73 @@ class LocalBrain : AgentBrain {
         /** The single tool this local intent needed failed. Not escalatable: the cloud would retry the same op. */
         const val ACTION_FAILED = "action_failed"
 
+        /**
+         * The spoken message of a tool result in the engine's history line
+         * ("name(args) → success [ch]; verified=X (detail); MESSAGE"), or "" — the message follows the verify detail's
+         * ")" + "; ": split at the FIRST "); " after "verified=", so a screen reading that itself contains "); " is spoken
+         * whole. The planner-only recovery hint (Recovery.hint) and the J-07 untrusted marker are stripped: they must
+         * never be spoken (same class as the §1.7 UNVERIFIED-prefix leak). Pure.
+         */
+        fun resultMessage(last: String): String {
+            val v = last.indexOf("verified=")
+            val cut = if (v >= 0) last.indexOf("); ", v) else -1
+            return (if (cut >= 0) last.substring(cut + 3) else if ("); " in last) last.substringAfterLast("); ") else last.substringAfterLast("; "))
+                .substringBefore(" — the '")
+                .removePrefix(AgentEngine.UNTRUSTED_MARK)
+                .trim()
+        }
+
         /** §1.3: the offline capability line spoken on an unmatched offline goal is generated HERE, from the
-         *  intents decide() actually handles — so we never advertise a capability (e.g. "check notifications")
-         *  that no local intent provides. Keep in sync with decide(). */
+         *  intents that actually work without internet — LocalBrain's own (decide()) plus the fast path's device
+         *  reads (time, battery) — so we never advertise a capability no offline intent provides. Keep in sync. */
         fun offlineCapabilities(): String =
-            "open apps, make calls, go back or to the home screen, scroll, change the volume, " +
-            "set an alarm or timer, and read your screen to you"
+            "open apps, make calls and send texts, read your screen and your notifications, set an alarm or timer, " +
+            "change the volume, tell you the time or battery, and go back or to the home screen"
+
+        /**
+         * N-09 — parse "text Ama saying …", "send a (WhatsApp) message to Ama that …", "send Ama a text saying …",
+         * "message 0244 123 456: …". A clear "saying / that says / to say" wins over a bare "that", so "text the man that
+         * fixed my car saying hi" keeps "the man that fixed my car" together. Null when there's no message, or the
+         * recipient part runs long (probably a mis-split — the planner gets it). Pure → unit-tested.
+         */
+        fun parseSms(raw: String): Sms? {
+            val s = raw.trim().trimEnd('.', '!').replace(Regex("\\s+"), " ")
+            val m = SMS_STRONG.firstNotNullOfOrNull { it.find(s) } ?: SMS_WEAK.firstNotNullOfOrNull { it.find(s) } ?: return null
+            var who = m.groupValues[1].trim().removePrefix("to ").trim()
+            var whatsApp = RE_VIA_WHATSAPP.containsMatchIn(s.substring(0, m.groups[2]!!.range.first))
+            RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
+            val msg = m.groupValues[2].trim().trim('"', '\'', '“', '”').replaceFirst(Regex("^(?i)that\\s+"), "").trim()
+            if (who.isEmpty() || msg.isEmpty() || who.split(' ').size > 4) return null
+            val digits = who.filter { it.isDigit() }
+            val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
+            return Sms(if (isNumber) null else who, if (isNumber) (if (who.trim().startsWith("+")) "+$digits" else digits) else null, msg, whatsApp)
+        }
+
+        /** N-09 — split a compound request into 2–4 clauses ("… and …", "… then …", "…; …", Twi "… na …"), or null. Pure. */
+        fun splitClauses(goal: String): List<String>? {
+            val parts = goal.trim().trimEnd('.', '!', '?').split(RE_CLAUSE_SPLIT)
+                .map { it.trim().trim(',').trim().replaceFirst(Regex("^(?i)(?:also|then|please)\\s+"), "").trim() }
+                .filter { it.isNotEmpty() }
+            return parts.takeIf { it.size in 2..com.tekyerema.core.config.AppConfig.int("router.localPlan.maxClauses", 4) }
+        }
+
+        /** After "open <app>": "read my (last) message(s)" / "read it" means the app's screen, not the notification shade. */
+        internal fun inAppClause(clause: String): String =
+            if (RE_READ_NOTIFS.containsMatchIn(clause.lowercase()) || RE_IN_APP_READ.containsMatchIn(clause)) "read the screen" else clause
+
+        /** Tools a local plan may use. No money, USSD, emergency, camera or install steps inside a compound request. */
+        private val PLAN_TOOLS = setOf("open_app", "key_event", "scroll", "swipe", "volume_up", "volume_down", "set_volume",
+            "read_screen", "read_state", "read_notifications", "set_alarm", "set_timer", "play_music", "open_setting",
+            "make_call", "send_sms", "search_contacts")
+        /** After "open <app>", only steps whose meaning doesn't change inside that app. */
+        private val IN_APP_TOOLS = setOf("open_app", "key_event", "scroll", "swipe", "volume_up", "volume_down", "set_volume",
+            "read_screen", "read_state", "set_alarm", "set_timer", "open_setting")
+
+        /** N-09: "what can you do?" — answered on the phone, the same online or off (no round trip for a fixed answer). */
+        fun capabilityAnswer(): String =
+            "I work your phone by voice. Even without internet I can " + offlineCapabilities() + ". " +
+            "With internet I can also answer questions, search the web, and do longer tasks inside apps like WhatsApp. " +
+            "What would you like?"
 
         // English + minimal Twi verb coverage. Twi: bue=open, frɛ=call, kenkan=read, san (kɔ)=back.
         // Natural-phrasing coverage (§A.3): fuzzy/paraphrase alternations, EN + Ghanaian-English + Twi,
@@ -460,6 +611,35 @@ class LocalBrain : AgentBrain {
         // than open a wrong app off a loose token match (§1.9). Deliberately excludes ambiguous words that DO
         // appear in app names ("play" → Play Store, "set" → Settings) to avoid false deferrals.
         private val RE_APP_HAS_VERB = Regex("\\b(send|message|reply|forward|dial|frɛ\\S*|kyerɛw\\S*)\\b", RegexOption.IGNORE_CASE)
+        // N-09 "what can you do?" and its everyday variants (whole utterance).
+        private val RE_CAPABILITIES = Regex("^(?:please\\s+)?(?:so\\s+)?(?:what\\s+(?:else\\s+)?(?:can|do)\\s+you\\s+do(?:\\s+for\\s+me)?|" +
+            "what\\s+are\\s+you\\s+able\\s+to\\s+do|what\\s+can\\s+i\\s+(?:ask|say\\s+to|tell)\\s+you|what\\s+can\\s+i\\s+(?:ask|say)|" +
+            "how\\s+(?:can|do)\\s+you\\s+help(?:\\s+me)?|what\\s+are\\s+your\\s+(?:abilities|capabilities|features|skills)|" +
+            "what\\s+do\\s+you\\s+do|tell\\s+me\\s+what\\s+you\\s+can\\s+do)$", RegexOption.IGNORE_CASE)
+        // N-09 a sender's messages: 1 = "what did <who> say/send", 2 = "(any|read|check) messages from <who>".
+        private val RE_FROM_WHO = Regex("^(?:please\\s+)?(?:what\\s+(?:did|has)\\s+(.+?)\\s+(?:say|send|write|text|message)(?:\\s+me)?|" +
+            "(?:any|read|check)\\s+(?:(?:new|my|the)\\s+)?(?:messages?|texts?)\\s+from\\s+(.+))$", RegexOption.IGNORE_CASE)
+        private val RE_PRONOUN = Regex("(?i)(?:he|she|they|him|her|them|it|you|someone|anyone|anybody|somebody)")
+        // A messaging app named in "read my WhatsApp messages" → read_notifications' filter.
+        private val RE_MSG_APP = Regex("\\b(whatsapp|telegram|messenger|signal|instagram|facebook|gmail|email|imo)\\b", RegexOption.IGNORE_CASE)
+        // N-09 send-a-text phrasings. Groups: 1 = recipient as heard, 2 = the message.
+        private const val SMS_NOUN = "(?:whatsapp\\s+)?(?:text(?:\\s+message)?|sms|message)"
+        private const val MARK_STRONG = "(?:\\s(?:saying|that\\s+says|which\\s+says|to\\s+say|and\\s+say|telling\\s+(?:him|her|them))\\s|:)"
+        private const val MARK_WEAK = "\\sthat\\s"
+        private fun smsPatterns(mark: String) = listOf(
+            Regex("^\\s*$LEADIN(?:send|write)\\s+(?:an?\\s+)?$SMS_NOUN\\s+to\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
+            Regex("^\\s*$LEADIN(?:send|write)\\s+(.+?)\\s+an?\\s+$SMS_NOUN\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
+            Regex("^\\s*$LEADIN(?:text|sms|message|whatsapp)\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE)
+        )
+        private val SMS_STRONG = smsPatterns(MARK_STRONG)
+        private val SMS_WEAK = smsPatterns(MARK_WEAK)
+        private val RE_VIA_WHATSAPP = Regex("\\bwhatsapp\\b", RegexOption.IGNORE_CASE)
+        private val RE_VIA_TAIL = Regex("\\s+(?:on|via|by|through|using|in|over)\\s+(whatsapp|sms|text)$", RegexOption.IGNORE_CASE)
+        // N-09 clause boundaries of a compound request. Twi "na" (and/then), but not after a question word ("dɛn na …").
+        private val RE_CLAUSE_SPLIT = Regex("\\s*[,;]?\\s*\\b(?:and\\s+then|and\\s+also|and|then|after\\s+that|afterwards)\\b\\s*|\\s*;\\s*|" +
+            "\\s(?<!(?:bɛn|bɛ|dɛn|hena|ɛhe|ehe|ben|den)\\s)na\\s", RegexOption.IGNORE_CASE)
+        // After "open <app>": "check my chats", "read the latest conversation".
+        private val RE_IN_APP_READ = Regex("^(?:read|check)\\s+(?:it|them|(?:the|my)\\s+(?:(?:last|latest|new|newest|recent|first|top)\\s+)?(?:chats?|messages?|conversations?))$", RegexOption.IGNORE_CASE)
         private val RE_BACK = Regex("^back\\b|\\b(go back|previous|san\\s+(kɔ|ko))\\b", RegexOption.IGNORE_CASE)
         private val RE_HOME = Regex("^home\\b|\\b(home screen|go home|home button|kɔ\\s+fie|san\\s+kɔ\\s+fie|fie)\\b", RegexOption.IGNORE_CASE)  // §P2.7 Twi "fie" = home [owner: verify]
         private val RE_RECENTS = Regex("\\b(recent apps|recents|switch apps|app switcher)\\b", RegexOption.IGNORE_CASE)

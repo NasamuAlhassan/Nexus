@@ -1,5 +1,7 @@
 package com.tekyerema.agent
 
+import com.tekyerema.core.OfflineReason
+
 /**
  * Hybrid online/offline router (directive §14/§36). One brain the engine talks to; internally it prefers
  * the on-device [LocalBrain] (fast path, works offline) and escalates to a cloud brain only when the local
@@ -11,6 +13,16 @@ package com.tekyerema.agent
  *        (sticky, so multi-step planning stays coherent);
  *      • offline (or no cloud) → refuse honestly: "I need an internet connection for that", or nudge the
  *        user toward a simpler local phrasing. Never silently fail, never fabricate (§12/§33).
+ *
+ * N-09 / N-10 / H-11 (overnight hybrid pass) — "online" means the internet ANSWERS, not that Android says connected:
+ *  - [isOnline] is stall-aware ([com.tekyerema.core.LinkHealth] via NetworkMonitor), and when the last evidence is bad
+ *    a quick [linkCheck] runs before a request is handed to the cloud — a dead link costs ~4 s, not a 35–80 s timeout;
+ *  - a cloud step that comes back NETWORK_LOST before anything was done on the phone is answered like offline;
+ *  - offline, the reply says what CAN be done: a recent answer to the same question ([AnswerCache], with its age),
+ *    an offer to answer a question when the internet is back ([OfflineQueue], only if the user says yes), opening the
+ *    app the request names, or the list of things that work offline;
+ *  - online, a question answered recently is answered again at once from the cache (no round trip, no quota);
+ *  - an optional on-device model ([LocalModelBrain], off by default, nothing bundled) gets one try offline.
  *
  * Pure of Android (connectivity is injected as [isOnline]) → unit-tested with fake brains.
  */
@@ -32,6 +44,19 @@ class RoutingBrain(
      *  task that names one, its FIRST step is to open it locally (no cloud round-trip); the cloud takes over
      *  from inside the app. Injected (needs PackageManager) so this class stays Android-free. */
     private val appForGoal: ((String) -> Pair<String, String>?)? = null,
+    /** N-10: when the link's last evidence is bad, is the internet answering right now? null = can't tell (JVM tests,
+     *  probing off) → trust [isOnline]. */
+    private val linkCheck: (suspend () -> Boolean?)? = { if (com.tekyerema.core.LinkHealth.suspect()) com.tekyerema.core.LinkProbe.check() else null },
+    /** Why the cloud can't be used — so the reply says "the internet isn't working" rather than "you're offline". */
+    private val offlineReason: () -> OfflineReason = { try { com.tekyerema.core.NetworkMonitor.offlineReason() } catch (_: Throwable) { OfflineReason.NONE } },
+    /** H-11: answers to recent questions (null = no cache). */
+    private val answers: AnswerCache? = AnswerCache.shared,
+    /** N-09: keep a question for when the internet is back (after the user said yes); false = couldn't. null = no queue. */
+    private val enqueue: ((String) -> Boolean)? = { OfflineQueue.add(it) },
+    /** N-09: is this goal already kept (i.e. this run IS the queued question being answered)? Then don't offer again. */
+    private val queued: (String) -> Boolean = { OfflineQueue.store.contains(it) },
+    /** C-04: optional on-device model for requests the rules don't match, used only without the cloud. */
+    private val localModel: AgentBrain? = LocalModelBrain.ifEnabled(),
     private val isOnline: () -> Boolean
 ) : AgentBrain {
 
@@ -44,6 +69,12 @@ class RoutingBrain(
             return last.contains("verified=false") || last.contains("verified=partial") ||
                 Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
         }
+
+        /** Reason class of a local request the offline router could not do (spoken detail differs by case). */
+        const val OFFLINE_UNKNOWN = "offline_unknown_command"
+
+        /** Tools that change nothing — a history of only these means nothing has been done on the phone yet. */
+        private val READ_ONLY_STEP = Regex("^(?:read_state|read_screen|read_all|read_notifications|web_search|find_tool|wait|ask_user)\\(")
     }
 
     @Volatile private var stickyCloud = false
@@ -51,6 +82,10 @@ class RoutingBrain(
     /** Q-02: did any step of this task go to the cloud operator? */
     val usedCloud: Boolean get() = stickyCloud
     @Volatile private var cloudGoal: String? = null   // cached (possibly translated) goal for the cloud
+    /** N-09: the question we offered to answer later; the user's reply comes back through ask_user. */
+    @Volatile private var offered: String? = null
+    /** C-04: the on-device model took this task — later steps finish with it. */
+    @Volatile private var stickyLocalModel = false
 
     private fun cloudCtx(ctx: BrainContext): BrainContext =
         cloudGoal?.takeIf { it != ctx.goal }?.let { ctx.copy(goal = it) } ?: ctx
@@ -60,6 +95,10 @@ class RoutingBrain(
         s.any { it in "ɛɔŋʋɩ" } || Regex("\\b(frɛ\\w*|bue\\w*|kɔ|sɛ|mepɛ|kenkan|nkra|aane|daabi|wopɛ)\\b", RegexOption.IGNORE_CASE).containsMatchIn(s)
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
+        // N-09: the user answered our "should I find out when the internet is back?" offer.
+        offered?.let { return answerOffer(ctx, it) }
+        if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
+
         // Cloud-first: hand EVERYTHING to the cloud brain (the relay = Claude), skipping LocalBrain. Sticky so
         // multi-step planning stays coherent; the (optional) Twi→English rewrite still runs once.
         // N-10: not on a weak connection — the on-device brain answers what it can there without a slow round-trip.
@@ -70,7 +109,7 @@ class RoutingBrain(
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = goalForCloud?.invoke(ctx.goal)?.takeIf { it.isNotBlank() }
         }
-        if (stickyCloud && cloud != null) return cloud.decide(cloudCtx(ctx))
+        if (stickyCloud && cloud != null) return fromCloud(ctx, cloud.decide(cloudCtx(ctx)))
 
         // C-17: the local brain's last step failed or didn't verify — a deviation from its routine plan. Hand the rest
         // of the task to the cloud operator (sticky) instead of letting the rules try the same thing again.
@@ -79,7 +118,7 @@ class RoutingBrain(
             android.util.Log.i("Tekyerema", "[ROUTE] local step deviated → escalating to cloud brain mid-task")
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
-            return cloud.decide(cloudCtx(ctx))
+            return fromCloud(ctx, cloud.decide(cloudCtx(ctx)))
         }
 
         val d = local.decide(ctx)
@@ -87,7 +126,12 @@ class RoutingBrain(
         if (!escalatable) return d   // CallTool / Done / a genuine local CannotDo
 
         val needsNet = (d as AgentDecision.CannotDo).reasonClass == LocalBrain.NETWORK
-        if (cloud != null && isOnline()) {
+        // H-11: the same question was answered a moment ago — say it again now (no round trip, no quota).
+        if (ctx.simple && ctx.history.isEmpty()) answers?.fresh(ctx.goal)?.let {
+            android.util.Log.i("Tekyerema", "[ROUTE] answered from the recent-answer cache")
+            return AgentDecision.Done(it)
+        }
+        if (cloud != null && isOnline() && linkAnswers()) {
             // Step one of a task about a named app: open it here — deterministic, ~0 ms instead of a round-trip.
             if (!stickyCloud && ctx.history.isEmpty()) appForGoal?.invoke(ctx.goal)?.let { (label, pkg) ->
                 if (ctx.screen.optString("app") != pkg) {
@@ -102,17 +146,96 @@ class RoutingBrain(
                 android.util.Log.i("Tekyerema", "[ROUTE] local ${d.reasonClass} '${com.tekyerema.core.Privacy.content(ctx.goal.take(60))}' → escalating to cloud brain")
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
-            return cloud.decide(cloudCtx(ctx))
+            return fromCloud(ctx, cloud.decide(cloudCtx(ctx)))
+        }
+        // C-04: no cloud right now — the optional on-device model gets one try at a request the rules didn't match.
+        if (!needsNet && localModel != null && ctx.history.isEmpty()) {
+            val m = localModel.decide(ctx)
+            if (m is AgentDecision.CallTool) {
+                android.util.Log.i("Tekyerema", "[ROUTE] offline → on-device model chose ${m.name}")
+                stickyLocalModel = true
+                return m
+            }
         }
         // offline or no cloud brain configured — never silently do nothing (§A.4), and this is a FAILURE,
         // not a completion, so it must be CannotDo → status CANNOT_DO in history, never COMPLETED (§1.2).
-        // The capability list is generated from the intents LocalBrain ACTUALLY handles (§1.3), so we never
-        // advertise something (e.g. "check notifications") that no offline intent provides.
-        return AgentDecision.CannotDo(
-            if (needsNet) "network_unavailable" else "offline_unknown_command",
-            if (needsNet) "I don't have internet, so I can't do that one right now."
-            else "I'm offline and I don't know that command yet. Offline I can " + LocalBrain.offlineCapabilities() + "."
-        )
+        return offlineReply(ctx, needsNet, lost = false)
+    }
+
+    /** The cloud's decision, with two N-09/H-11 touches: a direct answer is remembered; a lost connection before
+     *  anything was done on the phone is answered the offline way (cached answer / offer / what works offline). */
+    private fun fromCloud(ctx: BrainContext, d: AgentDecision): AgentDecision {
+        if (d is AgentDecision.Done && ctx.simple) answers?.put(ctx.goal, d.summary)
+        if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && nothingDoneYet(ctx.history)) {
+            android.util.Log.i("Tekyerema", "[ROUTE] the cloud couldn't be reached — answering the offline way")
+            stickyCloud = false
+            return offlineReply(ctx, needsNet = true, lost = true)
+        }
+        return d
+    }
+
+    private fun nothingDoneYet(history: List<String>): Boolean = history.all { READ_ONLY_STEP.containsMatchIn(it) }
+
+    /** The link's last evidence was bad → probe before waiting on a cloud call (N-10). No evidence → go ahead. */
+    private suspend fun linkAnswers(): Boolean {
+        val ok = try { linkCheck?.invoke() } catch (_: Throwable) { null }
+        if (ok == false) android.util.Log.w("Tekyerema", "[ROUTE] the internet isn't answering → staying on the phone")
+        return ok != false
+    }
+
+    /**
+     * What to say (or offer) when the cloud can't be used. Order: a recent answer to this very question; an offer to
+     * answer the question when the internet is back; opening the app the request names; what was done so far; the
+     * list of things that work offline. Always honest about WHY: offline, stalled, or no online assistant set up.
+     */
+    private fun offlineReply(ctx: BrainContext, needsNet: Boolean, lost: Boolean): AgentDecision {
+        val reason = if (lost) OfflineReason.STALLED else offlineReason()
+        val noCloud = cloud == null && reason == OfflineReason.NONE
+        val lead = when {
+            noCloud -> "No online assistant is set up"
+            reason == OfflineReason.STALLED -> "The internet isn't working right now"
+            else -> "I'm offline"
+        }
+        val reasonClass = if (needsNet) LocalBrain.NETWORK else OFFLINE_UNKNOWN
+        // H-11: an answer from earlier, with its age — better than nothing for "what's the dollar rate".
+        if (ctx.simple && ctx.history.isEmpty()) answers?.stale(ctx.goal)?.let { (answer, age) ->
+            return AgentDecision.Done("$lead, but when I checked ${AnswerCache.spokenAge(age)}: $answer")
+        }
+        // N-09: offer to answer it when the internet is back — only if the user says yes (C-13 ask_user).
+        if (needsNet && !noCloud && enqueue != null && ctx.history.isEmpty() &&
+            OfflineQueueStore.queueable(ctx.goal) && !queued(ctx.goal)) {
+            offered = ctx.goal
+            val q = "$lead, so I can't look that up. Should I find out when the internet is back?"
+            return AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", q), "offline: offer to answer later")
+        }
+        // Part of a compound task was done on the phone before it needed the internet.
+        if (ctx.history.isNotEmpty() && !nothingDoneYet(ctx.history))
+            return AgentDecision.CannotDo(reasonClass, "$lead, so I did the first part but can't finish the rest.")
+        // The request names an app: that much can be done without the internet.
+        if (ctx.history.isEmpty()) appForGoal?.let { f -> try { f(ctx.goal) } catch (_: Throwable) { null } }?.let { (label, pkg) ->
+            if (ctx.screen.optString("app") != pkg)
+                return AgentDecision.CannotDo(reasonClass, "$lead, so I can't do all of that. I can open $label and read the screen to you — say \"open $label\".")
+        }
+        return AgentDecision.CannotDo(reasonClass, when {
+            noCloud && needsNet -> "That needs the internet and an online assistant, which isn't set up. On the phone I can " + LocalBrain.offlineCapabilities() + "."
+            noCloud -> "I don't know that command yet, and no online assistant is set up. On the phone I can " + LocalBrain.offlineCapabilities() + "."
+            needsNet && reason == OfflineReason.STALLED -> "The internet isn't working right now, so I can't do that one. Offline I can still " +
+                LocalBrain.offlineCapabilities() + "."
+            needsNet -> "I don't have internet, so I can't do that one right now. Offline I can still " + LocalBrain.offlineCapabilities() + "."
+            else -> "$lead and I don't know that command yet. Offline I can " + LocalBrain.offlineCapabilities() + "."
+        })
+    }
+
+    /** N-09: the user's reply to the offer (the engine put it in history as `ask_user(…) → the user answered: "…"`). */
+    private fun answerOffer(ctx: BrainContext, goal: String): AgentDecision {
+        offered = null
+        val reply = Regex("the user answered: \"(.*)\"\\s*$").find(ctx.history.lastOrNull().orEmpty())?.groupValues?.get(1)
+        return when (OfflineQueueStore.yesNo(reply)) {
+            true -> if (enqueue?.invoke(goal) == true) AgentDecision.Done("Okay. I'll find out when the internet is back, and tell you.")
+                else AgentDecision.Done("Sorry, I'm already keeping as many questions as I can for later. Please ask again when the internet is back.")
+            false -> AgentDecision.Done("Okay, I won't.")
+            null -> AgentDecision.Done("Okay, I'll leave it for now.")   // unclear → keep nothing (the safe default)
+        }
     }
 
     private fun isWeak(): Boolean = try { com.tekyerema.core.NetworkMonitor.isWeak() } catch (_: Throwable) { false }
