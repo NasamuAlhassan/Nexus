@@ -1543,6 +1543,7 @@ object AgentEngine {
                         exploration.note(afterSnap)
                         futility.observed(afterSnap)
                         appSwitched = afterSnap?.appPackage != null && afterSnap.appPackage != before.appPackage
+                        if (appSwitched) noteAppSwitch(afterSnap)   // voice/AppNote.kt: "In WhatsApp."
                         log(LogEntry.Kind.VERIFY, if (vr.verified) "verified — ${vr.detail}"
                             else if (verdict == Progress.Verdict.PARTIAL) "PARTIAL — ${vr.detail}; but the screen moved on to $novel new item(s)"
                             else "NOT verified — ${vr.detail}")
@@ -2275,6 +2276,13 @@ object AgentEngine {
         val rawTree = try { controller?.takeIf { it.ready }?.buildSnapshot() } catch (t: Throwable) { null }
         if (rawTree != null && TargetSemantics.isCredentialScreen(rawTree)) return rawTree
         return Perception.observe(controller, wantVision)
+    }
+
+    /** Voice-UX (2026-09-29): tell the voice layer which app this run's step brought to the front (voice/AppNote.kt).
+     *  Outside runTask on purpose — that method sits near the JVM's 64 KB limit. */
+    private fun noteAppSwitch(snap: UiSnapshot?) {
+        val pkg = snap?.appPackage ?: return
+        _state.update { it.copy(appSwitch = AppSwitch(pkg, snap.appName, it.runSeq)) }
     }
 
     private fun setStatus(s: AgentStatus) = _state.update { it.copy(status = s) }

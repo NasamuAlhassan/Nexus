@@ -1172,7 +1172,11 @@ class VoiceController(
             AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED,
             AgentStatus.CANNOT_DO, AgentStatus.FAILED, AgentStatus.STOPPED
         )
-        val progressJob = if (speakAloud()) observerScope.launch { progressLoop(goal) } else null   // K-02
+        val runSeq = agent.state.value.runSeq   // this run (submitGoal numbers it synchronously)
+        val progressJob = if (speakAloud()) observerScope.launch {
+            launch { appNotes(runSeq) }   // Voice-UX 2026-09-29: "In WhatsApp." (voice/AppNote.kt)
+            progressLoop(goal)
+        } else null   // K-02
         val finalState: AgentUiState? = try {
             awaitAgent(goal, terminal) { st ->
                 when (st.status) {
@@ -1275,6 +1279,32 @@ class VoiceController(
                 lines++
             }
             kotlinx.coroutines.delay(interval)
+        }
+    }
+
+    /**
+     * Voice-UX (2026-09-29): when this run's step brings another app to the front, say where the phone is — "In WhatsApp."
+     * — once per app; the rules (never over a prompt or a PIN step, not in a quick task) are in [AppNote]. Runs beside
+     * [progressLoop] and is cancelled with it when the task ends.
+     */
+    private suspend fun appNotes(runSeq: Long) {
+        val notes = AppNote()
+        // A task that is over by now says it all in its result (this job is cancelled with it) — hold every note till then.
+        kotlinx.coroutines.delay(AppNote.MIN_TASK_MS)
+        val heldUntil = System.currentTimeMillis()
+        agent.state.collect { st ->
+            val sw = st.appSwitch?.takeIf { it.runSeq == runSeq } ?: return@collect
+            val now = agent.state.value
+            if (now.appSwitch != sw) return@collect   // it moved on again: the newer app is judged on its own
+            val lang = forceLanguage() ?: sessionLanguage()
+            val t = System.currentTimeMillis()
+            val line = notes.next(AppNote.Moment(sw.pkg, sw.name, taskMs = AppNote.MIN_TASK_MS + (t - heldUntil), nowMs = t,
+                agentWorking = now.status == AgentStatus.THINKING || now.status == AgentStatus.ACTING,
+                micFree = _state.value.state == VoiceState.EXECUTING && interjectJob?.isActive != true &&
+                    askJob?.isActive != true && confirmJob?.isActive != true && secureJob?.isActive != true,
+                secureStep = SecureStep.active()), lang == Lang.TWI) ?: return@collect
+            fillers?.stop()
+            try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
         }
     }
 
