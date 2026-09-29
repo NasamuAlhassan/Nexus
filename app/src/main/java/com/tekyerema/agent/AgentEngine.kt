@@ -700,7 +700,11 @@ object AgentEngine {
                         // RESULT is what gets SPOKEN — the reason class is for developers, not the user's ears.
                         log(LogEntry.Kind.INFO, "CANNOT DO [${decision.reasonClass}]")
                         log(LogEntry.Kind.RESULT, decision.detail)
-                        pushConvo("Tɛkyerɛma: ${decision.detail}")
+                        // A dropped connection is about THAT moment. Remembered word for word ("the internet isn't
+                        // working"), the model refused the next request on a working link (A20e, 2026-09-29).
+                        val netDrop = decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST
+                        pushConvo(if (netDrop) "Tɛkyerɛma: (that request didn't run — the connection dropped for a moment; " +
+                            "this says nothing about the connection now)" else "Tɛkyerɛma: ${decision.detail}")
                         finish(AgentStatus.CANNOT_DO, stats); return
                     }
                     is AgentDecision.Fail -> {
