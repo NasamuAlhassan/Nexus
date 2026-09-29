@@ -71,8 +71,9 @@ sealed class FastIntent(val name: String) {
     object TakePhoto : FastIntent("TAKE_PHOTO")
     /** E-21: take a selfie now with the front camera. */
     object TakeSelfie : FastIntent("TAKE_SELFIE")
-    /** E-14: play [query] (or an [artist]'s songs), in [app] when named; all null = "play some music". */
-    data class PlayMusic(val query: String?, val artist: String? = null, val app: String? = null) : FastIntent("PLAY_MUSIC")
+    /** E-14: play [query] (or an [artist]'s songs), in [app] when named; all null = "play some music". [collection] =
+     *  the user's own music — "downloads" | "liked" | "library" — never searched as words. */
+    data class PlayMusic(val query: String?, val artist: String? = null, val app: String? = null, val collection: String? = null) : FastIntent("PLAY_MUSIC")
     /** E-20: ask an AI assistant app ([app], e.g. ChatGPT) [question] and read back its answer. */
     data class AskApp(val app: String, val question: String) : FastIntent("ASK_APP")
     object CalendarToday : FastIntent("CALENDAR_TODAY")
@@ -545,8 +546,25 @@ object FastIntentClassifier {
     private val RE_PLAY_POSSESSIVE = Regex("^(?:please )?play (?:me )?(?:some )?(?:of )?(.+?)'s (?:songs|music|tracks|hits)(?: (?:on|in|with|using) ($MUSIC_APPS))?(?: please)?$")
     private val RE_PLAY_ON = Regex("^(?:please )?play (?:me )?(.+?) (?:on|in|with|using|from) ($MUSIC_APPS)(?: please)?$")
     private val RE_PLAY_ANY = Regex("^(?:please )?play (?:some |my )?music(?: please)?$")
+    /** The user's OWN music: "play my downloads on YouTube Music" was searched as the words "my downloads" and played a
+     *  stranger's song (A20e 2026-09-29). Group 1 = which collection, group 2 = the app. */
+    private val RE_PLAY_COLLECTION = Regex("^(?:please )?(?:play|shuffle|put on|start playing|start) (?:me )?(?:all )?(?:of )?" +
+        "(?:(?:some |the |all the )?(?:songs|music|tracks) (?:from|in|on) )?(?:my |the )?" +
+        "(downloads?|downloaded (?:songs|music|tracks)|(?:songs|music|tracks) (?:that )?i(?:'ve| have)? (?:downloaded|saved|liked)|" +
+        "offline (?:songs|music|tracks)|(?:music )?library|liked (?:songs|music|tracks)|likes|favou?rites|favou?rite (?:songs|music|tracks))" +
+        "(?: (?:on|in|from|using) ($MUSIC_APPS))?(?: please)?$")
+
+    /** "downloads" | "liked" | "library" for the words of [RE_PLAY_COLLECTION]'s first group. */
+    private fun collectionOf(words: String): String = when {
+        Regex("download|offline").containsMatchIn(words) -> "downloads"
+        Regex("lik|favou?rite").containsMatchIn(words) -> "liked"
+        else -> "library"
+    }
 
     private fun playMusic(g: String): FastIntent.PlayMusic? {
+        RE_PLAY_COLLECTION.matchEntire(g)?.let { m ->
+            return FastIntent.PlayMusic(null, null, m.groupValues[2].ifBlank { null }, collectionOf(m.groupValues[1]))
+        }
         RE_PLAY_BY.matchEntire(g)?.let { m -> return FastIntent.PlayMusic(null, m.groupValues[1].trim(), m.groupValues[2].ifBlank { null }) }
         RE_PLAY_POSSESSIVE.matchEntire(g)?.let { m -> return FastIntent.PlayMusic(null, m.groupValues[1].trim(), m.groupValues[2].ifBlank { null }) }
         RE_PLAY_ON.matchEntire(g)?.let { m ->

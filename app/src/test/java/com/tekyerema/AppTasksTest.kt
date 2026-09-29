@@ -316,6 +316,34 @@ class AppTasksTest {
         assertNull(c("play despacito on youtube"))   // a video → the agent, not a music intent
     }
 
+    /** Owner, A20e 2026-09-29: "play my downloads on YouTube Music" searched the words "my downloads" and played a
+     *  stranger's song. The user's own music is a collection to open, never a search. */
+    @Test fun the_users_own_music_is_a_collection_not_a_search() {
+        val yt = "youtube music"
+        assertEquals(FastIntent.PlayMusic(null, null, yt, "downloads"), c("Play my downloads on YouTube Music."))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "downloads"), c("play my downloads"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "downloads"), c("play my downloaded songs"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "downloads"), c("play the songs I downloaded"))
+        assertEquals(FastIntent.PlayMusic(null, null, "yt music", "downloads"), c("play songs from my downloads on YT Music"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "downloads"), c("shuffle my offline music"))
+        assertEquals(FastIntent.PlayMusic(null, null, yt, "liked"), c("play my liked songs on youtube music"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "liked"), c("play my favourites"))
+        assertEquals(FastIntent.PlayMusic(null, null, null, "library"), c("play my library"))
+        assertEquals(FastIntent.PlayMusic(null, null, yt, "downloads"), c("play my download on youtube music"))   // a dropped "s"
+        // Still a search / an artist, as before.
+        assertEquals(FastIntent.PlayMusic("sarkodie", null, yt), c("play sarkodie on youtube music"))
+        assertEquals(FastIntent.PlayMusic(null, "stonebwoy", null), c("play songs by Stonebwoy"))
+    }
+
+    @Test fun youtube_musics_library_tab_is_the_lowest_button_named_library() {
+        val s = snap("com.google.android.apps.youtube.music",
+            el("Library", top = 300), el("Home", top = 1368, left = 0, right = 180), el("Library", top = 1368, left = 540, right = 720),
+            el("Library", top = 1368, left = 540, right = 720, clickable = false))
+        val tab = PlayMusicTool.libraryTab(s)
+        assertEquals(1368, tab?.bounds?.top); assertEquals(540, tab?.bounds?.left); assertTrue(tab!!.clickable)
+        assertNull(PlayMusicTool.libraryTab(snap("com.google.android.apps.youtube.music", el("Home", top = 1368))))
+    }
+
     @Test fun fast_path_asks_assistant_apps_with_the_users_own_words() {
         assertEquals(FastIntent.AskApp("ChatGPT", "what is the capital of Ghana?"), c("Ask ChatGPT, what is the capital of Ghana?"))
         assertEquals(FastIntent.AskApp("ChatGPT", "who won the 2010 World Cup and where"), c("open chatgpt and ask it who won the 2010 World Cup and where"))

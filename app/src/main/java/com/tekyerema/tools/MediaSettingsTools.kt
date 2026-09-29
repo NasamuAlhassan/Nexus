@@ -62,7 +62,8 @@ object PlayMusicTool : Tool {
         ToolParam("artist", "string", "Artist.", required = false),
         ToolParam("app", "string", "Music app.", required = false),
         ToolParam("action", "string", "Default play.", required = false,
-            enumValues = listOf("play", "pause", "resume", "next", "previous", "stop"))
+            enumValues = listOf("play", "pause", "resume", "next", "previous", "stop")),
+        ToolParam("collection", "string", "The user's own music.", required = false, enumValues = listOf("downloads", "liked", "library"))
     )
 
     /** Pure (unit-tested): the spoken reply after a transport key, given what plays afterwards. */
@@ -82,6 +83,12 @@ object PlayMusicTool : Tool {
         val query = args.str("query")?.trim().orEmpty()
         val artist = args.str("artist")?.trim().orEmpty()
         if (action != "play") return transport(action, ctx)
+        args.str("collection")?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }?.let { c ->
+            val named = args.str("app")?.trim()?.lowercase().orEmpty()
+            if (named.isNotEmpty() && !Regex("youtube|you tube|yt").containsMatchIn(named))
+                return ToolResult(false, "I can only play your own downloads, likes or library in YouTube Music for now, not $named.", recoverable = false)
+            return playCollection(c, ctx)
+        }
         val appName = args.str("app")?.trim()?.takeIf { it.isNotEmpty() }
         val pkg = appName?.let { n ->
             when (val m = com.tekyerema.android.AppResolver.resolveDetailed(ctx.appContext, n)) {
@@ -130,10 +137,99 @@ object PlayMusicTool : Tool {
 
     private const val YT_MUSIC = "com.google.android.apps.youtube.music"
 
-    private suspend fun awaitPlaying(ctx: ToolContext, pkg: String?, timeoutMs: Long): MediaSessions.Track? {
+    /**
+     * "Play my downloads" / "my liked songs" / "my library": the user's OWN music, not a search. The owner's "play my
+     * downloads on YouTube Music" (A20e, 2026-09-29) was searched as the words "my downloads" and played a stranger's
+     * song. YouTube Music only: liked songs open from their own link (list=LM) and Play is pressed; downloads have no
+     * link, so the app is walked — full-screen player minimised, Library tab, the Downloads filter, Shuffle all. It never
+     * touches anything else on those pages (the "Smart downloads — Turn on" card included). Success = the player's own
+     * session reports playing.
+     */
+    private suspend fun playCollection(collection: String, ctx: ToolContext): ToolResult {
+        val label = when (collection) { "liked" -> "your liked songs"; "library" -> "your library"; else -> "your downloads" }
+        if (!isInstalled(ctx.appContext, YT_MUSIC))
+            return ToolResult(false, "I can play $label only in YouTube Music, and it isn't on this phone.", recoverable = false)
+        val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE, recoverable = false)
+        val wait = AppConfig.long("os.media.collectionWaitMs", 12_000L)
+        fun inApp(s: UiSnapshot) = s.appPackage == YT_MUSIC
+        val t0 = System.currentTimeMillis()
+        fun stage(what: String) = android.util.Log.i("Tekyerema", "[MUSIC] $collection: $what at ${System.currentTimeMillis() - t0} ms")
+        // What was already playing (maybe a search from a minute ago): only a DIFFERENT song, or a start from silence,
+        // proves the press worked.
+        val before = MediaSessions.playing(MediaSessions.current(ctx.appContext), YT_MUSIC)
+        if (collection == "liked") {
+            try {
+                ctx.appContext.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://music.youtube.com/playlist?list=LM"))
+                    .setPackage(YT_MUSIC).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (t: Throwable) { return ToolResult(false, "Couldn't open YouTube Music: ${t.javaClass.simpleName}", recoverable = true) }
+            val page = awaitScreen(ctrl, wait) { s -> inApp(s) && AppUi.has(s, "play") && AppUi.anyLabel(s, Regex("(?i)^liked music$")) }
+                ?: return ToolResult(false, "YouTube Music didn't open your liked songs.", recoverable = true, channel = "intent")
+            AppUi.preferClickable(AppUi.exact(page, "play"))?.let { ctrl.clickElement(it.id) }
+        } else {
+            val launch = ctx.appContext.packageManager.getLaunchIntentForPackage(YT_MUSIC)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                ?: return ToolResult(false, "YouTube Music can't be opened.", recoverable = false)
+            try { ctx.appContext.startActivity(launch) } catch (t: Throwable) {
+                return ToolResult(false, "Couldn't open YouTube Music: ${t.javaClass.simpleName}", recoverable = true)
+            }
+            val onLibrary: (UiSnapshot) -> Boolean = { x -> inApp(x) && x.elements.any { e -> e.label?.startsWith("Show downloads", true) == true } }
+            val settled: (UiSnapshot) -> Boolean = { x -> inApp(x) && (onLibrary(x) || libraryTab(x) != null || AppUi.has(x, "minimise", "minimize")) }
+            var s = awaitScreen(ctrl, wait, accept = settled) ?: awaitScreen(ctrl, 500L) { inApp(it) }
+                ?: return ToolResult(false, "YouTube Music didn't open.", recoverable = true)
+            stage("opened (library=${onLibrary(s)}, tab=${libraryTab(s) != null})")
+            // The full-screen player covers the tabs: put it away first.
+            AppUi.preferClickable(AppUi.exact(s, "minimise", "minimize"))?.let { m ->
+                ctrl.clickElement(m.id)
+                s = awaitScreen(ctrl, 4_000L) { x -> inApp(x) && (onLibrary(x) || libraryTab(x) != null) } ?: s
+            }
+            if (!onLibrary(s)) {
+                val tab = libraryTab(s) ?: return ToolResult(false, "I couldn't find the Library tab in YouTube Music.", recoverable = true, channel = "a11y")
+                pressElement(ctrl, tab, s) { awaitScreen(ctrl, 4_000L) { onLibrary(it) } != null }
+                s = awaitScreen(ctrl, wait) { onLibrary(it) }
+                    ?: return ToolResult(false, "YouTube Music's Library didn't open.", recoverable = true, channel = "a11y")
+                stage("library tab")
+            }
+            if (collection == "downloads") {
+                val chip = s.elements.firstOrNull { it.clickable && it.label?.startsWith("Show downloads", true) == true }
+                if (chip != null && chip.label?.contains("selected", true) != true) {
+                    ctrl.clickElement(chip.id)
+                    stage("downloads filter")
+                }
+                // The list loads a moment after the page (A20e: the page was read before it appeared and the tool said
+                // there were no downloads while "Downloaded songs · 3 songs" sat on the screen).
+                s = awaitScreen(ctrl, wait) { x -> AppUi.has(x, "downloaded songs") } ?: s
+                // "Downloaded songs" is the app's own playlist of exactly the downloads: open it and play THAT, so
+                // nothing that merely sits in the library (or was recently played) can start instead.
+                val list = AppUi.exact(s, "downloaded songs").firstOrNull()
+                    ?: return ToolResult(false, "I opened your downloads in YouTube Music, but there's no Downloaded songs list — there may be nothing downloaded yet.",
+                        recoverable = false, channel = "a11y")
+                pressElement(ctrl, list, s) { awaitScreen(ctrl, 4_000L) { x -> inApp(x) && !onLibrary(x) } != null }
+                s = awaitScreen(ctrl, wait) { x -> inApp(x) && !onLibrary(x) && AppUi.has(x, "shuffle", "play", "shuffle all", "play all") }
+                    ?: return ToolResult(false, "YouTube Music didn't open your Downloaded songs list.", recoverable = true, channel = "a11y")
+                stage("downloaded songs list")
+            }
+            val go = AppUi.preferClickable(AppUi.exact(s, "shuffle", "shuffle all")) ?: AppUi.preferClickable(AppUi.exact(s, "play", "play all"))
+                ?: return ToolResult(false, "I opened $label in YouTube Music, but there was no Play or Shuffle button.", recoverable = false, channel = "a11y")
+            ctrl.clickElement(go.id)
+            stage("pressed '${go.label}'")
+        }
+        val playing = awaitPlaying(ctx, YT_MUSIC, wait) { t -> before == null || t != before }
+        stage(if (playing != null) "playing" else "not playing")
+        return if (playing != null) ToolResult(true, "Playing $label in YouTube Music. Now playing ${MediaSessions.words(playing) ?: "your music"}.",
+            JSONObject().put("playing", true).put("collection", collection), channel = "a11y")
+        else ToolResult(false, "I opened $label in YouTube Music and pressed play, but nothing is playing yet.",
+            JSONObject().put("playing", false), recoverable = false, channel = "a11y")
+    }
+
+    /** YouTube Music's Library tab: its label is hidden (zero-size) in the tree, so it is the tab button whose label
+     *  names it (the snapshot gives such a button its child's label), lowest on screen. Pure. */
+    internal fun libraryTab(s: UiSnapshot): com.tekyerema.accessibility.UiElement? =
+        s.elements.filter { it.clickable && it.label?.trim().equals("library", true) && !it.bounds.isEmpty() }.maxByOrNull { it.bounds.top }
+
+    private suspend fun awaitPlaying(ctx: ToolContext, pkg: String?, timeoutMs: Long,
+                                     accept: (MediaSessions.Track) -> Boolean = { true }): MediaSessions.Track? {
         val end = System.currentTimeMillis() + timeoutMs
         while (true) {
-            MediaSessions.playing(MediaSessions.current(ctx.appContext), pkg)?.let { return it }
+            MediaSessions.playing(MediaSessions.current(ctx.appContext), pkg)?.takeIf(accept)?.let { return it }
             if (System.currentTimeMillis() >= end) return null
             kotlinx.coroutines.delay(500L)
         }

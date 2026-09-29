@@ -182,6 +182,22 @@ class BrainLogicTest {
         assertTrue((d2 as AgentDecision.Done).summary.contains("Wi-Fi"))
     }
 
+    /** Owner, A20e 2026-09-29: "play the playlist on the screen right now" was answered with a description of YouTube
+     *  — "on the screen" alone meant "read it". Doing something WITH the screen goes to the planner. */
+    @Test fun an_action_on_something_on_screen_is_not_a_screen_reading() = runBlocking {
+        for (g in listOf("Play the playlist on the screen right now.", "Play the playlist, you can see on my screen right now.",
+                         "can you play the video on my screen", "tap the first song on the screen",
+                         "what's on my screen? play it", "open the link on my screen")) {
+            assertFalse(g, LocalBrain.isScreenRead(g.lowercase()))
+            val d = decide(LocalBrain(), g)
+            assertFalse("$g → $d", d is AgentDecision.CallTool && d.name == "read_state")
+        }
+        for (g in listOf("what's on my screen", "what is on the screen?", "read the screen", "read my screen please",
+                         "describe the screen", "what am I looking at", "what do you see", "which app am I in",
+                         "tell me what is on my screen"))
+            assertTrue(g, LocalBrain.isScreenRead(g.lowercase()))
+    }
+
     @Test fun local_read_screen_speaks_app_name_not_package() = runBlocking {
         val home = screenWith("At a glance").put("app", "com.google.android.apps.nexuslauncher").put("appName", "the home screen")
         val b = LocalBrain()

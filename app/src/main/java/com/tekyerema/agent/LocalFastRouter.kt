@@ -117,6 +117,7 @@ class LocalFastRouter(
             ?: media(KeyEvent.KEYCODE_MEDIA_PREVIOUS, intent, "Previous.")
         is FastIntent.PlayMusic -> runTool("play_music", org.json.JSONObject().apply {
             intent.query?.let { put("query", it) }; intent.artist?.let { put("artist", it) }; intent.app?.let { put("app", it) }
+            intent.collection?.let { put("collection", it) }
         }, action = true)
 
         FastIntent.Back -> global("back", intent, "Went back.")
@@ -226,7 +227,7 @@ class LocalFastRouter(
         is FastIntent.Ringer -> "put the phone on ${intent.mode}"
         FastIntent.Screenshot -> "took a screenshot"; FastIntent.PowerMenu -> "opened the power menu"; FastIntent.TakePhoto -> "took a photo"
         FastIntent.TakeSelfie -> "took a selfie"
-        is FastIntent.PlayMusic -> "played ${intent.query ?: intent.artist ?: "music"}${intent.app?.let { " on $it" } ?: ""}"
+        is FastIntent.PlayMusic -> "played ${intent.collection?.let { if (it == "liked") "your liked songs" else "your $it" } ?: intent.query ?: intent.artist ?: "music"}${intent.app?.let { " on $it" } ?: ""}"
         is FastIntent.AskApp -> "asked ${intent.app} a question"
         is FastIntent.Preference -> "changed how I ${if (intent.key == "patience") "listen" else "speak"}"
         is FastIntent.Magnify -> "changed the screen magnification"

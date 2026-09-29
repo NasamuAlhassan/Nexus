@@ -22,6 +22,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.tekyerema.agent.AgentEngine
 import com.tekyerema.core.Sanitize
+import com.tekyerema.core.Injection
 import com.tekyerema.settings.Settings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -329,7 +330,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             visited++
             val rawLabel = rawLabelOf(node)
             if (Sanitize.hadHiddenContent(rawLabel)) stripped++
-            val label = Sanitize.label(rawLabel)
+            val label = Sanitize.label(rawLabel) ?: if (node.isClickable && node.isVisibleToUser) captionOf(node) else null
             val hasRange = try { node.rangeInfo != null } catch (t: Throwable) { false }
             val clickable = node.isClickable || ancestorClickable
             val longClickable = node.isLongClickable
@@ -463,6 +464,33 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // Empty editable fields expose their placeholder via hintText (e.g. a compose box's "Message").
         try { n.hintText?.toString()?.takeIf { it.isNotBlank() }?.let { return it } } catch (t: Throwable) {}
         return null
+    }
+
+    /**
+     * A name for a visible button that has none of its own: the caption of its first labelled child or grandchild,
+     * even one drawn at zero size. YouTube Music's bottom tabs are unlabeled containers whose "Home"/"Library" text is
+     * zero-size (A20e 2026-09-29), so "open the Library tab" had nothing to press. Only a caption that is NOT itself
+     * listed (a visible one already is — a row must not appear twice), only a SHORT one (a word or two, ≤ 30 chars),
+     * and none with instruction-like wording — a hidden paragraph can't ride in on a button this way.
+     */
+    private fun captionOf(n: AccessibilityNodeInfo): String? {
+        var seenVisible = false
+        fun look(p: AccessibilityNodeInfo, depth: Int): String? {
+            for (i in 0 until minOf(p.childCount, 4)) {
+                val c = try { p.getChild(i) } catch (_: Throwable) { null } ?: continue
+                val t = Sanitize.label(c.text?.toString()?.takeIf { it.isNotBlank() } ?: c.contentDescription?.toString())
+                if (t != null) {
+                    val r = Rect(); c.getBoundsInScreen(r)
+                    if (c.isVisibleToUser && r.width() > 0 && r.height() > 0) { seenVisible = true; return null }
+                    return t
+                }
+                if (depth < 2) look(c, depth + 1)?.let { return it }
+                if (seenVisible) return null
+            }
+            return null
+        }
+        return try { look(n, 1) } catch (_: Throwable) { null }
+            ?.trim()?.takeIf { it.length in 1..30 && Injection.detect(it) == null }
     }
 
     private fun collectionHint(n: AccessibilityNodeInfo): String? = try {

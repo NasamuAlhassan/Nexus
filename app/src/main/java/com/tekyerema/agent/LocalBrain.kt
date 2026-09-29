@@ -96,7 +96,7 @@ class LocalBrain : AgentBrain {
         //     ("open WhatsApp and read my messages" — offline too); otherwise the cloud operator plans them. ---
         if (RE_MULTISTEP.containsMatchIn(g)) {
             startPlan(ctx)?.let { return it }
-            if (!RE_READ_SCREEN.containsMatchIn(g)) return defer("multi-step request")
+            if (!isScreenRead(g)) return defer("multi-step request")
         }
 
         // --- greetings / acknowledgements → speak, don't operate ---
@@ -119,7 +119,7 @@ class LocalBrain : AgentBrain {
         }
 
         // --- read the screen ---
-        if (RE_READ_SCREEN.containsMatchIn(g)) { pendingRead = true; return call("read_state", JSONObject(), "read the current screen") }
+        if (isScreenRead(g)) { pendingRead = true; return call("read_state", JSONObject(), "read the current screen") }
 
         // --- navigation keys ---
         matchKey(g)?.let { key -> doneLine = keyDone(key); return call("key_event", JSONObject().put("key", key), "navigation: $key") }
@@ -664,6 +664,21 @@ class LocalBrain : AgentBrain {
         // §P2.4 named track: "play <track>". The last group is the track query.
         private val RE_PLAY_TRACK = Regex("^\\s*$LEADIN(?:play|bɔ)\\s+(?:me\\s+|some\\s+)?(.+)$", RegexOption.IGNORE_CASE)
         private val RE_ON_APP = Regex("\\bon\\s+(youtube|yutu\\S*|spotify|boomplay|audiomack|tiktok|instagram|soundcloud|apple\\s+music)\\b", RegexOption.IGNORE_CASE)
+        /**
+         * A request to DO something with what is on the screen is an action, not a request to hear the screen: the
+         * owner's "play the playlist on the screen right now" and "play the playlist you can see on my screen" (A20e
+         * 2026-09-29) were both answered with a description of YouTube, because "on my screen" alone meant "read it".
+         * An action verb opening the request, or opening any clause of it, hands it to the planner.
+         */
+        private val RE_ACTION_CLAUSE = Regex("(?:^|[.,;!?]\\s*|\\b(?:and|then|so|now)\\s+)(?:(?:please|kindly|just|now|ok(?:ay)?|can you|could you|would you|will you|i want you to|help me)\\s+)*" +
+            "(?:play|tap|click|press|hit|open|select|choose|pick|start|watch|download|save|send|share|forward|delete|remove|like|" +
+            "subscribe|follow|add|turn|switch|go to|scroll to|close|stop|pause|skip|call|reply|install|uninstall|buy|book|join|" +
+            "shuffle|put on|copy|paste|type|write|enter|fill|accept|decline|allow|answer|update|sign|log|clear|mute|unmute|zoom)\\b",
+            RegexOption.IGNORE_CASE)
+
+        /** "What's on my screen?" / "read the screen" — and not "play the playlist on my screen". Pure. */
+        internal fun isScreenRead(g: String): Boolean = RE_READ_SCREEN.containsMatchIn(g) && !RE_ACTION_CLAUSE.containsMatchIn(g)
+
         private val RE_READ_SCREEN = Regex("\\b(what('?s| is| am i)\\b.*\\b(screen|looking at|showing|open)|on\\s+(my|the)\\s+screen|read (the|my) screen|describe (the|my) screen|what do you see|kenkan|(which|what) app am i (in|on|using))\\b", RegexOption.IGNORE_CASE)
         private val RE_GREET = Regex("^\\s*(hi|hello|hey|good (morning|afternoon|evening)|thanks|thank you|akwaaba|medaase)\\s*[.!]*\\s*$", RegexOption.IGNORE_CASE)
         // Compound requests → the local fast path only does ONE action, so hand these to the cloud planner
