@@ -318,6 +318,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         var stripped = 0
         val maxVisited = 1200
         val maxCollected = 220
+        val maxDepth = com.tekyerema.core.config.AppConfig.int("perception.tree.maxDepth", 60).coerceIn(10, 120)
 
         // Each stack entry carries whether an ancestor is clickable, so "tap-able via parent" is
         // known without walking parent chains (every getParent() is an IPC round trip).
@@ -374,7 +375,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                     stripped++ // labelled but invisible/off-screen: treated as a hidden channel
                 }
             }
-            if (depth < 25) {
+            // Depth 60, not 25: Compose apps nest deeply — ChatGPT's message box sits 35 levels down (A20e 2026-09-29),
+            // so the app looked like it had no text box at all. The visit budget above still bounds the walk; and an
+            // invisible node's subtree (a closed drawer, an off-screen page) is skipped so it can't use that budget up.
+            if (depth < maxDepth && (depth == 0 || node.isVisibleToUser)) {
                 val childClickable = node.isClickable || ancestorClickable
                 for (i in node.childCount - 1 downTo 0) {
                     val c = try { node.getChild(i) } catch (t: Throwable) { null }

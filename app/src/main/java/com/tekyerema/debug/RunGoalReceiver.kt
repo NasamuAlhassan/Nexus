@@ -130,7 +130,7 @@ class RunGoalReceiver : BroadcastReceiver() {
                 try {
                     val snap = AgentEngine.currentController()?.buildSnapshot()
                     Log.i("Tekyerema", "[SCREEN] app=${snap?.appPackage} name=${snap?.appName} title=${snap?.screenTitle} n=${snap?.elements?.size} " +
-                        "compactJsonChars=${snap?.toCompactJson()?.toString()?.length}")
+                        "compactJsonChars=${snap?.toCompactJson()?.toString()?.length} truncated=${snap?.truncated}")
                     snap?.toCompactJson()?.toString()?.chunked(3000)?.forEach { Log.d("Tekyerema", "[SCREEN-JSON] $it") }
                     snap?.elements?.forEach { e ->
                         Log.i("Tekyerema", "[SCREEN] #${e.id} ${e.role} '${e.label?.take(50)}'" +
