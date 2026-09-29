@@ -43,6 +43,20 @@ object MoMoSendTool : Tool {
 
     private const val TAG = "Tekyerema"
 
+    /**
+     * What is wrong with a recipient number, or null when it is a Ghana mobile number (10 digits from 0; "233…" folds
+     * to 0…). A judge's spoken numbers came through as 7, 9 and 11 digits (A20e 2026-09-29) — a misheard number must
+     * be said again before any read-back, never confirmed and dialled. The text goes back to the planner and the user.
+     */
+    internal fun numberProblem(raw: String?): String? {
+        var d = raw?.filter { it.isDigit() }.orEmpty()
+        if (d.length == 12 && d.startsWith("233")) d = "0" + d.substring(3)
+        if (d.length == 10 && d.startsWith("0")) return null
+        if (d.isEmpty()) return "I don't have the recipient's number yet — ask the user for it."
+        return "I heard the number ${d.toList().joinToString(" ")} — that's ${d.length} digits, and a Ghana mobile number has 10 " +
+            "starting with 0. Ask the user to say it again slowly, or to type it."
+    }
+
     private fun operatorOf(ctx: ToolContext): String? {
         val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
         return tm?.simOperatorName?.ifBlank { tm.simOperator } ?: tm?.simOperator
@@ -52,6 +66,7 @@ object MoMoSendTool : Tool {
      *  network it refuses BEFORE the confirmation, so the planner falls back to the guided mobile_money menu —
      *  it used to fire MTN's key sequence into AirtelTigo/Telecel's *110# menu. */
     override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        numberProblem(args.str("number"))?.let { return ToolResult(false, it, recoverable = true) }
         val op = operatorOf(ctx)
         val net = GhanaMobileMoney.network(op)
             ?: return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't drive Mobile Money automatically.", recoverable = true)

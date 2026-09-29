@@ -149,4 +149,21 @@ class AsrAccuracyTest {
     @Test fun twi_call_verb_is_a_name_slot() {
         assertEquals("frɛ Kwame", fix("frɛ Kwami"))
     }
+
+    /** Owner's voice, A20e 2026-09-29: "Prince" was written "prints" / "print" every time, in English and in Twi. */
+    @Test fun prince_heard_as_prints_is_prince_where_a_person_is_named() {
+        assertEquals(PhoneticKey.of("Prince"), PhoneticKey.of("prints"))
+        assertEquals(PhoneticKey.of("Prince"), PhoneticKey.of("print"))
+        assertEquals("Switch the account on YouTube to Prince.", fix("Switch the account on YouTube to prints."))
+        assertEquals("Suis the account on YouTube to Prince.", fix("Suis the account on YouTube to prints."))
+        assertEquals("Bue whatsapp ne ka kyerɛ Prince sɛ ɔmbre fie.", fix("Bue whatsapp ne ka kyerɛ print sɛ ɔmbre fie."))
+        assertEquals("send a message to Prince", fix("send a message to prints"))
+        assertEquals("call Prince", fix("call prints"))
+        // Not a person slot → a print stays a print.
+        assertEquals("print the document", fix("print the document"))
+        assertEquals("go to prints", fix("go to prints"))
+        // Other names keep their keys apart.
+        assertTrue(PhoneticKey.of("Grant") != PhoneticKey.of("Grace"))
+        assertTrue(PhoneticKey.of("Prince") != PhoneticKey.of("Priscilla"))
+    }
 }

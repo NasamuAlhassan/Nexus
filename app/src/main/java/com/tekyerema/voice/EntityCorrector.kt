@@ -41,6 +41,9 @@ object PhoneticKey {
         s = s.replace("tch", "ch").replace("ph", "f").replace("gh", "g").replace("ck", "k").replace("qu", "kw")
             .replace("q", "k").replace("x", "ks").replace("dj", "j").replace("dz", "j").replace("th", "t")
             .replace("wh", "w").replace("ky", "ch").replace("hy", "sh")
+        // A final "-nce" is said "-ns", and Whisper-tiny writes it "-nt"/"-nts": the owner's "Prince" came out "prints"
+        // and "print" every time (A20e 2026-09-29, in English and inside Twi). One ending, one key.
+        s = s.replace(Regex("n(?:ts|t|ce|se|s)$"), "ns")
         val sb = StringBuilder(s.length)
         for (i in s.indices) {
             val c = s[i]
@@ -127,7 +130,10 @@ object EntityCorrector {
 
     // Name slots. A person follows these verbs; "to"/"for"/"from" introduce a person only in a sending/reading request.
     private val CONTACT_VERBS = setOf("call", "ring", "phone", "dial", "message", "text", "sms", "email", "tell", "ask",
-        "frɛ", "fre")   // Twi "frɛ" = call [owner: verify with a native speaker]
+        "frɛ", "fre",   // Twi "frɛ" = call [owner: verify with a native speaker]
+        "kyerɛ", "kyere")   // Twi "ka kyerɛ X" = tell X (the owner's "ka kyerɛ print sɛ …" = tell Prince that …)
+    /** "switch the account to Prince": after "account", "to" names the account's owner — a person on this phone. */
+    private val ACCOUNT_WORDS = setOf("account", "accounts")
     private val PERSON_PREPS = setOf("to", "for", "from")
     private val SEND_VERBS = setOf("send", "sent", "give", "transfer", "pay", "forward", "buy", "message", "text",
         "messages", "texts", "reply", "write", "email", "sms", "calls", "call", "read")
@@ -160,6 +166,7 @@ object EntityCorrector {
         val cores = words.map(::core)
         val fixes = ArrayList<Fix>()
         var sendSeen = false
+        var accountSeen = false
         var i = 0
         while (i < words.size) {
             val c = cores[i]
@@ -167,9 +174,11 @@ object EntityCorrector {
                 c in APP_VERBS -> Kind.APP
                 c in CONTACT_VERBS -> Kind.CONTACT
                 c in PERSON_PREPS && sendSeen -> Kind.CONTACT
+                c == "to" && accountSeen -> Kind.CONTACT
                 else -> null
             }
             if (c in SEND_VERBS) sendSeen = true
+            if (c in ACCOUNT_WORDS) accountSeen = true
             if (kind == null) { i++; continue }
             // the slot starts after fillers ("open THE app …", "send it TO MY …")
             var s = i + 1

@@ -146,7 +146,7 @@ class LocalBrain : AgentBrain {
         if (g.contains("airtime") || g.contains("top up") || g.contains("top-up") || g.contains("recharge"))
             buyAirtimeDecision(raw)?.let { return it }
         if ((g.contains("send") || g.contains("transfer") || g.contains("fa")) &&
-            (g.contains("money") || g.contains("cedi") || g.contains("pesewa") || g.contains("momo") || g.contains("mobile money") || g.contains("sika")))
+            (g.contains("money") || g.contains("cash") || g.contains("cedi") || g.contains("pesewa") || g.contains("momo") || g.contains("mobile money") || g.contains("sika")))
             sendMoneyDecision(raw)?.let { return it }
 
         // --- §A.2 play music (generic/local); §P2.4 also a named track against the local library. A track on
@@ -444,17 +444,30 @@ class LocalBrain : AgentBrain {
     /** §A.2 — send money: needs an amount AND a recipient (after "to"/Twi "ma"); opens the menu, user does PIN. */
     private fun sendMoneyDecision(raw: String): AgentDecision? {
         val canon = Normalizer.normalize(raw, if (twi) Lang.TWI else Lang.GH_EN)
-        val amountCedis = parseCediAmount(canon) ?: return null
         val marker = Regex("\\b(to|ma)\\b", RegexOption.IGNORE_CASE).find(canon) ?: return null
-        val after = canon.substring(marker.range.last + 1).trim().trimEnd('.', '!', '?')
+        var after = canon.substring(marker.range.last + 1).trim().trimEnd('.', '!', '?')
+        // The amount is a number BEFORE "to" ("send 5 cedis to …") or one that carries a currency word after it ("to
+        // 024… 5 cedis") — never the first digits of the sentence: "Send money to 0553238" became "Send 553238 cedis to
+        // 0553238" (A20e 2026-09-29; the read-back caught it). No amount → not decided here; the planner asks.
+        val amountCedis = moneyAmount(canon.substring(0, marker.range.first))?.let { parseCediAmount(it) }
+            ?: RE_CURRENCY_AMOUNT.find(after)?.let { m -> after = after.removeRange(m.range).trim(); parseCediAmount(m.value) }
+            ?: return null
         if (after.isEmpty()) return null
         // reference: after "for"/"reference"/"ref"/"narration". Split it off FIRST so its digits can't pollute
         // the recipient number (e.g. "for order 5").
         val refMark = Regex("\\b(?:for|reference|ref|narration|remark)\\b", RegexOption.IGNORE_CASE).find(after)
         val recipientPart = refMark?.let { after.substring(0, it.range.first) } ?: after
         val reference = refMark?.let { after.substring(it.range.last + 1).trim(':', ' ', '.', '!', '?') }?.takeIf { it.isNotBlank() }
-        val digits = recipientPart.filter { it.isDigit() }
-        if (digits.length >= 7) {
+        val digits = ghanaMobile(recipientPart.filter { it.isDigit() })
+        if (digits.length >= 7 && digits.length != 10) {
+            // A Ghana mobile number is 10 digits. A short or long one is a mishearing (or a number said in two
+            // breaths) — say what was heard and ask again; never walk *170# with it.
+            val spoken = digits.toList().joinToString(" ")
+            // English in both languages until a native speaker writes the Twi line.
+            return AgentDecision.Done("I heard the number $spoken — that's ${digits.length} digits, and a Ghana mobile number has 10. " +
+                "Please say the number again.")
+        }
+        if (digits.length == 10) {
             // Deterministic *170# driver: it reads each menu screen and stops at the PIN. The TIER3 confirmation
             // reads the CEDI amount + number back FIRST, so a units mistake (pesewa vs cedi) is caught before it runs.
             val args = JSONObject().put("number", digits).put("amount", amountCedis)
@@ -470,6 +483,16 @@ class LocalBrain : AgentBrain {
         doneLine = if (twi) "Mabue Mobile Money." else "Opened Mobile Money."
         return call("mobile_money", args, "send money")
     }
+
+    /** The amount said before the recipient ("send 5 cedis to …"): a number that is not phone-like (no leading 0 on 3+
+     *  digits, fewer than 7 digits) — the words and currency around it are kept for [parseCediAmount]. Pure. */
+    private fun moneyAmount(before: String): String? =
+        Regex("(?<![\\d.])\\d+(?:\\.\\d{1,2})?(?![\\d])").findAll(before.replace(",", ""))
+            .firstOrNull { m -> val d = m.value.substringBefore('.'); d.length < 7 && !(d.length >= 3 && d.startsWith("0")) }
+            ?.let { m -> before.replace(",", "").substring(m.range.first) }
+
+    /** "+233 24…" / "233 24…" → "024…"; anything else as it is. */
+    private fun ghanaMobile(d: String): String = if (d.length == 12 && d.startsWith("233")) "0" + d.substring(3) else d
 
     /** Parse a cedi amount, converting pesewas → cedis (10 pesewas → "0.1"). Guards the worst-harm error:
      *  entering "10" for "10 pesewas" would send 10 CEDIS (100×). "cedi(s)" or a bare number stays as cedis. */
@@ -660,6 +683,8 @@ class LocalBrain : AgentBrain {
         private val RE_TAP = Regex("^\\s*(tap|click|press|select|choose|hit)\\s+(on\\s+)?(.+)$", RegexOption.IGNORE_CASE)
         // §A.2 — generic/local music only ("play music", "play my music", "play a song"); a named track on a
         // specific app ("play X on youtube") does NOT match and defers to the cloud planner.
+        /** An amount that names its currency: "5 cedis", "2.50 GHS", "GH₵ 10", "50 pesewas". */
+        private val RE_CURRENCY_AMOUNT = Regex("(?i)(?:(?:gh₵|₵|ghs)\\s*\\d+(?:\\.\\d{1,2})?|(?<![\\d.])\\d+(?:\\.\\d{1,2})?\\s*(?:ghana\\s+)?(?:cedis?|pesewas?|ghs|gh₵)\\b)")
         private val RE_PLAY_MUSIC = Regex("^\\s*$LEADIN(?:play|bɔ|to)\\s+(?:me\\s+|some\\s+|my\\s+)?(?:music|songs?|nnwom|a\\s+song)\\s*$", RegexOption.IGNORE_CASE)
         // §P2.4 named track: "play <track>". The last group is the track query.
         private val RE_PLAY_TRACK = Regex("^\\s*$LEADIN(?:play|bɔ)\\s+(?:me\\s+|some\\s+)?(.+)$", RegexOption.IGNORE_CASE)

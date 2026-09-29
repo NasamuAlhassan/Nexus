@@ -57,6 +57,12 @@ class VoiceW3Test {
         assertTrue(TurnDetector.looksUnfinished("read my messages and,"))
         for (done in listOf("call her", "turn the torch on", "read my message", "who is that", "open WhatsApp", "call"))
             assertFalse(done, TurnDetector.looksUnfinished(done))
+        // A judge's session (A20e 2026-09-29): the number came in pieces — a phone number's start is a pause, not the end.
+        for (cut in listOf("Send money to 055.", "call 055 323", "send 5 cedis to 0553238", "call +233 24"))
+            assertTrue(cut, TurnDetector.looksUnfinished(cut))
+        for (done in listOf("call 0552093690", "send 5 cedis to 0244123456.", "set a timer for 5", "turn the volume to 10",
+                            "call +233 24 412 3456", "what is 20 plus 30"))
+            assertFalse(done, TurnDetector.looksUnfinished(done))
         assertTrue(TurnDetector.isHold("Wait."))
         assertTrue(TurnDetector.isHold("hold on please"))
         assertTrue(TurnDetector.isHold("Twɛn kakra"))

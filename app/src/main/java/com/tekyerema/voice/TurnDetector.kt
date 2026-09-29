@@ -27,10 +27,18 @@ object TurnDetector {
     private fun norm(text: String) = text.lowercase().replace(Regex("[^\\p{L}\\p{N}ɛɔ'\\s,]"), " ")
         .replace(Regex("\\s+"), " ").trim()
 
+    /** A request that ends in the START of a Ghana phone number — "send money to 055", "call 055 323" — was a pause
+     *  between digit groups, not the end (a judge's session, A20e 2026-09-29: the number arrived in pieces). */
+    private val RE_PARTIAL_NUMBER = Regex("(?:^|\\s)((?:\\+?233|0)[\\d\\s-]*)$")
+
     fun looksUnfinished(text: String): Boolean {
         val t = norm(text)
         if (t.isEmpty()) return false
         if (t.endsWith(",")) return true
+        RE_PARTIAL_NUMBER.find(t.trimEnd(' '))?.let { m ->
+            val d = m.groupValues[1].filter { it.isDigit() }.let { if (it.startsWith("233")) "0" + it.drop(3) else it }
+            if (t.contains(' ') && d.length in 1..9) return true
+        }
         val words = AppConfig.stringList("speech.turn.trailingWords", DEFAULT_TRAILING)
         val last = t.trimEnd(',', ' ').substringAfterLast(' ')
         // A lone "call" or "open" is a (complete) one-word command to the agent; only a trailing word AFTER

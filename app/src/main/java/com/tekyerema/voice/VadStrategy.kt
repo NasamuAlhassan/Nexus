@@ -13,10 +13,14 @@ import com.tekyerema.core.config.AppConfig
 data class VadStrategy(val name: String, val hangoverMs: Int, val maxUtteranceMs: Int, val noSpeechMs: Int) {
     companion object {
         val QUICK = VadStrategy("quick", 350, 10_000, 4_000)
-        val NORMAL = VadStrategy("normal", 400, 15_000, 8_000)
+        // Normal: ~1.0 s of silence ends a request (700 ms here + Silero's own 300 ms). It was ~0.7 s, and people cut off
+        // mid-request between the groups of a phone number ("send money to 055 … 323 …") — the owner: "it stops
+        // listening early" (A20e 2026-09-29, a judge's session).
+        val NORMAL = VadStrategy("normal", 700, 15_000, 8_000)
         val PATIENT = VadStrategy("patient", 1_100, 25_000, 12_000)
-        /** B-02: the rest of a request that paused mid-phrase — a short window, so a false alarm costs little. */
-        val CONTINUE = VadStrategy("continue", 600, 10_000, 2_500)
+        /** B-02: the rest of a request that paused mid-phrase. 4 s to start again (it was 2.5 s: the judge's "Send money
+         *  to" was acted on while they gathered the number); a false alarm costs only that wait. */
+        val CONTINUE = VadStrategy("continue", 900, 12_000, 4_000)
 
         fun named(name: String?): VadStrategy {
             val base = when (name?.trim()?.lowercase()) {

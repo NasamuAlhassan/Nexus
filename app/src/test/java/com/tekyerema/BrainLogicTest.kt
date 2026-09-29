@@ -143,6 +143,36 @@ class BrainLogicTest {
         assertEquals("mobile_money", a.name); assertEquals("buy_airtime", a.args.getString("_kind")); assertEquals("5", a.args.getString("_amount"))
     }
 
+    /** A judge on the A20e, 2026-09-29: "Send money to 0553238" was read back as "Send 553238 cedis", and "Send money
+     *  to 055" as "Send 55 cedis" — the amount was the first digits of the sentence, i.e. the phone number. */
+    @Test fun the_amount_never_comes_out_of_the_phone_number() {
+        for (g in listOf("Send money to 0553238.", "Send money to 055.", "Send money to 0244123456", "send cash to 05533238011")) {
+            val d = decide(LocalBrain(), g)
+            if (d is AgentDecision.CallTool) {
+                val amount = d.args.optString("amount").ifEmpty { d.args.optString("_amount") }
+                assertTrue("$g → $d", amount.isEmpty() || amount.length < 3)
+                assertFalse("$g → $d", d.name == "momo_send" || d.name == "mobile_money")
+            }
+        }
+        val ok = tool(decide(LocalBrain(), "send 5 cedis to 0244123456"))
+        assertEquals("momo_send", ok.name); assertEquals("5", ok.args.getString("amount")); assertEquals("0244123456", ok.args.getString("number"))
+        val after = tool(decide(LocalBrain(), "send money to 0244123456 5 cedis"))
+        assertEquals("5", after.args.getString("amount")); assertEquals("0244123456", after.args.getString("number"))
+        val cash = tool(decide(LocalBrain(), "send cash of 10 cedis to 0244123456"))
+        assertEquals("momo_send", cash.name); assertEquals("10", cash.args.getString("amount"))
+        assertEquals("0244123456", tool(decide(LocalBrain(), "send 5 cedis to +233 24 412 3456")).args.getString("number"))
+        // A misheard number (7 or 11 digits) is said back and asked for again — never read back for approval.
+        for (g in listOf("send 5 cedis to 0553238", "send 5 cedis to 05533238011")) {
+            val d = decide(LocalBrain(), g)
+            assertTrue("$g → $d", d is AgentDecision.Done && d.summary.contains("Ghana mobile number has 10"))
+        }
+        val M = com.tekyerema.tools.MoMoSendTool
+        assertNull(M.numberProblem("0244123456")); assertNull(M.numberProblem("233244123456"))
+        assertTrue(M.numberProblem("0553238")!!.contains("7 digits"))
+        assertTrue(M.numberProblem("05533238011")!!.contains("11 digits"))
+        assertTrue(M.numberProblem(null)!!.contains("don't have"))
+    }
+
     @Test fun mobile_money_helper_parses_and_maps() {
         val MM = com.tekyerema.tools.GhanaMobileMoney
         assertEquals("50", MM.parseAmount("send 50 cedis to Ama"))

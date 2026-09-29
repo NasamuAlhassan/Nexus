@@ -38,7 +38,9 @@ object ToolSelector {
         ),
         "money" to Group(
             listOf("mobile_money", "momo_send", "run_ussd"),
-            Regex("(?i)(\\bmomo\\b|mobile money|\\bmoney\\b|\\bcedis?\\b|\\bghs\\b|pesewa|transfer|\\bpay\\b|airtime|bundle|" +
+            // "cash": the owner's "Send cash to 055…" (A20e 2026-09-29) loaded no money tool, so the planner hunted for
+            // a "Mobile Money" app instead of walking *170#.
+            Regex("(?i)(\\bmomo\\b|mobile money|\\bmoney\\b|\\bcash\\b|\\bcedis?\\b|\\bghs\\b|pesewa|transfer|\\bpay\\b|airtime|bundle|" +
                 "balance|ussd|\\*\\d|sika)")
         ),
         "device" to Group(

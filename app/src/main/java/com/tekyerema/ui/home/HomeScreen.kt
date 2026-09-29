@@ -121,6 +121,12 @@ fun HomeContent(
         if (Perms.mic(context)) VoiceEngine.start() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
     val stopEverything = { VoiceEngine.cancel(); AgentEngine.stop() }
+    // The task is waiting on the USER (a question, a yes/no, the PIN step): a tap on the orb is how a person answers, so
+    // it opens the mic for that answer — it used to be the kill switch here. A judge on the A20e (2026-09-29) was asked
+    // for the MoMo number, tapped the orb to answer, and the tap stopped the task; the answer then arrived as a brand-new
+    // request with no money context ("by with ceremony"). "Stop" by voice, and the panel's Cancel, still end it.
+    val waitingOnUser = agent.status == AgentStatus.ASKING || agent.status == AgentStatus.WAITING_CONFIRMATION ||
+        agent.status == AgentStatus.SECURE_INPUT
 
     // Typed input (an alternative way in): the text enters the agent through the same entry point as an ASR
     // transcript. It is never dropped: typed while a task works it goes to that task, typed while a reply is read it
@@ -157,7 +163,7 @@ fun HomeContent(
     }.ifEmpty { when (presence) {
         Presence.IDLE, Presence.DONE -> if (greet) "Tap the orb, or say “Hey Tɛkyerɛma”" else "Tap to talk"
         Presence.ERROR -> "Tap to try again"
-        Presence.CONFIRMING -> ""
+        Presence.CONFIRMING -> if (waitingOnUser) "Tap to answer" else ""
         Presence.CONFIRM_LISTENING -> com.tekyerema.voice.Confirmation.LISTEN_HINT
         Presence.SPEAKING -> "Tap to interrupt"
         else -> "Tap to stop"
@@ -167,8 +173,8 @@ fun HomeContent(
         Presence.LISTENING -> "Stop listening" to "Listening"
         Presence.THINKING -> "Cancel" to "Thinking"
         Presence.ACTING -> "Stop" to phrase.ifBlank { "Working" }
-        Presence.CONFIRMING -> "Cancel" to "Asking for your answer"
-        Presence.CONFIRM_LISTENING -> "Cancel" to "Listening for yes or no"
+        Presence.CONFIRMING -> (if (waitingOnUser) "Answer" else "Cancel") to "Asking for your answer"
+        Presence.CONFIRM_LISTENING -> (if (waitingOnUser) "Answer" else "Cancel") to "Listening for yes or no"
         Presence.SPEAKING -> "Stop talking and listen" to "Speaking"
         Presence.DONE -> "Talk to Tɛkyerɛma" to "Done"
         Presence.ERROR -> "Try again" to "Something went wrong"
@@ -189,11 +195,14 @@ fun HomeContent(
                 stateDescription = stateText,
                 circularHitArea = circularHitArea,
                 onTap = {
-                    when (presence) {
-                        Presence.IDLE, Presence.DONE, Presence.ERROR -> startListening()
+                    when {
+                        presence == Presence.IDLE || presence == Presence.DONE || presence == Presence.ERROR -> startListening()
+                        // A question is waiting: the tap answers it (already listening → nothing more to start).
+                        waitingOnUser -> if (Perms.mic(context)) { focusManager.clearFocus(); VoiceEngine.respond() }
+                            else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         // Tapping while it reads a reply means "stop, I want to talk" (Gemini-style). While a task works
                         // this is still the kill switch (see interrupt()).
-                        Presence.SPEAKING -> if (Perms.mic(context)) { focusManager.clearFocus(); VoiceEngine.interrupt() } else stopEverything()
+                        presence == Presence.SPEAKING -> if (Perms.mic(context)) { focusManager.clearFocus(); VoiceEngine.interrupt() } else stopEverything()
                         else -> stopEverything()
                     }
                 },
