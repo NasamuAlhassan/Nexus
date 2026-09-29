@@ -85,6 +85,12 @@ class VoiceW3Test {
     @Test fun vad_strategies_have_sane_defaults_and_config_overrides() {
         assertTrue(VadStrategy.PATIENT.hangoverMs > VadStrategy.NORMAL.hangoverMs)
         assertTrue(VadStrategy.CONTINUE.noSpeechMs < VadStrategy.NORMAL.noSpeechMs)
+        // The owner, 2026-09-29: "it stops listening early". A request ends only after ≥ ~1.2 s of silence (hangover +
+        // Silero's 300 ms), an answer after ≥ ~1.9 s; a request may run 30 s; half a request waits ≥ 5 s for the rest.
+        assertTrue(VadStrategy.NORMAL.hangoverMs + 300 >= 1_200)
+        assertTrue(VadStrategy.PATIENT.hangoverMs + 300 >= 1_900)
+        assertEquals(30_000, VadStrategy.NORMAL.maxUtteranceMs)
+        assertTrue(VadStrategy.CONTINUE.noSpeechMs >= 5_000)
         assertEquals("normal", VadStrategy.default().name)
         AppConfig.loadFrom(listOf("c" to """{"speech":{"vad":{"strategy":"patient","strategies":{"patient":{"hangoverMs":1500,"noSpeechMs":99999}}}}}"""))
         val p = VadStrategy.default()
