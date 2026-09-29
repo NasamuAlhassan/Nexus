@@ -90,6 +90,7 @@ class LocalFastRouter(
         FastIntent.BrightnessDown -> stepBrightness(up = false) ?: brightnessViaSlider(null, -0.2f)
         is FastIntent.BrightnessSet -> setBrightness(intent.fraction)
         is FastIntent.Calculate -> handled(intent, intent.answer)
+        is FastIntent.TwiPhrase -> handled(intent, intent.answer)
 
         FastIntent.FlashlightOn -> torch(on = true)
         FastIntent.FlashlightOff -> torch(on = false)

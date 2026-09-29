@@ -44,6 +44,8 @@ sealed class FastIntent(val name: String) {
     data class OpenApp(val query: String) : FastIntent("OPEN_APP")
     /** A simple sum answered on the phone ([LocalMath]); [answer] is the spoken result. */
     data class Calculate(val answer: String) : FastIntent("CALCULATE")
+    /** "How do you say thank you in Twi?" / "what does akwaaba mean?" — from [TwiPhrasebook], no model. */
+    data class TwiPhrase(val answer: String) : FastIntent("TWI_PHRASE")
     // ---- W4 deterministic phone actions (E-02, E-05, E-06, E-09, E-12, E-13, E-14, E-18, E-21, E-22, E-28, E-29) ----
     object AnswerCall : FastIntent("ANSWER_CALL")
     object EndCall : FastIntent("END_CALL")
@@ -185,6 +187,7 @@ object FastIntentClassifier {
             // or "enable battery saver" is read as a battery-LEVEL question.
             quickToggle(g) != null -> quickToggle(g)
             LocalMath.answer(g) != null -> FastIntent.Calculate(LocalMath.answer(g)!!)
+            TwiPhrasebook.answer(g) != null -> FastIntent.TwiPhrase(TwiPhrasebook.answer(g)!!)
             // E-09 ringer mode before the volume rules ("silent mode" is the ringer, not muting the media volume).
             ringerMode(g) != null -> FastIntent.Ringer(ringerMode(g)!!)
             RE_TIME.containsMatchIn(g) -> FastIntent.Time
