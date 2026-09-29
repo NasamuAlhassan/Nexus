@@ -46,7 +46,9 @@ object AssistantChat {
         val seen = before.elements.mapNotNull { it.label?.trim() }.toSet()
         val q = AppUi.norm(question)
         val parts = after.elements
-            .filter { !it.editable && !it.password }
+            // A short caption on something tappable is a control, not reply text (ChatGPT's toolbar "Edit Menu" was read
+            // out as the start of its answer — A20e 2026-09-29).
+            .filter { !it.editable && !it.password && !(it.clickable && (it.label?.trim()?.split(Regex("\\s+"))?.size ?: 0) <= 4) }
             .sortedWith(compareBy({ it.bounds.top }, { it.bounds.left }))
             .mapNotNull { it.label?.trim()?.takeIf { l -> l.isNotEmpty() } }
             .filter { l ->

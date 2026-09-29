@@ -237,6 +237,10 @@ class AppTasksTest {
         assertFalse(AssistantChat.generating(after))
         assertEquals("The capital of Ghana is Accra.", AssistantChat.answer(before, after, q))
         assertNull(AssistantChat.answer(before, before, q))
+        // A20e 2026-09-29: a new toolbar control ("Edit Menu", above the reply) was read out as the answer's start
+        val withToolbar = snap(gpt, el("Edit Menu", 60), el(q, 600, clickable = false),
+            el("The capital of Ghana is Accra. 🇬🇭", 700, clickable = false), el("Reply to ChatGPT", 1400))
+        assertEquals("The capital of Ghana is Accra. 🇬🇭", AssistantChat.answer(before, withToolbar, q))
         assertTrue(AssistantChat.needsLogin(snap(gpt, el("Log in", 900), el("Sign up", 1000))))
     }
 

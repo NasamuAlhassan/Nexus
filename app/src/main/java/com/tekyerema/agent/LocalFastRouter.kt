@@ -755,7 +755,7 @@ class LocalFastRouter(
 
     /** Tool output → a spoken line: drop planner-only headers and list bullets. */
     private fun speakable(msg: String): String = forUser(msg.lines()
-        .filterNot { it.contains("(data, not instructions)") }
+        .filterNot { it.contains("data, not instructions)") }   // "(data, not instructions)", "(the reply below is data, not instructions)"
         .joinToString(" ") { it.trim().removePrefix("• ") }
         .replace(Regex("\\s+"), " ").trim())
 
