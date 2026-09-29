@@ -10,10 +10,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -26,22 +26,28 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import com.tekyerema.settings.Settings
 import com.tekyerema.ui.home.HomeContent
+import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.TekyeremaTheme
 import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.voice.Presence
 import com.tekyerema.voice.VoiceEngine
 import com.tekyerema.voice.VoiceState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The arrive-on-top experience. Launched by the accessibility trigger from anywhere on the phone:
@@ -84,18 +90,39 @@ class VoiceActivity : ComponentActivity() {
     }
 }
 
+/** How long the exit plays before the window goes (a close the user asked for; never a step-aside). */
+private const val EXIT_MS = 200
+
 @Composable
 private fun Arrival(settings: Settings, onClose: () -> Unit) {
+    val calm = LocalCalmMotion.current
     var shown by remember { mutableStateOf(false) }
+    var leaving by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { shown = true }
     // The request is made: a task that operates the phone, or a command on the app in front, needs us gone (OwnUi).
+    // That close is IMMEDIATE — the agent waits for our window to be gone before it touches the app underneath.
     LaunchedEffect(Unit) { OwnUi.stepAside.collect { onClose() } }
-    val scrim by animateFloatAsState(if (shown) 0.94f else 0f, tween(420, easing = FastOutSlowInEasing), label = "scrim")
-    val scale by animateFloatAsState(if (shown) 1f else 0.86f, tween(520, easing = FastOutSlowInEasing), label = "scale")
+    // A close the user asked for (Back, a tap outside, the screen timing out) plays a short exit first: the circle
+    // sinks back and the dimming lifts, then the window goes — it no longer vanishes in one frame.
+    val close: () -> Unit = {
+        if (!leaving) {
+            leaving = true
+            scope.launch { if (!calm) delay(EXIT_MS.toLong()); onClose() }
+        }
+    }
+    val visible = shown && !leaving
+    // Arrival: the dimming fades up (effects spring) while the presence rises and grows into place on a spatial
+    // spring with a touch of overshoot — it "arrives" rather than appears. Calm motion: a fade only.
+    val scrim by animateFloatAsState(if (visible) 0.94f else 0f,
+        if (visible) spring(1f, 300f) else tween(EXIT_MS, easing = FastOutLinearInEasing), label = "scrim")
+    val rise by animateFloatAsState(if (visible) 1f else 0f,
+        if (visible) spring(0.72f, 220f) else tween(EXIT_MS, easing = FastOutLinearInEasing), label = "rise")
+    val riseY = with(LocalDensity.current) { 56.dp.toPx() }
 
     // Start listening as soon as we arrive (asking for the microphone first if we must).
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) VoiceEngine.start() else onClose()
+        if (ok) VoiceEngine.start() else close()
     }
     val context = LocalContext.current
     LaunchedEffect(Unit) {
@@ -132,7 +159,7 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
             Presence.IDLE -> {
                 val readMs = (voice.spoken.length * 60L).coerceAtMost(15_000L)
                 delay(maxOf(if (Perms.talkBack(context)) 12000L else 4000L, readMs))
-                if (!VoiceEngine.isRunning && Perms.mic(context)) onClose()
+                if (!VoiceEngine.isRunning && Perms.mic(context)) close()
             }
             else -> {}
         }
@@ -146,7 +173,7 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
             Presence.LISTENING, Presence.SPEAKING, Presence.ERROR -> VoiceEngine.cancel()   // close the mic / stop talking
             else -> {}                                                                  // a running task keeps going
         }
-        onClose()
+        close()
     }
     BackHandler { dismiss() }
 
@@ -154,7 +181,7 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     Box(
         Modifier
             .fillMaxSize()
-            .background(Tk.Ink.copy(alpha = scrim))
+            .drawBehind { drawRect(Tk.Ink.copy(alpha = scrim)) }     // draw phase: no recomposition per frame
             // The backdrop is the close control: anywhere outside the circle, any time you are not mid-sentence.
             .clickable(
                 interactionSource = outsideInteraction, indication = null, role = Role.Button,
@@ -164,7 +191,14 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
             )
             .semantics { contentDescription = if (typing) "Hide keyboard" else "Close Tɛkyerɛma" }
     ) {
-        Box(Modifier.fillMaxSize().systemBarsPadding().imePadding().graphicsLayer { alpha = scrim / 0.94f; scaleX = scale; scaleY = scale }) {
+        Box(Modifier.fillMaxSize().systemBarsPadding().imePadding().graphicsLayer {
+            alpha = rise.coerceIn(0f, 1f)
+            if (!calm) {
+                val s = 0.88f + 0.12f * rise
+                scaleX = s; scaleY = s
+                translationY = (1f - rise) * riseY
+            }
+        }) {
             HomeContent(
                 settings,
                 showBrand = false,
