@@ -981,6 +981,17 @@ object AgentEngine {
                                     val again = try { controller?.buildSnapshot() } catch (_: Throwable) { null } ?: break
                                     semantic = readBack(again)
                                 }
+                                // Still neither WHO nor WHAT: a blind user can't check "Send this message?" — don't ask it.
+                                // (A20e 2026-09-29: asked over WhatsApp's "Couldn't connect" dialog.) The planner must get
+                                // the chat on screen first; the gate itself is unchanged.
+                                if (semantic == com.tekyerema.policy.ActionSemantics.BARE_SEND) {
+                                    stats = stats.copy(blocked = stats.blocked + 1)
+                                    log(LogEntry.Kind.POLICY, "send not asked: neither the recipient nor the message is readable on screen")
+                                    history.add("${decision.name}(${shortArgs(decision.args)}) → not attempted: I can't read who this " +
+                                        "message goes to or what it says, so the user couldn't check it. Get the chat with the typed " +
+                                        "message on screen first (read_state); if an error dialog is showing, tell the user (cannot_do).")
+                                    continue
+                                }
                                 // Prefer the action-describing sentence (§19); the policy's default is
                                 // just tool.confirmationPrompt(args), so semantic never hides a safety note.
                                 val basePrompt = semantic ?: pd.confirmationPrompt ?: tool.confirmationPrompt(decision.args)
