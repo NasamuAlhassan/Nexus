@@ -111,6 +111,11 @@ class RecoveryCoordinator(
         }
         val target = targetOf(s, cls)
         if (cls == OutcomeClass.DIALOG) dialogActions(s)?.let { return it }
+        // The ladder is for finding and operating GUI targets. A read that failed has its own hint; a send / call / payment
+        // (or anything the user approved) that failed or didn't verify may still have happened — its fix is "check first"
+        // (LoopGuard G-21, the EffectLedger), never "try another route", which could do it twice.
+        if (!s.mutating || s.consequential || s.confirmed)
+            return Actions(cls, logs = listOf("recovery: ${cls.name} on ${if (s.mutating) "a consequential step — check first, no ladder" else "a read — no ladder"}"))
         if (cls == OutcomeClass.WRONG_PAGE) visits.noteFailedBranch(s.before, key)
         val env = RecoveryLadder.Env(
             target = target, screen = screen,

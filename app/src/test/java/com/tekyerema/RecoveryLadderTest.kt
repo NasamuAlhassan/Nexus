@@ -166,6 +166,18 @@ class RecoveryLadderTest {
         assertTrue(again.notes.single(), again.notes.single().contains("came back"))
     }
 
+    @Test fun a_failed_send_or_a_failed_read_gets_no_ladder() {
+        val c = RecoveryCoordinator(locateGate = { _, _ -> null })
+        val send = tapStep("Send", message = "Could not tap", success = false).copy(consequential = true, targetMissing = false)
+        val a = c.afterStep(send, OutcomeClass.FAILED, canAsk = true)
+        assertNull(a.rung); assertTrue(a.notes.isEmpty()); assertTrue(a.planned.isEmpty())
+        val approved = tapStep("Pay", message = "Could not tap", success = false).copy(confirmed = true, targetMissing = false)
+        assertNull(c.afterStep(approved, OutcomeClass.FAILED, canAsk = true).rung)
+        val read = RecoveryCoordinator.Step(decision = AgentDecision.CallTool("read_sms", JSONObject(), null), verdict = Verdict.FAILED,
+            success = false, recoverable = false, before = calls, after = null, mutating = false)
+        assertNull(c.afterStep(read, OutcomeClass.BLOCKED, canAsk = true).rung)
+    }
+
     @Test fun asking_the_user_is_the_last_rung_and_only_when_someone_is_there() {
         val c = RecoveryCoordinator()
         val s = tapStep("Zorblax mode", message = "Could not tap", success = false).copy(targetMissing = false, verdict = Verdict.FAILED)
