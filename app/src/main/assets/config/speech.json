@@ -2,8 +2,8 @@
   "schema_version": 1,
   "speech": {
     "voiceLayer": {
-      "profile": "builtin_en",
-      "_note": "builtin_en = Android SpeechRecognizer + system TTS, English only (testing; SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
+      "profile": "gh_mixed",
+      "_note": "gh_mixed (owner's choice 2026-09-29, the default) = English: Android SpeechRecognizer + system TTS; Twi: UG HCI Lab ASR (on-device Twi Whisper fallback) + HCI Lab TTS — one recognizer per listen, chosen by the language setting ('speak Twi' / 'speak English'). builtin_en = Android SpeechRecognizer + system TTS, English only (SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
       "systemSpeech": {
         "languageTag": "en-GH",
         "fallbackTag": "en-US",

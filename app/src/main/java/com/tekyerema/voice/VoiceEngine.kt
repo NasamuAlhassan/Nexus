@@ -167,6 +167,11 @@ object VoiceEngine {
                 )
                 return com.tekyerema.voice.io.CapturedAudioInput(mic, answerMic, hybrid, sessionLang, forced)
             }
+            // gh_mixed (owner, 2026-09-29): English listens → the phone's recognizer; Twi listens → the captured path (UG HCI
+            // Lab ASR, on-device Twi Whisper as fallback). The language is the user's setting, else the session language —
+            // both set by capturedInput above. Replies already split the same way (RoutingTts: english=system, twi=hcilab).
+            override fun mixedInput(english: com.tekyerema.voice.io.VoiceInput, twi: com.tekyerema.voice.io.VoiceInput) =
+                com.tekyerema.voice.io.LanguageRoutedInput(english, twi) { forced() ?: sessionLang() }
         })
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] voice layer=${plan.profile} input=${built.input.id} | " +

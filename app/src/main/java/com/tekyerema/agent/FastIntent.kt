@@ -529,6 +529,14 @@ object FastIntentClassifier {
     private val RE_PREF_DETAILED = Regex("^(?:please\\s+)?(?:be more detailed|more detailed answers|give me more detail(?:s)? from now on|explain more from now on)(?: please)?$")
     private val RE_PREF_PATIENT = Regex("^(?:please\\s+)?(?:be patient(?: with me)?|wait longer(?: for me)?|give me more time(?: to (?:speak|talk|finish))?|don't cut me off)(?: please)?$")
 
+    /** Switching the voice language (gh_mixed: English → the phone's recognizer, Twi → the UG HCI Lab). Twi forms marked
+     *  for a native speaker: "kasa Twi" (speak Twi), "kasa Borɔfo" (speak English). [owner: verify] */
+    private val RE_PREF_TWI = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? twi|" +
+        "(?:switch|change) (?:to|into) twi|use twi|twi (?:please|mode)|(?:kasa|ka) twi|twi kasa)(?: please| now| from now on)?$")
+    private val RE_PREF_ENGLISH = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? english|" +
+        "(?:switch|change) (?:to|into) english|use english|english (?:please|mode)|(?:kasa|ka) (?:borɔfo|borofo|brofo|bro fo)|" +
+        "(?:borɔfo|borofo|brofo) kasa)(?: please| now| from now on)?$")
+
     private fun preference(g: String): FastIntent.Preference? = when {
         RE_PREF_SLOWER.matches(g) -> FastIntent.Preference("rate", "slower")
         RE_PREF_FASTER.matches(g) -> FastIntent.Preference("rate", "faster")
@@ -536,6 +544,8 @@ object FastIntentClassifier {
         RE_PREF_BRIEF.matches(g) -> FastIntent.Preference("verbosity", "brief")
         RE_PREF_DETAILED.matches(g) -> FastIntent.Preference("verbosity", "detailed")
         RE_PREF_PATIENT.matches(g) -> FastIntent.Preference("patience", "patient")
+        RE_PREF_TWI.matches(g) -> FastIntent.Preference("language", "twi")
+        RE_PREF_ENGLISH.matches(g) -> FastIntent.Preference("language", "english")
         else -> null
     }
 

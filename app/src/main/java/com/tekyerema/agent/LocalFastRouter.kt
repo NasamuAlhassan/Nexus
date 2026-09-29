@@ -251,7 +251,8 @@ class LocalFastRouter(
         FastIntent.TakeSelfie -> "took a selfie"
         is FastIntent.PlayMusic -> "played ${intent.collection?.let { if (it == "liked") "your liked songs" else "your $it" } ?: intent.query ?: intent.artist ?: "music"}${intent.app?.let { " on $it" } ?: ""}"
         is FastIntent.AskApp -> "asked ${intent.app} a question"
-        is FastIntent.Preference -> "changed how I ${if (intent.key == "patience") "listen" else "speak"}"
+        is FastIntent.Preference -> if (intent.key == "language") "switched to ${if (intent.value == "twi") "Twi" else "English"}"
+            else "changed how I ${if (intent.key == "patience") "listen" else "speak"}"
         is FastIntent.Magnify -> "changed the screen magnification"
         is FastIntent.SetEmergencyContact -> "set your emergency contact"
         is FastIntent.EmergencyLine -> "put the ${intent.service} number on the dial pad"
@@ -510,6 +511,15 @@ class LocalFastRouter(
             "verbosity" -> { s.verbosity = p.value; s.profile = "custom"
                 if (p.value == "brief") "Okay, I'll keep it short." else "Okay, I'll give you more detail." }
             "patience" -> { s.vadStrategy = p.value; s.profile = "custom"; "Okay, I'll wait longer for you to finish speaking." }
+            // gh_mixed (2026-09-29): English is heard by the phone's recognizer, Twi by the UG HCI Lab — the phone's English
+            // recognizer can't hear Twi, so the switch is said, not guessed. The next listen goes to the other recognizer.
+            "language" -> if (p.value == "twi") {
+                s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_TWI; s.sessionLanguage = com.tekyerema.voice.Lang.TWI
+                "Okay, Twi. Say 'speak English' to switch back."
+            } else {
+                s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_ENGLISH; s.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
+                "Okay, English."
+            }
             else -> "Okay."
         }
         return handled(p, line)

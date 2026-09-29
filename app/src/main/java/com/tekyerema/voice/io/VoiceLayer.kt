@@ -17,8 +17,11 @@ object VoiceLayer {
     const val CONFIG_KEY = "speech.voiceLayer.profile"
     const val BUILTIN_EN = "builtin_en"
     const val GHANA = "ghana"
+    /** English → the phone's recognizer + system voice; Twi → UG HCI Lab ASR/TTS (on-device Twi Whisper as fallback).
+     *  The owner's choice for the hackathon, 2026-09-29 ([LanguageRoutedInput]). */
+    const val GH_MIXED = "gh_mixed"
 
-    enum class InputKind { SYSTEM_SPEECH, CAPTURED_AUDIO }
+    enum class InputKind { SYSTEM_SPEECH, CAPTURED_AUDIO, MIXED }
 
     /** What a profile builds. [pinnedLanguage] non-null = the session language is fixed (no LID, no Twi routing). */
     data class Plan(
@@ -33,11 +36,13 @@ object VoiceLayer {
     fun profileOf(raw: String?): String = when (raw?.trim()?.lowercase()) {
         GHANA -> GHANA
         BUILTIN_EN -> BUILTIN_EN
+        GH_MIXED -> GH_MIXED
         else -> BUILTIN_EN
     }
 
     fun plan(raw: String?): Plan = when (profileOf(raw)) {
         GHANA -> Plan(GHANA, InputKind.CAPTURED_AUDIO, buildOnDeviceAsr = true, buildLanguageLayer = true, pinnedLanguage = null)
+        GH_MIXED -> Plan(GH_MIXED, InputKind.MIXED, buildOnDeviceAsr = true, buildLanguageLayer = true, pinnedLanguage = null)
         else -> Plan(BUILTIN_EN, InputKind.SYSTEM_SPEECH, buildOnDeviceAsr = false, buildLanguageLayer = false, pinnedLanguage = Lang.GH_EN)
     }
 
@@ -49,6 +54,8 @@ object VoiceLayer {
         fun languageLayer(): L
         fun systemInput(): VoiceInput
         fun capturedInput(onDevice: A, layer: L): VoiceInput
+        /** [InputKind.MIXED]: one recognizer per language. The default routes everything to English (tests). */
+        fun mixedInput(english: VoiceInput, twi: VoiceInput): VoiceInput = LanguageRoutedInput(english, twi) { Lang.GH_EN }
     }
 
     class Built<A, L>(val plan: Plan, val input: VoiceInput, val onDevice: A?, val layer: L?)
@@ -59,6 +66,13 @@ object VoiceLayer {
             val onDevice = f.onDeviceAsr()
             val layer = f.languageLayer()
             Built(plan, f.capturedInput(onDevice, layer), onDevice, layer)
+        }
+        InputKind.MIXED -> {
+            val onDevice = f.onDeviceAsr()
+            val layer = f.languageLayer()
+            // The captured (Twi) side is built first: it sets up the language session the router reads.
+            val twi = f.capturedInput(onDevice, layer)
+            Built(plan, f.mixedInput(f.systemInput(), twi), onDevice, layer)
         }
     }
 }

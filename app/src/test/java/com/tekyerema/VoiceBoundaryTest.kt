@@ -17,6 +17,7 @@ import com.tekyerema.voice.VoiceController
 import com.tekyerema.voice.io.BargeIn
 import com.tekyerema.voice.io.CapturedAudioInput
 import com.tekyerema.voice.io.Heard
+import com.tekyerema.voice.io.LanguageRoutedInput
 import com.tekyerema.voice.io.Hypothesis
 import com.tekyerema.voice.io.InputCaps
 import com.tekyerema.voice.io.ListenEvents
@@ -96,6 +97,42 @@ class VoiceBoundaryTest {
         val built = VoiceLayer.build(VoiceLayer.plan(VoiceLayer.GHANA), f)
         assertEquals(listOf("sherpa", "hcilab", "captured(sherpa,hcilab)"), f.calls)
         assertEquals("captured", built.input.id)
+    }
+
+    // ------------------------------------------------------------------ gh_mixed: Google English + HCI Lab Twi (owner, 2026-09-29)
+    @Test fun gh_mixed_builds_both_recognizers_and_routes_each_listen_by_language() = kotlinx.coroutines.runBlocking {
+        assertEquals(VoiceLayer.GH_MIXED, VoiceLayer.profileOf(" GH_MIXED "))
+        val p = VoiceLayer.plan(VoiceLayer.GH_MIXED)
+        assertEquals(VoiceLayer.InputKind.MIXED, p.input)
+        assertTrue(p.buildOnDeviceAsr); assertTrue(p.buildLanguageLayer); assertNull(p.pinnedLanguage)
+        val f = CountingFactory()
+        val built = VoiceLayer.build(p, f)
+        assertEquals(listOf("sherpa", "hcilab", "captured(sherpa,hcilab)", "system"), f.calls)
+        assertTrue(built.input is LanguageRoutedInput)
+
+        var lang = Lang.GH_EN
+        val heard = mutableListOf<String>()
+        class Rec(override val id: String, secure: Boolean) : VoiceInput {
+            override val caps = InputCaps(false, false, false, emptySet(), secureListen = secure, patientEndpointing = secure)
+            override suspend fun listen(spec: ListenSpec, events: ListenEvents): Heard { heard += "$id/${spec.language}"; return Heard.NoSpeech }
+        }
+        val routed = LanguageRoutedInput(english = Rec("google", secure = false), twi = Rec("hcilab", secure = true)) { lang }
+        routed.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
+        assertFalse("English: Google can't hear 'done' privately", routed.caps.secureListen)
+        lang = Lang.TWI
+        routed.listen(ListenSpec(ListenPurpose.REQUEST), object : ListenEvents {})
+        assertTrue("Twi: the captured path keeps a secure listen on the phone", routed.caps.secureListen)
+        assertEquals(listOf("google/${Lang.GH_EN}", "hcilab/${Lang.TWI}"), heard)
+    }
+
+    @Test fun the_voice_language_is_switched_by_saying_so() {
+        val c = { s: String -> com.tekyerema.agent.FastIntentClassifier.classify(s) }
+        for (s in listOf("speak Twi", "Speak Twi.", "switch to Twi", "talk to me in Twi", "kasa Twi", "use twi please"))
+            assertEquals(s, com.tekyerema.agent.FastIntent.Preference("language", "twi"), c(s))
+        for (s in listOf("speak English", "switch to English", "kasa borɔfo", "kasa brofo", "English please"))
+            assertEquals(s, com.tekyerema.agent.FastIntent.Preference("language", "english"), c(s))
+        for (s in listOf("how do you say thank you in Twi", "what is my name in Twi", "send Kofi a message in Twi"))
+            assertFalse(s, (c(s) as? com.tekyerema.agent.FastIntent.Preference)?.key == "language")
     }
 
     // ------------------------------------------------------------------ the system recognizer, faked
