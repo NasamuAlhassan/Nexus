@@ -196,6 +196,9 @@ class LocalBrain : AgentBrain {
             // → defer to the planner rather than open a wrong app off a loose token match.
             if (RE_APP_HAS_VERB.containsMatchIn(app) || app.split(Regex("\\s+")).size > 3)
                 return defer("app name looks like a compound instruction: \"$app\"")
+            // "open the app" / "open it" names no app: the planner asks which one (it has the conversation) instead of a
+            // failed search for an app called "app" first.
+            if (RE_NO_APP_NAME.matches(app.lowercase())) return defer("no app named: \"$app\"")
             // Twi confirmation stays generic ("I've opened it") — the ASR-rendered app name may be rough.
             if (app.isNotEmpty()) { doneLine = if (twi) "Mabue no." else "$app is open."; return call("open_app", JSONObject().put("app", app), "launch app") }
         }
@@ -551,7 +554,8 @@ class LocalBrain : AgentBrain {
             val parts = message.trim().trimEnd('.', '!', '?').split(RE_CLAUSE_SPLIT).map { it.trim() }.filter { it.isNotEmpty() }
             return parts.drop(1).any { RE_COMMAND_LEAD.containsMatchIn(it) }
         }
-        private val RE_COMMAND_LEAD = Regex("^(?:please\\s+)?(?:call|ring|dial|text|sms|message|whatsapp|email|open|launch|" +
+        private val RE_NO_APP_NAME = Regex("^(?:the |an? |this |that |my |some )?(?:app|apps|application|it|this|that|one|something)$")
+        private val RE_COMMAND_LEAD =Regex("^(?:please\\s+)?(?:call|ring|dial|text|sms|message|whatsapp|email|open|launch|" +
             "remind|send|set|turn|play|read|take|search|find|check|frɛ|bue|kenkan)\\b", RegexOption.IGNORE_CASE)
 
         /** N-09 — split a compound request into 2–4 clauses ("… and …", "… then …", "…; …", Twi "… na …"), or null. Pure. */

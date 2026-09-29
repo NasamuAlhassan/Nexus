@@ -736,6 +736,13 @@ object AgentEngine {
                                 log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
                                 finish(AgentStatus.CANNOT_DO, stats); return
                             }
+                            // "never mind" / "cancel" / "gyae" as the whole answer ends the task here — the device suite
+                            // (2026-09-29) saw the model ask the same question again. A plain "no" may be a real answer.
+                            if (com.tekyerema.voice.ControlVerbs.classify(ans) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
+                                log(LogEntry.Kind.RESULT, "Okay, I've left it.")
+                                pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
+                                finish(AgentStatus.STOPPED, stats); return
+                            }
                             history.add("ask_user(\"$q\") → the user answered: \"$ans\"")
                             continue
                         }

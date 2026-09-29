@@ -166,6 +166,17 @@ class AgentW9Test {
         assertNull(m.openTarget("opening hours of Melcom"))
     }
 
+    /** Device suite 2026-09-29: "open the app" searched for an app called "app"; "never mind" to "which app?" was asked again. */
+    @Test fun open_the_app_names_no_app_and_never_mind_ends_the_question() {
+        assertNull(com.tekyerema.agent.FastIntentClassifier.classify("open the app"))
+        assertNull(com.tekyerema.agent.FastIntentClassifier.classify("open it"))
+        assertEquals(FastIntent.OpenApp("whatsapp"), com.tekyerema.agent.FastIntentClassifier.classify("open whatsapp"))
+        val v = com.tekyerema.voice.ControlVerbs
+        for (s in listOf("never mind", "Never mind.", "cancel", "forget it", "gyae"))
+            assertEquals(s, com.tekyerema.voice.ControlVerbs.Verb.STOP, v.classify(s))
+        assertEquals("a plain no can be a real answer", com.tekyerema.voice.ControlVerbs.Verb.STEER, v.classify("no"))
+    }
+
     @Test fun not_installed_is_a_question_for_the_user_not_a_dead_end() {
         val k = com.tekyerema.agent.Recovery.classify(isAccelerator = true, success = false, recoverable = false, needsUser = true)
         assertEquals(com.tekyerema.agent.Recovery.Kind.ASK_USER, k)

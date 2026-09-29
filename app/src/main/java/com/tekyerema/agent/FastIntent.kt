@@ -377,6 +377,7 @@ object FastIntentClassifier {
         if (app.contains(",")) return null                       // "open whatsapp, find kwame" = compound
         if (RE_APP_HAS_VERB.containsMatchIn(app)) return null     // a second instruction, not an app label
         if (app.split(" ").size > 3) return null                 // an app label is a short noun phrase
+        if (RE_NO_APP_NAME.matches(app)) return null             // "open the app" / "open it": which one? → the planner asks
         return FastIntent.OpenApp(app)
     }
 
@@ -600,6 +601,7 @@ object FastIntentClassifier {
     // calculator." missed this on the A20e (2026-09-28) and went to the cloud model, which paged the home screen
     // left and right hunting for the icon — so -ing forms, stacked polite lead-ins, "up", "my" and a trailing
     // "app"/"please" are accepted. "opening hours …" is not an app.
+    private val RE_NO_APP_NAME = Regex("^(?:the |an? |this |that |my |some )?(?:app|apps|application|it|this|that|one|something)$")
     private val RE_OPEN = Regex("^(?:(?:please|kindly|can you|could you|would you|will you|i want to|i'd like to|i would like to|help me)\\s+)*" +
         "(?:open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s+to|goto|bring\\s+up|pull\\s+up|put\\s+on|bue\\S*|bua\\S*)\\s+" +
         "(?!hours?\\b|times?\\b)(?:up\\s+)?(?:the\\s+|my\\s+)?(.+?)(?:\\s+app)?(?:\\s+(?:please|for me))?$")
