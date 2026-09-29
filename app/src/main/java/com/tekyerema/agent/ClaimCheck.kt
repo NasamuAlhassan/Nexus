@@ -41,16 +41,31 @@ object ClaimCheck {
         val honestLine: String get() = "I didn't finish that — the $noun part didn't happen. Please ask me again."
     }
 
-    /** The first claim in [summary] with no supporting step in [history], or null. */
-    fun check(goal: String, summary: String, history: List<String>): Unsupported? {
+    /**
+     * The first claim in [summary] with no supporting step in [history], or null. [screen] = the text of the screen the
+     * reply was written on (title + labels): for a search, results for the asked words already showing count as done — on
+     * the A20e the page was still open from an earlier run ("Kwame Nkrumah - Google Search"), and refusing that helped nobody.
+     */
+    fun check(goal: String, summary: String, history: List<String>, screen: String? = null): Unsupported? {
         if (summary.trim().endsWith("?")) return null
         for (f in FAMILIES) {
             if (!f.goal.containsMatchIn(goal)) continue
             val said = firstPersonClaim(summary, f.claim) ?: continue
-            val supported = history.any { h -> f.evidence.any { t -> h.startsWith("$t(") } && h.contains("→ success") }
+            val supported = history.any { h -> f.evidence.any { t -> h.startsWith("$t(") } && h.contains("→ success") } ||
+                (f.noun == "search" && searchShowing(goal, screen))
             if (!supported) return Unsupported(f.noun, said.lowercase())
         }
         return null
+    }
+
+    private val SEARCH_TERMS = Regex("\\b(?:search(?: the web| google| online)?(?: for)?|look up|google)\\s+(.+)$", I)
+
+    /** Every word (3+ letters) of what the goal asked to search for appears on [screen]. Pure. */
+    internal fun searchShowing(goal: String, screen: String?): Boolean {
+        val s = screen?.lowercase() ?: return false
+        val terms = SEARCH_TERMS.find(goal.trim().trimEnd('.', '!', '?'))?.groupValues?.get(1) ?: return false
+        val words = terms.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.length >= 3 && it !in setOf("the", "and", "for", "about") }
+        return words.isNotEmpty() && words.all { it in s }
     }
 
     private fun firstPersonClaim(summary: String, verbs: String): String? {

@@ -19,6 +19,14 @@ class ClaimCheckTest {
             listOf("web_search({query=Kwame Nkrumah}) → success [native]; verified=true (x); …")))
     }
 
+    /** The results page was still open from an earlier run: what the user asked for is on screen — not a false claim. */
+    @Test fun search_results_already_showing_count_as_done() {
+        val goal = "open Chrome and search for Kwame Nkrumah"
+        assertNull(ClaimCheck.check(goal, "I opened Chrome and searched for Kwame Nkrumah.", opened,
+            screen = "Kwame Nkrumah - Google Search Kwame Nkrumah Wikipedia"))
+        assertNotNull(ClaimCheck.check(goal, "I opened Chrome and searched for Kwame Nkrumah.", opened, screen = "New tab Search or type URL"))
+    }
+
     @Test fun sends_calls_plays_are_checked_the_same_way() {
         assertNotNull(ClaimCheck.check("text Ama hi", "Sent your message to Ama.", emptyList()))
         assertNull(ClaimCheck.check("text Ama hi", "Sent your message to Ama.", listOf("send_sms({contact=Ama}) → success [a11y]; verified=true; …")))

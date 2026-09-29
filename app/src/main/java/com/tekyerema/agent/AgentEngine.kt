@@ -871,7 +871,8 @@ object AgentEngine {
                         }
                         // Claim check (A20e 2026-09-29: "I opened Chrome and searched…" after only opening Chrome): a reply may
                         // only claim what a step did — refused once with what's missing, then ended honestly (agent/ClaimCheck).
-                        val unsupported = ClaimCheck.check(runCtx.goal, decision.summary, history)
+                        val unsupported = ClaimCheck.check(runCtx.goal, decision.summary, history,
+                            screen = (listOfNotNull(before.screenTitle) + before.elements.mapNotNull { it.label }).joinToString(" "))
                         if (unsupported != null && runCtx.claimRefusals++ == 0) {
                             log(LogEntry.Kind.INFO, "completion gate: the reply says '${unsupported.said}' but no step did the ${unsupported.noun} — not done yet")
                             history.add(unsupported.note)
