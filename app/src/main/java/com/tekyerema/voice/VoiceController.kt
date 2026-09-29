@@ -9,7 +9,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -113,8 +112,32 @@ class VoiceController(
     /** B-13: "brief" | "normal" | "detailed". */
     private val verbosity: () -> String = { "normal" },
     /** N-16: a one-time spoken health notice (screen control off, background restricted), or null. */
-    private val healthNotice: () -> String? = { null }
+    private val healthNotice: () -> String? = { null },
+    /** voice/io boundary: listen once → normalized text (the phone's recognizer under `builtin_en`). Null = the
+     *  captured-audio path over [mic] / [answerMic] / [asr] — today's stack, unchanged (profile `ghana`, and tests). */
+    input: com.tekyerema.voice.io.VoiceInput? = null
 ) {
+    /** Every listen goes through here; see [com.tekyerema.voice.io.VoiceInput]. */
+    private val voiceIn: com.tekyerema.voice.io.VoiceInput =
+        input ?: com.tekyerema.voice.io.CapturedAudioInput(mic, answerMic, asr, sessionLanguage, forceLanguage)
+    /** B-07 onset detection on the echo-cancelled mic (both profiles). */
+    private val barge: com.tekyerema.voice.io.BargeInDetector? = bargeMic?.let { com.tekyerema.voice.io.RecorderBargeIn(it) }
+
+    /** The listening tone — unless the recognizer plays its own (`systemSpeech.ownCue = none`). */
+    private fun listenCue() { if (!voiceIn.caps.playsOwnCue) cues.listening() }
+
+    private fun events(
+        ready: () -> Unit = {}, speech: () -> Unit = {}, captured: () -> Unit = {}, partial: (String) -> Unit = {}
+    ) = object : com.tekyerema.voice.io.ListenEvents {
+        override fun onReady() = ready()
+        override fun onSpeechStart() = speech()
+        override fun onCaptured() = captured()
+        override fun onPartial(text: String) = partial(text)
+    }
+
+    private suspend fun listen(purpose: com.tekyerema.voice.io.ListenPurpose, events: com.tekyerema.voice.io.ListenEvents, patient: Boolean? = null) =
+        voiceIn.listen(com.tekyerema.voice.io.ListenSpec(purpose).let { if (patient != null) it.copy(patient = patient) else it }, events)
+
     private val _state = MutableStateFlow(VoiceUiState(language = sessionLanguage()))
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()
     private var job: Job? = null
@@ -243,12 +266,10 @@ class VoiceController(
                 fillers?.stop()
                 val lang = forceLanguage() ?: sessionLanguage()
                 if (!hasMicPermission()) return@launch
-                val cap = answerMic.captureWith(VadStrategy.QUICK, onListening = { cues.listening() },
-                    onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
-                val wav = (cap as? CaptureResult.Success)?.wav ?: return@launch
-                interjectionHeard = true
-                cues.captured()
-                val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
+                val heard = listen(com.tekyerema.voice.io.ListenPurpose.INTERJECTION, events(ready = { listenCue() },
+                    speech = { _state.update { it.copy(speechDetected = true) } },
+                    captured = { interjectionHeard = true; cues.captured() }))
+                val text = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical.orEmpty()
                 if (text.isBlank()) return@launch
                 val line = applyInterjection(text, lang == Lang.TWI)
                 try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
@@ -308,15 +329,18 @@ class VoiceController(
             if (!hasMicPermission()) return   // typed answers still work (submitText)
             repeat(2) { attempt ->
                 _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = question) }
-                val cap = answerMic.captureWith(VadStrategy.PATIENT, onListening = { cues.listening() },
-                    onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
-                if (cap is CaptureResult.Cancelled) return
-                val wav = (cap as? CaptureResult.Success)?.wav
-                if (wav != null) {
-                    cues.captured()
-                    val text = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()).canonical } catch (c: CancellationException) { throw c } catch (_: Exception) { "" }
-                    if (text.isNotBlank()) { agent.answer(text); return }
+                val onSpeech = { _state.update { it.copy(speechDetected = true) } }
+                val heard = listen(com.tekyerema.voice.io.ListenPurpose.ANSWER, events(ready = { listenCue() }, speech = onSpeech, captured = { cues.captured() }))
+                if (heard is com.tekyerema.voice.io.Heard.Cancelled) return
+                var text = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical.orEmpty()
+                // voice/io: a recognizer that ends the turn on its own short pause can't be patient — an answer cut off
+                // mid-phrase ("the one for my…") gets one more listen, joined on (B-02), instead of half an answer.
+                if (text.isNotBlank() && !voiceIn.caps.patientEndpointing && TurnDetector.looksUnfinished(text)) {
+                    val more = listen(com.tekyerema.voice.io.ListenPurpose.CONTINUATION, events(speech = onSpeech, captured = { cues.captured() }))
+                    (more as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical?.takeIf { it.isNotBlank() }
+                        ?.let { text = text.trimEnd(',', ' ') + " " + it }
                 }
+                if (text.isNotBlank()) { agent.answer(text); return }
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) {}
             }
@@ -512,6 +536,12 @@ class VoiceController(
     private val PROMPTS = setOf(AgentStatus.WAITING_CONFIRMATION, AgentStatus.ASKING, AgentStatus.SECURE_INPUT)
     /** How long a typed request waits for the turn in front of it to finish acting before it cuts in anyway. */
     private val WAIT_MAX_MS = 4_000L
+    /** voice/io: listening can't work at all right now — a second try won't either. */
+    private val UNRECOVERABLE = setOf(com.tekyerema.voice.io.Heard.Cause.OFFLINE, com.tekyerema.voice.io.Heard.Cause.NO_RECOGNIZER,
+        com.tekyerema.voice.io.Heard.Cause.PERMISSION, com.tekyerema.voice.io.Heard.Cause.LANGUAGE,
+        com.tekyerema.voice.io.Heard.Cause.NOT_ALLOWED_HERE)
+    private val CANT_LISTEN_CONFIRM = "I can't hear answers right now. Tap Yes or No when you're ready."
+    private val SECURE_TAP_DONE = "When you've finished, tap Done, or type done."
 
     /**
      * Ask the pending question aloud, listen for a spoken yes/no, and answer the agent.
@@ -544,16 +574,28 @@ class VoiceController(
 
                 _state.update { it.copy(confirmPhase = ConfirmPhase.LISTENING, partialHint = prompt) }
                 val onSpeech = { _state.update { it.copy(speechDetected = true) } }
-                val cap = if (patient) answerMic.captureWith(VadStrategy.PATIENT, onListening = { cues.listening() }, onSpeechStart = onSpeech)
-                    else answerMic.capture(onListening = { cues.listening() }, onSpeechStart = onSpeech)
-                val answer = when (cap) {
-                    is CaptureResult.Success -> {
-                        cues.captured()
-                        _state.update { it.copy(confirmPhase = ConfirmPhase.HEARD, speechDetected = false) }
-                        val tr = try { asr.transcribe(cap.wav, sessionLanguage(), forceLanguage()) }
-                        catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+                // Final results only (partials never answer a confirmation); the captured path reports "captured" before
+                // it transcribes, exactly where the old capture → transcribe split was.
+                val result = listen(com.tekyerema.voice.io.ListenPurpose.YES_NO, events(ready = { listenCue() }, speech = onSpeech, captured = {
+                    cues.captured()
+                    _state.update { it.copy(confirmPhase = ConfirmPhase.HEARD, speechDetected = false) }
+                }), patient = patient)
+                val answer = when (result) {
+                    is com.tekyerema.voice.io.Heard.Speech, is com.tekyerema.voice.io.Heard.Unavailable -> {
+                        val tr = (result as? com.tekyerema.voice.io.Heard.Speech)?.transcript
                         val heard = tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() }
-                        Log.i("Tekyerema", "[VOICE] confirmation heard='${com.tekyerema.core.Privacy.content(tr?.raw)}' → ${Confirmation.interpret(heard)}")   // J-15
+                        // voice/io: a recognizer that can't run here at all (offline, no service) won't answer on a second
+                        // try either — say the buttons still work and leave the question waiting for them (never a yes).
+                        if (result is com.tekyerema.voice.io.Heard.Unavailable && result.cause in UNRECOVERABLE) {
+                            Log.i("Tekyerema", "[VOICE] confirmation: can't listen (${result.cause}) — waiting for the buttons")
+                            _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
+                            try { tts.speak(CANT_LISTEN_CONFIRM, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                            return
+                        }
+                        // J-02: n-best alternatives that mean the opposite make the answer unclear (asked again, then declined).
+                        val alternatives = (result as? com.tekyerema.voice.io.Heard.Speech)?.alternatives.orEmpty()
+                        Log.i("Tekyerema", "[VOICE] confirmation heard='${com.tekyerema.core.Privacy.content(tr?.raw)}' → ${Confirmation.interpret(heard)}" +
+                            if (alternatives.size > 1) " (n-best ${alternatives.size})" else "")   // J-15
                         // §8/§9/§13/§14 — a coherent reply that isn't yes/no ("send it to Kofi instead",
                         // "make it shorter", "actually call Ama") is a CORRECTION, not a decline. Hand the
                         // words to the brain, which re-plans against the pending proposal; the run continues
@@ -565,9 +607,9 @@ class VoiceController(
                             catch (c: CancellationException) { throw c } catch (_: Exception) {}
                             return
                         }
-                        Confirmation.interpret(heard)
+                        com.tekyerema.voice.io.YesNo.decide(heard, alternatives)
                     }
-                    CaptureResult.Cancelled -> throw CancellationException("confirmation cancelled")
+                    com.tekyerema.voice.io.Heard.Cancelled -> throw CancellationException("confirmation cancelled")
                     else -> Confirmation.Answer.UNCLEAR
                 }
                 when (answer) {
@@ -624,17 +666,25 @@ class VoiceController(
         val instruction = secureInstruction(agent.state.value.handoffReason, lang == Lang.TWI)
         val remind = if (lang == Lang.TWI) "Sɛ wowie a, ka sɛ 'awie'." else "Say 'done' when you've finished."
         cues.needsOk()
+        // voice/io (J-15): an input that can't keep this audio on the phone (the phone's own recognizer may stream it to a
+        // server) never listens here — it isn't even started. The user finishes on the phone and taps Done (or types it).
+        if (!voiceIn.caps.secureListen) {
+            _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = "Finish it yourself, then tap Done") }
+            Log.i("Tekyerema", "[VOICE] secure step: not listening (${voiceIn.id} may send audio off the phone) — Done button / typed done")
+            try { tts.speak(tapDoneInstead(instruction), Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            return
+        }
         try {
             var attempt = 0
             while (attempt < 8) {
                 _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = if (lang == Lang.TWI) "Hyɛ mu, na ka 'awie'" else "Finish it yourself, then say 'done'") }
                 try { tts.speak(if (attempt == 0) instruction else remind, lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                 if (!hasMicPermission()) return    // can't listen; stay secure (user completes on the phone, taps to cancel/retry)
-                val cap = answerMic.capture(onListening = { cues.listening() }, onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
-                when (cap) {
-                    is CaptureResult.Success -> {
-                        val tr = try { asr.transcribe(cap.wav, sessionLanguage(), forceLanguage()) }
-                        catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+                val result = listen(com.tekyerema.voice.io.ListenPurpose.SECURE_DONE, events(ready = { listenCue() },
+                    speech = { _state.update { it.copy(speechDetected = true) } }))
+                when (result) {
+                    is com.tekyerema.voice.io.Heard.Speech, is com.tekyerema.voice.io.Heard.Unavailable -> {
+                        val tr = (result as? com.tekyerema.voice.io.Heard.Speech)?.transcript
                         val heard = tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() }
                         // SECURITY: never log `heard` (it is user speech during a secure step). Log only the decision.
                         if (Confirmation.isCompletion(heard)) {
@@ -645,7 +695,7 @@ class VoiceController(
                         }
                         // Not a completion word → gently re-prompt (do NOT treat anything else as the PIN).
                     }
-                    CaptureResult.Cancelled -> throw CancellationException("secure input cancelled")
+                    com.tekyerema.voice.io.Heard.Cancelled -> throw CancellationException("secure input cancelled")
                     else -> { /* silence → re-prompt */ }
                 }
                 attempt++
@@ -661,16 +711,28 @@ class VoiceController(
     /** One more capture + transcription with [strategy] (a continuation or a patient wait); null when nothing usable
      *  was said. Cancellation propagates. */
     private suspend fun listenMore(strategy: VadStrategy): Transcript? {
-        val cap = mic.captureWith(strategy, onListening = { cues.listening() },
-            onSpeechStart = { _state.update { it.copy(speechDetected = true) } })
-        val wav = (cap as? CaptureResult.Success)?.wav ?: run {
-            if (cap is CaptureResult.Cancelled) throw CancellationException("cancelled while listening")
-            return null
-        }
-        cues.captured()
-        val t = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()) }
-            catch (c: CancellationException) { throw c } catch (_: Exception) { null }
-        return t?.takeUnless { it.isBlank }
+        val purpose = if (strategy.name == VadStrategy.PATIENT.name) com.tekyerema.voice.io.ListenPurpose.PATIENT
+            else com.tekyerema.voice.io.ListenPurpose.CONTINUATION
+        val heard = listen(purpose, events(ready = { listenCue() }, speech = { _state.update { it.copy(speechDetected = true) } },
+            captured = { cues.captured() }))
+        if (heard is com.tekyerema.voice.io.Heard.Cancelled) throw CancellationException("cancelled while listening")
+        return (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.takeUnless { it.isBlank }
+    }
+
+    /** What the user hears when their words couldn't be recognised ([cause] from the voice boundary). */
+    private fun cantHear(cause: com.tekyerema.voice.io.Heard.Cause): String = when (cause) {
+        com.tekyerema.voice.io.Heard.Cause.OFFLINE -> "Voice needs the internet right now, or type your request."
+        com.tekyerema.voice.io.Heard.Cause.NO_RECOGNIZER -> "This phone's speech service isn't available. You can type your request."
+        com.tekyerema.voice.io.Heard.Cause.BUSY -> "The phone's speech service is busy. Tap and try again in a moment."
+        com.tekyerema.voice.io.Heard.Cause.PERMISSION -> "I need microphone permission to hear you."
+        com.tekyerema.voice.io.Heard.Cause.LANGUAGE -> "The phone's speech service doesn't have this language. You can type your request."
+        else -> "Sorry, I couldn't understand that. Try again, a little closer to the phone."
+    }
+
+    /** The secure instruction with "say done" swapped for the Done button — for an input that never listens there. */
+    private fun tapDoneInstead(instruction: String): String {
+        val say = Regex("Say 'done' when (?:you've|it's) finished\\.")
+        return if (say.containsMatchIn(instruction)) instruction.replace(say, SECURE_TAP_DONE) else "$instruction $SECURE_TAP_DONE"
     }
 
     private fun secureInstruction(reason: String?, twi: Boolean): String {
@@ -702,31 +764,36 @@ class VoiceController(
             val ack = Acknowledgements.next(forceLanguage() ?: sessionLanguage())
             set(VoiceState.LISTENING, ack)
             agent.prewarm()   // N-04: open the brain's connection while the user talks
-            val cap = mic.capture(
-                onListening = { cues.listening(); set(VoiceState.LISTENING, ack) },   // tone once the mic is open
-                onSpeechStart = {
+            val heard = listen(if (quiet) com.tekyerema.voice.io.ListenPurpose.FOLLOW_UP else com.tekyerema.voice.io.ListenPurpose.REQUEST, events(
+                ready = { listenCue(); set(VoiceState.LISTENING, ack) },   // tone once the mic is open
+                speech = {
                     com.tekyerema.core.telemetry.Telemetry.mark("speech_start")   // B-19: speech → end_of_turn is the endpoint wait
                     _state.update { it.copy(state = VoiceState.LISTENING, partialHint = ack, speechDetected = true) }
-                }
-            )
-            val wav = when (cap) {
-                is CaptureResult.Success -> cap.wav
+                },
+                captured = {
+                    com.tekyerema.core.telemetry.Telemetry.mark("end_of_turn")
+                    set(VoiceState.CAPTURED, "Got it")
+                    cues.captured()
+                    set(VoiceState.TRANSCRIBING, "Transcribing…")
+                },
+                // voice/io: the recognizer's live words, for the screen only — never acted on, never logged, never spoken.
+                partial = { p -> _state.update { it.copy(livePartial = p) } }
+            ))
+            var tr = when (heard) {
+                is com.tekyerema.voice.io.Heard.Speech -> heard.transcript.also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final") }
                 // In a follow-up, silence just ends the conversation quietly (the screen then closes);
                 // on a deliberate tap-to-talk it's worth telling the user we heard nothing.
-                CaptureResult.NoSpeech -> { if (quiet) idle("") else sayThenIdle("I didn't hear anything. Tap and try again."); return }
-                CaptureResult.TooShort -> { if (quiet) idle("") else sayThenIdle("That was too short. Tap and try again."); return }
-                CaptureResult.Cancelled -> { cancelledToIdle(); return }
-                is CaptureResult.Error -> { if (quiet) { idle(""); return }; fail(VoiceStage.MIC, cap.message, "I can't use the microphone right now."); return }
+                com.tekyerema.voice.io.Heard.NoSpeech -> { if (quiet) idle("") else sayThenIdle("I didn't hear anything. Tap and try again."); return }
+                com.tekyerema.voice.io.Heard.TooShort -> { if (quiet) idle("") else sayThenIdle("That was too short. Tap and try again."); return }
+                com.tekyerema.voice.io.Heard.Cancelled -> { cancelledToIdle(); return }
+                is com.tekyerema.voice.io.Heard.Unavailable -> {
+                    if (heard.cause == com.tekyerema.voice.io.Heard.Cause.AUDIO) {
+                        if (quiet) { idle(""); return }
+                        fail(VoiceStage.MIC, heard.detail, "I can't use the microphone right now."); return
+                    }
+                    fail(VoiceStage.ASR, heard.detail, cantHear(heard.cause)); return
+                }
             }
-
-            com.tekyerema.core.telemetry.Telemetry.mark("end_of_turn")
-            set(VoiceState.CAPTURED, "Got it")
-            cues.captured()
-            set(VoiceState.TRANSCRIBING, "Transcribing…")
-            var tr = try {
-                asr.transcribe(wav, sessionLanguage(), forceLanguage()).also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final") }
-            } catch (c: CancellationException) { throw c
-            } catch (e: Exception) { fail(VoiceStage.ASR, e.message ?: "ASR failed", "Sorry, I couldn't understand that. Try again, a little closer to the phone."); return }
             if (tr.isBlank) { fail(VoiceStage.ASR, "Empty transcript", "Sorry, I didn't catch that. Try again, a little closer to the phone."); return }
             // B-09: "wait" / "hold on" on its own → the user needs a moment: listen patiently for the real request.
             var holds = 0
@@ -829,12 +896,13 @@ class VoiceController(
             }
 
             set(VoiceState.SPEAKING, outcome.spoken)
-            var interruption: ByteArray? = null
+            var interruption: com.tekyerema.voice.io.BargeIn? = null
             tel.mark("reply_start")
             val spoke = if (!speakAloud() || outcome.spoken.isBlank()) false else try {
-                val (ok, barged) = speakInterruptible(Verbalize.apply(outcome.spoken), tr.language)
-                interruption = barged
-                ok || barged != null
+                val b = speakInterruptible(Verbalize.apply(outcome.spoken), tr.language)
+                // The interruption's own audio (captured stack), or just its onset (the phone's recognizer listens afresh).
+                interruption = b.takeIf { it.interrupted && (it.wav != null || !voiceIn.caps.transcribesAudio) }
+                b.spokeFully || interruption != null
             } catch (c: CancellationException) { throw c } catch (e: Exception) { false }
             tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
@@ -842,11 +910,14 @@ class VoiceController(
                     partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
             }
             // B-07: the user spoke over the reply — what they said is the next turn.
-            interruption?.let { wav ->
+            interruption?.let { b ->
                 Log.i("Tekyerema", "[VOICE] barge-in: reply interrupted — handling what the user said")
-                set(VoiceState.TRANSCRIBING, "Transcribing…")
-                val next = try { asr.transcribe(wav, sessionLanguage(), forceLanguage()) }
-                    catch (c: CancellationException) { throw c } catch (_: Exception) { null }
+                val heard = b.wav?.let { wav -> set(VoiceState.TRANSCRIBING, "Transcribing…"); voiceIn.transcribe(wav) }
+                    // Onset only: the reply has stopped and the barge-in mic is released — listen afresh (the first word or
+                    // two of the interruption are lost; the recognizer never runs during our own speech).
+                    ?: listen(com.tekyerema.voice.io.ListenPurpose.REQUEST, events(ready = { listenCue(); set(VoiceState.LISTENING, "") },
+                        captured = { cues.captured(); set(VoiceState.TRANSCRIBING, "Transcribing…") }))
+                val next = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript
                 // "Stop" / "that's enough" said over the reply: it has stopped, and that is all (checked before the echo
                 // guard — a reading that contains the word "stop" must not swallow the user's own "stop").
                 if (next != null && ReadingPace.isEnough(next.canonical)) {
@@ -903,27 +974,21 @@ class VoiceController(
     /**
      * B-07 — speak [text] while an echo-cancelled mic listens; if the user starts talking the reply stops and their
      * words are returned as the next utterance. Only for replies long enough to be worth interrupting, never for a
-     * confirmation read-back (an early "yes" must not count). Returns (spoke fully, interrupting audio or null).
+     * confirmation read-back (an early "yes" must not count). Returns whether it spoke fully, whether it was interrupted,
+     * and — for an input that transcribes audio — the interruption itself.
      */
-    private suspend fun speakInterruptible(text: String, lang: String): Pair<Boolean, ByteArray?> {
+    private suspend fun speakInterruptible(text: String, lang: String): com.tekyerema.voice.io.BargeIn {
         val cfg = com.tekyerema.core.config.AppConfig
-        val barge = bargeMic
-        if (barge == null || !bargeInEnabled() || !hasMicPermission() || text.length < cfg.int("speech.bargeIn.minChars", 60))
-            return tts.speak(text, lang) to null
+        val detector = barge
+        if (detector == null || !bargeInEnabled() || !hasMicPermission() || text.length < cfg.int("speech.bargeIn.minChars", 60))
+            return com.tekyerema.voice.io.BargeIn(tts.speak(text, lang), interrupted = false, wav = null)
         // The reply on the voice-communication path, so the echo canceller has our own voice as its reference (the A20e's
         // AEC let media-stream TTS straight through). Entered BEFORE the mic opens and the reply starts: both must be on it.
         val duplex = duplexBegin()
         try {
-            return kotlinx.coroutines.coroutineScope {
-                val interrupted = java.util.concurrent.atomic.AtomicBoolean(false)
-                val listen = async {
-                    barge.captureWith(VadStrategy.NORMAL, onListening = {}, onSpeechStart = { interrupted.set(true); tts.stop() })
-                }
-                val ok = try { tts.speak(text, lang) } catch (c: CancellationException) { listen.cancel(); throw c }
-                if (!interrupted.get()) { listen.cancel(); return@coroutineScope ok to null }
-                val cap = listen.await()
-                false to (cap as? CaptureResult.Success)?.wav
-            }
+            // voice/io: keep the interruption's audio only for an input that can transcribe it; the phone's recognizer opens
+            // its own mic, so there the onset alone stops the reply and a fresh listen follows (after duplexEnd, below).
+            return detector.speakWatching({ tts.speak(text, lang) }, onOnset = { tts.stop() }, keepAudio = voiceIn.caps.transcribesAudio)
         } finally {
             if (duplex) duplexEnd()
         }
@@ -1090,9 +1155,10 @@ class VoiceController(
     private fun set(s: VoiceState, hint: String = "") =
         _state.update {
             it.copy(state = s, partialHint = hint, failedStage = VoiceStage.NONE, error = "",
-                speechDetected = if (s == VoiceState.LISTENING) it.speechDetected else false)
+                speechDetected = if (s == VoiceState.LISTENING) it.speechDetected else false,
+                livePartial = if (s == VoiceState.LISTENING) it.livePartial else "")
         }
-    private fun idle(hint: String) = _state.update { it.copy(state = VoiceState.IDLE, partialHint = hint, speechDetected = false) }
+    private fun idle(hint: String) = _state.update { it.copy(state = VoiceState.IDLE, partialHint = hint, speechDetected = false, livePartial = "") }
     /** A cancelled voice turn rests in IDLE — unless the keyboard replaced it, in which case TYPING stands. */
     private fun cancelledToIdle() { if (_state.value.state != VoiceState.TYPING) idle("Cancelled.") }
 

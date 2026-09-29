@@ -27,10 +27,10 @@ object VoiceEngine {
     private lateinit var settings: Settings
     private lateinit var systemTts: AndroidTts
     private lateinit var controller: VoiceController
-    private lateinit var mic: MicCapture
-    /** Yes/no answers: a shorter silence window than a full request. */
-    private lateinit var answerMic: MicCapture
     private var initialized = false
+    /** voice/io: which voice layer is live (`speech.voiceLayer.profile`), for diagnostics. */
+    @Volatile var voiceLayer: String = com.tekyerema.voice.io.VoiceLayer.BUILTIN_EN
+        private set
     /** Kept for QA auditioning of the "thinking" filler clips over ADB (`--es play_fillers twi|en`). */
     @Volatile private var fillerPlayer: FillerPlayer? = null
     @Volatile private var sherpa: SherpaAsr? = null
@@ -65,91 +65,130 @@ object VoiceEngine {
         if (initialized) return
         initialized = true
         settings = Settings(app)
-        // §P0 — build the mics with app context so the Silero VAD model (assets/vad/silero_vad.onnx) loads.
-        mic = MicCapture(appContext = app, defaultStrategy = { VadStrategy.named(settings.vadStrategy) })   // B-03
-        answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
         systemTts = AndroidTts(app)
-        // B-18: which voice fills each role comes from config (providers.speech.tts.*), always ending in the phone's
-        // own engine so the assistant is never silent. The language layer builds the network clients (UG HCI Lab or
-        // any REST API) from config + local.properties; with the shipped config there are none, so everything is the
-        // system engine and a Twi reply is spoken from its text (no MT). The system voice is wrapped so Twi letters
-        // (ɛ/ɔ) are read as plain vowels instead of being spelled out; English text passes through unchanged.
-        val layer = com.tekyerema.language.LanguageLayer.build(app)
-        asrRegistry = layer.asr
-        val systemVoice = com.tekyerema.language.PlainLatinVoice(systemTts)
-        val ttsRegistry = layer.tts + ("system" to systemVoice)
         val isOnline = { com.tekyerema.core.NetworkMonitor.isOnline() }
-        val localizer = com.tekyerema.language.ReplyLocalizer(
-            com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline))
-        val tts = RoutingTts(
-            english = SpeechProviders.tts("english", ttsRegistry, systemVoice),
-            twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
-            enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
-            ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
-                .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
-            isOnline = isOnline
-        )
-        // B-05: reply in the language the user last spoke; the persisted habitual language only moves after a streak.
-        val language = com.tekyerema.language.LanguageSession(
-            loadHabitual = { settings.sessionLanguage }, saveHabitual = { settings.sessionLanguage = it })
-        val sherpa = SherpaAsr(app).also { this.sherpa = it }
-        // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
-        scope.launch(Dispatchers.Default) { try { sherpa.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
+        // The system voice is wrapped so Twi letters (ɛ/ɔ) are read as plain vowels instead of being spelled out;
+        // English text passes through unchanged.
+        val systemVoice = com.tekyerema.language.PlainLatinVoice(systemTts)
+        val levels = ArrayList<StateFlow<Float>>()
         // B-19: contact names + app labels for post-ASR name correction, loaded off the voice path (READ_CONTACTS only
-        // if already granted). Refreshed again whenever a listen starts (cheap no-op inside its TTL).
+        // if already granted). Refreshed again whenever a listen starts (cheap no-op inside its TTL). Both profiles.
         scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} }
         vocabRefresh = { scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} } }
-        // B-19 speculative recognition: start the on-device decode during the end-of-turn silence (MicCapture.onPause).
-        // Only when this turn would be recognised ON the phone anyway — never a second call to a quota'd online API
-        // (a forced-Twi turn with the HCI Lab online skips it). `speech.asr.speculative` = false turns it off.
-        val speculate: (ByteArray) -> Unit = { wav ->
-            if (com.tekyerema.core.config.AppConfig.bool("speech.asr.speculative", true) && sherpa.ready &&
-                onlineAsrFor(settings.forcedLanguage) == null) {
-                val gen = sherpa.specGeneration          // taken now, on the mic thread: a drop from here on voids it
-                scope.launch(Dispatchers.Default) { try { sherpa.speculate(wav, settings.forcedLanguage, gen) } catch (_: Throwable) {} }
+
+        // ===== voice/io — THE voice-layer switch (the only reader of speech.voiceLayer.profile) =====
+        // builtin_en (testing default): Android's SpeechRecognizer + the system TTS, English. SherpaAsr and the HCI Lab
+        // language layer are not built. ghana: MicCapture + HybridAsr + RoutingTts, exactly as before the boundary.
+        val plan = com.tekyerema.voice.io.VoiceLayer.plan(
+            com.tekyerema.core.config.AppConfig.string(com.tekyerema.voice.io.VoiceLayer.CONFIG_KEY, com.tekyerema.voice.io.VoiceLayer.BUILTIN_EN))
+        voiceLayer = plan.profile
+        // Filled by the ghana factory below (captured-audio stack); stay as-is under builtin_en.
+        var hybrid: AsrProvider = LocalAsrProvider()          // never used for listening under builtin_en (no audio to give it)
+        var tts: TtsProvider = systemVoice
+        var sessionLang: () -> String = { Lang.GH_EN }
+        var onLang: (String) -> Unit = {}
+        var forced: () -> String? = { plan.pinnedLanguage }
+        val built = com.tekyerema.voice.io.VoiceLayer.build(plan, object : com.tekyerema.voice.io.VoiceLayer.Factory<SherpaAsr, com.tekyerema.language.LanguageLayer.Registries> {
+            override fun onDeviceAsr() = SherpaAsr(app).also { sherpa = it }
+            override fun languageLayer() = com.tekyerema.language.LanguageLayer.build(app)
+            override fun systemInput(): com.tekyerema.voice.io.VoiceInput {
+                val cfg = { com.tekyerema.voice.io.SystemSpeechConfig.fromConfig() }
+                val main = android.os.Handler(android.os.Looper.getMainLooper())
+                val focus = AudioFocus(app)
+                return com.tekyerema.voice.io.SystemSpeechInput(
+                    engine = com.tekyerema.voice.io.AndroidRecognizerEngine(app) { cfg().component },
+                    config = cfg, isOnline = isOnline, main = Dispatchers.Main.immediate,
+                    postToMain = { r -> if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) r() else main.post { r() } },
+                    micHandOver = { WakeWordService.handOver() }, micReclaim = { WakeWordService.reclaim() },
+                    acquireFocus = { focus.acquire(AudioFocus.Kind.LISTEN) },
+                    releaseFocus = { t -> focus.release(t as? android.media.AudioFocusRequest) }
+                ).also { s ->
+                    levels.add(s.level)
+                    // Startup facts, no content: which recognizer, and does it list en-GH? If it says no, use the fallback.
+                    val c = cfg()
+                    com.tekyerema.voice.io.AndroidRecognizerEngine.probe(app, c.languageTag, c.fallbackTag) { langs ->
+                        if (c.languageTag.lowercase() !in langs && c.fallbackTag.lowercase() in langs) s.useFallbackTag = true
+                    }
+                }
             }
-        }
-        mic.onPause = speculate
-        mic.onSpeculationStale = { sherpa.dropSpeculation() }
-        // Not on the yes/no mic: a confirmation answer is short (little to gain) and "yes… no" must never reach the
-        // confirmation as "yes".
-        answerMic.onPause = null
+            override fun capturedInput(onDevice: SherpaAsr, layer: com.tekyerema.language.LanguageLayer.Registries): com.tekyerema.voice.io.VoiceInput {
+                // §P0 — build the mics with app context so the Silero VAD model (assets/vad/silero_vad.onnx) loads.
+                val mic = MicCapture(appContext = app, defaultStrategy = { VadStrategy.named(settings.vadStrategy) })   // B-03
+                // Yes/no answers: a shorter silence window than a full request.
+                val answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
+                levels.add(mic.level); levels.add(answerMic.level)
+                // B-18: which voice fills each role comes from config (providers.speech.tts.*), always ending in the phone's
+                // own engine so the assistant is never silent. The language layer builds the network clients (UG HCI Lab or
+                // any REST API) from config + local.properties; with the shipped config there are none, so everything is the
+                // system engine and a Twi reply is spoken from its text (no MT).
+                asrRegistry = layer.asr
+                val ttsRegistry = layer.tts + ("system" to systemVoice)
+                val localizer = com.tekyerema.language.ReplyLocalizer(
+                    com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline))
+                tts = RoutingTts(
+                    english = SpeechProviders.tts("english", ttsRegistry, systemVoice),
+                    twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
+                    enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
+                    ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
+                        .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
+                    isOnline = isOnline
+                )
+                // B-05: reply in the language the user last spoke; the persisted habitual language only moves after a streak.
+                val language = com.tekyerema.language.LanguageSession(
+                    loadHabitual = { settings.sessionLanguage }, saveHabitual = { settings.sessionLanguage = it })
+                sessionLang = { language.current() }
+                onLang = { language.onTurn(it) }
+                forced = { settings.forcedLanguage }
+                // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
+                scope.launch(Dispatchers.Default) { try { onDevice.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
+                // B-19 speculative recognition: start the on-device decode during the end-of-turn silence (MicCapture.onPause).
+                // Only when this turn would be recognised ON the phone anyway — never a second call to a quota'd online API
+                // (a forced-Twi turn with the HCI Lab online skips it). `speech.asr.speculative` = false turns it off.
+                mic.onPause = { wav ->
+                    if (com.tekyerema.core.config.AppConfig.bool("speech.asr.speculative", true) && onDevice.ready &&
+                        onlineAsrFor(settings.forcedLanguage) == null) {
+                        val gen = onDevice.specGeneration          // taken now, on the mic thread: a drop from here on voids it
+                        scope.launch(Dispatchers.Default) { try { onDevice.speculate(wav, settings.forcedLanguage, gen) } catch (_: Throwable) {} }
+                    }
+                }
+                mic.onSpeculationStale = { onDevice.dropSpeculation() }
+                // Not on the yes/no mic: a confirmation answer is short (little to gain) and "yes… no" must never reach the
+                // confirmation as "yes".
+                answerMic.onPause = null
+                // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes via sherpa-onnx are the OFFLINE path; an
+                // online provider per language comes from config (providers.speech.asr.online.<lang>) — the UG HCI Lab ASR
+                // client is built into asrRegistry by the language layer — and is used only while connected, degrading to
+                // on-device on any failure. LanguagePipeline (LID/normalize/entities) runs locally on the raw text.
+                hybrid = HybridAsr(
+                    onDevice = onDevice,
+                    onlineFor = { lang -> onlineAsrFor(lang) },
+                    forceLanguage = { settings.forcedLanguage },
+                    sessionLanguage = { language.current() }
+                )
+                return com.tekyerema.voice.io.CapturedAudioInput(mic, answerMic, hybrid, sessionLang, forced)
+            }
+        })
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
-        android.util.Log.i("Tekyerema", "[STARTUP] on-device ASR=${sherpa.name} ready=${sherpa.ready} | " +
-            "language layer: ${layer.summary()} | " +
+        android.util.Log.i("Tekyerema", "[STARTUP] voice layer=${plan.profile} input=${built.input.id} | " +
+            "on-device ASR=${built.onDevice?.let { "${it.name} ready=${it.ready}" } ?: "not built"} | " +
+            "language layer: ${built.layer?.summary() ?: "not built"} | " +
             "cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
         val duplex = DuplexAudio(app)   // B-07
         controller = VoiceController(
-            // Phase 8 HYBRID ASR (§12/§13): on-device whisper-TINY fine-tunes (Twi = tiny-twi; Gh-EN = our
-            // tekyerema-ghen-tiny) via sherpa-onnx are the OFFLINE path — Twi always stays on-device. For
-            // Gh-EN, when a real online endpoint is configured (Settings.asrOnlineBaseUrl, PLACEHOLDER until
-            // whisper-large-v3-turbo-tekyerema-eng is hosted) AND we're connected, the strong online model
-            // is used, degrading to on-device on any failure. LanguagePipeline (LID/normalize/entities) runs
-            // locally on the raw text for every path. Offline/no-endpoint ⇒ the network is never touched.
-            asr = HybridAsr(
-                onDevice = sherpa,
-                // Language-aware online routing, network folded in (offline ⇒ null ⇒ on-device, no hang). B-18: the
-                // provider per language comes from config (providers.speech.asr.online.<lang>); the UG HCI Lab ASR
-                // client is built into asrRegistry by the language layer. None is enabled in the shipped config, so
-                // English and Twi both transcribe ON-DEVICE via sherpa.
-                onlineFor = { lang -> onlineAsrFor(lang) },
-                forceLanguage = { settings.forcedLanguage },
-                sessionLanguage = { language.current() }
-            ),
+            asr = hybrid,
             tts = tts,
-            sessionLanguage = { language.current() },
-            onLanguageResolved = { language.onTurn(it) },
+            sessionLanguage = sessionLang,
+            onLanguageResolved = onLang,
             scope = scope,
             hasMicPermission = {
                 ContextCompat.checkSelfPermission(app, android.Manifest.permission.RECORD_AUDIO) ==
                     PackageManager.PERMISSION_GRANTED
             },
-            mic = mic,
             cues = cues,
-            forceLanguage = { settings.forcedLanguage },
+            forceLanguage = forced,
             speakAloud = { settings.speakAloud },
-            answerMic = answerMic,
+            input = built.input,
             // A visible "Tɛkyerɛma is asking…" card over any app while a follow-up question waits for an answer.
             showAsking = { q -> com.tekyerema.ui.OverlayConfirm.showQuestion(app, q) },
             hideAsking = { com.tekyerema.ui.OverlayConfirm.hide(app) },
@@ -178,7 +217,8 @@ object VoiceEngine {
                     com.tekyerema.core.config.AppConfig.bool("speech.bargeIn.enabled", true)
             }
         )
-        scope.launch { combine(mic.level, answerMic.level) { a, b -> maxOf(a, b) }.collect { _level.value = it } }
+        // The living visual follows whichever microphone is listening (our two MicCaptures, or the phone's recognizer).
+        if (levels.isNotEmpty()) scope.launch { combine(levels.toList()) { a -> a.maxOrNull() ?: 0f }.collect { _level.value = it } }
         HistoryStore.init(app)
         // The reply panel follows the task: whenever it waits on the user (a confirmation, a question, the secure step)
         // a panel over any app shows what it's waiting for, with buttons that fit (PromptSurface).
