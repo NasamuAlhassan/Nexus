@@ -4,5 +4,10 @@
     "toolTiers": {},
     "denyApps": [],
     "guideOnlyApps": []
+  },
+  "money": {
+    "_note": "Money safety round 2 (2026-09-29, money/). Raising or removing a Mobile Money limit waits coolingOffMs (lowering is immediate) so a caller can't talk the user into lifting it and sending at once; MTN's 'You have sent' message within receiptWindowMs of a PIN hand-off is read as a receipt.",
+    "limits": {"coolingOffMs": 1800000},
+    "afterCare": {"receiptWindowMs": 300000}
   }
 }

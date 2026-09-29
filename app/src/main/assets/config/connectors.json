@@ -14,7 +14,8 @@
           "names": ["mtn"],
           "mccmnc": ["62001"],
           "root": "*170#",
-          "sendSequence": ["1", "1", "{number}", "{number}", "{amount}", "{reference}"]
+          "sendSequence": ["1", "1", "{number}", "{number}", "{amount}", "{reference}"],
+          "care": "100"
         },
         "airteltigo": {
           "names": ["airteltigo", "airtel", "tigo"],
@@ -27,6 +28,20 @@
           "root": "*110#"
         }
       }
+    },
+    "banks": {
+      "_note": "Money safety round 2 (2026-09-29): VERIFIED bank USSD codes only (docs/agent/research/secure_payment_auth.md, 'Bank transfers'). A bank is added here only once its code is verified; GCB, Ecobank, Fidelity, CalBank, Access, ADB and AT Money were not, so they are named as unsupported and never dialled. Tekyerema only OPENS the code and reads each screen; the user chooses every option, confirms the payment and enters the PIN (guided, never automated).",
+      "ussd": {
+        "stanbic": {"name": "Stanbic Bank", "code": "*715#", "aliases": ["stanbic", "stanbic bank", "stan bic"]},
+        "zenith": {"name": "Zenith Bank", "code": "*966#", "aliases": ["zenith", "zenith bank"]},
+        "uba": {"name": "UBA", "code": "*822#", "aliases": ["uba", "u b a", "united bank for africa"]},
+        "republic": {"name": "Republic Bank", "code": "*414#", "aliases": ["republic", "republic bank"]},
+        "absa": {"name": "Absa", "code": "*859*99#", "aliases": ["absa", "absa bank", "absa spark", "absar"]},
+        "ghanapay": {"name": "GhanaPay", "code": "*707#", "aliases": ["ghanapay", "ghana pay"]}
+      },
+      "unverified": ["GCB", "GCB Bank", "Ecobank", "Fidelity", "Fidelity Bank", "CalBank", "Cal Bank", "Access Bank", "ADB",
+        "Agricultural Development Bank", "Standard Chartered", "Societe Generale", "Prudential Bank", "First Atlantic", "FBN", "CBG",
+        "Consolidated Bank", "OmniBSIC", "NIB", "GTBank", "Guaranty Trust", "Bank of Africa", "First National Bank", "ARB Apex", "AT Money"]
     }
   }
 }

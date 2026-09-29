@@ -281,6 +281,9 @@ object OperatorPolicy {
     @Synchronized fun init(s: OperatorStore) {
         store = s
         load(s)
+        // Money safety round 2: the user's Mobile Money limits and paid-numbers list live in the same store (money/).
+        com.tekyerema.money.MoneyLimits.init(s)
+        com.tekyerema.money.KnownRecipients.init(s)
         _changes.value = _changes.value + 1
     }
 
@@ -292,6 +295,7 @@ object OperatorPolicy {
         schedules = true; alerts = true; routines = true; retentionDays = 0
         usage.clear(); usageDay = Long.MIN_VALUE; lastModel = null
         zoneOffset = { java.util.TimeZone.getDefault().getOffset(it) }
+        com.tekyerema.money.MoneyLimits.resetForTest(); com.tekyerema.money.KnownRecipients.resetForTest()   // round 2 (money/)
         if (s != null) init(s)
     }
 
@@ -354,7 +358,7 @@ object OperatorPolicy {
             K_ALERTS -> "switched message alerts ${onOff(value)}"
             K_ROUTINES -> "switched routines ${onOff(value)}"
             K_RETENTION -> value?.toIntOrNull()?.takeIf { it > 0 }?.let { "set history to be kept for $it days" } ?: "set history back to the usual time"
-            else -> null
+            else -> com.tekyerema.money.MoneyLimits.describeChange(key, value)   // round 2: Mobile Money limits (null otherwise)
         }
     }
 

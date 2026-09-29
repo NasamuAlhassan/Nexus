@@ -68,12 +68,14 @@ internal enum class Page {
     // WS-C: Control and its sub-pages.
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
     // Phone care: "check my phone" and the event alerts (PhoneCarePage).
-    PHONE_CARE;
+    PHONE_CARE,
+    // Money safety round 2: the user's Mobile Money limits (MoneyLimitsPage, under Control).
+    MONEY_LIMITS;
 
     /** Where Back goes. */
     val parent: Page get() = when (this) {
         ROOT -> ROOT
-        PROVIDERS, KEYS, USAGE, DATA, AUDIT -> CONTROL
+        PROVIDERS, KEYS, USAGE, DATA, AUDIT, MONEY_LIMITS -> CONTROL
         else -> ROOT
     }
     val depth: Int get() = if (this == ROOT) 0 else parent.depth + 1
@@ -151,6 +153,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.DATA -> DataPage(settings, onBack = { page = Page.CONTROL }) { page = Page.AUDIT }
         Page.AUDIT -> AuditPage { page = Page.CONTROL }
         Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
+        Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
     } }
 }
 

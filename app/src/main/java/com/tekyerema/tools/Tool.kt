@@ -72,6 +72,10 @@ interface Tool {
      *  when the model supplied no concrete expectation. */
     val verifiesOutcome: Boolean get() = false
 
+    /** Called only by an on-phone guide (money safety round 2: the guided bank menu, money/BankUssdTool) — never offered
+     *  to a model: no schema entry, no find_tool hit. Default: offered like any tool. */
+    val hiddenFromModel: Boolean get() = false
+
     /** Side-effect-free check that the action CAN proceed, run BEFORE the policy confirmation. Non-null = it can't
      *  (e.g. make_call to a name that isn't in the contacts, or matches several people): the engine then skips the
      *  confirmation and hands this failure to the brain, so a blind user is never asked to approve an action that

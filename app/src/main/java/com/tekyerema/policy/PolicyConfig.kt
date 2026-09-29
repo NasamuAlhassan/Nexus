@@ -34,10 +34,12 @@ object PolicyConfig {
             return if (custom.isNotEmpty() && (TargetSemantics.consequential.containsMatchIn(custom) || TargetSemantics.isConsent(custom)))
                 RiskTier.TIER2 else null
         }
+        // Money safety round 2: the guided bank menu — opening it is TIER3, a typed amount/account number TIER2 (money/BankUssdTool).
+        if (tool.name == com.tekyerema.money.BankUssdTool.NAME) return com.tekyerema.money.BankUssdTool.argTier(args)
         if (tool.name != "run_ussd") return null
         val code = args.optString("code").replace(Regex("\\s"), "")
         if (code.isEmpty()) return null
-        val prefixes = com.tekyerema.tools.GhanaMobileMoney.moneyPrefixes() +
+        val prefixes = com.tekyerema.tools.GhanaMobileMoney.moneyPrefixes() + com.tekyerema.money.BankUssd.moneyPrefixes() +   // + verified bank codes (round 2)
             AppConfig.stringList("policy.moneyUssdPrefixes", emptyList()).map { it.trim().trimEnd('#') }.filter { it.isNotEmpty() }
         return if (prefixes.any { p -> code == "$p#" || code.startsWith("$p*") || code == p }) RiskTier.TIER3 else null
     }

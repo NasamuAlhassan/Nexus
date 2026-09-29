@@ -26,7 +26,7 @@ object RetrievalNeed {
     /** Things on the phone, directions, and apps: never a web research target. */
     private val NOT_WEB = Regex("\\b(?:app|application|settings?|wi-?fi|bluetooth|camera|gallery|contacts?|messages?|notifications?|" +
         "alarms?|clock|calculator|calendar|flash ?light|torch|dialer|keyboard|recent apps|home screen|files|downloads|" +
-        "near me|nearby|directions?|the way|route|map|maps)\\b")
+        "near me|nearby|directions?|the way|route|map|maps|ussd|short ?code)\\b")   // round 2: "open Stanbic USSD" is the phone's
 
     /** The external thing to find for an "open <site or portal>" request, or null. Pure; the engine also skips it when
      *  an installed app matches (the app wins). */

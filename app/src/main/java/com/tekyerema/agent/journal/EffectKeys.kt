@@ -65,6 +65,9 @@ object EffectKeys {
                     (a(args, "_kind") ?: a(args, "action") ?: "") + " amount=" + (a(args, "_amount") ?: a(args, "amount")).orEmpty())
             }
             "run_ussd" -> a(args, "code")?.let { Spec(EffectKind.PAYMENT, "ussd", "the USSD service", it) }
+            // Money safety round 2: a guided bank-menu step is navigation, like a keypad digit — the transfer is the user's own
+            // final step with their PIN, never ours (money/BankUssdTool), so two "1"s on two screens are not "the same thing".
+            "bank_ussd" -> null
             "install_app" -> {
                 val what = a(args, "package") ?: a(args, "app") ?: a(args, "name") ?: return null
                 Spec(EffectKind.INSTALL, what, a(args, "app") ?: what, "")

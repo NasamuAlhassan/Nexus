@@ -141,6 +141,9 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             capabilityRow(Capability.MESSAGES, "Texts, WhatsApp messages and replies.", Icons.Outlined.ChatBubbleOutline, Spectrum.Azure)
             capabilityRow(Capability.CALLS, "Placing calls. Emergency help always works.", Icons.Outlined.Call, Spectrum.Mint)
             capabilityRow(Capability.MONEY, "Mobile Money and payments.", Icons.Outlined.Payments, Spectrum.Gold)
+            // Money safety round 2 (money/MoneyLimits): the most a send and a day may be; raising waits 30 minutes.
+            SettingRow("Mobile Money limits", value = remember(version) { moneyLimitsSummary() }, icon = Icons.Outlined.Payments,
+                iconTint = Spectrum.Gold, description = "The most you can send at once, and in a day.") { open(Page.MONEY_LIMITS) }
             capabilityRow(Capability.SETTINGS, "Wi-Fi, Bluetooth, brightness, sound mode and other phone settings.", Icons.Outlined.Tune, Spectrum.Cyan)
             capabilityRow(Capability.WEB, "Searching the web for answers.", Icons.Outlined.Public, Spectrum.Violet, divider = false)
         }

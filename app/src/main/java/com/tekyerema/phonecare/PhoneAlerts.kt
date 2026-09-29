@@ -118,9 +118,14 @@ object PhoneAlerts {
         val shown = rec.sender ?: rec.title
         val senderId = if (fromApp) null else smsAddress(app, body) ?: shown
         val trusted = fromApp || MoneyAlerts.isTrustedSender(senderId)
-        val event = MoneyAlerts.classify(body, trusted, fromNumber = !fromApp && MoneyAlerts.looksLikeNumber(senderId)) ?: return null
         val now = System.currentTimeMillis()
         val sig = "m|" + body.lowercase().filter { it.isLetterOrDigit() }.hashCode()
+        // Money safety round 2 (money/MoMoAfterCare): MTN's own "You have sent GHS 5.00 to KOFI MENSAH" within minutes of a
+        // hand-off at the PIN → "MTN confirms 5 cedis sent to Kofi Mensah." Only from a trusted sender; the balance only
+        // when the user switched balances on.
+        if (trusted) com.tekyerema.money.MoMoAfterCare.receiptFor(body, Settings(app).alertMoneyBalance, now)
+            ?.let { return Alert(MONEY, it, sig, canBePrivate = true) }
+        val event = MoneyAlerts.classify(body, trusted, fromNumber = !fromApp && MoneyAlerts.looksLikeNumber(senderId)) ?: return null
         return when (event) {
             is MoneyAlerts.Event.Received -> {
                 // The MoMo app's push and the SMS for the same payment: said once.
