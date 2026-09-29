@@ -35,8 +35,17 @@ object Grounding {
         val q = query.trim()
         if (q.isEmpty()) return MatchOutcome.None
 
+        // A partial match must not ADD an action the model didn't name: "Library" is not "Remove from library" (YT Music's
+        // song menu, A20e 2026-09-29 — the policy caught it). Such a label stays a weak match, never silently chosen.
+        val qLower = q.lowercase()
+        fun addsAction(label: String): Boolean {
+            val l = label.lowercase()
+            return (com.tekyerema.policy.TargetSemantics.consequential.containsMatchIn(l) &&
+                !com.tekyerema.policy.TargetSemantics.consequential.containsMatchIn(qLower)) ||
+                (com.tekyerema.policy.TargetSemantics.isConsent(l) && !com.tekyerema.policy.TargetSemantics.isConsent(qLower))
+        }
         fun isStrong(label: String): Boolean =
-            label.length <= MAX_INCIDENTAL_LABEL_LENGTH && q.length.toDouble() / label.length >= MIN_MATCH_RATIO
+            label.length <= MAX_INCIDENTAL_LABEL_LENGTH && q.length.toDouble() / label.length >= MIN_MATCH_RATIO && !addsAction(label)
 
         fun strongPass(pool: List<UiElement>): UiElement? {
             pool.firstOrNull { it.label?.equals(q, true) == true }?.let { return it }

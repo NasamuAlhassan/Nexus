@@ -87,6 +87,16 @@ class AgentW7bTest {
         assertEquals(0, (m2 as MatchOutcome.Found).element.id)
     }
 
+    /** A20e 2026-09-29: the model asked for "Library" in YT Music's song menu and got "Remove from library". */
+    @Test fun a_partial_label_match_never_adds_an_action() {
+        val menu = listOf(el(0, "Play next"), el(1, "Remove from library"), el(2, "Download"), el(3, "Share"))
+        assertTrue(Grounding.bestMatch(menu, "Library") is MatchOutcome.OnlyWeak)
+        assertTrue(Grounding.bestMatch(menu, "Remove from library") is MatchOutcome.Found)   // asked for exactly: fine
+        assertEquals(2, (Grounding.bestMatch(menu, "download") as MatchOutcome.Found).element.id)
+        val nav = listOf(el(0, "Home"), el(1, "Library tab"))
+        assertEquals(1, (Grounding.bestMatch(nav, "Library") as MatchOutcome.Found).element.id)
+    }
+
     @Test fun a_filled_text_box_is_found_by_its_hint_and_the_only_box_by_its_role() {
         val box = el(3, "Hello Ama", hint = "Message", role = "EditText", editable = true)
         val els = listOf(el(0, "Attach"), box, el(4, "Send"))
