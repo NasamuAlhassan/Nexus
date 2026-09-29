@@ -65,15 +65,18 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         }
         var last: AgentDecision = AgentDecision.Fail("no model configured")
         for ((i, model) in models.withIndex()) {
-            last = decideWith(model, ctx)
-            if (!(last is AgentDecision.Fail && last.reason.contains(DAILY_MARKER))) return last
+            last = decideWith(model, ctx, canFallBack = i < models.lastIndex)
+            val daily = last is AgentDecision.Fail && last.reason.contains(DAILY_MARKER)
+            val paced = last is AgentDecision.Fail && last.reason.contains(PACE_MARKER)
+            if (!daily && !paced) return last
             if (i < models.lastIndex)
-                android.util.Log.w("Tekyerema", "[LLM] $model: daily quota used up on every key → falling back to ${models[i + 1]}")
+                android.util.Log.w("Tekyerema", "[LLM] $model: " + (if (daily) "daily quota used up on every key" else
+                    "every key is cooling") + " → this step on ${models[i + 1]}")
         }
         return last
     }
 
-    private suspend fun decideWith(model: String, ctx: BrainContext): AgentDecision = withContext(Dispatchers.IO) {
+    private suspend fun decideWith(model: String, ctx: BrainContext, canFallBack: Boolean = false): AgentDecision = withContext(Dispatchers.IO) {
         val keys = settings.groqApiKeys
         if (keys.isEmpty()) return@withContext AgentDecision.Fail("No Groq/OpenAI API key configured.")
         val url = settings.groqBaseUrl.trimEnd('/') + "/chat/completions"
@@ -107,6 +110,10 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
                 if (soonest - now > 90_000L) return@withContext AgentDecision.Fail(
                     "The AI service is rate-limited right now ($DAILY_MARKER). Please try again later."
                 )
+                // A2 (device 2026-09-29): three keys on the daily cap and the fourth per-minute limited paced 8 s at a time
+                // for a minute while the next model's separate quota sat unused. Move on instead of waiting long.
+                if (canFallBack && soonest - now > AppConfig.long("router.quota.maxWaitMs", 1500L))
+                    return@withContext AgentDecision.Fail("The AI service is busy right now ($PACE_MARKER).")
                 val waitMs = (soonest - now).coerceIn(250L, 8000L)
                 if (++pacedWaits > 8) return@withContext AgentDecision.Fail(
                     "The AI service is rate-limited right now. Please try again in a moment."
@@ -332,6 +339,7 @@ class OpenAiCompatBrain(private val settings: Settings) : AgentBrain {
         /** Tried in order after the configured model when its daily quota is exhausted on every key. */
         private val FALLBACK_MODELS = listOf("openai/gpt-oss-20b")
         private const val DAILY_MARKER = "daily quota on every key"
+        private const val PACE_MARKER = "every key cooling on this model"
 
         /** Parse a Groq rate-limit reset duration ("547ms", "24.652s", "4m19.2s", "1m0s") to milliseconds. */
         fun parseDurationMs(s: String?): Long? {
