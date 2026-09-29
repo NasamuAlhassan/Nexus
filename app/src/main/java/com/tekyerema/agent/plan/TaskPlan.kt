@@ -135,6 +135,9 @@ class PlanTracker(
     private var justDone: PlanItem? = null
     private var dropped: List<String> = emptyList()
     private var gateRefusals = 0
+    /** Steps taken since this plan (version) was adopted, and whether its soft budget already asked for a replan. */
+    private var stepsOnPlan = 0
+    private var overBudgetAsked = false
     /** How many replans the engine asked for (for traces/tests). */
     var replansRequested = 0; private set
 
@@ -158,6 +161,8 @@ class PlanTracker(
         failures = 0
         replanWhy = null
         justDone = null
+        stepsOnPlan = 0
+        overBudgetAsked = false
         return (if (version == 1) "plan: " else "replan v$version: ") +
             items.joinToString(" | ") { "${it.id}. ${it.text}${it.check?.let { c -> " [$c]" } ?: ""}${if (!it.open) " (${it.status.name.lowercase()})" else ""}" }
     }
@@ -199,8 +204,19 @@ class PlanTracker(
                 failures = 0
             }
         } else if (e.verified) failures = 0
+        // Soft budget (AndroidWorld's ~2× rule): a plan still open well past twice its size is re-thought once.
+        stepsOnPlan++
+        val open = items.count { it.open }
+        if (open > 0 && !overBudgetAsked && replanWhy == null && stepsOnPlan >= softBudget()) {
+            overBudgetAsked = true
+            replansRequested++
+            replanWhy = "this is taking longer than planned ($stepsOnPlan steps for ${items.size} subgoals, $open still open)"
+        }
         return done
     }
+
+    /** Steps a plan may take before the engine asks for a rethink: ~2 per subgoal, at least [MIN_SOFT_BUDGET]. */
+    internal fun softBudget(): Int = maxOf(MIN_SOFT_BUDGET, 2 * items.size + AppConfig.int("agent.plan.softBudgetSlack", 2))
 
     /** True once the engine has asked for a replan that hasn't been answered with a new plan yet. */
     val replanPending: Boolean get() = replanWhy != null
@@ -268,6 +284,8 @@ class PlanTracker(
     }
 
     companion object {
+        const val MIN_SOFT_BUDGET = 6
+
         /** Does [check] hold? NewElement is judged against [before] when there is one, else read as "present now". */
         fun checkHolds(check: String?, before: UiSnapshot?, after: UiSnapshot?): Boolean {
             if (after == null) return false

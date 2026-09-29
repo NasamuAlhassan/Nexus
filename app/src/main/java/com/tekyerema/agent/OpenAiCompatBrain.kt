@@ -263,15 +263,10 @@ class OpenAiCompatBrain(
                     continue
                 }
                 code == 400 && text.contains("tool_use_failed") && !corrected -> {
-                    // The model invented an invalid tool. Nudge it and retry once.
+                    // The model invented an invalid tool — or (B) its arguments failed the schema check, e.g. a `plan` sent
+                    // as a list. Nudge it with the real reason and retry once.
                     corrected = true
-                    messages.put(
-                        JSONObject().put("role", "user").put(
-                            "content",
-                            "Your previous response called a tool that does not exist. " +
-                                "Call ONLY one of the provided tools, using its exact name."
-                        )
-                    )
+                    messages.put(JSONObject().put("role", "user").put("content", toolUseFailedNudge(text)))
                 }
                 code !in 200..299 -> return@withContext AgentDecision.Fail("LLM HTTP $code: ${text.take(220)}")
                 else -> {
@@ -355,6 +350,20 @@ class OpenAiCompatBrain(
             // After the fields the prompt cache sees, so a cap change never breaks a shared prefix.
             if (maxCompletion != null && maxCompletion > 0) body.put("max_completion_tokens", maxCompletion)
             return body
+        }
+
+        /**
+         * The retry nudge for Groq's 400 `tool_use_failed`: a schema mismatch ("parameters for tool tap did not match schema:
+         * … `/plan`: expected string") says which argument was wrong; otherwise the model named a tool that doesn't exist.
+         */
+        fun toolUseFailedNudge(body: String): String {
+            val schema = Regex("(?i)did not match schema[^\\[]*\\[([^\\]]{1,160})").find(body)?.groupValues?.get(1)
+                ?: if (Regex("(?i)did not match schema|expected (?:string|integer|boolean)").containsMatchIn(body)) "" else null
+            return if (schema != null) "Your previous tool call's arguments didn't match the tool's schema" +
+                (if (schema.isNotBlank()) " (${schema.replace("\\\"", "\"").trim()})" else "") +
+                ". Call it again with valid arguments — each argument ONE value of its declared type; `plan` is ONE string " +
+                "'subgoal => check; subgoal => check'."
+            else "Your previous response called a tool that does not exist. Call ONLY one of the provided tools, using its exact name."
         }
 
         /** Groq's "Request too large … (TPM): Limit 8000, Requested 8106". */

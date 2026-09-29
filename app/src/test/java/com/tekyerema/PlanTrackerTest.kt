@@ -161,6 +161,28 @@ class PlanTrackerTest {
         assertEquals(1, t.replansRequested)
     }
 
+    @Test fun a_plan_running_past_twice_its_size_is_rethought_once() {
+        val t = PlanTracker(replanAfterFailures = 99)
+        t.offer("Open Settings => foreground_is: settings; Open About phone => element_present: Software information")
+        assertEquals(6, t.softBudget())   // 2 per subgoal + 2, at least 6
+        val s = screen("com.sec.android.app.launcher", "Settings")
+        repeat(5) { t.onStep(PlanTracker.StepEvidence(false, false, false, s, s)) }   // exploration: no ticks, no failures
+        assertFalse(t.replanPending)
+        t.onStep(PlanTracker.StepEvidence(false, false, false, s, s))
+        assertTrue(t.replanPending)
+        assertTrue(t.promptBlock().contains("taking longer than planned (6 steps for 2 subgoals"))
+        repeat(10) { t.onStep(PlanTracker.StepEvidence(false, false, false, s, s)) }
+        assertFalse("once per plan version", t.replanPending)
+    }
+
+    @Test fun a_schema_mismatch_gets_a_nudge_that_names_the_argument() {
+        val body = """{"error":{"message":"tool call validation failed: parameters for tool open_app did not match schema: errors: [`/plan`: expected string, but got array]","type":"invalid_request_error","code":"tool_use_failed"}}"""
+        val n = com.tekyerema.agent.OpenAiCompatBrain.toolUseFailedNudge(body)
+        assertTrue(n, n.contains("didn't match the tool's schema") && n.contains("/plan") && n.contains("ONE string"))
+        val unknown = com.tekyerema.agent.OpenAiCompatBrain.toolUseFailedNudge("""{"error":{"message":"Failed to call a function. Please adjust your prompt.","code":"tool_use_failed"}}""")
+        assertTrue(unknown.contains("does not exist"))
+    }
+
     @Test fun a_finished_subgoal_prompts_a_proactive_check_of_the_plan() {
         val t = PlanTracker()
         t.offer(planText)
