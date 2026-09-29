@@ -84,6 +84,13 @@ object ActionSemantics {
                 else -> "Send this message$who?"
             }
         }
+        // J-02: a form being saved — say WHAT is saved (the typed values), not "Tap “Save”?".
+        if (primitive == "tap" && TargetSemantics.commitCaption.matches(text.lowercase().trim())) {
+            val fields = TargetSemantics.filledFields(before).take(4).joinToString("; ") { f ->
+                (f.hint?.trim()?.takeIf { it.isNotBlank() && it.length <= 20 }?.let { "$it: " } ?: "") + f.label!!.trim().take(40)
+            }
+            if (fields.isNotEmpty()) return "${text.trim().replaceFirstChar { it.uppercaseChar() }} this? $fields"
+        }
         if (verb == "call") {
             val stripped = text.replaceFirst(Regex("(?i)^call\\s+"), "").trim()
             val who = requestedLabel?.trim()?.ifBlank { null } ?: recipient ?: stripped.ifBlank { null }

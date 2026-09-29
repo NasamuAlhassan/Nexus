@@ -1510,7 +1510,11 @@ object AgentEngine {
         val nums = Regex("\\d+").findAll(summary).map { it.value }.toSet()
         val screenNums = Regex("\\d+").findAll(onScreen).map { it.value }.toSet()
         if (!nums.all { it in screenNums }) return false
-        val quoted = Regex("[\"“”']([^\"“”']{2,40})[\"“”']").findAll(summary).map { it.groupValues[1].lowercase().trim() }.toList()
+        // An apostrophe inside a word ("You're", "didn't") is not a quote mark: two of them made a word-for-word screen
+        // reading look like an ungrounded "quotation" and it was marked unconfirmed (A20e, 2026-09-28).
+        val quoted = (Regex("[\"“”]([^\"“”]{2,40})[\"“”]").findAll(summary) +
+            Regex("(?<![\\p{L}\\p{N}])'([^']{2,40})'(?![\\p{L}\\p{N}])").findAll(summary))
+            .map { it.groupValues[1].lowercase().trim() }.toList()
         if (quoted.any { it.isNotBlank() && it !in onScreenLc }) return false
         return true
     }

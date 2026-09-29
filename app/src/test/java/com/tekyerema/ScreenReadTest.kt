@@ -110,4 +110,10 @@ class ScreenReadTest {
         val own = org.json.JSONObject().put("question", "what is the capital of Ghana")
         assertFalse(com.tekyerema.core.Provenance.hasUntrusted(com.tekyerema.core.Provenance.tagArgs(own, "ask ChatGPT what is the capital of Ghana", screen)))
     }
+
+    /** Chrome's window title is "Chrome: <page>" — the page title is said once, without the prefix. */
+    @Test fun a_browser_page_title_is_said_once() {
+        val s = UiSnapshot("com.android.chrome", "Chrome: Community Notice", listOf(el(0, "Community Notice"), el(1, "The borehole is closed.")), 0L, appName = "Chrome")
+        assertEquals("You're in Chrome. Community Notice. The borehole is closed.", ScreenReadout.compose(s)[0])
+    }
 }

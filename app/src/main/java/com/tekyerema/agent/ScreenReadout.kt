@@ -14,7 +14,9 @@ import com.tekyerema.accessibility.UiSnapshot
  * "continue".
  */
 object ScreenReadout {
-    const val MORE = " There's more — say “continue”."
+    // No quote marks: the engine's grounding check (§C.3) took “continue” for a quotation that isn't on the screen and
+    // marked every multi-part reading "not confirmed" (A20e, 2026-09-28). Spoken, the quotes added nothing.
+    const val MORE = " There's more — say continue."
     const val NOTHING = "I don't see any text on this screen."
 
     /** What is read, one item per entry, in reading order. */
@@ -45,8 +47,10 @@ object ScreenReadout {
         val items = items(snap).dropWhile { snap.appName != null && it.equals(snap.appName, ignoreCase = true) }
         val where = snap.appName?.takeIf { it.isNotBlank() }?.let { name ->
             // The title is named only when the reading doesn't start with it anyway.
-            val title = snap.screenTitle?.takeIf { it.isNotBlank() && !it.equals(name, true) && it.length <= 60 &&
-                !it.equals(items.firstOrNull(), true) }
+            // Chrome titles its window "Chrome: <page title>" — drop the app-name prefix, and skip the title when the
+            // reading starts with it anyway ("You're in Chrome, on Chrome: Community Notice. Community Notice.").
+            val title = snap.screenTitle?.removePrefix("$name: ")?.removePrefix("$name - ")?.trim()
+                ?.takeIf { it.isNotBlank() && !it.equals(name, true) && it.length <= 60 && !it.equals(items.firstOrNull(), true) }
             (if (name.startsWith("the ")) "You're on $name" else "You're in $name") + (title?.let { ", on $it" } ?: "") + "."
         }
         val sentences = items.flatMap { split(sentence(it), maxChars) }

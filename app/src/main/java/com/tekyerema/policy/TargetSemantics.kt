@@ -22,6 +22,20 @@ object TargetSemantics {
         RegexOption.IGNORE_CASE
     )
 
+    /**
+     * J-02: a button that COMMITS what was typed into a form — a new contact, an event, an edited profile. Found by the
+     * device suite (A20e, 2026-09-28): asked to "save a new contact", the model went through the Contacts app's own
+     * screens (Create contact → type the name → Save) instead of the confirmed create_contact tool, and "Save" was not a
+     * consequential word — the same write would have gone through unconfirmed. Exact captions only, and only when the
+     * screen holds a filled field ([filledFields]), so an ordinary "Save" in Settings doesn't ask.
+     */
+    val commitCaption = Regex("^(save|save contact|save changes|create|create contact|update)$", RegexOption.IGNORE_CASE)
+
+    /** Editable fields holding typed content (not a hint, not a search box). A password field's value is never read. */
+    fun filledFields(screen: UiSnapshot?): List<UiElement> = screen?.elements.orEmpty().filter { e ->
+        e.editable && !e.password && !isQueryBox(e) && !e.label.isNullOrBlank() && !e.label.equals(e.hint, ignoreCase = true)
+    }
+
     /** Fields whose IME action can BE a send (message compose boxes and the like). */
     val communicationField = Regex("\\b(message|reply|chat|comment|caption|post|tweet|status)\\b", RegexOption.IGNORE_CASE)
 
@@ -160,6 +174,10 @@ object TargetSemantics {
         } == true
         if (primitive == "tap" && label.isNullOrBlank() && target?.clickable == true && composing)
             return Classification(RiskTier.TIER2, null, "an unlabelled control tapped while composing a message may send it")
+
+        // J-02: committing a filled form (Save / Create / Update) is a write the user confirms, like create_contact.
+        if (primitive == "tap" && lower != null && commitCaption.matches(lower.trim()) && filledFields(screen).isNotEmpty())
+            return Classification(RiskTier.TIER2, null, "target '$label' saves what was typed into this form")
 
         // J-03: a control that SPENDS money is TIER3 — its own read-back class, above an ordinary send. A real button
         // whose caption STARTS with a spend verb counts even when long ("Pay GH₵ 50.00 to Kwame Mensah").

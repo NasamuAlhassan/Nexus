@@ -14,6 +14,7 @@ import com.tekyerema.tools.defaultTools
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -83,5 +84,24 @@ class ConsentTargetsTest {
         assertEquals(RiskTier.TIER2, PolicyConfig.argTier(node, JSONObject().put("custom", "Install")))
         assertEquals(RiskTier.TIER2, PolicyConfig.argTier(node, JSONObject().put("custom", "Sign in")))
         assertNull(PolicyConfig.argTier(node, JSONObject().put("custom", "Mark as read")))
+    }
+
+    /** Device suite (A20e): "save a new contact" through the Contacts app's own screens reached "Save" unconfirmed. */
+    @Test fun saving_a_filled_form_is_confirmed_and_read_back() {
+        fun field(id: Int, text: String?, hint: String, password: Boolean = false) =
+            UiElement(id, "EditText", text, Box(0, id * 100, 700, id * 100 + 80), editable = true, clickable = true, hint = hint, password = password)
+        val save = btn(9, "Save")
+        val form = UiSnapshot("com.samsung.android.app.contacts", "Create contact",
+            listOf(field(1, "Zz Tekyerema Test", "Name"), field(2, "020 000 0000", "Phone"), field(3, null, "Email"), save), 0L, PerceptionRoute("tree", "test"))
+        assertEquals(RiskTier.TIER2, TargetSemantics.classify("tap", save, null, false, form).tier)
+        val rb = ActionSemantics.confirmation("tap", save, null, form)!!
+        assertTrue(rb, rb.startsWith("Save this?") && rb.contains("Name: Zz Tekyerema Test") && rb.contains("Phone: 020 000 0000"))
+        // A "Save" with nothing typed (a settings screen) doesn't ask.
+        val plain = UiSnapshot("com.android.settings", "Display", listOf(save), 0L, PerceptionRoute("tree", "test"))
+        assertTrue(TargetSemantics.classify("tap", save, null, false, plain).tier == null)
+        // A password value is never read back.
+        val login = UiSnapshot("com.example", "Sign in", listOf(field(1, "ama", "Username"), field(2, "hunter22", "Password", password = true), save), 0L,
+            PerceptionRoute("tree", "test"))
+        assertFalse(ActionSemantics.confirmation("tap", save, null, login)!!.contains("hunter22"))
     }
 }
