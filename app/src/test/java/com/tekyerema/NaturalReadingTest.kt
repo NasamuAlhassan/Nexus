@@ -14,6 +14,8 @@ import org.junit.Test
 
 /** Owner, A20e 2026-09-30: messages were read "straight through… not like a human being" — one at a time, with pauses. */
 class NaturalReadingTest {
+    @org.junit.Before fun freshCoaching() { com.tekyerema.voice.Coaching.resetForTest() }   // the shrinking tail starts full
+
     @After fun reset() = MessageCursor.clear()
 
     @Test fun pause_marks_become_timed_silences_and_never_trail() {

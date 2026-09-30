@@ -51,8 +51,22 @@ object Verbalize {
             if (mo in 1..12 && d in 1..31) "$d ${MONTHS[mo - 1]} ${m.groupValues[3]}" else m.value
         }
         t = TIME.replace(t) { m ->
-            val h = m.groupValues[1].toLong(); val min = m.groupValues[2].toInt()
-            intToWords(h) + when { min == 0 -> " o'clock"; min < 10 -> " oh " + ONES[min]; else -> " " + intToWords(min.toLong()) }
+            val h24 = m.groupValues[1].toInt(); val min = m.groupValues[2].toInt()
+            // A 24-hour time is said the human way: "13:45" → "one forty-five in the afternoon" (micro_details.md
+            // quick win 3). 1:00–12:59 is left as written — it usually already carries its AM or PM.
+            val h = when { h24 == 0 -> 12L; h24 > 12 -> (h24 - 12).toLong(); else -> h24.toLong() }
+            val period = when {
+                h24 == 0 || h24 >= 21 -> " at night"
+                h24 in 13..16 -> " in the afternoon"
+                h24 in 17..20 -> " in the evening"
+                else -> ""
+            }
+            intToWords(h) + when {
+                min == 0 && period.isEmpty() -> " o'clock"
+                min == 0 -> ""
+                min < 10 -> " oh " + ONES[min]
+                else -> " " + intToWords(min.toLong())
+            } + period
         }
         t = PERCENT.replace(t) { m -> m.groupValues[1] + " percent" }
         t = DECIMAL.replace(t) { m ->

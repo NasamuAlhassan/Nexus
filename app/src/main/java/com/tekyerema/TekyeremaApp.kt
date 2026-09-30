@@ -25,6 +25,8 @@ class TekyeremaApp : Application() {
         com.tekyerema.audit.AuditLog.init(this)
         com.tekyerema.notifications.MessageIndex.init(this)
         com.tekyerema.core.Privacy.sweepAll(filesDir)
+        // Coaching tails ("You can say cancel to stop.") shrink after enough hearings — the count survives restarts.
+        com.tekyerema.voice.Coaching.store = getSharedPreferences("tekyerema_coaching", MODE_PRIVATE)
         ModelManager.init(this)     // §Part D — single model store; first-run download is the delivery path
         AgentEngine.init(this)
         VoiceEngine.init(this)

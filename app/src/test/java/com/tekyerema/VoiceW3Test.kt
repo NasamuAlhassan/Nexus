@@ -26,7 +26,7 @@ class VoiceW3Test {
         assertEquals("one thousand five hundred cedis", Verbalize.apply("1,500 cedis"))
         assertEquals("Dial star one seven zero hash", Verbalize.apply("Dial *170#"))
         assertEquals("It's seven oh five", Verbalize.apply("It's 07:05"))
-        assertEquals("at fourteen thirty", Verbalize.apply("at 14:30"))
+        assertEquals("at two thirty in the afternoon", Verbalize.apply("at 14:30"))   // 24-h said the human way (micro_details)
         assertEquals("fifty percent", Verbalize.apply("50%"))
         assertEquals("two point five", Verbalize.apply("2.5"))
         assertEquals("See a link for details", Verbalize.apply("See https://example.com/x?y=1 for details"))

@@ -55,7 +55,9 @@ class AndroidVoiceCues(
     private fun cue(name: String, tones: List<Pair<Double, Int>>, gain: Double, pattern: LongArray) {
         haptic(configPattern(name) ?: pattern)
         val notes = configTones(name) ?: tones
-        inBackground { play(notes, gain) }
+        // At night the earcons come down with the voice (QuietHours) — half as loud, same shapes.
+        val g = gain * (if (QuietHours.factor() < 1f) 0.5 else 1.0)
+        inBackground { play(notes, g) }
     }
 
     private fun configTones(name: String): List<Pair<Double, Int>>? {

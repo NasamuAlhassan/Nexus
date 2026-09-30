@@ -118,7 +118,9 @@ object BankGuide {
 
     /** "Stanbic Bank says: “1 Transfer; 2 Balance”. What should I enter?" — the screen first, one question. */
     fun question(s: BankSession.View, first: Boolean): String =
-        "${s.bank.name} says: “${BankUssd.spokenScreen(s.screen, s.speakBalance)}”. What should I enter?" + if (first) " You can say cancel to stop." else ""
+        "${s.bank.name} says: “${BankUssd.spokenScreen(s.screen, s.speakBalance)}”. What should I enter?" +
+            // The coaching tail is dropped once the user has heard it enough (voice/Coaching).
+            if (first) com.tekyerema.voice.Coaching.tail("tail_bank_cancel", " You can say cancel to stop.") else ""
 
     /** The last line at a payment confirmation, a PIN prompt or a final message — read out, then the user takes over. */
     fun handOffLine(s: BankSession.View): String {

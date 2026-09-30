@@ -102,9 +102,12 @@ class AndroidTts(context: Context) : TtsProvider {
                 // returned, and its later cancellation stopped whatever was speaking by then).
                 utterances.begin(call)
                 engine.setOnUtteranceProgressListener(utterances.listener)
+                // At night the voice comes down to ~65% (QuietHours) — softer, not different.
+                val vol = QuietHours.factor()
+                val params = if (vol < 1f) android.os.Bundle().apply { putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, vol) } else null
                 for ((i, c) in chunks.withIndex()) {
                     val mode = if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                    val rc = c.first?.let { engine.speak(it, mode, null, ids[i]) } ?: engine.playSilentUtterance(c.second, mode, ids[i])
+                    val rc = c.first?.let { engine.speak(it, mode, params, ids[i]) } ?: engine.playSilentUtterance(c.second, mode, ids[i])
                     if (rc != TextToSpeech.SUCCESS) { utterances.finish(call, false); break }
                 }
                 cont.invokeOnCancellation { if (utterances.isCurrent(call)) engine.stop(); utterances.finish(call, false) }

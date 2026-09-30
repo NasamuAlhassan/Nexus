@@ -17,6 +17,8 @@ import org.junit.Test
  * what they say; "read them" reads them; a balance is read only when asked about.
  */
 class PrivateReadingTest {
+    @org.junit.Before fun freshCoaching() { com.tekyerema.voice.Coaching.resetForTest() }   // the shrinking tail starts full
+
     @After fun clear() = PrivateReading.clear()
 
     @Test fun the_decision_who_only_just_when_on_and_on_the_loudspeaker() {

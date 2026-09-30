@@ -160,6 +160,8 @@ class VoiceController(
      *  Reset whenever the user deliberately starts a turn (mic tap / typed). */
     private var followUpChain = 0
     private val maxFollowUps = 10
+    /** Consecutive tap-to-talk turns that heard nothing — the "I didn't hear anything" line escalates, then goes quiet. */
+    private var noSpeechRun = 0
 
     /** A voice turn, or a listen for a pending prompt's reply (both hold the microphone). */
     val isRunning: Boolean get() = job?.isActive == true || confirmJob?.isActive == true ||
@@ -900,10 +902,14 @@ class VoiceController(
                 partial = { p -> _state.update { it.copy(livePartial = p) } }
             ))
             var tr = when (heard) {
-                is com.tekyerema.voice.io.Heard.Speech -> heard.transcript.also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final") }
+                is com.tekyerema.voice.io.Heard.Speech -> heard.transcript.also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final"); noSpeechRun = 0 }
                 // In a follow-up, silence just ends the conversation quietly (the screen then closes);
                 // on a deliberate tap-to-talk it's worth telling the user we heard nothing.
-                com.tekyerema.voice.io.Heard.NoSpeech -> { if (quiet) idle("") else sayThenIdle("I didn't hear anything. Tap and try again."); return }
+                com.tekyerema.voice.io.Heard.NoSpeech -> {
+                    // Escalating, not word-for-word (Closers.noInput): short, then one example, then quiet.
+                    if (quiet) idle("") else Closers.noInput(++noSpeechRun)?.let { sayThenIdle(it) } ?: idle("")
+                    return
+                }
                 com.tekyerema.voice.io.Heard.TooShort -> { if (quiet) idle("") else sayThenIdle("That was too short. Tap and try again."); return }
                 com.tekyerema.voice.io.Heard.Cancelled -> { cancelledToIdle(); return }
                 is com.tekyerema.voice.io.Heard.Unavailable -> {
@@ -961,7 +967,7 @@ class VoiceController(
         } catch (c: CancellationException) {
             cancelledToIdle()
         } catch (e: Exception) {
-            fail(VoiceStage.NONE, e.message ?: "Voice error", "Sorry, something went wrong.")
+            fail(VoiceStage.NONE, e.message ?: "Voice error", "Sorry, something went wrong. Tap and try again, or type your request.")
         } finally {
             // A turn that never reached an answer (no speech, cancelled, an error) is not a measurement — drop it.
             com.tekyerema.core.telemetry.Telemetry.discard(byVoice = true)
@@ -992,6 +998,23 @@ class VoiceController(
             // First-run practice (voice/Welcome.kt): "send a practice message" REHEARSES the spoken confirmation for a text
             // to a made-up contact. It never reaches the fast path, the agent or any tool — nothing can be sent.
             if (Practice.matches(tr.canonical)) { runPractice(); return }
+
+            // "Say that again." — the last reply is spoken again, exactly, never re-run (a blind user's reflex when a
+            // line went by too fast; micro_details.md quick win 2). Before the fast path and the agent.
+            if (RepeatIntent.matches(tr.canonical)) {
+                val lastLine = _state.value.spoken
+                set(VoiceState.SPEAKING, lastLine)
+                val line = lastLine.ifBlank { "I haven't said anything yet." }
+                try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
+                // A repeated QUESTION is still waiting for its answer — listen again, as the first asking did.
+                if (line.trim().endsWith("?") && source == InputSource.ASR && speakAloud() && hasMicPermission() &&
+                    followUpChain < maxFollowUps) {
+                    followUpChain++
+                    runOnce(quiet = true, questionPending = true)
+                }
+                return
+            }
 
             // LOCAL FAST PATH (demo-critical): deterministic device ops execute HERE, before the agent/LLM —
             // no reasoning, no screen read, no app launch merely to answer (never open Clock to tell the time).
@@ -1032,7 +1055,13 @@ class VoiceController(
 
             tel.mark("route")
             // Offline, words the meaning matcher mapped to a command only the LocalBrain runs ("read the screen") go as that command.
-            val outcome = runAgent(fastRouter?.agentGoal(tr.canonical) ?: tr.canonical) ?: return   // null: already set fail/cancel
+            val agentT0 = android.os.SystemClock.uptimeMillis()
+            var outcome = runAgent(fastRouter?.agentGoal(tr.canonical) ?: tr.canonical) ?: return   // null: already set fail/cancel
+            // After a LONG task, a small warm word before the result ("Alright — it's sent.") — the breath a person takes
+            // (micro_details.md quick win 8). Never on a question (the "?" tail must stay last) or a reading.
+            if (outcome.status == AgentStatus.COMPLETED && android.os.SystemClock.uptimeMillis() - agentT0 > 10_000 &&
+                !outcome.spoken.trim().endsWith("?"))
+                outcome = outcome.copy(spoken = Closers.warm(outcome.spoken, tr.language == Lang.TWI))
             when (outcome.status) {
                 AgentStatus.COMPLETED -> cues.done()
                 AgentStatus.COMPLETED_UNVERIFIED -> cues.unverified()   // K-03: never the "done" sound without evidence
@@ -1052,7 +1081,7 @@ class VoiceController(
             tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
                 it.copy(state = VoiceState.IDLE, spoken = outcome.spoken, spokenAt = System.currentTimeMillis(),
-                    partialHint = if (spoke || !speakAloud()) "" else "(no ${Lang.label(tr.language)} voice yet)")
+                    partialHint = if (spoke || !speakAloud() || outcome.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
             }
             // B-07: the user spoke over the reply — what they said is the next turn.
             interruption?.let { b ->
@@ -1113,7 +1142,7 @@ class VoiceController(
         } catch (c: CancellationException) {
             idle("Cancelled.")
         } catch (e: Exception) {
-            fail(VoiceStage.NONE, e.message ?: "Voice error", "Sorry, something went wrong.")
+            fail(VoiceStage.NONE, e.message ?: "Voice error", "Sorry, something went wrong. Tap and try again, or type your request.")
         } finally {
             com.tekyerema.core.telemetry.Telemetry.discard(byVoice = true)   // an unfinished turn measured nothing
         }
@@ -1185,7 +1214,7 @@ class VoiceController(
             progressLoop(goal)
         } else null   // K-02
         val finalState: AgentUiState? = try {
-            awaitAgent(goal, terminal) { st ->
+            awaitAgent(goal, runSeq, terminal) { st ->
                 when (st.status) {
                     AgentStatus.WAITING_CONFIRMATION -> {
                         fillers?.stop()   // the confirmation question is about to be spoken — never talk over it
@@ -1226,7 +1255,7 @@ class VoiceController(
      * G-13: a user entering their PIN used to be cut off by the 180 s cap. A separate, longer cap
      * (`voice.agent.maxUserWaitMs`, 10 min) still ends a turn nobody answers. Null = timed out.
      */
-    private suspend fun awaitAgent(goal: String, terminal: Set<AgentStatus>, onState: suspend (AgentUiState) -> Unit): AgentUiState? =
+    private suspend fun awaitAgent(goal: String, runSeq: Long, terminal: Set<AgentStatus>, onState: suspend (AgentUiState) -> Unit): AgentUiState? =
         kotlinx.coroutines.coroutineScope {
             val tick = 250L
             val maxUserWait = com.tekyerema.core.config.AppConfig.long("voice.agent.maxUserWaitMs", 600_000L)
@@ -1234,8 +1263,10 @@ class VoiceController(
             val watcher = launch {
                 agent.state.collect { st ->
                     onState(st)
-                    // WS-A: "carry on" resumes a paused task whose goal is the original request (st.request = our words).
-                    if (st.status in terminal && (st.goal == goal || st.request == goal)) out.complete(st)
+                    // THIS run, by number — two tasks can share their goal words, and an old run unwinding after stop()
+                    // must not end the new turn (audit 2026-09-30, half 1 #5). The goal match stays as a fallback for a
+                    // resumed task ("carry on") whose run renumbers.
+                    if (st.status in terminal && (st.runSeq == runSeq || st.goal == goal || st.request == goal)) out.complete(st)
                 }
             }
             // The clock samples the agent's status each tick: time on the user (confirmation, secure hand-off) and
@@ -1321,14 +1352,16 @@ class VoiceController(
         // ("detailed" no longer adds "That took N steps." — no spoken step numbers, owner 2026-09-28.)
         // [exact]: a reading the user asked for is never cut — "brief" used to keep only "You're in Messages." of a screen.
         val text = resultText?.let { if (verbosity() == "brief" && !exact) SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
+        val twi = sessionLanguage() == Lang.TWI
         return when (status) {
-            AgentStatus.COMPLETED -> text ?: "Done."
+            AgentStatus.COMPLETED -> text ?: Closers.done(twi)   // varied, never the same "Done." twice in a row
             // (Honest results 2026-09-29: a send's evidence line that already says "I can't confirm it went" isn't doubted twice.)
             AgentStatus.COMPLETED_UNVERIFIED -> com.tekyerema.agent.SendReport.unverified(text ?: "I tried that")
             AgentStatus.CANNOT_DO -> text ?: "I can't do that."
-            AgentStatus.FAILED -> text ?: "That didn't work."
+            // A dead end always says what to do next (micro_details.md: no naked errors).
+            AgentStatus.FAILED -> text ?: "That didn't work. You can try again, or say it another way."
             AgentStatus.STOPPED -> if (stopAlreadySaid) "" else "Stopped."   // a voice "no" was already acknowledged
-            else -> text ?: "Done."
+            else -> text ?: Closers.done(twi)
         }
     }
 
@@ -1343,7 +1376,7 @@ class VoiceController(
     private fun cancelledToIdle() { if (_state.value.state != VoiceState.TYPING) idle("Cancelled.") }
 
     /** Log the honest per-layer failure ([msg]) and speak a human line ([spoken]) before resting in ERROR. */
-    private suspend fun fail(stage: VoiceStage, msg: String, spoken: String = "Sorry, something went wrong.") {
+    private suspend fun fail(stage: VoiceStage, msg: String, spoken: String = "Sorry, something went wrong. Tap and try again, or type your request.") {
         Log.w("Tekyerema", "[VOICE] fail stage=$stage: $msg")
         cues.error()
         if (speakAloud()) {

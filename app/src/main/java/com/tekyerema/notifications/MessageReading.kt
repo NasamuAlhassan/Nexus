@@ -37,7 +37,10 @@ object MessageReading {
     }
 
     /** Ends like the screen reader's parts, so the reply re-opens the microphone for "continue" (ReadingPace). */
-    fun more(n: Int): String = if (n == 1) "There's one more — say continue." else "There are $n more — say continue."
+    /** The tail shrinks once the user knows the ropes (voice/Coaching) — but "say continue" stays: it's what reopens the mic. */
+    fun more(n: Int): String = com.tekyerema.voice.Coaching.tail("tail_more",
+        if (n == 1) "There's one more — say continue." else "There are $n more — say continue.",
+        if (n == 1) "One more — say continue." else "$n more — say continue.")
 }
 
 /** The messages still to read after a [MessageReading.page] — "continue" / "next" / "more" reads the next page. */
