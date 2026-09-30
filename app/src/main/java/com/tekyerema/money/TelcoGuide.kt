@@ -95,6 +95,12 @@ object TelcoGuide {
                     return reply(session, n, auto = true, more = true, row = "More")
                 }
         }
+        // The network asking to CONFIRM the number the user JUST dictated: offer the same one back — the engine's
+        // TIER2 read-back ("Enter 0 5 5, … and send it?") makes it one YES instead of ten digits said twice
+        // (live A20e 2026-09-30: MTN's Enter → Confirm double-entry cost the user the whole number again).
+        session.lastNumber?.let { n ->
+            if (RE_CONFIRM_NUMBER.containsMatchIn(session.screen)) return reply(session, n, auto = false, more = false, row = null)
+        }
         // First ask of this walk: no reply and no ask has happened yet (like the bank's first-question check).
         return ask(question(session, first = !last.contains("\"${TelcoUssdTool.ARG_ACTION}\":\"${TelcoUssdTool.REPLY}\"")))
     }
@@ -157,6 +163,9 @@ object TelcoGuide {
     fun noteOpen(flow: TelcoUssd.Flow) { pendingOpen = flow }
 
     fun resetForTest() { pendingOpen = null; TelcoSession.end() }
+
+    /** A screen asking the number be entered AGAIN ("Confirm Phone Number", "Re-enter number"). */
+    private val RE_CONFIRM_NUMBER = Regex("(?i)\\b(?:confirm|re-?enter|repeat)\\b.{0,20}\\b(?:phone|number|msisdn)\\b")
 
     private val STEP_LINE = Regex("^[a-z_]+\\(")
     private val RECOVERY_HINT = Regex(" — (?:this route|re-observe|only the user|the '[^']*' accelerator)")

@@ -26,7 +26,10 @@ object TelcoSession {
                     val morePressed: Int = 0,
                     /** The USER answered a screen by voice: from then on the walk stays guided — the autopilot never
                      *  takes the wheel back (live A20e 2026-09-30: it resumed a stale step and looped into More). */
-                    val userDrove: Boolean = false)
+                    val userDrove: Boolean = false,
+                    /** The number the user just dictated (7+ digits) — offered back with one yes when the network asks
+                     *  to CONFIRM it, instead of making them say all ten digits twice (live A20e 2026-09-30). */
+                    val lastNumber: String? = null)
 
     const val MAX_MS = 10 * 60_000L
     @Volatile private var view: View? = null
@@ -36,13 +39,15 @@ object TelcoSession {
     }
 
     fun screen(screen: String, kind: BankUssd.ScreenKind, auto: Boolean, more: Boolean, stepIdx: Int = -1,
-               user: Boolean = false, now: Long = System.currentTimeMillis()) {
+               user: Boolean = false, typed: String? = null, now: Long = System.currentTimeMillis()) {
         view = view?.let {
             it.copy(screen = screen, kind = kind, at = now,
                 // A matched step (possibly a LATER one than expected — menus drift) moves the walk past itself.
                 stepDone = if (auto && !more && stepIdx >= 0) maxOf(it.stepDone, stepIdx + 1) else it.stepDone,
                 morePressed = if (more) it.morePressed + 1 else 0,
-                userDrove = it.userDrove || user)
+                userDrove = it.userDrove || user,
+                lastNumber = if (user && typed != null && typed.count(Char::isDigit) >= 7) typed.filter(Char::isDigit)
+                    else it.lastNumber)
         }
     }
 
@@ -162,7 +167,7 @@ object TelcoUssdTool : Tool {
                 recoverable = false)
         val kind = BankUssd.kind(next.text, next.hasInput, next.masked)
         TelcoSession.screen(next.text, kind, auto = auto, more = more,
-            stepIdx = args.optInt(ARG_STEP, -1), user = !auto)
+            stepIdx = args.optInt(ARG_STEP, -1), user = !auto, typed = value)
         Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(next.text.take(120).replace("\n", " | "))}")
         if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) handOver()
         return ToolResult(true, "${session.flow.netName}: ${BankUssd.spokenScreen(next.text, speakBalance = false).take(120)}",

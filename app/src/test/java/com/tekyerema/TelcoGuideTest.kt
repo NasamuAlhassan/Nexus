@@ -108,6 +108,22 @@ class TelcoGuideTest {
         assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).name == "ask_user")
     }
 
+    /** MTN's Enter → Confirm double-entry: the number the user just dictated is offered back as ONE yes
+     *  (the TIER2 read-back), never ten digits said twice (live A20e 2026-09-30). */
+    @Test fun `a confirm-number screen reuses the number just dictated`() {
+        val f = flow()
+        TelcoSession.opened(f, "Enter Phone Number", BankUssd.ScreenKind.MENU)
+        TelcoSession.screen("Confirm Phone Number", BankUssd.ScreenKind.MENU, auto = false, more = false,
+            user = true, typed = "0552093690")
+        val d = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).name == TelcoUssdTool.NAME &&
+            d.args.optString("_text") == "0552093690" && !d.args.optBoolean("_auto"))
+        // A later ordinary menu doesn't resend the number.
+        TelcoSession.screen("MashUp Offers 1. MashUp GHC 1 2. MashUp GHC 5 0. Back", BankUssd.ScreenKind.MENU, auto = false, more = false, user = true)
+        val e = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(e.toString(), e is AgentDecision.CallTool && (e as AgentDecision.CallTool).name == "ask_user")
+    }
+
     @Test fun `a payment confirmation or a PIN ends the task with the user`() {
         val f = flow()
         TelcoSession.opened(f, "Pay GHS 20.00 for 5GB. Enter PIN to confirm", BankUssd.ScreenKind.PIN)
