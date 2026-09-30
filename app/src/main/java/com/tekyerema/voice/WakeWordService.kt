@@ -249,6 +249,12 @@ class WakeWordService : Service() {
         scope.launch {
             try {
                 launchVoice()
+                // Latency (owner, A20e 2026-09-30: "it takes a bit of time before it responds… or shows up"): the voice screen
+                // takes ~2 s to draw on the A20e and the mic only opened once it had (Displayed +1.96 s, mic +2.07 s). Open the
+                // turn NOW — the listening cue plays at once and the screen arrives around it (it doesn't start a second turn
+                // while this one runs). With a screen reader the screen still starts it, after TalkBack's window announcement.
+                if (!com.tekyerema.ui.Perms.talkBack(this@WakeWordService))
+                    withContext(Dispatchers.Main) { VoiceEngine.start() }
                 // Wait for the turn to ACTUALLY start (not a fixed timer: a slow activity launch would let the
                 // wake mic reopen first and re-fire — V2 audit BUG 1), then for it to finish.
                 withTimeoutOrNull(8_000) {
