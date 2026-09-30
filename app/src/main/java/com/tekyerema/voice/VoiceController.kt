@@ -413,6 +413,17 @@ class VoiceController(
      * anything" nag. This is what makes a sequence of turns feel like one conversation (§32), not a
      * string of isolated commands.
      */
+    /** Volume-up twice: the last reply again, exactly (the hardware twin of "say that again"). A running turn or
+     *  task is never talked over; with nothing said yet it says so briefly. */
+    fun repeatLast() {
+        if (isRunning || agent.busy || SecureStep.active() || !speakAloud()) return
+        val line = _state.value.spoken.ifBlank { "I haven't said anything yet." }
+        observerScope.launch {
+            try { tts.speak(Verbalize.apply(line), forceLanguage() ?: sessionLanguage()) }
+            catch (c: CancellationException) { throw c } catch (_: Exception) {}
+        }
+    }
+
     fun followUp() {
         // Never over a running task or a waiting prompt: a new goal would be refused by the busy engine and this turn
         // would then wait on it for the whole task budget.

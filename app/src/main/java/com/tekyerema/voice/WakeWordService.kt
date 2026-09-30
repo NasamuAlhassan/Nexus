@@ -269,6 +269,9 @@ class WakeWordService : Service() {
     }
 
     private fun launchVoice() {
+        // The shade (or another system dialog) in front would bury the voice screen — close it first, so the wake
+        // word always brings Tɛkyerɛma to the eye as well as the ear (owner 2026-09-30).
+        try { com.tekyerema.accessibility.TekyeremaAccessibilityService.live?.collapseShade() } catch (_: Throwable) {}
         try {
             startActivity(Intent(this, VoiceActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (t: Throwable) { Log.w(TAG, "[WAKE] activation failed: ${t.message}") }

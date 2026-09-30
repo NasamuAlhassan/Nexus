@@ -212,8 +212,12 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     // ---------------------------------------------------------------- A-01 / A-04 / J-14 activation + kill switch
     private val keyPattern = KeyPattern()
+    /** Owner 2026-09-30: volume-UP twice = say the last reply again — the physical twin of "say that again". */
+    private val repeatPattern = KeyPattern(keyCode = { KeyPattern.keyFor(
+        com.tekyerema.core.config.AppConfig.string("activation.keys.repeatKey", "volume_up")) })
 
-    /** A-01 / J-14: volume-down twice → talk, or stop a running task. The keys are never swallowed. */
+    /** A-01 / J-14: volume-down twice → talk — or, mid-task/mid-speech, STOP and listen (owner 2026-09-30: one
+     *  gesture to interrupt and take over). Volume-up twice → repeat the last reply. The keys are never swallowed. */
     override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
         val e = event ?: return false
         if (e.action != android.view.KeyEvent.ACTION_UP) return false
@@ -222,8 +226,26 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         if (keyPattern.onKeyUp(e.keyCode, e.eventTime)) {
             restoreVolume(e.keyCode, steps = 2)   // the gesture's two presses moved the volume; put it back
             talkOrStop("keys")
+        } else if (repeatPattern.onKeyUp(e.keyCode, e.eventTime)) {
+            // Only when a reply is RECENT: two quick volume-ups during music must stay volume, not a surprise speech.
+            val recent = System.currentTimeMillis() - com.tekyerema.voice.VoiceEngine.state.value.spokenAt <
+                com.tekyerema.core.config.AppConfig.long("activation.keys.repeatWithinMs", 120_000L)
+            if (recent) {
+                restoreVolume(e.keyCode, steps = 2)
+                Log.i("Tekyerema", "[TRIGGER] keys → repeat the last reply")
+                android.os.Handler(mainLooper).post { com.tekyerema.voice.VoiceEngine.repeatLast() }
+            }
         }
         return false
+    }
+
+    /** Close the notification shade (and other system dialogs) so the voice screen isn't buried under it —
+     *  the wake word fired with the shade open used to leave the panel invisible (owner 2026-09-30). */
+    fun collapseShade() {
+        try {
+            if (Build.VERSION.SDK_INT >= 31) performGlobalAction(15 /* GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE */)
+            else @Suppress("DEPRECATION") sendBroadcast(android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+        } catch (_: Throwable) {}
     }
 
     private fun restoreVolume(code: Int, steps: Int) {
@@ -232,13 +254,26 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         repeat(steps) { try { am.adjustSuggestedStreamVolume(dir, AudioManager.USE_DEFAULT_STREAM_TYPE, 0) } catch (_: Throwable) {} }
     }
 
-    /** One gesture, two meanings: when Tɛkyerɛma is busy it STOPS everything (J-14 kill switch); otherwise it opens
-     *  the voice screen (in front, so the microphone is allowed) and listens. */
+    /** One gesture, two meanings: when Tɛkyerɛma is busy it STOPS what it's doing AND LISTENS (owner 2026-09-30 —
+     *  interrupt and take over in one move; it used to stop only, and the user had to trigger again); otherwise it
+     *  opens the voice screen (in front, so the microphone is allowed) and listens. Never during the PIN (SecureStep). */
     private fun talkOrStop(source: String) {
+        if (com.tekyerema.voice.SecureStep.active()) { Log.i("Tekyerema", "[TRIGGER] $source ignored — secure step"); return }
         val busy = com.tekyerema.voice.VoiceEngine.isRunning || AgentEngine.isBusy
-        Log.i("Tekyerema", "[TRIGGER] $source → ${if (busy) "STOP (kill switch)" else "talk"}")
-        if (busy) android.os.Handler(mainLooper).post { com.tekyerema.voice.VoiceEngine.cancel() }
-        else try {
+        Log.i("Tekyerema", "[TRIGGER] $source → ${if (busy) "STOP, then listen" else "talk"}")
+        val h = android.os.Handler(mainLooper)
+        if (busy) {
+            h.post { com.tekyerema.voice.VoiceEngine.cancel() }
+            // Once the stop has settled, open the mic — the point of the interrupt is to say something new.
+            h.postDelayed({
+                if (!com.tekyerema.voice.VoiceEngine.isRunning && !AgentEngine.isBusy) openVoiceScreen()
+            }, 700)
+        } else openVoiceScreen()
+    }
+
+    private fun openVoiceScreen() {
+        collapseShade()
+        try {
             startActivity(android.content.Intent(this, com.tekyerema.ui.VoiceActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (t: Throwable) { Log.w("Tekyerema", "[TRIGGER] couldn't open the voice screen: ${t.message}") }
     }

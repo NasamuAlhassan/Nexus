@@ -352,6 +352,8 @@ object VoiceEngine {
     fun respond() { if (initialized) controller.respond() }
     /** Listen once more after a reply so the conversation can continue; silence just rests (no nag). */
     fun followUp() = controller.followUp()
+    /** Volume-up twice (the physical "say that again"): the last reply, spoken again. */
+    fun repeatLast() = controller.repeatLast()
     fun cancel() = controller.cancel()
 
     /** Typed command → the same agent entry point as an ASR transcript (see VoiceController.submitText). */

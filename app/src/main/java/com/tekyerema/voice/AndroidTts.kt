@@ -146,6 +146,10 @@ class AndroidTts(context: Context) : TtsProvider {
         @Suppress("NAME_SHADOWING") val text = respell(text)
         // B-15/K-07: our stream (accessibility when TalkBack drives the phone) + may-duck focus for the duration.
         try { engine.setAudioAttributes(focus.attributes(AudioFocus.Kind.SPEAK)) } catch (_: Throwable) {}
+        // Live tuning knobs (owner, 2026-09-30 "let's manage the current one"): rate and pitch from config, so the
+        // voice's feel is adjusted by set_config on the phone — no rebuild. Clamped so a typo can't make it absurd.
+        try { engine.setSpeechRate(com.tekyerema.core.config.AppConfig.double("speech.tts.rate", 1.0).toFloat().coerceIn(0.5f, 1.5f)) } catch (_: Throwable) {}
+        try { engine.setPitch(com.tekyerema.core.config.AppConfig.double("speech.tts.pitch", 1.0).toFloat().coerceIn(0.7f, 1.3f)) } catch (_: Throwable) {}
         // Our OWN focus request, released only by us: a newer line used to acquire focus, then this line's finally
         // released it, and the newer line played with the music at full volume.
         val focusToken = focus.acquire(AudioFocus.Kind.SPEAK)
