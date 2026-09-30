@@ -114,7 +114,7 @@ object Routines {
         FastIntent.LockScreen, FastIntent.LastSms, FastIntent.WhereAmI,
         FastIntent.Connectivity, FastIntent.NowPlaying, FastIntent.ShowAlarms, FastIntent.CalendarToday, FastIntent.ListSchedules -> true
         is FastIntent.BrightnessSet, is FastIntent.QuickToggle, is FastIntent.Ringer, is FastIntent.OpenApp, is FastIntent.PlayMusic,
-        is FastIntent.CallHistory, is FastIntent.Digest, is FastIntent.SaverQuery -> true
+        is FastIntent.CallHistory, is FastIntent.Digest, is FastIntent.ChatMessages, is FastIntent.SaverQuery -> true
         else -> false
     }
 

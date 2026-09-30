@@ -19,8 +19,10 @@ class NotificationDigestTest {
             m(9, "com.whatsapp", "WhatsApp", "Ama", "Ama", "Hello"),
             m(8, "com.whatsapp", "WhatsApp", "Kojo", "Family", "Food is ready"),
             m(7, "org.telegram.messenger", "Telegram", "Kofi", "Kofi", "ok"))
+        // Plain form: on the system voice the group breaks and the breath before the quote are real pauses (SpokenText).
         assertEquals("Since you last asked: 4 notifications. WhatsApp: 2 from Ama, 1 in Family. Telegram: 1 from Kofi. " +
-            "The newest is from Ama on WhatsApp: Are you coming.", NotificationDigest.build(msgs, emptyList(), "since you last asked"))
+            "The newest is from Ama on WhatsApp. Are you coming?",
+            com.tekyerema.voice.SpokenText.plain(NotificationDigest.build(msgs, emptyList(), "since you last asked")))
     }
 
     @Test fun missed_calls_come_first_and_name_each_caller_once() {
@@ -53,6 +55,22 @@ class NotificationDigestTest {
         // …and are never counted again as a "Phone" notification.
         assertEquals("Today: 1 missed call, from Ama.",
             NotificationDigest.build(listOf(dialer), NotificationDigest.callsFromNotifications(listOf(dialer)), "today"))
+    }
+
+    /** A20e 2026-09-30: "read my messages" read "33 notifications", YouTube first, for ~50 s. Messages = chats and texts. */
+    @Test fun read_my_messages_is_chats_and_texts_only() {
+        val all = listOf(
+            m(10, "com.google.android.youtube", "YouTube", null, "New video", "Kwadwo uploaded"),
+            m(9, "com.whatsapp", "WhatsApp", "Ama", "Ama", "Are you coming?"),
+            m(8, "com.samsung.android.messaging", "Messages", "MTN", "MTN", "Your balance is low"),
+            m(7, "com.android.vending", "Play Store", null, null, "3 updates available"))
+        val chats = all.filter { NotificationDigest.isMessage(it) }
+        assertEquals(listOf("com.whatsapp", "com.samsung.android.messaging"), chats.map { it.pkg })
+        val s = NotificationDigest.build(chats, emptyList(), "in the last 12 hours", noun = "message")
+        assertTrue(s, s.startsWith("In the last 12 hours: 2 messages. "))
+        assertFalse(s, s.contains("YouTube") || s.contains("Play Store") || s.contains("notification"))
+        assertEquals("No new messages today.", NotificationDigest.build(emptyList(), emptyList(), "today", noun = "message"))
+        assertTrue(NotificationDigest.isMessage(m(1, "com.example.chat", "Chat", "A", "A", "x"), extra = setOf("com.example.chat")))
     }
 
     @Test fun a_non_chat_notification_is_counted_without_a_person() {

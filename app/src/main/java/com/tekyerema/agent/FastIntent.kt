@@ -59,6 +59,13 @@ sealed class FastIntent(val name: String) {
     object EndCall : FastIntent("END_CALL")
     data class CallHistory(val missedOnly: Boolean) : FastIntent("CALL_HISTORY")
     object LastSms : FastIntent("LAST_SMS")
+    /** "read my last WhatsApp message", "any new WhatsApp messages", "read my WhatsApp messages from Ama" — from the
+     *  messages the phone already captured, instantly. The agent opened WhatsApp for these and took 25–42 s (A20e device
+     *  suite 2026-09-30). [app] = "WhatsApp" | "Telegram" | "Messenger"; [latestOnly] = one message ("message", singular). */
+    data class ChatMessages(val app: String, val latestOnly: Boolean, val from: String? = null) : FastIntent("CHAT_MESSAGES")
+    /** "continue" while messages are being read a few at a time (notifications/MessageReading) — never classified, only
+     *  the router's name for that turn. */
+    object MoreMessages : FastIntent("MORE_MESSAGES")
     object WhereAmI : FastIntent("WHERE_AM_I")
     object Connectivity : FastIntent("CONNECTIVITY")
     object NowPlaying : FastIntent("NOW_PLAYING")
@@ -119,7 +126,8 @@ sealed class FastIntent(val name: String) {
     data class QuickToggle(val key: String, val on: Boolean) : FastIntent("TOGGLE_${key.uppercase()}")
     // ---- Overnight [S]: what the big assistants don't do for a blind user on an A20e (docs/agent/research/overnight_features.md)
     /** E-15 / H-09: "what did I miss?" — [scope] "last" (since the last catch-up), "recent" (the last hours) or "today". */
-    data class Digest(val scope: String) : FastIntent("DIGEST")
+    /** [messagesOnly]: the user said "messages" (chats and texts), not "notifications" / "what did I miss" (everything). */
+    data class Digest(val scope: String, val messagesOnly: Boolean = false) : FastIntent("DIGEST")
     /** C-03 / H-08: "remember that Ama Mensah is my mother" ([said] = the word used, [explicit] = asked in so many words). */
     data class SetRelation(val relation: String, val said: String, val contact: String, val explicit: Boolean) : FastIntent("SET_RELATION")
     /** "who is my mother" ([relation]); "" = every relation. */
@@ -278,6 +286,10 @@ object FastIntentClassifier {
             RE_ANSWER.matches(g) -> FastIntent.AnswerCall
             RE_END_CALL.matches(g) -> FastIntent.EndCall
             RE_CALL_HISTORY.containsMatchIn(g) -> FastIntent.CallHistory(missedOnly = g.contains("missed"))
+            RE_CHAT_MESSAGES.matchEntire(g) != null -> RE_CHAT_MESSAGES.matchEntire(g)!!.let { m ->
+                val app = when (m.groupValues[1]) { "telegram" -> "Telegram"; "messenger" -> "Messenger"; else -> "WhatsApp" }
+                FastIntent.ChatMessages(app, latestOnly = !m.groupValues[2].endsWith("s"), from = m.groupValues[3].trim().ifEmpty { null })
+            }
             RE_LAST_SMS.containsMatchIn(g) -> FastIntent.LastSms
             RE_WHERE_AM_I.containsMatchIn(g) -> FastIntent.WhereAmI
             RE_ONLINE.containsMatchIn(g) -> FastIntent.Connectivity
@@ -313,7 +325,7 @@ object FastIntentClassifier {
         com.tekyerema.android.Relations.parseQuery(g)?.let { return FastIntent.RelationQuery(it) }
         com.tekyerema.android.Relations.parseSet(raw)?.let { r -> return FastIntent.SetRelation(r.relation, r.said, r.name, r.explicit) }
         // E-15 / H-09 the catch-up.
-        digestScope(g)?.let { return FastIntent.Digest(it) }
+        digestScope(g)?.let { return FastIntent.Digest(it, RE_ASKED_MESSAGES.containsMatchIn(g) && "notification" !in g) }
         // K-01 / K-10 help, H-10 resume.
         ContextHelp.classify(g)?.let { return FastIntent.Help(it) }
         if (LeftOff.matches(g)) return FastIntent.Resume
@@ -346,6 +358,9 @@ object FastIntentClassifier {
         "(?:messages|notifications)|summari[sz]e my (?:messages|notifications)|what are my notifications|(?:my )?notifications? summary|" +
         "who (?:has )?(?:messaged|written to|contacted) me)(?: please)?$")
     private val RE_DIGEST_TODAY = Regex("^(?:what did i miss|what(?:'s| has) come in|who messaged me|what messages did i get) today$")
+
+    // "read my messages" means chats and texts — A20e 2026-09-30 it read "33 notifications", YouTube first, for ~50 s.
+    private val RE_ASKED_MESSAGES = Regex("\\b(?:messages?|messaged|texts?|sms|nkra)\\b")
 
     private fun digestScope(g: String): String? = when {
         RE_DIGEST_TODAY.matches(g) -> "today"
@@ -560,6 +575,10 @@ object FastIntentClassifier {
     private val RE_CALL_HISTORY = Regex("\\b(?:who (?:just )?called(?: me)?|missed calls?|any (?:missed )?calls|recent calls|call history|call log|did anyone call|" +
         "who (?:did )?i (?:just |last )?call(?:ed)?|my last call|(?:last|latest) (?:person|number) i (?:called|dialled|dialed))\\b")
     // SMS only — "texts", "sms", "text message(s)" or "my (last) text"; "read the text on the screen" is not an SMS.
+    // Group 1 = app, 2 = "message(s)"/"chat(s)", 3 = a person. A send ("send a WhatsApp message to Ama") never matches.
+    private val RE_CHAT_MESSAGES = Regex("^(?:please )?(?:(?:can|could) you )?(?:read|check|tell me|any|do i have(?: any)?|" +
+        "have i got(?: any)?|are there(?: any)?|did i get(?: any)?)(?: me)?(?: (?:my|the))?(?: (?:last|latest|newest|new|recent|unread))?" +
+        " (whatsapp|whats app|telegram|messenger) (messages?|chats?)(?: from (.+?))?(?: please)?$")
     private val RE_LAST_SMS = Regex("\\b(?:read|check|what(?:'s| is| was)|any)\\b.*\\b(?:text messages?|texts|sms|my (?:last |latest |new )?text)\\b|^(?:my )?(?:last|latest|new) (?:text|sms|text message)s?$")
     private val RE_WHERE_AM_I = Regex("\\b(?:where am i|where i am|what(?:'s| is) my (?:current )?location|my current location|what street am i on)\\b")
     private val RE_ONLINE = Regex("\\b(?:am i (?:online|connected)|(?:is|do i have) (?:the )?internet|internet connection|am i on (?:wi-?fi|data|mobile data)|what network am i on)\\b")

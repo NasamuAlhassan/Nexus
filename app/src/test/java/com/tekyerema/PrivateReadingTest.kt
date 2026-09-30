@@ -94,8 +94,14 @@ class PrivateReadingTest {
         assertFalse(brief, brief.contains("Are you coming"))
         assertTrue(brief, brief.contains("from Ama"))
         assertTrue(NotificationDigest.build(msgs, emptyList(), "since you last asked").contains("Are you coming"))
-        assertEquals("Ama on WhatsApp: Are you coming? Kofi on WhatsApp: I'm outside. MobileMoney on MoMo: Your new balance is GHS 20.00.",
-            PrivateReading.readOut(msgs))
-        assertEquals("Ama on WhatsApp: Are you coming? And 2 more.", PrivateReading.readOut(msgs, max = 1))
+        // One at a time (2026-09-30): who, where and when, a pause, the words; a longer pause before the next.
+        val out = PrivateReading.readOut(msgs)
+        val items = out.split(com.tekyerema.voice.SpokenText.BREAK)
+        assertEquals(3, items.size)
+        assertTrue(items[0], items[0].startsWith("From Ama, on WhatsApp, ") && items[0].endsWith("${com.tekyerema.voice.SpokenText.PAUSE}Are you coming?"))
+        assertTrue(items[1], items[1].startsWith("From Kofi, on WhatsApp, ") && items[1].endsWith("I'm outside."))
+        assertTrue(items[2], items[2].startsWith("From MobileMoney, on MoMo, "))
+        val one = com.tekyerema.voice.SpokenText.plain(PrivateReading.readOut(msgs, per = 1))
+        assertTrue(one, one.startsWith("From Ama, on WhatsApp, ") && one.endsWith("There are 2 more — say continue."))
     }
 }

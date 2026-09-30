@@ -74,7 +74,21 @@ class AndroidTts(context: Context) : TtsProvider {
         // Our OWN focus request, released only by us: a newer line used to acquire focus, then this line's finally
         // released it, and the newer line played with the music at full volume.
         val focusToken = focus.acquire(AudioFocus.Kind.SPEAK)
-        val chunks = SpeechChunks.split(text, com.tekyerema.core.config.AppConfig.int("speech.tts.chunkChars", 180))
+        // Natural reading (owner, A20e 2026-09-30): the reading's pause marks (SpokenText) become real silences between its
+        // pieces — a breath after "From Ama, on WhatsApp", a longer one between messages — instead of one run-on line.
+        // playSilentUtterance works on every engine; SSML breaks may be read aloud by some.
+        val maxChars = com.tekyerema.core.config.AppConfig.int("speech.tts.chunkChars", 180)
+        val pieces = ArrayList<Pair<String?, Long>>()             // text, or null + a silence in ms
+        for (seg in SpokenText.segments(text, com.tekyerema.core.config.AppConfig.long("speech.tts.pauseMs", 450L),
+                com.tekyerema.core.config.AppConfig.long("speech.tts.breakMs", 900L))) {
+            SpeechChunks.split(seg.text, maxChars).forEach { pieces += it to 0L }
+            if (seg.pauseAfterMs > 0) pieces += null to seg.pauseAfterMs
+        }
+        if (pieces.isEmpty()) return false
+        pieces.filter { it.first == null }.takeIf { it.isNotEmpty() }?.let { s ->
+            Log.i("Tekyerema", "[TTS] paced reading: ${pieces.size - s.size} spoken parts, pauses ${s.map { it.second }} ms")
+        }
+        val chunks = pieces
         val t0 = android.os.SystemClock.uptimeMillis()
         try {
             return suspendCancellableCoroutine { cont ->
@@ -89,7 +103,8 @@ class AndroidTts(context: Context) : TtsProvider {
                 utterances.begin(call)
                 engine.setOnUtteranceProgressListener(utterances.listener)
                 for ((i, c) in chunks.withIndex()) {
-                    val rc = engine.speak(c, if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, ids[i])
+                    val mode = if (i == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                    val rc = c.first?.let { engine.speak(it, mode, null, ids[i]) } ?: engine.playSilentUtterance(c.second, mode, ids[i])
                     if (rc != TextToSpeech.SUCCESS) { utterances.finish(call, false); break }
                 }
                 cont.invokeOnCancellation { if (utterances.isCurrent(call)) engine.stop(); utterances.finish(call, false) }

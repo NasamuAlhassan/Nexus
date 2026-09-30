@@ -21,7 +21,16 @@ object References {
     fun noteNumber(number: String?) { number?.filter { it.isDigit() || it == '+' }?.takeIf { it.count(Char::isDigit) in 9..13 }?.let { lastNumber = it } }
 
     /** H-12: "forget that" / "forget everything". */
-    fun clear() { lastPerson = null; lastOptions = emptyList(); lastNumber = null }
+    /** Where the last message read out came from: "WhatsApp" | "SMS" (null = unknown, or an app a reply can't go back to). */
+    @Volatile var lastChannel: String? = null; private set
+
+    /** A message was just read out ("Your last WhatsApp message is from Ama…"): a bare "reply …" answers that person there. */
+    fun noteRead(person: String?, channel: String?) {
+        notePerson(person)
+        lastChannel = channel?.takeIf { it == "WhatsApp" || it == "SMS" }
+    }
+
+    fun clear() { lastPerson = null; lastOptions = emptyList(); lastNumber = null; lastChannel = null }
 
     /** H-12: "forget Ama" — drop her as the remembered person / option. */
     fun forget(who: String) {
@@ -45,7 +54,8 @@ object References {
     private val THAT_NUMBER = Regex("\\b(?:call|ring|phone|dial|text|message|sms|save)\\s+(that number)\\b", RegexOption.IGNORE_CASE)
 
     /** The goal with its reference replaced, or null when there is nothing (resolvable) to replace. */
-    fun rewrite(goal: String, person: String? = lastPerson, options: List<String> = lastOptions, number: String? = lastNumber): String? {
+    fun rewrite(goal: String, person: String? = lastPerson, options: List<String> = lastOptions, number: String? = lastNumber,
+                channel: String? = lastChannel): String? {
         THAT_NUMBER.find(goal)?.let { m ->
             val n = number ?: return null
             return goal.replaceRange(m.groups[1]!!.range, n)
@@ -60,8 +70,19 @@ object References {
             val who = person ?: return null
             return goal.replaceRange(m.groups[2]!!.range, who)
         }
+        // Demo journey (A20e 2026-09-30): "read my last WhatsApp message" → "reply saying I'm on my way". The words are
+        // read back with the person and the number before anything is sent (LocalBrain.parseSms → send_sms, TIER2).
+        BARE_REPLY.find(goal.trim())?.let { m ->
+            val who = person ?: return null
+            val via = when (channel) { "WhatsApp" -> " on WhatsApp"; "SMS" -> ""; else -> return null }
+            return "reply to $who$via saying ${m.groupValues[1].trim()}"
+        }
         return null
     }
+
+    /** "reply saying I'm on my way" / "reply: yes" / "reply back with thank you" — not "reply to Ama …" (that names someone). */
+    private val BARE_REPLY = Regex("^(?:please )?(?:reply|respond|answer)(?: back)?(?!\\s+to\\b)(?:\\s+(?:saying|with|that))?\\s*:?\\s+(.+)$",
+        RegexOption.IGNORE_CASE)
 }
 
 object ScreenEntities {

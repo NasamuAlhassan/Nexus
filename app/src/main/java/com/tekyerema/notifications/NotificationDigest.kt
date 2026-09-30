@@ -25,6 +25,15 @@ object NotificationDigest {
     val DEFAULT_IGNORE = setOf("android", "com.android.systemui", "com.samsung.android.lool", "com.android.providers.downloads",
         "com.samsung.android.app.smartcapture", "com.samsung.android.scloud", "com.android.vending.billing")
 
+    /** Chat and text-message apps: what "read my messages" means (the rest — YouTube, the Play Store, promotions — only
+     *  for "what did I miss" / "read my notifications"). Config `notifications.digest.messagingPackages` adds more. */
+    val MESSAGING = setOf("com.whatsapp", "com.whatsapp.w4b", "com.samsung.android.messaging", "com.google.android.apps.messaging",
+        "com.android.mms", "com.android.messaging", "org.telegram.messenger", "org.telegram.messenger.web", "org.thunderdog.challegram",
+        "com.facebook.orca", "com.facebook.mlite", "com.viber.voip", "com.imo.android.imoim", "com.imo.android.imoimbeta",
+        "org.thoughtcrime.securesms", "com.skype.raider", "com.microsoft.teams", "com.truecaller")
+
+    fun isMessage(m: IndexedMessage, extra: Set<String> = emptySet()): Boolean = m.pkg in MESSAGING || m.pkg in extra
+
     /** A group summary ("5 messages from 3 chats") repeats what the individual notifications already say. */
     private val SUMMARY = Regex("^\\d+ (?:new )?(?:messages?|notifications?)(?: from \\d+ (?:chats?|conversations?))?$", RegexOption.IGNORE_CASE)
     private val MISSED_TITLE = Regex("\\bmissed (?:voice |video )?call", RegexOption.IGNORE_CASE)
@@ -49,11 +58,12 @@ object NotificationDigest {
      * asked", "in the last 12 hours"). Apps with the most notifications come first; within an app, the busiest people.
      */
     /** @param quoteNewest false = say who and how many only (private reading on the loudspeaker, [PrivateReading]). */
+    /** @param noun "notification", or "message" when the user asked for their messages (chats and texts only). */
     fun build(messages: List<IndexedMessage>, calls: List<MissedCall>, sinceLabel: String,
-              maxApps: Int = 3, maxPeople: Int = 3, quoteNewest: Boolean = true): String {
+              maxApps: Int = 3, maxPeople: Int = 3, quoteNewest: Boolean = true, noun: String = "notification"): String {
         val items = messages.filter { it.pkg !in DIALERS }.sortedByDescending { it.t }
         val missed = calls.sortedByDescending { it.t }
-        if (items.isEmpty() && missed.isEmpty()) return "Nothing new ${sinceLabel}."
+        if (items.isEmpty() && missed.isEmpty()) return if (noun == "message") "No new messages ${sinceLabel}." else "Nothing new ${sinceLabel}."
         val parts = ArrayList<String>()
         if (missed.isNotEmpty()) {
             val who = missed.map { it.who }.distinct()
@@ -66,11 +76,13 @@ object NotificationDigest {
                 .thenByDescending { it.value.first().t })
             val appLines = apps.take(maxApps).map { (app, list) -> "$app: " + peopleLine(app, list, maxPeople) }
             val otherApps = apps.drop(maxApps).sumOf { it.value.size }
-            parts.add(count(items.size, "notification") + ". " + appLines.joinToString(". ") +
+            parts.add(count(items.size, noun) + ". " + appLines.joinToString(". ") +
                 if (otherApps > 0) ". And ${count(otherApps, "more")} from other apps" else "")
             if (quoteNewest) latest(items)?.let { parts.add(it) }
         }
-        return sinceLabel.replaceFirstChar { it.uppercaseChar() } + ": " + parts.joinToString(". ") + "."
+        // A pause between the groups, so each lands before the next (SpokenText; a line break on screen).
+        val body = parts.joinToString("." + com.tekyerema.voice.SpokenText.BREAK)
+        return sinceLabel.replaceFirstChar { it.uppercaseChar() } + ": " + body + if (body.last() in ".!?…") "" else "."
     }
 
     /** "3 from Ama, 2 in Family" — a person's chat says "from", a group chat (title ≠ sender) says "in". */
@@ -104,11 +116,13 @@ object NotificationDigest {
             where != null -> "The newest is from $where"
             else -> "The newest says"
         }
-        return "$head: ${clip(m.text!!.trim(), 100)}"
+        // Who, a breath, then the words as they'd be said — not "…on WhatsApp: are you coming" in one run.
+        return "$head." + com.tekyerema.voice.SpokenText.PAUSE + com.tekyerema.voice.SpokenText.forEar(clip(m.text!!.trim(), 100))
     }
 
     private fun clip(s: String, max: Int): String {
-        val t = s.replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?')
+        // A question keeps its "?" (the voice rises); SpokenText.forEar adds the full stop a statement needs.
+        val t = s.replace(Regex("\\s+"), " ").trim().trimEnd('.')
         if (t.length <= max) return t
         val cut = t.take(max)
         return cut.substring(0, cut.lastIndexOf(' ').takeIf { it > max / 2 } ?: cut.length) + "…"

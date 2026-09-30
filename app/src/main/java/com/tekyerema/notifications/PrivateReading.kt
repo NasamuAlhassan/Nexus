@@ -85,10 +85,13 @@ object PrivateReading {
 
     // ---------------------------------------------------------------- what "read them" reads
 
-    private class Held(val text: String, val at: Long)
+    private class Held(val text: String, val at: Long, val rest: List<MessageReading.Msg>)
     @Volatile private var held: Held? = null
 
-    fun hold(text: String, now: Long = System.currentTimeMillis()) { held = Held(text, now) }
+    /** [rest]: messages after this page, for "continue" once the page has been read ([MessageCursor]). */
+    fun hold(text: String, now: Long = System.currentTimeMillis(), rest: List<MessageReading.Msg> = emptyList()) {
+        held = Held(text, now, rest)
+    }
 
     /** The held-back reading if it's fresh (`privacy.privateReading.holdMs`, 5 min), cleared once read. */
     @Synchronized
@@ -96,23 +99,22 @@ object PrivateReading {
         val h = held ?: return null
         held = null
         return h.text.takeIf { now - h.at < com.tekyerema.core.config.AppConfig.long("privacy.privateReading.holdMs", 300_000L) }
+            ?.also { MessageCursor.set(h.rest, now) }
     }
 
     fun clear() { held = null }
 
-    /** "Ama on WhatsApp: Are you coming? Kofi: I'm outside." — what "read them" says for a catch-up (newest first). */
-    fun readOut(messages: List<IndexedMessage>, max: Int = 5): String {
-        val withText = messages.filter { !it.text.isNullOrBlank() }.sortedByDescending { it.t }
-        val lines = withText.take(max).map { m ->
+    /** The catch-up's messages, newest first, as [MessageReading] items — what "read them" reads, a page at a time. */
+    fun messagesOf(messages: List<IndexedMessage>, now: Long = System.currentTimeMillis()): List<MessageReading.Msg> =
+        messages.filter { !it.text.isNullOrBlank() }.sortedByDescending { it.t }.map { m ->
             val who = m.sender?.takeIf { it.isNotBlank() } ?: m.title?.takeIf { it.isNotBlank() && !it.equals(m.app, true) }
-            val where = m.app?.takeIf { it.isNotBlank() }
-            val head = listOfNotNull(who, where?.let { if (who != null) "on $it" else it }).joinToString(" ").ifEmpty { "A message" }
-            "$head: ${m.text!!.replace(Regex("\\s+"), " ").trim().let { if (it.length > 160) it.take(157).trimEnd() + "…" else it }}"
-                .let { if (it.last() in ".!?…") it else "$it." }
+            MessageReading.Msg(who, m.app?.takeIf { it.isNotBlank() }, com.tekyerema.tools.CallLogFormat.ago(m.t, now),
+                m.text!!.let { if (it.length > 300) it.take(297).trimEnd() + "…" else it })
         }
-        val more = withText.size - lines.size
-        return lines.joinToString(" ") + if (more > 0) " And $more more." else ""
-    }
+
+    /** "From Ama, on WhatsApp, 10 minutes ago." ⏸ "Are you coming?" ⏸⏸ "From Kofi…" — one page; the rest via "continue". */
+    fun readOut(messages: List<IndexedMessage>, per: Int = MessageReading.PER_TURN): String =
+        MessageReading.page(null, messagesOf(messages), per).text
 
     private fun joinAnd(xs: List<String>): String = when (xs.size) {
         0 -> ""; 1 -> xs[0]; else -> xs.dropLast(1).joinToString(", ") + " and " + xs.last()
@@ -147,9 +149,9 @@ object PrivateReading {
     fun digest(ctx: Context, full: String, brief: String, messages: List<IndexedMessage>): String {
         if (!enabled(ctx)) return full
         if (privateOutputConnected(ctx)) return maskBalances(full)
-        val words = readOut(messages)
-        if (words.isBlank()) return maskBalances(brief)
-        hold(maskBalances(words))
+        val page = MessageReading.page(null, messagesOf(messages))
+        if (page.text.isBlank()) return maskBalances(brief)
+        hold(maskBalances(page.text), rest = page.rest)
         return "$brief Say “read them” to hear them."
     }
 

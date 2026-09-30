@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessibilityNew
 import androidx.compose.material.icons.outlined.HealthAndSafety
+import androidx.compose.material.icons.outlined.Dialpad
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
@@ -72,7 +73,9 @@ internal enum class Page {
     // Money safety round 2: the user's Mobile Money limits (MoneyLimitsPage, under Control).
     MONEY_LIMITS,
     // D8: the user's per-app rules (AppRulesPage, under Control).
-    APP_RULES;
+    APP_RULES,
+    // Practise typing a PIN with TalkBack on a phone-style keypad, practice numbers only (PinPracticePage).
+    PIN_PRACTICE;
 
     /** Where Back goes. */
     val parent: Page get() = when (this) {
@@ -129,6 +132,11 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                     icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Mint, divider = false,
                     description = "Check my phone, and alerts for money, missed calls and low battery.") { page = Page.PHONE_CARE }
             }
+            // Payment-safety research #10: get quick with TalkBack typing before a real Mobile Money PIN screen.
+            GlassGroup {
+                SettingRow("Practise typing a PIN", icon = Icons.Outlined.Dialpad, iconTint = Spectrum.Gold, divider = false,
+                    description = "A made-up number on a keypad like the phone's — never your real PIN.") { page = Page.PIN_PRACTICE }
+            }
             GlassGroup {
                 SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet) { page = Page.HELP }
                 // First-run voice welcome (voice/Welcome.kt): the questions and the practice text, by voice, again.
@@ -157,6 +165,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
         Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
         Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }         // D8
+        Page.PIN_PRACTICE -> PinPracticePage { page = Page.ROOT }
     } }
 }
 

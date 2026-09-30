@@ -126,7 +126,9 @@ class HttpTtsProvider(
 
     override suspend fun speak(text: String, language: String): Boolean {
         val code = HttpSpeech.languageCode(spec, language) ?: return false
-        val say = if (language == Lang.TWI) TwiText.canonical(text).trim() else text.trim()
+        // Pause marks (voice/SpokenText) are silences on the phone's own voice; a network voice gets plain text.
+        val flat = com.tekyerema.voice.SpokenText.plain(text)
+        val say = if (language == Lang.TWI) TwiText.canonical(flat).trim() else flat.trim()
         if (say.isEmpty() || !available()) return false
         // The gateway takes at most spec.maxChars a request (HCI Lab: 250) — split, and leave a long reply to the phone's
         // own voice rather than spend several of a small day's requests on one answer.

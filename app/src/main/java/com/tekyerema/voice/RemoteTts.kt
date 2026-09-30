@@ -27,14 +27,16 @@ class RoutingTts(
         // Strip markdown (**bold**, *, _, `, #) the cloud brain sometimes emits: it makes a voice read "asterisk".
         // Replies are spoken, so plain text.
         val text = rawText.replace(Regex("[*_`#]+"), "").replace(Regex("[ \\t]+"), " ").trim()
+        // Pause marks (SpokenText) are silences on the system voice only; network voices and the Twi localizer get plain text.
+        val plain = SpokenText.plain(text)
         if (language == Lang.TWI) {
             // Localize English response text to Twi so the Twi VOICE speaks Twi WORDS (not English read by
             // a Twi voice). Already-Twi text (e.g. LocalBrain "Mabue no.") is left as-is by enToTw. The language
             // layer's localizer also refuses anything with a quantity or a name it can't keep (ReplyLocalizer).
-            val localized = try { enToTw?.invoke(text)?.takeIf { it.isNotBlank() } }
+            val localized = try { enToTw?.invoke(plain)?.takeIf { it.isNotBlank() } }
                 catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
             // X-06: the Twi voice gets the standard spelling (look-alike ɛ/ɔ mapped, tone marks dropped).
-            val twiText = com.tekyerema.language.TwiText.canonical(localized ?: text)
+            val twiText = com.tekyerema.language.TwiText.canonical(localized ?: plain)
             if (twi.speak(twiText, language)) { Log.i("Tekyerema", "[TTS] spoke Twi via ${twi.name}"); return true }
             Log.w("Tekyerema", "[TTS] Twi voice (${twi.name}) unavailable → English system-engine fallback (${english.name}) (§28)")
             return english.speak(text, Lang.GH_EN)   // fallback: ORIGINAL English text, English voice — never silent
@@ -42,7 +44,7 @@ class RoutingTts(
         // English: prefer a Ghanaian-accented voice when online; fall back to the system engine (offline, no
         // provider, or a failure) so we're never silent and never stall offline.
         if (ghEnglish != null && isOnline()) {
-            if (ghEnglish.speak(text, Lang.GH_EN)) { Log.i("Tekyerema", "[TTS] spoke Gh-English via ${ghEnglish.name}"); return true }
+            if (ghEnglish.speak(plain, Lang.GH_EN)) { Log.i("Tekyerema", "[TTS] spoke Gh-English via ${ghEnglish.name}"); return true }
             Log.w("Tekyerema", "[TTS] Gh-English voice unavailable → system-engine fallback (${english.name})")
         }
         Log.i("Tekyerema", "[TTS] spoke $language via ${english.name}")

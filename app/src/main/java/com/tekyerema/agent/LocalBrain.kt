@@ -791,7 +791,9 @@ class LocalBrain : AgentBrain {
         private fun smsPatterns(mark: String) = listOf(
             Regex("^\\s*$LEADIN(?:send|write)\\s+(?:an?\\s+)?$SMS_NOUN\\s+to\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
             Regex("^\\s*$LEADIN(?:send|write)\\s+(.+?)\\s+an?\\s+$SMS_NOUN\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
-            Regex("^\\s*$LEADIN(?:text|sms|message|whatsapp)\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE)
+            // "reply to Ama on WhatsApp saying …" (References.rewrite makes a bare "reply saying …" this) — a new message to that
+            // person, read back before it goes.
+            Regex("^\\s*$LEADIN(?:text|sms|message|whatsapp|reply)\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE)
         )
         private val SMS_STRONG = smsPatterns(MARK_STRONG)
         private val SMS_WEAK = smsPatterns(MARK_WEAK)

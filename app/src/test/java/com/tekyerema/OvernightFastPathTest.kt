@@ -20,12 +20,18 @@ class OvernightFastPathTest {
     @After fun reset() { Routines.clearForTest(); com.tekyerema.android.Relations.clear() }
 
     @Test fun catch_up_phrasings() {
-        for (s in listOf("What did I miss?", "What have I missed", "Catch me up.", "Any new messages?", "Did I miss anything?",
-            "Do I have any new notifications?", "Tekyerema, what did I miss?", "Nkra bɛn na aba?"))
+        for (s in listOf("What did I miss?", "What have I missed", "Catch me up.", "Did I miss anything?",
+            "Do I have any new notifications?", "Tekyerema, what did I miss?"))
             assertEquals(s, FastIntent.Digest("last"), c(s))
-        for (s in listOf("Read my messages.", "Check my notifications", "Read all my new messages", "Summarise my notifications"))
+        // "messages" = chats and texts only (A20e 2026-09-30: "read my messages" read 33 notifications, YouTube first).
+        for (s in listOf("Any new messages?", "Nkra bɛn na aba?", "Do I have any new messages", "Did anyone message me"))
+            assertEquals(s, FastIntent.Digest("last", messagesOnly = true), c(s))
+        for (s in listOf("Read my messages.", "Read all my new messages"))
+            assertEquals(s, FastIntent.Digest("recent", messagesOnly = true), c(s))
+        for (s in listOf("Check my notifications", "Summarise my notifications"))
             assertEquals(s, FastIntent.Digest("recent"), c(s))
         assertEquals(FastIntent.Digest("today"), c("What did I miss today?"))
+        assertEquals(FastIntent.Digest("today", messagesOnly = true), c("who messaged me today"))
         // A person, or a second instruction, is not the catch-up.
         assertNull(c("What did I miss and call Ama back"))
         assertFalse(c("read my messages from Ama") is FastIntent.Digest)
@@ -105,7 +111,7 @@ class OvernightFastPathTest {
     @Test fun a_routine_step_is_reading_or_a_reversible_setting_never_a_send_call_or_pay() {
         assertEquals(Routines.Step.Fast(FastIntent.Time, "tell me the time"), Routines.resolve("tell me the time"))
         assertEquals(Routines.Step.Fast(FastIntent.Time, "the time"), Routines.resolve("the time"))
-        assertEquals(Routines.Step.Fast(FastIntent.Digest("recent"), "my messages"), Routines.resolve("my messages"))
+        assertEquals(Routines.Step.Fast(FastIntent.Digest("recent", messagesOnly = true), "my messages"), Routines.resolve("my messages"))
         assertEquals(Routines.Step.Fast(FastIntent.QuickToggle("dnd", true), "turn on do not disturb"), Routines.resolve("turn on do not disturb"))
         assertEquals(Routines.Step.Fast(FastIntent.Time, "read the time"), Routines.resolve("reads the time"))
         assertEquals(Routines.Step.Web("the weather today in Ghana", "the weather"), Routines.resolve("the weather"))
