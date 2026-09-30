@@ -916,12 +916,23 @@ class VoiceController(
                 is com.tekyerema.voice.io.Heard.Speech -> heard.transcript.also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final"); noSpeechRun = 0 }
                 // In a follow-up, silence just ends the conversation quietly (the screen then closes);
                 // on a deliberate tap-to-talk it's worth telling the user we heard nothing.
-                com.tekyerema.voice.io.Heard.NoSpeech -> {
-                    // Escalating, not word-for-word (Closers.noInput): short, then one example, then quiet.
-                    if (quiet) idle("") else Closers.noInput(++noSpeechRun)?.let { sayThenIdle(it) } ?: idle("")
+                com.tekyerema.voice.io.Heard.NoSpeech, com.tekyerema.voice.io.Heard.TooShort -> {
+                    // A QUESTION is waiting and the phone's recognizer came back empty (error 7 on the A20e, twice,
+                    // on spoken digits — 2026-09-30): one more listen through OUR OWN recognizer (the keyboard's
+                    // dictation core — offline-capable, tuned on Ghanaian speech) before the ask is allowed to die.
+                    if (questionPending) {
+                        answerViaOwnAsr()?.let { tr2 -> runTurn(tr2, InputSource.ASR); return }
+                        sayThenIdle("I didn't catch that. The question is still waiting — say it once more, or tap to type.")
+                        return
+                    }
+                    if (heard is com.tekyerema.voice.io.Heard.TooShort) {
+                        if (quiet) idle("") else sayThenIdle("That was too short. Tap and try again.")
+                    } else {
+                        // Escalating, not word-for-word (Closers.noInput): short, then one example, then quiet.
+                        if (quiet) idle("") else Closers.noInput(++noSpeechRun)?.let { sayThenIdle(it) } ?: idle("")
+                    }
                     return
                 }
-                com.tekyerema.voice.io.Heard.TooShort -> { if (quiet) idle("") else sayThenIdle("That was too short. Tap and try again."); return }
                 com.tekyerema.voice.io.Heard.Cancelled -> { cancelledToIdle(); return }
                 is com.tekyerema.voice.io.Heard.Unavailable -> {
                     if (heard.cause == com.tekyerema.voice.io.Heard.Cause.AUDIO) {
@@ -983,6 +994,25 @@ class VoiceController(
             // A turn that never reached an answer (no speech, cancelled, an error) is not a measurement — drop it.
             com.tekyerema.core.telemetry.Telemetry.discard(byVoice = true)
         }
+    }
+
+    /**
+     * The phone's recognizer failed on an ANSWER: one listen through our own stack (the keyboard's dictation core —
+     * capture + our HybridAsr, offline Parakeet when there's no net). Null when it can't run or heard nothing.
+     */
+    private suspend fun answerViaOwnAsr(): Transcript? {
+        val twi = (forceLanguage() ?: sessionLanguage()) == Lang.TWI
+        if (SecureStep.active() || !Dictation.available(twi)) return null
+        Log.i("Tekyerema", "[VOICE] answer retry via our own recognizer")
+        val out = try {
+            Dictation.run(twi, engineRunning = false, secure = SecureStep.active(),
+                mic = VoiceEngine.dictationMic, asr = VoiceEngine.dictationAsr,
+                handOver = { WakeWordService.handOver() },
+                reclaim = { WakeWordService.reclaim() },
+                onListening = { listenCue(); set(VoiceState.LISTENING, "") })
+        } catch (c: CancellationException) { throw c } catch (_: Throwable) { null }
+        val text = (out as? Dictation.Outcome.Text)?.text?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return Transcript(raw = text, canonical = text, language = if (twi) Lang.TWI else Lang.GH_EN)
     }
 
     /**
