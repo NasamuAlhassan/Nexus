@@ -100,9 +100,22 @@ object TelcoGuide {
                     return reply(session, n, auto = true, more = true, row = "More")
                 }
         }
-        // The network asking to CONFIRM the number the user JUST dictated: offer the same one back — the engine's
-        // TIER2 read-back ("Enter 0 5 5, … and send it?") makes it one YES instead of ten digits said twice
-        // (live A20e 2026-09-30: MTN's Enter → Confirm double-entry cost the user the whole number again).
+        // An ENTRY screen whose answer the user's own request already carried ("Send ₵0.1 mashup to 055…"): enter it
+        // instead of asking them to dictate it again — the number still gets its one TIER2 read-back ("Enter 0 5 5, …
+        // and send it?"), so nothing is typed unheard (live A20e 2026-09-30: the ask came and the recogniser then
+        // failed on the digits twice; the walk stalled on information the user had already said).
+        if (TelcoUssd.rows(session.screen).isEmpty()) {
+            val slot = com.tekyerema.money.ussd.MenuModel.slotOf(session.screen)
+            val value = when (slot) {
+                com.tekyerema.money.ussd.SlotKind.PHONE_NUMBER -> session.flow.number
+                com.tekyerema.money.ussd.SlotKind.CONFIRM_NUMBER -> session.lastNumber ?: session.flow.number
+                com.tekyerema.money.ussd.SlotKind.AMOUNT -> session.flow.amount
+                else -> null
+            }
+            if (value != null) return reply(session, value, auto = false, more = false, row = null)
+        }
+        // The network asking to CONFIRM a number the user dictated mid-walk: the same one back — one YES, never
+        // ten digits said twice (MTN's Enter → Confirm double-entry).
         session.lastNumber?.let { n ->
             if (RE_CONFIRM_NUMBER.containsMatchIn(session.screen)) return reply(session, n, auto = false, more = false, row = null)
         }

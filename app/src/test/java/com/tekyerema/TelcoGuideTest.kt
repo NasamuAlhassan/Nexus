@@ -108,6 +108,24 @@ class TelcoGuideTest {
         assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).name == "ask_user")
     }
 
+    /** The request's own slots ride the walk: "Send ₵0.1 mashup to 055…" answers "Enter Phone Number" and
+     *  "Enter Amount" itself — no dictating what was already said (live A20e 2026-09-30: the ask stalled twice
+     *  on recogniser no-match for digits the user had already given). */
+    @Test fun `the goal's number and amount answer the entry screens`() {
+        val req = TelcoUssd.parse("Send ₵0.1 mashup to 0552093690", "mtn") as TelcoUssd.Request.Open
+        assertEquals("0552093690", req.flow.number)
+        assertEquals("0.1", req.flow.amount)
+        TelcoSession.opened(req.flow, "Enter Phone Number", BankUssd.ScreenKind.MENU)
+        val d = TelcoGuide.decide("Send ₵0.1 mashup to 0552093690", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).args.optString("_text") == "0552093690")
+        TelcoSession.screen("Enter Amount", BankUssd.ScreenKind.MENU, auto = false, more = false, user = true, typed = "0552093690")
+        val a = TelcoGuide.decide("Send ₵0.1 mashup to 0552093690", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(a.toString(), a is AgentDecision.CallTool && (a as AgentDecision.CallTool).args.optString("_text") == "0.1")
+        // "+233" folds to the 0-form; an unknown-length number stays null (never a guess).
+        assertEquals("0552093690", (TelcoUssd.parse("mashup for +233 552093690", "mtn") as TelcoUssd.Request.Open).flow.number)
+        assertNull((TelcoUssd.parse("buy a mashup bundle", "mtn") as TelcoUssd.Request.Open).flow.number)
+    }
+
     /** MTN's Enter → Confirm double-entry: the number the user just dictated is offered back as ONE yes
      *  (the TIER2 read-back), never ten digits said twice (live A20e 2026-09-30). */
     @Test fun `a confirm-number screen reuses the number just dictated`() {

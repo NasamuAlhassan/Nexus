@@ -17,7 +17,11 @@ import com.tekyerema.core.config.AppConfig
  */
 object TelcoUssd {
     /** One guided walk: the code to dial, the auto-steps (each must MATCH a menu row on the live screen), what it's for. */
-    data class Flow(val key: String, val code: String, val auto: List<Regex>, val what: String, val netName: String)
+    data class Flow(val key: String, val code: String, val auto: List<Regex>, val what: String, val netName: String,
+                    /** Slots the USER'S OWN REQUEST carried ("Send ₵0.1 mashup to 055…") — entered when the network
+                     *  asks, instead of asking the user to dictate what they already said (live A20e 2026-09-30:
+                     *  the ask came AND the recogniser then failed on the digits, twice). */
+                    val number: String? = null, val amount: String? = null)
 
     sealed class Request {
         data class Open(val flow: Flow) : Request()
@@ -60,8 +64,14 @@ object TelcoUssd {
         if (g.isBlank() || network == null) return null
         val net = nets().firstOrNull { it.key == network } ?: return null
         val other = Regex("\\bfor (?:another|an ?other|someone|somebody|a different)\\b| for [0-9]| to [0-9]").containsMatchIn(g)
+        // The request's own slots: a 10-digit Ghana number (folded from +233/233 forms) and a cedi amount.
+        val number = Regex("(?:\\+?233|0)\\s?\\d[\\d\\s-]{7,}").find(goal)?.value?.filter { it.isDigit() }
+            ?.let { if (it.startsWith("233") && it.length == 12) "0" + it.drop(3) else it }?.takeIf { it.length == 10 && it.startsWith("0") }
+        val amount = MoneyLimits.parseAmount(
+            Regex("(?:GH[S₵C¢]|₵|¢)?\\s*(\\d+(?:\\.\\d{1,2})?)\\s*(?:cedis?|GHS|GHC|₵)?").find(
+                goal.replace(number ?: "\u0000", " "))?.value)?.toPlainString()
         fun open(key: String, code: String?, auto: List<Regex>, what: String, missing: String): Request =
-            code?.let { Request.Open(Flow(key, it, auto, what, net.name)) } ?: Request.Unsupported(
+            code?.let { Request.Open(Flow(key, it, auto, what, net.name, number = number, amount = amount)) } ?: Request.Unsupported(
                 "I don't have a checked code for $missing on ${net.name}, and I never guess codes. " +
                     "You can dial it yourself and ask me to read the menu.")
         return when {
