@@ -53,11 +53,13 @@ class IntentMatcher private constructor(private val ctx: Context) {
         val ids = WordPiece.encode(text, vocab)
         val shape = longArrayOf(1, ids.size.toLong())
         val input = LongArray(ids.size) { ids[it].toLong() }
-        val tensors = mapOf(
-            "input_ids" to ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(input), shape),
-            "attention_mask" to ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(LongArray(ids.size) { 1L }), shape),
-            "token_type_ids" to ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(LongArray(ids.size)), shape))
+        // Built one by one so a failure mid-way closes what was already made (audit 2026-09-30, half 1: the map
+        // literal leaked the earlier tensors when a later createTensor threw).
+        val tensors = LinkedHashMap<String, ai.onnxruntime.OnnxTensor>()
         try {
+            tensors["input_ids"] = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(input), shape)
+            tensors["attention_mask"] = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(LongArray(ids.size) { 1L }), shape)
+            tensors["token_type_ids"] = ai.onnxruntime.OnnxTensor.createTensor(env, java.nio.LongBuffer.wrap(LongArray(ids.size)), shape)
             session.run(tensors).use { out ->
                 @Suppress("UNCHECKED_CAST")
                 val h = (out[0].value as Array<Array<FloatArray>>)[0]
@@ -91,15 +93,17 @@ class IntentMatcher private constructor(private val ctx: Context) {
     companion object {
         private const val DIR = "intent"
         @Volatile private var instance: IntentMatcher? = null
-        @Volatile private var failed = false
+        @Volatile private var failedAt = 0L
 
-        /** Loaded on first use (≈ 0.3 s); null if the assets are missing or the model can't load (then: the usual reply). */
+        /** Loaded on first use (≈ 0.3 s); null if the assets are missing or the model can't load (then: the usual
+         *  reply). A failure is retried after a minute — one OOM while the 660 MB recogniser was loading used to
+         *  kill the matcher until restart (audit 2026-09-30, half 1). */
         fun get(ctx: Context): IntentMatcher? {
             instance?.let { return it }
-            if (failed) return null
+            if (failedAt != 0L && System.currentTimeMillis() - failedAt < 60_000L) return null
             return synchronized(this) {
-                instance ?: try { IntentMatcher(ctx.applicationContext).also { instance = it } }
-                catch (t: Throwable) { failed = true; Log.w("Tekyerema", "[MEANING] matcher unavailable: ${t.message}"); null }
+                instance ?: try { IntentMatcher(ctx.applicationContext).also { instance = it; failedAt = 0L } }
+                catch (t: Throwable) { failedAt = System.currentTimeMillis(); Log.w("Tekyerema", "[MEANING] matcher unavailable: ${t.message}"); null }
             }
         }
 
