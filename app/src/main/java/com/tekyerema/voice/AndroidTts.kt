@@ -70,13 +70,20 @@ class AndroidTts(context: Context) : TtsProvider {
         if (!voicePicked) {
             voicePicked = true
             pickedVoice = try {
+                // Offline-capable English voices only; a voice whose pack isn't downloaded yet is still a candidate —
+                // Google fetches the pack on first use (the A20e ships en-NG local voices undownloaded).
                 val voices = engine.voices?.filter {
-                    it.locale?.language.equals("en", true) && !it.isNetworkConnectionRequired &&
-                        !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+                    it.locale?.language.equals("en", true) && !it.isNetworkConnectionRequired
                 }.orEmpty()
+                val installed = voices.filterNot { it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
                 listOf("GH", "NG", "GB").firstNotNullOfOrNull { c ->
-                    voices.filter { (it.locale?.country ?: "").equals(c, true) }.maxByOrNull { it.quality }
-                }?.also { Log.i("Tekyerema", "[TTS] voice picked: ${it.name} (${it.locale}, q=${it.quality})") }
+                    fun best(pool: List<android.speech.tts.Voice>) =
+                        pool.filter { (it.locale?.country ?: "").equals(c, true) }.maxByOrNull { it.quality }
+                    best(installed) ?: best(voices)
+                }?.also {
+                    Log.i("Tekyerema", "[TTS] voice picked: ${it.name} (${it.locale}, q=${it.quality}" +
+                        if (it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)) ", downloading)" else ")")
+                }
             } catch (_: Throwable) { null }
         }
         pickedVoice?.let { try { engine.voice = it } catch (_: Throwable) {} }
