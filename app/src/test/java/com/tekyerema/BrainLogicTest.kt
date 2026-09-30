@@ -155,11 +155,11 @@ class BrainLogicTest {
             }
         }
         val ok = tool(decide(LocalBrain(), "send 5 cedis to 0244123456"))
-        assertEquals("momo_send", ok.name); assertEquals("5", ok.args.getString("amount")); assertEquals("0244123456", ok.args.getString("number"))
+        assertEquals("ussd_navigate", ok.name); assertEquals("5", ok.args.getString("amount")); assertEquals("0244123456", ok.args.getString("number"))
         val after = tool(decide(LocalBrain(), "send money to 0244123456 5 cedis"))
         assertEquals("5", after.args.getString("amount")); assertEquals("0244123456", after.args.getString("number"))
         val cash = tool(decide(LocalBrain(), "send cash of 10 cedis to 0244123456"))
-        assertEquals("momo_send", cash.name); assertEquals("10", cash.args.getString("amount"))
+        assertEquals("ussd_navigate", cash.name); assertEquals("10", cash.args.getString("amount"))
         assertEquals("0244123456", tool(decide(LocalBrain(), "send 5 cedis to +233 24 412 3456")).args.getString("number"))
         // A misheard number (7 or 11 digits) is said back and asked for again — never read back for approval.
         for (g in listOf("send 5 cedis to 0553238", "send 5 cedis to 05533238011")) {
@@ -168,7 +168,7 @@ class BrainLogicTest {
         }
         // The owner's live send: "use 'Prince' as the reference" went out as "Payment".
         val ref = tool(decide(LocalBrain(), "Send 0.1 cedis to 0552093690 use 'Prince' as the reference"))
-        assertEquals("momo_send", ref.name); assertEquals("0.1", ref.args.getString("amount"))
+        assertEquals("ussd_navigate", ref.name); assertEquals("0.1", ref.args.getString("amount"))
         assertEquals("0552093690", ref.args.getString("number")); assertEquals("prince", ref.args.getString("reference").lowercase())
         assertEquals("school fees", tool(decide(LocalBrain(), "send 5 cedis to 0244123456 reference school fees")).args.getString("reference").lowercase())
         assertEquals("rent", tool(decide(LocalBrain(), "send 5 cedis to 0244123456 with reference: rent")).args.getString("reference").lowercase())

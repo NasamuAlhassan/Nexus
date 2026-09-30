@@ -28,8 +28,8 @@ object TelcoGuide {
                 is TelcoUssd.Request.Open -> open(req.flow)
             }
         }
-        // Mid-task: only OUR task (a telco step or our ask in history) is continued here.
-        val ours = history.any { it.startsWith("${TelcoUssdTool.NAME}(") }
+        // Mid-task: only OUR task (a telco step, the navigator's hand-back, or our ask in history) is continued here.
+        val ours = history.any { it.startsWith("${TelcoUssdTool.NAME}(") || it.startsWith("${com.tekyerema.money.ussd.UssdNavigatorTool.NAME}(") }
         if (!ours && TelcoUssd.parse(goal, network) == null) return null
         val last = LocalBrain.lastStep(history)
         return when {
@@ -39,6 +39,11 @@ object TelcoGuide {
                 menuAnswer(answer, last, session)
             }
             last.startsWith("${TelcoUssdTool.NAME}(") -> afterStep(last, session)
+            // The navigator handed over mid-walk (its ask is already in its result line): ask from the CURRENT screen.
+            last.startsWith("${com.tekyerema.money.ussd.UssdNavigatorTool.NAME}(") ->
+                if (last.contains("→ success") && session != null && session.kind == BankUssd.ScreenKind.MENU)
+                    ask(question(session, first = true))
+                else null
             else -> if (ours) AgentDecision.Done(STOPPED) else AgentDecision.Done("Okay — I didn't open it.")
         }
     }

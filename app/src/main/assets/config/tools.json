@@ -433,6 +433,16 @@
     "planner"
    ],
    "untrusted_output": true
+  },
+  "ussd_navigate": {
+   "feature": "M-05",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner"
+   ],
+   "untrusted_output": true
   }
  }
 }

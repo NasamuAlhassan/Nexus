@@ -82,5 +82,6 @@ fun defaultTools(): List<Tool> = listOf(
     // Money safety round 2: the guided bank USSD menu (verified codes only; the on-phone guide decides every step, the user
     // confirms the payment and enters the PIN). Hidden from every model (no schema entry): only the guide calls it.
     com.tekyerema.money.BankUssdTool,
-    com.tekyerema.money.TelcoUssdTool
+    com.tekyerema.money.TelcoUssdTool,
+    com.tekyerema.money.ussd.UssdNavigatorTool
 )

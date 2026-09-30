@@ -504,13 +504,15 @@ class LocalBrain : AgentBrain {
                 (net?.let { "It starts like ${NumberSpeech.networkPhrase(it)}. " } ?: "") + "Please say the number again.")
         }
         if (digits.length == 10) {
-            // Deterministic *170# driver: it reads each menu screen and stops at the PIN. The TIER3 confirmation
-            // reads the CEDI amount + number back FIRST, so a units mistake (pesewa vs cedi) is caught before it runs.
             val args = JSONObject().put("number", digits).put("amount", amountCedis)
             reference?.let { args.put("reference", it) }
-            // Speak momo_send's OWN result at step 2 (the PIN prompt on success, or the honest failure reason)
-            // — NEVER a premature "Sent the money": the money only moves when the USER enters the PIN.
+            // Speak the tool's OWN result at step 2 (the network's confirmation with its shown name on success, or
+            // the honest failure) — NEVER a premature "Sent the money": money only moves when the USER enters the PIN.
             pendingResultSpeak = true
+            // The intent-driven navigator (money/ussd, 2026-09-30): matches each LIVE menu by meaning and navigates
+            // quietly — works on any network the SIM is on. `money.navigator.enabled=false` restores the fixed driver.
+            if (com.tekyerema.core.config.AppConfig.bool("money.navigator.enabled", true))
+                return call(com.tekyerema.money.ussd.UssdNavigatorTool.NAME, args, "send money (navigator)")
             return call("momo_send", args, "send money (deterministic)")
         }
         // Recipient given by NAME only (no number) → open the network menu; the user completes it. We do NOT

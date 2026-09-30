@@ -22,7 +22,20 @@ object MoneyPlan {
     fun end(history: List<String>): Pair<AgentStatus, String>? {
         BankGuide.end(history)?.let { return it }
         TelcoGuide.end(history)?.let { return it }
+        navigatorEnd(history)?.let { return it }
         return limitEnd(history)
+    }
+
+    /** The navigator's walk ends the task at its boundary or its honest failure — never a recovery inside a money
+     *  menu. A hand-over to the guide (data ask=true → a question line) does NOT end: TelcoGuide continues it. */
+    fun navigatorEnd(history: List<String>): Pair<AgentStatus, String>? {
+        val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
+        if (!last.startsWith("${com.tekyerema.money.ussd.UssdNavigatorTool.NAME}(")) return null
+        val msg = LocalBrain.resultMessage(last)
+        if (!last.contains("→ success")) return AgentStatus.CANNOT_DO to
+            msg.ifBlank { "The Mobile Money walk didn't finish. Nothing was sent." }
+        if (msg.trim().endsWith("?")) return null   // the hand-over question: the guide takes it from here
+        return AgentStatus.COMPLETED to msg
     }
 
     /** A momo_send / mobile_money preflight refused by a spending limit: the refusal is the answer. Pure. */
