@@ -250,7 +250,16 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     private fun restoreVolume(code: Int, steps: Int) {
         val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return
-        val dir = if (code == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
+        val down = code == android.view.KeyEvent.KEYCODE_VOLUME_DOWN
+        // At the rail nothing was lost: two DOWN presses at volume 0 changed nothing, and re-raising would make the
+        // phone LOUDER than before the gesture (research 2026-09-30); same for UP at the top.
+        try {
+            val stream = AudioManager.STREAM_MUSIC
+            val v = am.getStreamVolume(stream)
+            if (down && v == 0) return
+            if (!down && v >= am.getStreamMaxVolume(stream)) return
+        } catch (_: Throwable) {}
+        val dir = if (down) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
         repeat(steps) { try { am.adjustSuggestedStreamVolume(dir, AudioManager.USE_DEFAULT_STREAM_TYPE, 0) } catch (_: Throwable) {} }
     }
 
@@ -259,10 +268,14 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
      *  opens the voice screen (in front, so the microphone is allowed) and listens. Never during the PIN (SecureStep). */
     private fun talkOrStop(source: String) {
         if (com.tekyerema.voice.SecureStep.active()) { Log.i("Tekyerema", "[TRIGGER] $source ignored — secure step"); return }
+        val listening = com.tekyerema.voice.VoiceEngine.state.value.state == com.tekyerema.voice.VoiceState.LISTENING
         val busy = com.tekyerema.voice.VoiceEngine.isRunning || AgentEngine.isBusy
-        Log.i("Tekyerema", "[TRIGGER] $source → ${if (busy) "STOP, then listen" else "talk"}")
+        Log.i("Tekyerema", "[TRIGGER] $source → ${if (listening) "stop listening" else if (busy) "STOP, then listen" else "talk"}")
         val h = android.os.Handler(mainLooper)
-        if (busy) {
+        if (listening) {
+            // Already listening and the user pressed stop: they want SILENCE, not a re-armed mic.
+            h.post { com.tekyerema.voice.VoiceEngine.cancel() }
+        } else if (busy) {
             h.post { com.tekyerema.voice.VoiceEngine.cancel() }
             // Once the stop has settled, open the mic — the point of the interrupt is to say something new.
             h.postDelayed({

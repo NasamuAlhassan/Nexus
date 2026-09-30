@@ -136,6 +136,11 @@ class AndroidTts(context: Context) : TtsProvider {
 
     override suspend fun speak(text: String, language: String): Boolean {
         if (text.isBlank()) return false
+        NowSpeaking.begin()
+        try { return speakInner(text, language) } finally { NowSpeaking.end() }
+    }
+
+    private suspend fun speakInner(text: String, language: String): Boolean {
         if (!ready.await()) { Log.w("Tekyerema", "[TTS] engine init failed"); return false }
         logEngineOnce()
         if (!supports(language)) {

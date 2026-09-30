@@ -66,6 +66,7 @@ object TriggerBubble {
 
     /** Start the arrive-on-top voice screen. Our overlay is a visible window, so this is allowed from the background. */
     fun launch(ctx: Context) {
+        try { TekyeremaAccessibilityService.live?.collapseShade() } catch (_: Throwable) {}   // never buried under the shade
         try {
             ctx.startActivity(Intent(ctx, VoiceActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         } catch (_: Throwable) {}

@@ -62,6 +62,9 @@ import kotlinx.coroutines.launch
  */
 class VoiceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        // "Hey Tɛkyerɛma" at the lock screen must SHOW something (owner 2026-09-30) — the panel appears over the
+        // keyguard and wakes the display; the phone stays locked (no keyguard dismiss is requested).
+        if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
@@ -159,7 +162,10 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
             Presence.IDLE -> {
                 val readMs = (voice.spoken.length * 60L).coerceAtMost(15_000L)
                 delay(maxOf(if (Perms.talkBack(context)) 12000L else 4000L, readMs))
-                if (!VoiceEngine.isRunning && Perms.mic(context)) close()
+                // Never close mid-sentence (owner 2026-09-30: "when you are talking it kind of hides") — a repeat,
+                // an announcement or a slow paced reading can still be speaking after the state went IDLE.
+                while (VoiceEngine.isSpeaking) delay(250)
+                if (!VoiceEngine.isRunning) close()
             }
             else -> {}
         }

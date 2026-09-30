@@ -24,6 +24,11 @@ class RoutingTts(
 ) : TtsProvider {
     override val name = "routing(en=${english.name}; ghEn=${ghEnglish?.name ?: "-"}; twi=${twi.name})"
     override suspend fun speak(rawText: String, language: String): Boolean {
+        NowSpeaking.begin()
+        try { return speakInner(rawText, language) } finally { NowSpeaking.end() }
+    }
+
+    private suspend fun speakInner(rawText: String, language: String): Boolean {
         // Strip markdown (**bold**, *, _, `, #) the cloud brain sometimes emits: it makes a voice read "asterisk".
         // Replies are spoken, so plain text.
         val text = rawText.replace(Regex("[*_`#]+"), "").replace(Regex("[ \\t]+"), " ").trim()

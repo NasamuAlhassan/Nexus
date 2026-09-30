@@ -354,6 +354,8 @@ object VoiceEngine {
     fun followUp() = controller.followUp()
     /** Volume-up twice (the physical "say that again"): the last reply, spoken again. */
     fun repeatLast() = controller.repeatLast()
+    /** Any of our voices mid-sentence, turns and mini-turns alike — the panel never closes itself while true. */
+    val isSpeaking: Boolean get() = NowSpeaking.active
     fun cancel() = controller.cancel()
 
     /** Typed command → the same agent entry point as an ASR transcript (see VoiceController.submitText). */
