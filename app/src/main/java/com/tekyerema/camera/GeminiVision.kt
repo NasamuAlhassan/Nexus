@@ -38,8 +38,21 @@ sealed class VisionResult {
 object GeminiVision {
     private const val TAG = "Tekyerema"
 
+    /** The VizWiz lesson + money safety (vision_features.md §4): lines every camera prompt carries, describe and
+     *  follow-up alike. A confident wrong guess about money or medicine is worse for a blind user than an honest
+     *  "I can't read it" — they cannot check the answer against the picture. */
+    const val SAFETY = "Keep to what is actually visible. If the image is too dark, blurry or doesn't show enough " +
+        "to answer, say so plainly instead of guessing. Never guess amounts of money, medicine names or doses — " +
+        "say which part you can't read."
+
     const val PROMPT = "Describe what is in front of a blind person's phone camera in two short sentences: " +
-        "the main thing first, then any text or important detail. No markdown."
+        "the main thing first, then any text or important detail. No markdown. " + SAFETY
+
+    /** The follow-up turn (VisionQa, the Be My AI pattern): the SAME photo again, with the user's question. */
+    fun qaPrompt(question: String): String =
+        "A blind person is asking about the photo their phone camera just took. Answer the question in one or two " +
+        "short sentences, no markdown. If the answer is not visible in the photo, say so plainly. " + SAFETY +
+        " Question: " + question.trim()
 
     /** Shared connection pool; per-call timeouts come from config via newBuilder(). */
     private val shared: OkHttpClient by lazy { OkHttpClient() }

@@ -1,7 +1,11 @@
 {
   "schema_version": 1,
   "providers": {
-    "groq": {"baseUrl": "https://api.groq.com/openai/v1"},
+    "groq": {
+      "baseUrl": "https://api.groq.com/openai/v1",
+      "visionModel": "qwen/qwen3.8-27b",
+      "_visionNote": "P-01 fallback rung (camera/GroqVision): Groq's current vision-capable model. Each image counts ~2k input tokens from the same daily budget the planner runs on, so it is tried only when Gemini fails."
+    },
     "gemini": {"baseUrl": "https://generativelanguage.googleapis.com/v1beta"},
     "speech": {
       "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. Twi goes to the UG HCI Lab gateway (language.json hcilab_asr / hcilab_tts) when its token is in local.properties and its quota lasts; English stays on the phone.",

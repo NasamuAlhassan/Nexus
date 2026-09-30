@@ -118,6 +118,9 @@ class CameraReadActivity : ComponentActivity() {
     // --- camera ---
     private var analysis: ImageAnalysis? = null
     private var analysisExecutor: ExecutorService? = null
+    /** The bound camera, kept for its torch control (auto-on when describe frames stay dark). */
+    private var camera: androidx.camera.core.Camera? = null
+    private var torchOn = false
     private var cameraErrorSpoken = false
     private var intervalMs = 500L
     @Volatile private var lastAnalysedAt = 0L
@@ -174,6 +177,10 @@ class CameraReadActivity : ComponentActivity() {
         main.removeCallbacksAndMessages(null)
         pending.clear()
         afterSpeech.clear()
+        // The held photo must not outlive the camera screen (VisionQa: a follow-up only makes sense in the moment).
+        LastCapture.clear()
+        // Unbinding puts the torch out too; explicit, so a light we lit can never be left burning.
+        if (torchOn) try { camera?.cameraControl?.enableTorch(false) } catch (_: Throwable) {}
         // Use cases are unbound by the lifecycle (ON_DESTROY runs before this); make sure no frame is still routed here.
         try { analysis?.clearAnalyzer() } catch (_: Throwable) {}
         analysisExecutor?.shutdown()
@@ -196,9 +203,10 @@ class CameraReadActivity : ComponentActivity() {
                         "Describing photos needs the Gemini backup, which is switched off in Settings."))
                     return
                 }
-                settings.geminiApiKey.isBlank() -> {
+                // The Groq vision rung (VisionLadder) means describe works on keyless-Gemini days too.
+                settings.geminiApiKey.isBlank() && settings.groqApiKeys.isEmpty() -> {
                     mode = MODE_TEXT
-                    announce(phrase("describeNoKey", "Describing needs a Gemini key, which isn't set up. I can read any text I see instead."))
+                    announce(phrase("describeNoKey", "Describing needs a key that isn't set up on this phone. I can read any text I see instead."))
                 }
                 !NetworkMonitor.isOnline() -> {
                     mode = MODE_TEXT
@@ -264,9 +272,10 @@ class CameraReadActivity : ComponentActivity() {
                 useCase.setAnalyzer(executor) { image -> analyze(image) }
                 analysis = useCase
 
-                val camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, useCase)
+                val cam = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, useCase)
+                camera = cam
                 // Opening can fail later (another app holds the camera, policy) — say so instead of a silent black screen.
-                camera.cameraInfo.cameraState.observe(this) { state ->
+                cam.cameraInfo.cameraState.observe(this) { state ->
                     val error = state.error ?: return@observe
                     if (cameraErrorSpoken || closing) return@observe
                     cameraErrorSpoken = true
@@ -394,11 +403,35 @@ class CameraReadActivity : ComponentActivity() {
         if (closing || mode != MODE_DESCRIBE || describeClaimed.get()) return
         val stable = verdict == lastVerdict
         lastVerdict = verdict
+        if (!stable) return
+        // A frame that STAYED dark (not just the first auto-exposure frame): the user can't see the darkness and
+        // may have no light to turn on — put the phone's own light on for them instead of coaching.
+        if (verdict == Verdict.TOO_DARK && turnTorchOn()) return
         val now = SystemClock.elapsedRealtime()
-        if (!stable || isSpeaking() || now - lastGuidanceAt < AppConfig.long("camera.describe.guidanceIntervalMs", 3_000L)) return
+        if (isSpeaking() || now - lastGuidanceAt < AppConfig.long("camera.describe.guidanceIntervalMs", 3_000L)) return
         lastGuidanceAt = now
         val line = QualityGate.guidance(verdict)
         if (line.isNotEmpty()) speak(line)
+    }
+
+    /** Auto-torch (`vision.torch.auto`), once per session, said aloud — surprise light in a blind user's hand is
+     *  rude, and a sighted helper nearby would wonder. False when there is no torch to turn on (front camera has
+     *  none; describe uses the back one), so the normal "too dark" coaching still happens. */
+    private fun turnTorchOn(): Boolean {
+        if (torchOn || !AppConfig.bool("vision.torch.auto", true)) return false
+        val cam = camera ?: return false
+        if (!cam.cameraInfo.hasFlashUnit()) return false
+        return try {
+            cam.cameraControl.enableTorch(true)
+            torchOn = true
+            // Give the light a moment to change the frames before any "too dark" line could contradict it.
+            lastGuidanceAt = SystemClock.elapsedRealtime()
+            speak(phrase("torchOn", "It's dark — I've put the light on."), flush = false)
+            true
+        } catch (t: Throwable) {
+            Log.w(TAG, "[CAMERA] torch failed: ${t.javaClass.simpleName}")
+            false
+        }
     }
 
     private fun sendForDescription(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
@@ -410,7 +443,12 @@ class CameraReadActivity : ComponentActivity() {
                 FrameConvert.nv21ToJpeg(nv21, width, height, rotation, AppConfig.int("camera.describe.maxSide", 1024), 80)
             }
             val result = if (jpeg == null) VisionResult.Failed("encode")
-            else GeminiVision.describe(jpeg, settings.geminiApiKey, com.tekyerema.agent.ModelRoles.model("vision", settings.model))   // N-06
+            else {
+                // Held (memory only, dropped when this screen closes) so a follow-up question — "what colour is
+                // the shirt?" — can go back to the cloud with THIS photo (VisionQa, the Be My AI pattern).
+                LastCapture.hold(jpeg)
+                VisionLadder.describe(jpeg, GeminiVision.PROMPT, settings)   // N-06; Gemini first, Groq when it fails
+            }
             if (closing) return@launch
             when (result) {
                 is VisionResult.Described -> deliver(result.text)

@@ -98,6 +98,11 @@ class LocalFastRouter(
         // them") and the helper's PIN rule ("call my helper" is refused at a PIN). Null = not one of those.
         com.tekyerema.agent.helper.TrustFast.handle(appContext, text, controller())?.let { return it }
         val intent = FastIntentClassifier.classify(text) ?: run {
+            // Vision follow-up (camera/VisionQa, the Be My AI pattern): while the camera's last photo is still held,
+            // a question nothing above claimed is asked OF THAT PHOTO — "what's in front of me" … "what colour is
+            // the shirt?". After the classifier on purpose, so the time, the battery and every other fast answer
+            // keep their own rules.
+            visionFollowUp(text)?.let { return it }
             meaning(text, language)?.let { return it }
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
@@ -548,6 +553,17 @@ class LocalFastRouter(
             // The reader announces itself; nothing extra to say here.
             FastOutcome("CAMERA_${mode.uppercase()}", "", systemVoice = true)
         } catch (t: Throwable) { null }
+    }
+
+    /** The follow-up on the camera's last photo: the SAME image goes back to the cloud with the question, and the
+     *  answer (or the honest offline/failed line) is spoken. Null falls through to the agent unchanged. */
+    private suspend fun visionFollowUp(text: String): FastOutcome? {
+        if (!com.tekyerema.camera.LastCapture.has() || !com.tekyerema.camera.VisionQa.isFollowUp(text)) return null
+        val t0 = SystemClock.uptimeMillis()
+        val answer = com.tekyerema.camera.VisionQa.ask(text, com.tekyerema.settings.Settings(appContext)) ?: return null
+        // The answer describes the user's own room — log its length only, never its words.
+        Log.i(TAG, "[LOCAL_FAST_PATH] intent=VISION_FOLLOWUP vision_called=true latency_ms=${SystemClock.uptimeMillis() - t0} chars=${answer.length}")
+        return FastOutcome("VISION_FOLLOWUP", answer, systemVoice = false)
     }
 
     /** K-15: speak only what differs from the last time the screen was described. */
