@@ -59,6 +59,8 @@ object AgentEngine {
 
     @Volatile private var controller: AccessibilityController? = null
     private var appContext: Context? = null
+    /** The app context for on-phone guides that run without a ToolContext (money/TelcoGuide). */
+    fun appContext(): Context? = appContext
     private var settings: Settings? = null
     private lateinit var registry: ToolRegistry
     private val policy = PolicyEngine()

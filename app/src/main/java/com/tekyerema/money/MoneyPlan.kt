@@ -17,9 +17,11 @@ import com.tekyerema.agent.LocalBrain
 object MoneyPlan {
     fun decide(goal: String, history: List<String>): AgentDecision? =
         MoMoRetry.decide(goal, history) ?: MoMoAfterCare.decide(goal, history) ?: BankGuide.decide(goal, history)
+            ?: TelcoGuide.decide(goal, history)
 
     fun end(history: List<String>): Pair<AgentStatus, String>? {
         BankGuide.end(history)?.let { return it }
+        TelcoGuide.end(history)?.let { return it }
         return limitEnd(history)
     }
 

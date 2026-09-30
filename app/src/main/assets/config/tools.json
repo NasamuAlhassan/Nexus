@@ -1,82 +1,438 @@
 {
-  "schema_version": 1,
-  "tools": {
-    "read_state": {"feature": "F-01", "idempotent": true},
-    "read_screen": {"feature": "F-01", "idempotent": true, "untrusted_output": true},
-    "wait": {"feature": "G-10", "idempotent": true},
-    "tap": {"feature": "G-01", "callers": ["planner", "local"]},
-    "long_press": {"feature": "G-02", "callers": ["planner", "local"]},
-    "swipe": {"feature": "G-04", "min_api": 24, "callers": ["planner", "local"]},
-    "drag": {"feature": "G-04", "min_api": 24, "callers": ["planner", "local"]},
-    "pinch": {"feature": "G-04", "min_api": 24, "callers": ["planner", "local"]},
-    "scroll": {"feature": "G-02", "callers": ["planner", "local"]},
-    "type": {"feature": "G-05", "callers": ["planner", "local"]},
-    "tap_sequence": {"feature": "G-11", "callers": ["planner"]},
-    "set_range": {"feature": "G-02", "min_api": 24, "callers": ["planner", "local"]},
-    "key_event": {"feature": "E-18"},
-    "open_app": {"feature": "E-01", "idempotent": true},
-    "cannot_do": {"feature": "C-16", "idempotent": true},
-    "read_notifications": {"feature": "E-15", "idempotent": true, "untrusted_output": true},
-    "search_contacts": {"feature": "E-07", "permissions": ["android.permission.READ_CONTACTS"], "idempotent": true},
-    "find_contact": {"feature": "E-07", "permissions": ["android.permission.READ_CONTACTS"], "idempotent": true},
-    "search_messages": {"feature": "H-09", "idempotent": true, "untrusted_output": true},
-    "set_alarm": {"feature": "E-05"},
-    "set_timer": {"feature": "E-05"},
-    "set_volume": {"feature": "E-09", "idempotent": true},
-    "volume_up": {"feature": "E-09"},
-    "volume_down": {"feature": "E-09"},
-    "run_ussd": {"feature": "E-24", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
-    "make_call": {"feature": "E-02", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"]},
-    "reply_to_notification": {"feature": "E-16", "callers": ["planner", "local"]},
-    "play_music": {"feature": "E-14"},
-    "install_app": {"feature": "E-01", "callers": ["planner", "local"], "untrusted_output": true},
-    "take_photo": {"feature": "E-21", "callers": ["planner", "local"]},
-    "ask_app": {"feature": "E-20", "callers": ["planner", "local"], "untrusted_output": true},
-    "google_sign_in": {"feature": "G-13", "callers": ["planner"]},
-    "open_setting": {"feature": "E-11", "idempotent": true},
-    "mobile_money": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true},
-    "momo_send": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner", "local"], "untrusted_output": true,
-      "examples": [{"number": "0244123456", "amount": "5", "reference": "lunch"}, {"number": "0551234567", "amount": "0.5", "reference": "test"}]},
-    "bank_ussd": {"feature": "M-03", "permissions": ["android.permission.CALL_PHONE"], "callers": ["planner"], "untrusted_output": true},
-    "find_tool": {"feature": "D-02", "idempotent": true},
-    "notification_action": {"feature": "E-17", "callers": ["planner", "local"]},
-    "send_sms": {"feature": "E-03", "permissions": ["android.permission.SEND_SMS"], "callers": ["planner", "local"],
-      "examples": [{"contact": "Ama", "message": "I'm on my way."}]},
-    "call_control": {"feature": "E-02", "permissions": ["android.permission.ANSWER_PHONE_CALLS"], "callers": ["planner", "local"]},
-    "call_log": {"feature": "E-28", "permissions": ["android.permission.READ_CALL_LOG"], "idempotent": true},
-    "read_sms": {"feature": "E-29", "permissions": ["android.permission.READ_SMS"], "idempotent": true, "untrusted_output": true},
-    "calendar": {"feature": "E-06", "permissions": ["android.permission.READ_CALENDAR"], "untrusted_output": true},
-    "create_contact": {"feature": "E-07", "permissions": ["android.permission.WRITE_CONTACTS"], "callers": ["planner", "local"]},
-    "location": {"feature": "E-13", "permissions": ["android.permission.ACCESS_FINE_LOCATION"], "idempotent": true},
-    "show_alarms": {"feature": "E-05", "idempotent": true},
-    "clipboard": {"feature": "E-19", "untrusted_output": true},
-    "share_text": {"feature": "E-20", "callers": ["planner", "local"]},
-    "open_intent": {"feature": "D-14"},
-    "emergency": {"feature": "L-04", "permissions": ["android.permission.CALL_PHONE", "android.permission.SEND_SMS"], "callers": ["planner", "local"]},
-    "ask_user": {"feature": "C-13", "idempotent": true, "callers": ["planner", "local"]},
-    "node_action": {"feature": "G-01", "callers": ["planner", "local"]},
-    "scroll_to_find": {"feature": "G-18", "idempotent": true},
-    "wait_for_element": {"feature": "G-18", "idempotent": true},
-    "read_all": {"feature": "F-15", "idempotent": true, "untrusted_output": true},
-    "web_search": {"feature": "I-03", "idempotent": true, "untrusted_output": true},
-    "describe_screen": {"feature": "F-09", "idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
-    "read_shared": {"idempotent": true, "callers": ["planner", "local"], "untrusted_output": true},
-    "resultLimits": {"read_shared": 1500, "momo_send": 400},
-    "search": {
-      "groups": {
-        "shared": {
-          "tools": ["read_shared"],
-          "keywords": "\\b(shared|share|selected|selection|highlighted|this text|that text|the text|what (?:is|does) (?:this|that|it)(?: mean| say)?|read (?:it|this|that) again|sum (?:it|this|that) up|summari[sz]e (?:it|this|that)|explain (?:it|this|that))\\b"
-        },
-        "vision": {
-          "tools": ["describe_screen"],
-          "keywords": "\\b(describe|picture|pictures|photo|photos|image|images|icon|icons|what does it look like|looks like)\\b"
-        },
-        "apps": {
-          "tools": ["install_app", "take_photo", "ask_app", "google_sign_in", "play_music"],
-          "keywords": "\\b(install|reinstall|download|play ?store|google play|app store|selfie|photo|picture|pic|camera|chat ?gpt|gemini|claude|copilot|perplexity|assistant|sign ?in|sign ?up|log ?in|login|continue with google|google account|youtube music|yt music|spotify|boomplay|audiomack|song|songs|music|artist|album|playlist|track|skip|next song|pause|resume)\\b"
-        }
-      }
+ "schema_version": 1,
+ "tools": {
+  "read_state": {
+   "feature": "F-01",
+   "idempotent": true
+  },
+  "read_screen": {
+   "feature": "F-01",
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "wait": {
+   "feature": "G-10",
+   "idempotent": true
+  },
+  "tap": {
+   "feature": "G-01",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "long_press": {
+   "feature": "G-02",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "swipe": {
+   "feature": "G-04",
+   "min_api": 24,
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "drag": {
+   "feature": "G-04",
+   "min_api": 24,
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "pinch": {
+   "feature": "G-04",
+   "min_api": 24,
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "scroll": {
+   "feature": "G-02",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "type": {
+   "feature": "G-05",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "tap_sequence": {
+   "feature": "G-11",
+   "callers": [
+    "planner"
+   ]
+  },
+  "set_range": {
+   "feature": "G-02",
+   "min_api": 24,
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "key_event": {
+   "feature": "E-18"
+  },
+  "open_app": {
+   "feature": "E-01",
+   "idempotent": true
+  },
+  "cannot_do": {
+   "feature": "C-16",
+   "idempotent": true
+  },
+  "read_notifications": {
+   "feature": "E-15",
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "search_contacts": {
+   "feature": "E-07",
+   "permissions": [
+    "android.permission.READ_CONTACTS"
+   ],
+   "idempotent": true
+  },
+  "find_contact": {
+   "feature": "E-07",
+   "permissions": [
+    "android.permission.READ_CONTACTS"
+   ],
+   "idempotent": true
+  },
+  "search_messages": {
+   "feature": "H-09",
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "set_alarm": {
+   "feature": "E-05"
+  },
+  "set_timer": {
+   "feature": "E-05"
+  },
+  "set_volume": {
+   "feature": "E-09",
+   "idempotent": true
+  },
+  "volume_up": {
+   "feature": "E-09"
+  },
+  "volume_down": {
+   "feature": "E-09"
+  },
+  "run_ussd": {
+   "feature": "E-24",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true
+  },
+  "make_call": {
+   "feature": "E-02",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "reply_to_notification": {
+   "feature": "E-16",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "play_music": {
+   "feature": "E-14"
+  },
+  "install_app": {
+   "feature": "E-01",
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true
+  },
+  "take_photo": {
+   "feature": "E-21",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "ask_app": {
+   "feature": "E-20",
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true
+  },
+  "google_sign_in": {
+   "feature": "G-13",
+   "callers": [
+    "planner"
+   ]
+  },
+  "open_setting": {
+   "feature": "E-11",
+   "idempotent": true
+  },
+  "mobile_money": {
+   "feature": "M-03",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true
+  },
+  "momo_send": {
+   "feature": "M-03",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true,
+   "examples": [
+    {
+     "number": "0244123456",
+     "amount": "5",
+     "reference": "lunch"
+    },
+    {
+     "number": "0551234567",
+     "amount": "0.5",
+     "reference": "test"
     }
+   ]
+  },
+  "bank_ussd": {
+   "feature": "M-03",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner"
+   ],
+   "untrusted_output": true
+  },
+  "find_tool": {
+   "feature": "D-02",
+   "idempotent": true
+  },
+  "notification_action": {
+   "feature": "E-17",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "send_sms": {
+   "feature": "E-03",
+   "permissions": [
+    "android.permission.SEND_SMS"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "examples": [
+    {
+     "contact": "Ama",
+     "message": "I'm on my way."
+    }
+   ]
+  },
+  "call_control": {
+   "feature": "E-02",
+   "permissions": [
+    "android.permission.ANSWER_PHONE_CALLS"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "call_log": {
+   "feature": "E-28",
+   "permissions": [
+    "android.permission.READ_CALL_LOG"
+   ],
+   "idempotent": true
+  },
+  "read_sms": {
+   "feature": "E-29",
+   "permissions": [
+    "android.permission.READ_SMS"
+   ],
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "calendar": {
+   "feature": "E-06",
+   "permissions": [
+    "android.permission.READ_CALENDAR"
+   ],
+   "untrusted_output": true
+  },
+  "create_contact": {
+   "feature": "E-07",
+   "permissions": [
+    "android.permission.WRITE_CONTACTS"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "location": {
+   "feature": "E-13",
+   "permissions": [
+    "android.permission.ACCESS_FINE_LOCATION"
+   ],
+   "idempotent": true
+  },
+  "show_alarms": {
+   "feature": "E-05",
+   "idempotent": true
+  },
+  "clipboard": {
+   "feature": "E-19",
+   "untrusted_output": true
+  },
+  "share_text": {
+   "feature": "E-20",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "open_intent": {
+   "feature": "D-14"
+  },
+  "emergency": {
+   "feature": "L-04",
+   "permissions": [
+    "android.permission.CALL_PHONE",
+    "android.permission.SEND_SMS"
+   ],
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "ask_user": {
+   "feature": "C-13",
+   "idempotent": true,
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "node_action": {
+   "feature": "G-01",
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
+  "scroll_to_find": {
+   "feature": "G-18",
+   "idempotent": true
+  },
+  "wait_for_element": {
+   "feature": "G-18",
+   "idempotent": true
+  },
+  "read_all": {
+   "feature": "F-15",
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "web_search": {
+   "feature": "I-03",
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "describe_screen": {
+   "feature": "F-09",
+   "idempotent": true,
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true
+  },
+  "read_shared": {
+   "idempotent": true,
+   "callers": [
+    "planner",
+    "local"
+   ],
+   "untrusted_output": true
+  },
+  "resultLimits": {
+   "read_shared": 1500,
+   "momo_send": 400
+  },
+  "search": {
+   "groups": {
+    "shared": {
+     "tools": [
+      "read_shared"
+     ],
+     "keywords": "\\b(shared|share|selected|selection|highlighted|this text|that text|the text|what (?:is|does) (?:this|that|it)(?: mean| say)?|read (?:it|this|that) again|sum (?:it|this|that) up|summari[sz]e (?:it|this|that)|explain (?:it|this|that))\\b"
+    },
+    "vision": {
+     "tools": [
+      "describe_screen"
+     ],
+     "keywords": "\\b(describe|picture|pictures|photo|photos|image|images|icon|icons|what does it look like|looks like)\\b"
+    },
+    "apps": {
+     "tools": [
+      "install_app",
+      "take_photo",
+      "ask_app",
+      "google_sign_in",
+      "play_music"
+     ],
+     "keywords": "\\b(install|reinstall|download|play ?store|google play|app store|selfie|photo|picture|pic|camera|chat ?gpt|gemini|claude|copilot|perplexity|assistant|sign ?in|sign ?up|log ?in|login|continue with google|google account|youtube music|yt music|spotify|boomplay|audiomack|song|songs|music|artist|album|playlist|track|skip|next song|pause|resume)\\b"
+    }
+   }
+  },
+  "telco_ussd": {
+   "feature": "M-04",
+   "permissions": [
+    "android.permission.CALL_PHONE"
+   ],
+   "callers": [
+    "planner"
+   ],
+   "untrusted_output": true
   }
+ }
 }

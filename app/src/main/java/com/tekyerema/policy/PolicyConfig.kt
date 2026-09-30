@@ -36,6 +36,7 @@ object PolicyConfig {
         }
         // Money safety round 2: the guided bank menu — opening it is TIER3, a typed amount/account number TIER2 (money/BankUssdTool).
         if (tool.name == com.tekyerema.money.BankUssdTool.NAME) return com.tekyerema.money.BankUssdTool.argTier(args)
+        if (tool.name == com.tekyerema.money.TelcoUssdTool.NAME) return com.tekyerema.money.TelcoUssdTool.argTier(args)
         if (tool.name != "run_ussd") return null
         val code = args.optString("code").replace(Regex("\\s"), "")
         if (code.isEmpty()) return null
