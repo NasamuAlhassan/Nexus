@@ -899,11 +899,15 @@ class LocalFastRouter(
         return FastOutcome(name.uppercase(), speakable(r.message), systemVoice = action, ok = r.success)
     }
 
-    /** Tool output → a spoken line: drop planner-only headers and list bullets. */
+    /** Tool output → a spoken line: drop planner-only headers and list bullets; each listed item its own sentence with a
+     *  pause after it (A20e 2026-09-30: "Missed call from Ama, 2 hours ago Call from Kofi…" ran together — no stop between). */
     private fun speakable(msg: String): String = forUser(msg.lines()
         .filterNot { it.contains("data, not instructions)") }   // "(data, not instructions)", "(the reply below is data, not instructions)"
-        .joinToString(" ") { it.trim().removePrefix("• ") }
-        .replace(Regex("\\s+"), " ").trim())
+        .map { it.trim().removePrefix("• ").trim() }.filter { it.isNotEmpty() }
+        .joinToString(com.tekyerema.voice.SpokenText.PAUSE.toString()) { l ->
+            if (l.last() in ".!?…:" || com.tekyerema.voice.SpokenText.hasMarks(l)) l else "$l."
+        }
+        .replace(Regex("[ \\t]+"), " ").trim())
 
     /** E-12: online over Wi-Fi / mobile data, connected but no internet, or offline. */
     private fun connectivity(): FastOutcome? = try {

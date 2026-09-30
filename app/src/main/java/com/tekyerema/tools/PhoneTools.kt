@@ -521,8 +521,12 @@ object SendSmsTool : Tool {
             contact != null && number != null -> "$contact on $number"   // the number is what will actually be texted
             else -> contact ?: number ?: "this number"
         }
-        return if (viaWhatsApp(args)) "WhatsApp $who: \"${args.str("message").orEmpty()}\"?"
-        else "Text $who: \"${args.str("message").orEmpty()}\"?"
+        // Three beats, not one breath (owner, A20e 2026-09-30: "it doesn't read like a human being"): who and which number,
+        // a pause, the words exactly as they'll be sent, a pause, the question. The screen shows the same lines.
+        val msg = args.str("message").orEmpty().trim()
+        val words = if (msg.isNotEmpty() && msg.last() in ".!?…") msg else "$msg."
+        val p = com.tekyerema.voice.SpokenText.PAUSE
+        return (if (viaWhatsApp(args)) "WhatsApp $who." else "Text $who.") + p + "The message: \"$words\"" + p + "Send it?"
     }
 }
 

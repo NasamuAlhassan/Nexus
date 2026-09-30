@@ -200,8 +200,12 @@ class AppTasksTest {
         assertEquals("0 2 4, 4 1 2, 3 4 5 6", t.recipientWords(null, "0244123456"))
         assertEquals("0 2 4, 4 1 2, 3 4 5 6", t.recipientWords("0244123456", "0244123456"))
         val a = JSONObject().put("contact", "Ama").put("message", "On my way").put("_to", "Ama Mensah on 024 412 3456")
-        assertEquals("Text Ama Mensah on 024 412 3456: \"On my way\"?", t.confirmationPrompt(a))
-        assertEquals("WhatsApp Ama Mensah on 024 412 3456: \"On my way\"?", t.confirmationPrompt(a.put("via", "whatsapp")))
+        // Three beats with pauses (2026-09-30): who + number, the exact words, the question.
+        val plain = { s: String -> com.tekyerema.voice.SpokenText.plain(s) }
+        assertEquals("Text Ama Mensah on 024 412 3456. The message: \"On my way.\" Send it?", plain(t.confirmationPrompt(a)))
+        assertEquals("WhatsApp Ama Mensah on 024 412 3456. The message: \"On my way.\" Send it?",
+            plain(t.confirmationPrompt(a.put("via", "whatsapp"))))
+        assertEquals(2, t.confirmationPrompt(a).count { it == com.tekyerema.voice.SpokenText.PAUSE })
         assertEquals(PolicyOutcome.CONFIRM, PolicyEngine().evaluate(t, a).outcome)
     }
 
