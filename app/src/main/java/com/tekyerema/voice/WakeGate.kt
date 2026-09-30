@@ -36,7 +36,7 @@ class WakeGate(private val bar: Float = bar()) {
         recentRms = maxOf(rms, recentRms * RMS_DECAY)
         if (scores.isEmpty()) return false                 // scorer gated the window (too quiet / not full)
         val score = scores[WakeScorer.FIRE_HEAD] ?: 0f
-        val hit = score >= bar && recentRms >= MIN_RMS
+        val hit = score >= bar && recentRms >= minRms
         if (refractory > 0) { refractory--; above = 0; runPeak = 0f; return false }
         if (!hit) { above = 0; runPeak = 0f; return false }
         runPeak = maxOf(runPeak, score)
@@ -47,8 +47,13 @@ class WakeGate(private val bar: Float = bar()) {
     }
 
     companion object {
-        /** PCM float [-1, 1]; quiet-room noise on the A20e sat well below this. */
-        const val MIN_RMS = 0.005f
+        /** PCM float [-1, 1]; quiet-room noise on the A20e sat well below this. Far-field retrain (2026-09-30): the
+         *  decaying loudness had dropped below the old 0.005 by the third hit on quiet 'Hey Tɛkyerɛma's — 0.0035 wakes
+         *  8/8 quiet clips with no added false wakes on the 3.37 h eval; `wake.minRms` tunes it without a rebuild. */
+        const val MIN_RMS = 0.0035f
+        val minRms: Float get() = try {
+            com.tekyerema.core.config.AppConfig.double("wake.minRms", MIN_RMS.toDouble()).toFloat().coerceIn(0.001f, 0.05f)
+        } catch (_: Throwable) { MIN_RMS }
         const val RMS_DECAY = 0.93f
         const val TRIGGER_FRAMES = 3
         const val REFRACTORY_FRAMES = 25

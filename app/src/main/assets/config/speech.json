@@ -1,52 +1,66 @@
 {
-  "schema_version": 1,
-  "speech": {
-    "voiceLayer": {
-      "profile": "gh_mixed",
-      "_note": "gh_mixed (owner's choice 2026-09-29, the default) = English: Android SpeechRecognizer + system TTS; Twi: UG HCI Lab ASR (on-device Twi Whisper fallback) + HCI Lab TTS — one recognizer per listen, chosen by the language setting ('speak Twi' / 'speak English'). builtin_en = Android SpeechRecognizer + system TTS, English only (SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
-      "systemSpeech": {
-        "languageTag": "en-GH",
-        "fallbackTag": "en-US",
-        "preferOffline": "whenOffline",
-        "maxResults": 3,
-        "yesNoMaxResults": 5,
-        "partials": true,
-        "component": "",
-        "ownCue": "beforeStart",
-        "cueGuardMs": 250,
-        "retryOnBusyOrClient": 1,
-        "silenceExtras": true,
-        "completeSilenceMs": 2500,
-        "possiblyCompleteSilenceMs": 2000,
-        "freshPerListen": true,
-        "patientRelistens": 1,
-        "nbestRerank": true,
-        "_note": "component: a flattened ComponentName to pin one recognizer (only if the A20e test shows the default misbehaves). ownCue: beforeStart = our tone then the recognizer; none = the recognizer's own tone only. silenceExtras: SPEECH_INPUT_* hints (2.5 s / 2 s since 2026-09-29, after 'it stops listening early') — many stock recognizers ignore them, so patience is also built by re-listening. freshPerListen: a new SpeechRecognizer per listen so a stopped session's late callbacks can't reach the next one."
-      }
-    },
-    "bargeIn": {
-      "enabled": false,
-      "minChars": 60,
-      "duplex": true,
-      "matchVolume": true,
-      "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself (the reply played on the media stream, which the platform AEC does not take as its echo reference). With duplex on, a barge-in reply plays on the voice-communication path (MODE_IN_COMMUNICATION + loudspeaker, call volume matched to the media volume) so the AEC can cancel it; never during a call or with a headset. Turn enabled on per device after checking; SelfEcho still guards against it."
-    },
-    "reading": {
-      "partSeconds": 20,
-      "charsPerSecond": 15,
-      "_note": "A screen reading is spoken in parts of about partSeconds at the user's speech rate (was a fixed 480 characters, ~30 s), each ending 'There's more — say continue'; the mic re-opens after each part for 'continue' or 'stop'."
-    }
+ "schema_version": 1,
+ "speech": {
+  "voiceLayer": {
+   "profile": "gh_mixed",
+   "_note": "gh_mixed (owner's choice 2026-09-29, the default) = English: Android SpeechRecognizer + system TTS; Twi: UG HCI Lab ASR (on-device Twi Whisper fallback) + HCI Lab TTS — one recognizer per listen, chosen by the language setting ('speak Twi' / 'speak English'). builtin_en = Android SpeechRecognizer + system TTS, English only (SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
+   "systemSpeech": {
+    "languageTag": "en-GH",
+    "fallbackTag": "en-US",
+    "preferOffline": "whenOffline",
+    "maxResults": 3,
+    "yesNoMaxResults": 5,
+    "partials": true,
+    "component": "",
+    "ownCue": "beforeStart",
+    "cueGuardMs": 250,
+    "retryOnBusyOrClient": 1,
+    "silenceExtras": true,
+    "completeSilenceMs": 2500,
+    "possiblyCompleteSilenceMs": 2000,
+    "freshPerListen": true,
+    "patientRelistens": 1,
+    "nbestRerank": true,
+    "_note": "component: a flattened ComponentName to pin one recognizer (only if the A20e test shows the default misbehaves). ownCue: beforeStart = our tone then the recognizer; none = the recognizer's own tone only. silenceExtras: SPEECH_INPUT_* hints (2.5 s / 2 s since 2026-09-29, after 'it stops listening early') — many stock recognizers ignore them, so patience is also built by re-listening. freshPerListen: a new SpeechRecognizer per listen so a stopped session's late callbacks can't reach the next one."
+   }
   },
-  "ux": {
-    "fillers": {
-      "enabled": true,
-      "delayMs": 2500,
-      "maxChain": 1,
-      "gapMs": 3500,
-      "en": ["One moment please.", "Let me check that for you.", "Alright, let me take a look.", "Okay, I'm on it.",
-             "Just a moment please.", "Let me find that for you.", "Hold on a moment.", "Sure, working on that now."],
-      "twi": [],
-      "_note": "Spoken in the reply voice (the phone's engine). Twi is empty on purpose: the old Twi phrasings were never verified by a native speaker and the English engine reads Twi badly, so a Twi session plays the progress tone. Add verified phrases here."
-    }
+  "bargeIn": {
+   "enabled": false,
+   "minChars": 60,
+   "duplex": true,
+   "matchVolume": true,
+   "_note": "B-07 OFF by default: on the Galaxy A20e (2026-09-28) the echo canceller let the phone's own TTS through, so every long reply interrupted itself (the reply played on the media stream, which the platform AEC does not take as its echo reference). With duplex on, a barge-in reply plays on the voice-communication path (MODE_IN_COMMUNICATION + loudspeaker, call volume matched to the media volume) so the AEC can cancel it; never during a call or with a headset. Turn enabled on per device after checking; SelfEcho still guards against it."
+  },
+  "reading": {
+   "partSeconds": 20,
+   "charsPerSecond": 15,
+   "_note": "A screen reading is spoken in parts of about partSeconds at the user's speech rate (was a fixed 480 characters, ~30 s), each ending 'There's more — say continue'; the mic re-opens after each part for 'continue' or 'stop'."
   }
+ },
+ "ux": {
+  "fillers": {
+   "enabled": true,
+   "delayMs": 2500,
+   "maxChain": 1,
+   "gapMs": 3500,
+   "en": [
+    "One moment please.",
+    "Let me check that for you.",
+    "Alright, let me take a look.",
+    "Okay, I'm on it.",
+    "Just a moment please.",
+    "Let me find that for you.",
+    "Hold on a moment.",
+    "Sure, working on that now."
+   ],
+   "twi": [],
+   "_note": "Spoken in the reply voice (the phone's engine). Twi is empty on purpose: the old Twi phrasings were never verified by a native speaker and the English engine reads Twi badly, so a Twi session plays the progress tone. Add verified phrases here."
+  }
+ },
+ "wake": {
+  "_doc": "Far-field head 2026-09-30 (phase2/wakeword/ACCURACY_farfield_2026-09-30.md): 84% wake vs 68%, 0 false wakes in 3.37 h; owner far/reverb 23/24 vs 9/24. bar tuned for THAT head; marginalBelow keeps ~22% of its real wakes out of the 'marginal' bucket.",
+  "bar": 0.8,
+  "marginalBelow": 0.96,
+  "minRms": 0.0035
+ }
 }
