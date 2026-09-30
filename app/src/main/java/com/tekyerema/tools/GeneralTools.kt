@@ -79,5 +79,14 @@ object RunUssdTool : Tool {
         else ToolResult(false, "USSD $code did not return a response (network refused, timed out, or SIM/carrier not supported).")
     }
 
+    /** The network's reply IS the outcome — a one-shot code changes nothing on screen, and the screen-based verifier
+     *  called a successful check "no_effect", so the router escalated and the cloud re-did it through the dialer
+     *  (A20e 2026-09-30). */
+    override val verifiesOutcome = true
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: com.tekyerema.accessibility.UiSnapshot?,
+                                after: com.tekyerema.accessibility.UiSnapshot?, result: ToolResult): com.tekyerema.verifier.VerificationResult =
+        com.tekyerema.verifier.VerificationResult(result.success,
+            if (result.success) "the network replied" else "the network didn't reply")
+
     override fun confirmationPrompt(args: JSONObject) = "Run USSD code ${args.str("code")}?"
 }
