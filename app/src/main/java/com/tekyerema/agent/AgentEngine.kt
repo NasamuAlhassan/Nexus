@@ -344,7 +344,10 @@ object AgentEngine {
     /** J-02: numbers each confirmation (see [confirm]); never reused within the process. */
     @Volatile private var confirmSeq = 0L
 
-    val isBusy: Boolean get() = currentJob?.isActive == true
+    /** Busy until the job has fully UNWOUND: isActive drops the moment cancel() is called, while the old run is
+     *  still in a slow step — a new goal accepted then had its status overwritten by the old run's STOPPED
+     *  (audit 2026-09-30, half 1 #5). */
+    val isBusy: Boolean get() = currentJob?.isCompleted == false
 
     /** C-12: hold the task at its next step (a confirmation or secure step already waiting is unaffected). */
     fun pause() { if (isBusy) { paused.value = true; log(LogEntry.Kind.INFO, "Paused by user.") } }
@@ -548,6 +551,7 @@ object AgentEngine {
             undoBefore = if (forcedBrain == null) try { com.tekyerema.audit.DeviceState.capture(ctxApp) } catch (_: Throwable) { null } else null,
             trajectory = if (forcedBrain == null && com.tekyerema.core.telemetry.Trajectories.enabled(ctxApp))
                 com.tekyerema.core.telemetry.TrajectoryRecorder(goal) else null)
+        runCtx.seq = _state.value.runSeq
         activeRun = runCtx
         com.tekyerema.agent.helper.HelperGate.runStarted()   // Trust (2026-09-29): this run hasn't reached a PIN (yet)
         // WS-A task journal: an attended GUI task is recorded (begin) or picked up again (resume) — so a pause for the cloud
@@ -887,7 +891,12 @@ object AgentEngine {
                         }
                         val planOpen = (planGate as? com.tekyerema.agent.plan.PlanTracker.Gate.Unverified)?.open
                         // B: if a smaller backup model did part of the task, the spoken result says so (once).
-                        val spokenSummary = decision.summary + route.disclosure()
+                        // A question must END with its "?" — the voice layer reopens the mic on it, so the disclosure
+                        // goes in FRONT of a question, never after (audit 2026-09-30, half 1 #2: "Which Kofi do you
+                        // mean? (…)" was never listened for).
+                        val disclosure = route.disclosure()
+                        val spokenSummary = if (decision.summary.trim().endsWith("?") && disclosure.isNotBlank())
+                            disclosure.trim() + " " + decision.summary else decision.summary + disclosure
                         // G-21: a PARTIAL step (scrolled or tapped on to new content without meeting its claim yet) is
                         // navigation, not a failed state change — it doesn't dilute the ratio. It never counts as verified
                         // either: if it was the LAST state-changing step, lastMutatingVerified is false and the gate holds.
@@ -1772,7 +1781,8 @@ object AgentEngine {
             runCtx.journal?.finish(com.tekyerema.agent.journal.TaskState.CANCELLED)   // WS-A: stopped by the user — not resumable
             if (activeRun === runCtx) { activeRun = null; com.tekyerema.core.telemetry.Telemetry.endTurn("stopped", byVoice = false) }
             com.tekyerema.audit.AuditHooks.taskEnded(runCtx.source, runCtx.auditTask, AgentStatus.STOPPED.name)   // WS-C
-            setStatus(AgentStatus.STOPPED)
+            // Only while this run still owns the status: a task submitted during the unwind must not be marked STOPPED.
+            if (_state.value.runSeq == runCtx.seq) setStatus(AgentStatus.STOPPED)
             throw ce
         } catch (t: Throwable) {
             log(LogEntry.Kind.ERROR, "Error: ${t.message}")
@@ -2039,6 +2049,8 @@ object AgentEngine {
         val sends = SendReport.Tracker()
         /** [ClaimCheck]: how often a done-reply claimed something no step did. */
         var claimRefusals = 0
+        /** The state's runSeq when this run started — only the run that still owns the status may write it (audit half 1 #5). */
+        @Volatile var seq = 0L
     }
 
     @Volatile private var activeRun: RunCtx? = null

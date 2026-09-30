@@ -80,6 +80,11 @@ object MoMoSendTool : Tool {
         // back for a yes; the refusal ends the task (RoutingBrain.moneyEnd → money/MoneyPlan.limitEnd).
         com.tekyerema.money.MoneyLimits.preflight(args.str("amount"))?.let { (line, final) -> return ToolResult(false, line, recoverable = !final) }
         numberProblem(args.str("number"))?.let { return ToolResult(false, it, recoverable = true) }
+        // What execute TYPES is what preflight CHECKED: "+233…" folds to the 0-form and "50 pesewas" / "GHS 5" to the
+        // plain figure — the raw words used to be typed into *170# and MTN's screen then never matched (audit half 2 #10).
+        args.put("number", com.tekyerema.agent.NumberSpeech.normalize(args.str("number")))
+        com.tekyerema.money.MoneyLimits.parseAmount(args.str("amount"))?.let { args.put("amount", it.toPlainString()) }
+            ?: return ToolResult(false, "I couldn't make out the amount \"${args.str("amount")}\" in cedis — ask the user to say it again.", recoverable = true)
         val op = operatorOf(ctx)
         val net = GhanaMobileMoney.network(op)
             ?: return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't drive Mobile Money automatically.", recoverable = true)
@@ -260,6 +265,10 @@ object MoMoSendTool : Tool {
 
     private suspend fun readUssd(ctrl: AccessibilityController): Ussd? {
         val snap = try { ctrl.buildSnapshot() } catch (t: Throwable) { return null }
+        // Only the phone app's own window is a USSD dialog. Without this, the app UNDERNEATH (in front before the
+        // dialog appears, or after a cancel) was read as the USSD screen — and the walk typed the number and amount
+        // into, say, a chat box and pressed its Send (audit 2026-09-30, half 2 #2).
+        if (!com.tekyerema.accessibility.TelephonyWindows.matches(snap.appPackage)) return null
         val labels = ArrayList<String>()
         snap.screenTitle?.takeIf { it.isNotBlank() }?.let { labels += it }
         var inputId: Int? = null

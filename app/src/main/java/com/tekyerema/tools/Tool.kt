@@ -99,6 +99,7 @@ interface Tool {
 
 /** Small helpers for reading JSON args defensively. */
 fun JSONObject.str(key: String): String? = if (has(key) && !isNull(key)) optString(key) else null
-fun JSONObject.intOrNull(key: String): Int? = if (has(key) && !isNull(key)) optInt(key) else null
+/** Null for a value that isn't a whole number — optInt turns "7am" into 0, and a 00:00 alarm was set (audit half 2 #13). */
+fun JSONObject.intOrNull(key: String): Int? = if (has(key) && !isNull(key)) optString(key).trim().toIntOrNull() else null
 fun JSONObject.optDoubleOrNull(key: String): Double? = if (has(key) && !isNull(key)) optDouble(key) else null
 fun JSONObject.boolOrDefault(key: String, default: Boolean): Boolean = if (has(key) && !isNull(key)) optBoolean(key, default) else default

@@ -84,6 +84,8 @@ class IntentMatcher private constructor(private val ctx: Context) {
     private val prefs = ctx.getSharedPreferences("tekyerema_intent_personal", Context.MODE_PRIVATE)
     private fun personal(text: String): String? = prefs.getString(key(text), null)
     fun learn(text: String, canonical: String) { prefs.edit().putString(key(text), canonical).apply() }
+    /** "Forget everything" forgets the learned wordings too — they are the user's own words. */
+    fun forgetPersonal() { prefs.edit().clear().apply() }
     private fun key(text: String) = text.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
 
     companion object {

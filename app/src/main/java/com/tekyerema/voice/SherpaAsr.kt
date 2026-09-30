@@ -91,14 +91,18 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
      * one (the old marker was "1", so a model swap would never have been extracted), and files the new model doesn't
      * use are deleted — the A20e has ~2 GB free. Idempotent.
      */
-    /** The bundled model when its model.json says `"fromAssets": true` (read straight from the APK), else null. */
+    /** The bundled model when its model.json says `"fromAssets": true` (read straight from the APK), else null.
+     *  Cached as Optional: `getOrPut(null)` on a ConcurrentHashMap THROWS, so a language with no bundled model
+     *  (Twi; any build without the gitignored eng assets) crashed at startup (audit 2026-09-30, half 1 #3). */
     private fun assetSpec(lang: String): ModelSpec? = assetSpecs.getOrPut(lang) {
-        try {
-            appContext.assets.open("models/ondevice/$lang/asr/${ModelSpec.FILE}").use { ModelSpec.parse(it.readBytes().decodeToString()) }
-                ?.takeIf { it.fromAssets && it.type != ModelSpec.WHISPER }
-        } catch (_: Throwable) { null }
-    }
-    private val assetSpecs = java.util.concurrent.ConcurrentHashMap<String, ModelSpec?>()
+        java.util.Optional.ofNullable(
+            try {
+                appContext.assets.open("models/ondevice/$lang/asr/${ModelSpec.FILE}").use { ModelSpec.parse(it.readBytes().decodeToString()) }
+                    ?.takeIf { it.fromAssets && it.type != ModelSpec.WHISPER }
+            } catch (_: Throwable) { null }
+        )
+    }.orElse(null)
+    private val assetSpecs = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<ModelSpec>>()
 
     private fun extractBundledIfPresent(lang: String) {
         if (assetSpec(lang) != null) {

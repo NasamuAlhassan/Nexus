@@ -35,8 +35,13 @@ object MessageIndex {
     @Synchronized
     private fun ensureLoaded() {
         if (loaded) return
+        val f = file() ?: return   // no context yet: NOT loaded — a later save must not overwrite the file with nothing
+        // A file that exists but can't be read (a Keystore hiccup) must not count as loaded either, or the next
+        // save would overwrite the 7-day index with an empty one (audit 2026-09-30, half 2; Relations already guards this).
+        val text = SecureStore.read(f)
+        if (text == null && f.exists()) return
         loaded = true
-        val text = file()?.let { SecureStore.read(it) } ?: return
+        if (text == null) return
         try {
             val arr = JSONArray(text)
             for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { o ->

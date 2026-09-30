@@ -172,9 +172,11 @@ object SearchMessagesTool : Tool {
             set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
         }
         val since = MessageQuery.sinceFor(whenPhrase, now, cal.timeInMillis)
-        val live = ctx.notifications.recent(50).map { MessageQuery.Hit(it.title, it.text, it.packageName, it.postTime) }
+        val live = ctx.notifications.recent(50).filterNot { it.ongoing || com.tekyerema.core.Redact.deniedPackage(it.packageName) }
+            .map { MessageQuery.Hit(it.title, it.text, it.packageName, it.postTime) }
         // H-09: older messages from the persistent index (dismissed notifications, earlier days, after a restart).
-        val older = com.tekyerema.notifications.MessageIndex.all().map { MessageQuery.Hit(it.sender ?: it.title, it.text, it.pkg, it.t) }
+        val older = com.tekyerema.notifications.MessageIndex.all().filterNot { com.tekyerema.core.Redact.deniedPackage(it.pkg) }
+            .map { MessageQuery.Hit(it.sender ?: it.title, it.text, it.pkg, it.t) }
         val recs = (live + older).distinctBy { Triple(it.pkg, it.sender, it.text) }.sortedByDescending { it.postTime }
         val hits = MessageQuery.filter(recs, sender, since, contains)
         if (hits.isEmpty()) {
@@ -234,7 +236,9 @@ object ReadNotificationsTool : Tool {
         if (!com.tekyerema.ui.Perms.notifications(ctx.appContext))
             return ToolResult(false, "Notification access is off — I can't read your notifications until you turn it on for Tɛkyerɛma in Settings.")
         val filter = args.str("filter")?.trim()
-        val all = ctx.notifications.recent(12)
+        // Ongoing notifications (a call in progress, "Checking for new messages…") are state, not messages; a
+        // "never touch" app's are not read either (audit half 2 #9).
+        val all = ctx.notifications.recent(12).filterNot { it.ongoing || com.tekyerema.core.Redact.deniedPackage(it.packageName) }
         val filtered = if (filter.isNullOrBlank()) all else all.filter {
             it.title?.contains(filter, true) == true ||
                 it.sender?.contains(filter, true) == true ||
@@ -272,11 +276,41 @@ object ReplyToNotificationTool : Tool {
         ToolParam("message", "string", "The reply text to send.")
     )
 
+    /** Audit 2026-09-30 (half 2 #1): the RECIPIENT is resolved here, once, before the read-back — never after the yes.
+     *  Ambiguous words ("Ama" matching two chats; a bare app name with several chats) ask which; the resolved chat
+     *  (its app, and the group's name when it is one) rides in the args so the confirmation says where it will go. */
+    override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        if (args.str("message").isNullOrBlank()) return ToolResult(false, "No reply message provided.")
+        val sender = args.str("sender")
+        val hits = ctx.notifications.replyables(sender)
+        val rec = when {
+            hits.isEmpty() -> return ToolResult(false, "No replyable notification found${sender?.let { " from '$it'" } ?: ""}.", recoverable = true)
+            hits.size > 1 -> return ToolResult(false, "I see ${hits.size} conversations matching '${sender ?: ""}': " +
+                hits.take(4).joinToString("; ") { it.spokenSource } + ". Ask the user which one to reply to.", recoverable = true)
+            else -> hits[0]
+        }
+        args.put(ARG_KEY, rec.key).put(ARG_APP, rec.appLabel ?: "").put(ARG_WHO, rec.sender ?: rec.title ?: "")
+        // A chat title that isn't the sender is the conversation's name (usually a group): everyone in it hears the reply.
+        val group = rec.title?.takeIf { t -> t.isNotBlank() && rec.sender?.equals(t, true) == false }
+        if (group != null) args.put(ARG_GROUP, group) else args.remove(ARG_GROUP)
+        return null
+    }
+
+    const val ARG_KEY = "_key"
+    const val ARG_APP = "_app"
+    const val ARG_WHO = "_who"
+    const val ARG_GROUP = "_group"
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val sender = args.str("sender")
         val message = args.str("message").orEmpty()
         if (message.isBlank()) return ToolResult(false, "No reply message provided.")
-        val rec = ctx.notifications.findReplyable(sender)
+        // The conversation the USER approved (preflight resolved it into the read-back) — gone means stop, never
+        // "the newest one instead" (audit 2026-09-30, half 2 #1).
+        val rec = args.str(ARG_KEY)?.let { key ->
+            ctx.notifications.get(key)
+                ?: return ToolResult(false, "That conversation's notification is gone, so I can't reply through it. Nothing was sent.", recoverable = false)
+        } ?: ctx.notifications.findReplyable(sender)
             ?: return ToolResult(false, "No replyable notification found${sender?.let { " from '$it'" } ?: ""}.")
         val action = rec.replyAction ?: return ToolResult(false, "That notification has no reply action.")
         val remoteInputs = action.remoteInputs ?: return ToolResult(false, "No reply input available.")
@@ -339,8 +373,13 @@ object ReplyToNotificationTool : Tool {
     }
 
     override fun confirmationPrompt(args: JSONObject): String {
-        val sender = args.str("sender") ?: "sender"
         val message = args.str("message") ?: ""
-        return "Reply to $sender: \"$message\"?"
+        // The read-back names the RESOLVED chat — the group and its app when it is one — not the model's words
+        // (audit 2026-09-30, half 2 #1: "Reply to Ama" never said the whole group would hear it).
+        val who = args.str(ARG_WHO)?.takeIf { it.isNotBlank() } ?: args.str("sender") ?: "sender"
+        val app = args.str(ARG_APP)?.takeIf { it.isNotBlank() }?.let { " on $it" } ?: ""
+        val group = args.str(ARG_GROUP)?.takeIf { it.isNotBlank() }
+        return if (group != null) "Reply in the group \"$group\"$app — everyone in it will see it — saying: \"$message\"?"
+        else "Reply to $who$app: \"$message\"?"
     }
 }

@@ -226,7 +226,22 @@ object SendSmsTool : Tool {
     private fun recipient(args: JSONObject, ctx: ToolContext): Recipient {
         val contact = args.str("contact")?.trim()?.takeIf { it.isNotEmpty() }
         val number = args.str("number")?.filter { it.isDigit() || it == '+' }
-        if (!number.isNullOrBlank() && number.count { it.isDigit() } >= 3) return Recipient.Ok(number, contact)
+        if (!number.isNullOrBlank() && number.count { it.isDigit() } >= 3) {
+            // A name next to a supplied number is CHECKED against the phone book before the read-back says "Ama on
+            // 0 2 4…" — a number the model (or an injected message) slipped in must not borrow a trusted name
+            // (audit 2026-09-30, half 2 #6). Unknown number: the name is dropped, so the "you didn't say this
+            // number" notice fires and the digits alone are read back.
+            val saved = if (contact != null && ctx.appContext.granted(Manifest.permission.READ_CONTACTS))
+                try { com.tekyerema.android.ContactResolver.lookupByNumber(ctx.appContext, number).firstOrNull()?.name } catch (_: Throwable) { null }
+            else null
+            val name = when {
+                saved == null -> null
+                contact == null -> saved
+                saved.contains(contact, true) || contact.contains(saved, true) -> saved
+                else -> null   // the number is saved under someone ELSE — never read the asked-for name over it
+            }
+            return Recipient.Ok(number, name)
+        }
         if (contact == null)
             return Recipient.Problem(ToolResult(false, "Who should I text? I need a contact name or a phone number."))
         if (!ctx.appContext.granted(Manifest.permission.READ_CONTACTS))
@@ -308,6 +323,7 @@ object SendSmsTool : Tool {
         val handler = try { intent.resolveActivity(ctx.appContext.packageManager)?.packageName } catch (_: Throwable) { null }
         // D8: an SMS app the user said "never touch" isn't opened either (the emergency help text is exempt).
         launchRefusal(handler, "Messages", ctx.emergency)?.let { return ToolResult(false, it, recoverable = false) }
+        val preLaunch = try { ctx.controller?.buildSnapshot() } catch (_: Throwable) { null }
         try {
             ctx.appContext.startActivity(intent)
         } catch (e: ActivityNotFoundException) {
@@ -319,7 +335,7 @@ object SendSmsTool : Tool {
             data = JSONObject().put("sent", false), channel = "intent")
         val ctrl = ctx.controller
         if (ctrl == null || !AppConfig.bool("os.sms.pressSend", true) || driveRefusal(handler, ctx.emergency) != null) return drafted
-        return pressSendInComposer(ctrl, setOfNotNull(handler?.takeIf { it != "android" }), message, who, appName = "Messages") ?: drafted
+        return pressSendInComposer(ctrl, setOfNotNull(handler?.takeIf { it != "android" }), message, who, appName = "Messages", preLaunch = preLaunch) ?: drafted
     }
 
     /**
@@ -330,6 +346,7 @@ object SendSmsTool : Tool {
         val pkg = WHATSAPP_PKGS.firstOrNull { isInstalled(ctx.appContext, it) }
             ?: return ToolResult(false, "WhatsApp isn't installed on this phone.", recoverable = false)
         launchRefusal(pkg, "WhatsApp", ctx.emergency)?.let { return ToolResult(false, it, recoverable = false) }   // D8
+        val preLaunch = try { ctx.controller?.buildSnapshot() } catch (_: Throwable) { null }
         val url ="https://api.whatsapp.com/send?phone=${IntentTemplates.ghanaIntl(number)}&text=" + Uri.encode(message)
         try {
             ctx.appContext.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -340,7 +357,7 @@ object SendSmsTool : Tool {
             data = JSONObject().put("sent", false), channel = "intent")
         val ctrl = ctx.controller ?: return drafted
         if (driveRefusal(pkg, ctx.emergency) != null) return drafted
-        return pressSendInComposer(ctrl, setOf(pkg), message, who, appName = "WhatsApp") ?: drafted
+        return pressSendInComposer(ctrl, setOf(pkg), message, who, appName = "WhatsApp", preLaunch = preLaunch) ?: drafted
     }
 
     /**
@@ -349,12 +366,18 @@ object SendSmsTool : Tool {
      * (the caller then reports the honest "opened, not sent yet").
      */
     private suspend fun pressSendInComposer(
-        ctrl: com.tekyerema.accessibility.AccessibilityController, pkgs: Set<String>, message: String, who: String, appName: String
+        ctrl: com.tekyerema.accessibility.AccessibilityController, pkgs: Set<String>, message: String, who: String, appName: String,
+        preLaunch: com.tekyerema.accessibility.UiSnapshot? = null
     ): ToolResult? {
+        // The chat ALREADY in front can hold these very words (a draft left by "not sent yet", then "send it to Kofi
+        // instead"): pressing ITS Send would message the old person (audit 2026-09-30, half 2 #3). When the pre-launch
+        // screen already matched, only a screen that has CHANGED since the launch counts.
+        val staleSig = preLaunch?.takeIf { ComposerSend.composerWith(it, message) != null }?.signature()
         // 20 s, an upper bound: WhatsApp looks a number up on its server before opening the chat — on the campus Wi-Fi
         // (A20e 2026-09-29) the draft appeared after ~13 s, the old 8 s gave up, and the planner had to press Send.
         val opened = awaitScreen(ctrl, AppConfig.long("os.sms.composerWaitMs", 20_000L)) { s ->
-            (pkgs.isEmpty() || s.appPackage in pkgs) &&
+            (staleSig == null || s.signature() != staleSig) &&
+                (pkgs.isEmpty() || s.appPackage in pkgs) &&
                 (ComposerSend.composerWith(s, message) != null || ComposerSend.notOnWhatsApp(s) || ComposerSend.cantConnect(s))
         }
         if (opened == null) {

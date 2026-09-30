@@ -50,11 +50,19 @@ class LocalFastRouter(
         // The answer to "Did you mean …?" (the meaning matcher, below): yes runs it and remembers the wording, no drops it.
         // Anything else drops it too and is handled as said — so a stale suggestion never catches a later "yes".
         IntentMatcher.takePending()?.let { (said, canonical) ->
-            when (com.tekyerema.voice.Confirmation.interpret(text)) {
+            // Only a SHORT reply is an answer ("yes", "no", "yes please"): "okay, call my mother" carries a yes-word but
+            // is a NEW request, and must not run the suggestion (audit 2026-09-30, half 1 #1 — the typed path already
+            // guards this). Longer words fall through, handled as said; the suggestion is already dropped.
+            val short = text.trim().split(Regex("\\s+")).count { it.isNotBlank() } <= 3
+            if (short) when (com.tekyerema.voice.Confirmation.interpret(text)) {
                 com.tekyerema.voice.Confirmation.Answer.YES -> {
-                    IntentMatcher.get(appContext)?.learn(said, canonical)
-                    Log.i(TAG, "[MEANING] yes → '$canonical' (wording learned)")
-                    return runMeant(text, canonical)
+                    val out = runMeant(text, canonical)
+                    // Learned only when it ran (or went to the agent as the command) — never a wording that failed.
+                    if (out == null || out.ok) {
+                        IntentMatcher.get(appContext)?.learn(said, canonical)
+                        Log.i(TAG, "[MEANING] yes → '$canonical' (wording learned)")
+                    }
+                    return out   // null: the agent runs the command (agentGoal)
                 }
                 com.tekyerema.voice.Confirmation.Answer.NO ->
                     return FastOutcome("MEANING_NO", "Okay. Say it another way.", systemVoice = true, listenAfter = true)
@@ -144,6 +152,11 @@ class LocalFastRouter(
         if (language == Lang.TWI || !cfg.bool("intent.matcher.enabled", true)) return null
         // Online the cloud planner understands far more; the matcher is the offline brain's ears.
         if (com.tekyerema.core.NetworkMonitor.isOnline() && !cfg.bool("intent.matcher.online", false)) return null
+        // Words about the SCREEN ("tap on WhatsApp") are the LocalBrain's with the real screen in front of it — the
+        // dry-run below sees an empty screen and would defer them here (audit 2026-09-30, half 1 #4). And words that
+        // need the internet keep their honest offline answer (and the "tell me when it's back" offer), never a guess.
+        if (RE_SCREEN_VERB.containsMatchIn(text.lowercase())) return null
+        if (OfflineCapability.needsInternet(text)) return null
         if (localBrainKnows(text)) return null
         val t0 = SystemClock.uptimeMillis()
         val m = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -170,6 +183,8 @@ class LocalFastRouter(
         val intent = FastIntentClassifier.classify(canonical) ?: return null
         return run(intent)?.also { handOff = null }
     }
+
+    private val RE_SCREEN_VERB = Regex("^\\s*(?:tap|click|press|select|choose|hit|scroll|swipe)\\b")
 
     /** True when the offline LocalBrain runs [text] as it is (a tool call or an answer) — then the words are left to it. */
     private suspend fun localBrainKnows(text: String): Boolean = try {
@@ -440,6 +455,7 @@ class LocalFastRouter(
                 ScreenReadCursor.clear()
                 com.tekyerema.android.Relations.clear()   // who "my mother" is: personal, like the conversation
                 com.tekyerema.agent.habits.Habits.forgetHistory(appContext)   // when everyday requests come (agent/habits)
+                IntentMatcher.get(appContext)?.forgetPersonal()   // learned wordings are the user's words too (audit half 1 #1)
                 "Okay, I've forgotten our conversations, the messages I was keeping and who your family are. " +
                     "Your settings, schedules, routines and emergency contact stay — change them in Settings."
             }
@@ -660,7 +676,7 @@ class LocalFastRouter(
         } else {
             com.tekyerema.notifications.MessageCursor.clear()
             // Private reading (2026-09-29): on the loudspeaker, who and how many — "read them" reads the words (PrivateReading).
-            com.tekyerema.notifications.PrivateReading.digest(appContext, digest.build(shown, calls, label, noun = noun), brief, shown)
+            com.tekyerema.notifications.PrivateReading.digest(appContext, digest.build(shown, calls, label, noun = noun), brief, shown).spoken
         }
         if (intent.messagesOnly && shown.isEmpty() && msgs.isNotEmpty())
             line += " There are ${msgs.size} other notifications — say \"what did I miss\" to hear them."
@@ -704,7 +720,7 @@ class LocalFastRouter(
                 com.tekyerema.tools.CallLogFormat.ago(m.t, System.currentTimeMillis()) + "."
             // Who and when, a breath, then the words as they'd be said (SpokenText) — not one run-on line.
             com.tekyerema.notifications.PrivateReading.digest(appContext,
-                head + com.tekyerema.voice.SpokenText.PAUSE + com.tekyerema.voice.SpokenText.forEar(m.text!!), head, listOf(m))
+                head + com.tekyerema.voice.SpokenText.PAUSE + com.tekyerema.voice.SpokenText.forEar(m.text!!), head, listOf(m)).spoken
         } else {
             val hours = com.tekyerema.core.config.AppConfig.long("notifications.digest.windowHours", 12L).coerceIn(1L, 72L)
             val recent = msgs.filter { it.t > System.currentTimeMillis() - hours * 3_600_000L }.ifEmpty { msgs.take(1) }
@@ -725,23 +741,26 @@ class LocalFastRouter(
      *  rest for "continue" (MessageCursor). */
     private fun readPage(page: com.tekyerema.notifications.MessageReading.Page, brief: String,
                          shown: List<com.tekyerema.notifications.IndexedMessage>): String {
-        val out = com.tekyerema.notifications.PrivateReading.digest(appContext, page.text, brief, shown)
-        if (out == page.text || out.startsWith(page.text.take(20))) com.tekyerema.notifications.MessageCursor.set(page.rest)
-        else com.tekyerema.notifications.MessageCursor.clear()             // held: "read them" sets it (PrivateReading.take)
-        return out
+        val d = com.tekyerema.notifications.PrivateReading.digest(appContext, page.text, brief, shown)
+        // Held for "read them": "continue" must NOT read the held messages aloud (audit 2026-09-30, half 2 #5) —
+        // PrivateReading.take sets the cursor when the user says "read them".
+        if (d.held) com.tekyerema.notifications.MessageCursor.clear() else com.tekyerema.notifications.MessageCursor.set(page.rest)
+        return d.spoken
     }
 
     private fun countOf(n: Int, noun: String) = "$n $noun${if (n == 1) "" else "s"}"
 
     /** The persistent index (H-09, survives dismissal and restarts); the live ring only when the index is switched off. */
     private fun capturedMessages(): List<com.tekyerema.notifications.IndexedMessage> {
-        val live = com.tekyerema.notifications.NotificationStore.recent(50).map {
+        // An ongoing notification (a call in progress, "Checking for new messages…") is not a message (audit half 2 #14).
+        val live = com.tekyerema.notifications.NotificationStore.recent(50).filterNot { it.ongoing }.map {
             com.tekyerema.notifications.IndexedMessage(it.postTime, it.packageName, it.appLabel, it.sender, it.title, it.text)
         }
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("H-09", true)) return live
         // The index AND what is in the shade now, one row per (app, conversation, text): a message in the shade is never
         // "not seen" because the index missed its post (A20e 2026-09-30, after an app update).
         return (com.tekyerema.notifications.MessageIndex.all() + live)
+            .filterNot { com.tekyerema.core.Redact.deniedPackage(it.pkg) }   // "never touch" holds for rows captured before the rule (audit half 2 #9)
             .distinctBy { Triple(it.pkg, it.title, it.text) }.sortedByDescending { it.t }
     }
 

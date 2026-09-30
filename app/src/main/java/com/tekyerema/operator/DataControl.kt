@@ -67,7 +67,13 @@ object DataControl {
         step("references") { com.tekyerema.agent.References.clear() }
         step("screen memory") { com.tekyerema.agent.ScreenMemory.clear(); com.tekyerema.agent.ScreenReadCursor.clear() }
         step("answers") { com.tekyerema.agent.AnswerCache.shared.clear(); com.tekyerema.agent.OfflineQueue.store.clear() }
-        step("messages") { com.tekyerema.notifications.MessageIndex.clear() }
+        step("messages") {
+            com.tekyerema.notifications.MessageIndex.clear()
+            // The reading in flight too — "continue" / "read them" must find nothing after "delete everything".
+            com.tekyerema.notifications.MessageCursor.clear()
+            com.tekyerema.notifications.PrivateReading.clear()
+        }
+        step("learned wordings") { com.tekyerema.agent.IntentMatcher.get(app)?.forgetPersonal() }
         step("relations") { com.tekyerema.android.Relations.ensureLoaded(app); com.tekyerema.android.Relations.clear() }
         step("routines") {
             com.tekyerema.agent.Routines.ensureLoaded(app)

@@ -360,8 +360,10 @@ object CreateContactTool : Tool {
 
     override fun confirmationPrompt(args: JSONObject): String {
         val name = cleanName(args.str("name")) ?: "this person"
-        val number = cleanNumber(args.str("number")) ?: args.str("number") ?: "this number"
-        return "Save $name as a contact with the number $number?"
+        val number = cleanNumber(args.str("number")) ?: args.str("number")
+        // Digit by digit, in groups — "0244123456" was read as one big figure, uncheckable by ear (audit half 2 #12).
+        val said = number?.takeIf { it.any(Char::isDigit) }?.let { com.tekyerema.agent.NumberSpeech.spoken(it.filter(Char::isDigit)) } ?: "this number"
+        return "Save $name as a contact with the number $said?"
     }
 }
 
@@ -705,6 +707,8 @@ object ShareTextTool : Tool {
                 false, "I couldn't find an app called '$appName'. I can open the share sheet instead."
             )
         }
+        // D8 (audit half 2 #9): an app the user said "never touch" isn't opened by a share either.
+        launchRefusal(target.packageName, target.label)?.let { return ToolResult(false, it, recoverable = false) }
         send.setPackage(target.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (send.resolveActivity(context.packageManager) == null)
             return ToolResult(false, "${target.label} can't receive shared text. I can open the share sheet instead.")
@@ -894,6 +898,9 @@ object OpenIntentTool : Tool {
         }
         val handler = intent.resolveActivity(pm)
             ?: return ToolResult(false, "No app on this phone can open that.")
+        // D8 (audit half 2 #9): a deep link into a "never touch" app is still opening it.
+        launchRefusal(handler.packageName, labelOf(pm, handler.packageName) ?: handler.packageName)
+            ?.let { return ToolResult(false, it, recoverable = false) }
         return try {
             ctx.appContext.startActivity(intent)
             if (com.tekyerema.BuildConfig.DEBUG) Log.d(ORG_TAG, "[INTENT] $key → ${handler.packageName}")   // no slot values

@@ -65,9 +65,19 @@ class TekyeremaNotificationListener : NotificationListenerService() {
             replyAction = replyAction,
             appLabel = labelOf(sbn.packageName),
             sender = clean(sender),
-            actions = n.actions?.toList().orEmpty()
+            actions = n.actions?.toList().orEmpty(),
+            ongoing = (n.flags and Notification.FLAG_ONGOING_EVENT) != 0
         )
         NotificationStore.put(rec)
+        // H-09 (audit 2026-09-30, half 2 #8): a burst Android folded into one update carries EVERY message in
+        // EXTRA_MESSAGES — index the earlier ones too (their own words, senders and times), not only the newest.
+        // The index dedupes on (app, conversation, text), so re-posts of the same words are one row.
+        if (!rec.ongoing) for ((who, what, at) in earlierMessages(extras)) {
+            val w = clean(what) ?: continue
+            try {
+                MessageIndex.add(rec.copy(sender = clean(who), text = w, postTime = if (at > 0) at else sbn.postTime))
+            } catch (_: Throwable) {}
+        }
         return rec
     }
 
@@ -78,17 +88,29 @@ class TekyeremaNotificationListener : NotificationListenerService() {
             .takeIf { it.isNotBlank() && it != pkg }?.also { labels[pkg] = it }
     } catch (_: Throwable) { null }
 
-    /** The newest (sender, text) of a MessagingStyle notification, or (null, null). */
+    private fun senderOf(m: android.os.Bundle): CharSequence? {
+        val person = if (android.os.Build.VERSION.SDK_INT >= 28)
+            (m.getParcelable<android.app.Person>("sender_person"))?.name else null
+        return person ?: m.getCharSequence("sender")
+    }
+
+    /**
+     * The newest OTHER person's (sender, text) of a MessagingStyle notification, or (null, null). A message with no
+     * sender is the USER'S OWN reply (Android's model) — it used to be captured with the title as the sender, so
+     * "read my last WhatsApp message" read the user's own words back as Ama's (audit 2026-09-30, half 2 #7).
+     */
     private fun latestMessage(extras: android.os.Bundle?): Pair<CharSequence?, CharSequence?> = try {
-        val msgs = extras?.getParcelableArray(Notification.EXTRA_MESSAGES)
-        val last = msgs?.lastOrNull() as? android.os.Bundle
-        if (last == null) null to null
-        else {
-            val person = if (android.os.Build.VERSION.SDK_INT >= 28)
-                (last.getParcelable<android.app.Person>("sender_person"))?.name else null
-            (person ?: last.getCharSequence("sender")) to last.getCharSequence("text")
-        }
+        val msgs = extras?.getParcelableArray(Notification.EXTRA_MESSAGES)?.filterIsInstance<android.os.Bundle>()
+        val last = msgs?.lastOrNull { !senderOf(it).isNullOrBlank() } ?: msgs?.lastOrNull()
+        if (last == null) null to null else senderOf(last) to last.getCharSequence("text")
     } catch (_: Throwable) { null to null }
+
+    /** Every message BEFORE the newest with its sender and time — the burst the shade folded into one update. */
+    private fun earlierMessages(extras: android.os.Bundle?): List<Triple<CharSequence?, CharSequence?, Long>> = try {
+        val msgs = extras?.getParcelableArray(Notification.EXTRA_MESSAGES)?.filterIsInstance<android.os.Bundle>().orEmpty()
+        msgs.dropLast(1).filter { !senderOf(it).isNullOrBlank() }
+            .map { Triple(senderOf(it), it.getCharSequence("text"), it.getLong("time", 0L)) }
+    } catch (_: Throwable) { emptyList() }
 
     override fun onListenerDisconnected() {
         instance = null

@@ -22,21 +22,37 @@ object NotificationActionTool : Tool {
         ToolParam("action", "string", "'dismiss', or the button's label, e.g. 'Mark as read'.")
     )
 
+    /** Audit 2026-09-30 (half 2 #1 sibling): the notification is resolved ONCE, here — the same record the read-back
+     *  names is the one acted on ("Call back" used to be able to ring a newer missed caller). Ambiguous → ask. */
     override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
         if (!com.tekyerema.ui.Perms.notifications(ctx.appContext))
             return ToolResult(false, "Notification access is off, so I can't act on notifications.", recoverable = false)
-        val rec = ctx.notifications.find(args.str("match"))
-            ?: return ToolResult(false, "I couldn't find a notification matching '${args.str("match")}'.")
+        val hits = ctx.notifications.findAll(args.str("match"))
+        val rec = when {
+            hits.isEmpty() -> return ToolResult(false, "I couldn't find a notification matching '${args.str("match")}'.")
+            hits.size > 1 -> return ToolResult(false, "I see ${hits.size} notifications matching '${args.str("match")}': " +
+                hits.take(4).joinToString("; ") { it.spokenSource } + ". Ask the user which one.", recoverable = true)
+            else -> hits[0]
+        }
         val want = args.str("action")?.trim().orEmpty()
         if (!want.equals("dismiss", true) && rec.actions.none { it.title?.toString()?.equals(want, true) == true })
             return ToolResult(false, "That notification has no '$want' button. It offers: " +
                 rec.actions.mapNotNull { it.title?.toString() }.joinToString(", ").ifEmpty { "no buttons" } + ".")
+        args.put(ARG_KEY, rec.key).put(ARG_SOURCE, rec.spokenSource)
         return null
     }
 
+    const val ARG_KEY = "_key"
+    const val ARG_SOURCE = "_source"
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
-        val rec = ctx.notifications.find(args.str("match"))
-            ?: return ToolResult(false, "I couldn't find that notification any more.")
+        // The record the user approved (by key) — gone means stop, never "the newest match instead".
+        val rec = args.str(ARG_KEY)?.let { ctx.notifications.get(it) } ?: run {
+            if (args.str(ARG_KEY) != null)
+                return ToolResult(false, "That notification is gone, so I didn't press anything.", recoverable = false)
+            ctx.notifications.find(args.str("match"))
+                ?: return ToolResult(false, "I couldn't find that notification any more.")
+        }
         val want = args.str("action")?.trim().orEmpty()
         if (want.equals("dismiss", true)) {
             val ok = TekyeremaNotificationListener.dismiss(rec.key)
@@ -57,5 +73,5 @@ object NotificationActionTool : Tool {
     }
 
     override fun confirmationPrompt(args: JSONObject): String =
-        "Press \"${args.str("action")}\" on the ${args.str("match")} notification?"
+        "Press \"${args.str("action")}\" on the ${args.str(ARG_SOURCE)?.takeIf { it.isNotBlank() } ?: args.str("match")} notification?"
 }

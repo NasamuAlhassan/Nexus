@@ -24,6 +24,9 @@ internal object UssdDialog {
     /** The USSD dialog on screen now, or null (none, the progress spinner, or not a phone window). */
     suspend fun read(ctrl: AccessibilityController): Screen? {
         val snap = try { ctrl.buildSnapshot() } catch (_: Throwable) { return null }
+        // Only the phone app's own window is the USSD dialog — the app underneath must never be read (or typed
+        // into) as if it were the bank's menu (audit 2026-09-30, half 2 #2).
+        if (!TelephonyWindows.matches(snap.appPackage)) return null
         val labels = ArrayList<String>()
         snap.screenTitle?.takeIf { it.isNotBlank() }?.let { labels += it }
         var inputId: Int? = null

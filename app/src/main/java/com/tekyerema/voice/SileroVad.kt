@@ -45,6 +45,7 @@ class SileroVad(
     private var onsetRun = 0
     private var silenceRun = 0
     private var frames = 0
+    private var framesAtOnset = 0
     private var totalSpeech = 0
 
     init {
@@ -73,7 +74,7 @@ class SileroVad(
 
     fun reset() {
         try { vad?.reset() } catch (_: Throwable) {}
-        speaking = false; onsetRun = 0; silenceRun = 0; frames = 0; totalSpeech = 0
+        speaking = false; onsetRun = 0; silenceRun = 0; frames = 0; totalSpeech = 0; framesAtOnset = 0
     }
 
     val capturedSpeechMs: Long get() = (totalSpeech * frameMs).toLong()
@@ -95,11 +96,13 @@ class SileroVad(
         if (!speaking) {
             return if (isSpeech) {
                 onsetRun++
-                if (onsetRun >= startFramesN) { speaking = true; silenceRun = 0; totalSpeech = onsetRun; EnergyVad.Event.SPEECH_START }
+                if (onsetRun >= startFramesN) { speaking = true; silenceRun = 0; totalSpeech = onsetRun; framesAtOnset = frames - onsetRun; EnergyVad.Event.SPEECH_START }
                 else EnergyVad.Event.SILENCE
             } else { onsetRun = 0; EnergyVad.Event.SILENCE }
         }
-        if (frames >= maxFrames) { finish(); return EnergyVad.Event.TIMEOUT }
+        // The utterance budget starts at speech ONSET — a slow starter (patient mode waits up to 15 s) used to have
+        // the waiting silence counted against their words (audit 2026-09-30, half 1 #7; EnergyVad already counts this way).
+        if (frames - framesAtOnset >= maxFrames) { finish(); return EnergyVad.Event.TIMEOUT }
         return if (isSpeech) {
             silenceRun = 0; totalSpeech++; EnergyVad.Event.SPEECH
         } else {

@@ -144,15 +144,20 @@ object PrivateReading {
     fun spoken(ctx: Context, text: String, explicitBalance: Boolean): String =
         if (!explicitBalance && enabled(ctx)) maskBalances(text) else text
 
-    /** The catch-up ("what did I miss"): [full] as built, or — private on the loudspeaker — [brief] (no message quoted)
-     *  with the messages held for "read them". */
-    fun digest(ctx: Context, full: String, brief: String, messages: List<IndexedMessage>): String {
-        if (!enabled(ctx)) return full
-        if (privateOutputConnected(ctx)) return maskBalances(full)
+    /** What the catch-up ("what did I miss") says, and whether the reading itself was HELD for "read them". */
+    data class Digest(val spoken: String, val held: Boolean)
+
+    /** The catch-up: [full] as built, or — private on the loudspeaker — [brief] (no message quoted) with the messages
+     *  held for "read them". [Digest.held] tells the caller NOT to arm "continue" (audit 2026-09-30, half 2 #5: the
+     *  words used to be compared instead, and "continue" read the held messages aloud past the privacy hold). */
+    fun digest(ctx: Context, full: String, brief: String, messages: List<IndexedMessage>): Digest {
+        if (!enabled(ctx)) return Digest(full, held = false)
+        if (privateOutputConnected(ctx)) return Digest(maskBalances(full), held = false)
         val page = MessageReading.page(null, messagesOf(messages))
-        if (page.text.isBlank()) return maskBalances(brief)
-        hold(maskBalances(page.text), rest = page.rest)
-        return "$brief Say “read them” to hear them."
+        if (page.text.isBlank()) return Digest(maskBalances(brief), held = false)
+        // The rest is masked too — "continue" after "read them" is still on the loudspeaker.
+        hold(maskBalances(page.text), rest = page.rest.map { it.copy(text = maskBalances(it.text)) })
+        return Digest("$brief Say “read them” to hear them.", held = true)
     }
 
     /** The request the agent is working on now (a balance question lets a balance be read), or null. */

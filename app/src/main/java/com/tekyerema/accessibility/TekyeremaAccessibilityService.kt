@@ -109,7 +109,6 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             android.util.Log.d("TkyWin", "type=${event.eventType} pkg=${event.packageName} cls=${event.className} ch=${event.contentChangeTypes} wch=${if (Build.VERSION.SDK_INT >= 28) event.windowChanges else -1}")
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
-            com.tekyerema.voice.SecureStep.onForeground(pkg)   // the phone's PIN dialog closed → the PIN step is over
             val cls = event.className?.toString()
             // An app can come to front with a window-state event whose class ISN'T one of its Activities: the Play
             // Store brought forward reported cls="gn" (obfuscated) on the A20e, the foreground stayed "launcher", the
@@ -117,6 +116,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             // (asked of the system's window list — never a binder into the app) counts too; overlays, the keyboard and
             // the shade are other window types and still can't flip it.
             if (pkg != null && cls != null && (isActivity(pkg, cls) || isAppWindow(event.windowId))) {
+                // The phone's PIN dialog closed → the PIN step is over. Decided only here, from a REAL app window: the
+                // keyboard, the shade and overlays also send window-state events, and the keyboard opening over the USSD
+                // box used to end Secure Input while the user was typing the PIN (audit 2026-09-30, half 2 #4).
+                com.tekyerema.voice.SecureStep.onForeground(pkg)
                 fgActivityPkg = pkg
                 refreshTriggerVisibility(pkg)
                 // A-11: a user-configured offer for this app (flag off by default; cheap no-op for the same package).
@@ -585,6 +588,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override suspend fun clickElement(id: Int): Boolean {
         val node = nodeMap[id] ?: return false
+        // A node whose window has gone must not be tapped by its OLD position — that lands on whatever replaced it
+        // (audit 2026-09-30, half 2: taps on stale bounds). refresh() false = the element no longer exists.
+        if (!(try { node.refresh() } catch (_: Throwable) { false })) return false
         val target = if (node.isClickable) node else ancestorWhere(node, 6) { it.isClickable } ?: node
         val clicked = try { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) } catch (t: Throwable) { false }
         if (clicked) return true

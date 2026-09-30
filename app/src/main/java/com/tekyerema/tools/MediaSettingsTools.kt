@@ -412,8 +412,20 @@ object OpenSettingTool : Tool {
         val ctrl = ctx.controller
             ?: return ToolResult(true, "Opened $label settings — screen control is off, so please use the switch there.",
                 data = JSONObject().put("confirmed", false), channel = "intent")
-        ctrl.waitForSettle(1500)
-        val before = ctrl.buildSnapshot()
+        // Wait for the SETTINGS screen itself, not merely a quiet moment: right after startActivity the event stream is
+        // often silent while the OLD app is still in front, and a "Wi-Fi"/"location" switch there could be tapped
+        // (audit 2026-09-30, half 2 #11).
+        var before = ctrl.buildSnapshot()
+        val deadline = android.os.SystemClock.uptimeMillis() + 5_000L
+        while (before.appPackage != settingsPkg && android.os.SystemClock.uptimeMillis() < deadline) {
+            kotlinx.coroutines.delay(300)
+            before = ctrl.buildSnapshot()
+        }
+        if (before.appPackage != settingsPkg)
+            return ToolResult(true, "Opened $label settings — the screen didn't come up in time, so please use the switch there.",
+                data = JSONObject().put("confirmed", false), channel = "intent", recoverable = true)
+        ctrl.waitForSettle(800)
+        before = ctrl.buildSnapshot()
         val toggle = findToggle(before, target)
         if (want == null) {
             val now = toggle?.checked?.let { if (it) " It's on." else " It's off." } ?: ""
