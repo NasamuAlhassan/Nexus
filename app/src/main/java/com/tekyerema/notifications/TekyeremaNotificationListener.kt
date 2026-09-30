@@ -20,7 +20,14 @@ class TekyeremaNotificationListener : NotificationListenerService() {
         super.onListenerConnected()
         instance = this
         try {
-            activeNotifications?.forEach { sbn -> put(sbn) }
+            activeNotifications?.forEach { sbn ->
+                val rec = put(sbn) ?: return@forEach
+                // H-09 too (A20e 2026-09-30: after an app update the WhatsApp messages in the shade were in the live store but
+                // not the index, so "read my last WhatsApp message" said there were none). The index keeps one row per
+                // conversation and text, so a re-post is not a duplicate. Triggers and alerts stay live-only.
+                if (sbn.notification?.flags?.and(Notification.FLAG_ONGOING_EVENT) == 0)
+                    try { MessageIndex.add(rec) } catch (_: Throwable) {}
+            }
         } catch (t: Throwable) { /* best-effort backfill; live onNotificationPosted still works */ }
     }
 

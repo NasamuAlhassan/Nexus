@@ -620,7 +620,9 @@ class LocalFastRouter(
             .filter { m -> from == null || listOfNotNull(m.sender, m.title).any { it.contains(from, ignoreCase = true) } }
             .sortedByDescending { it.t }.toList()
         val whose = from?.let { " from ${it.replaceFirstChar(Char::uppercaseChar)}" }.orEmpty()
-        if (msgs.isEmpty()) return handled(intent, "I haven't seen any ${intent.app} messages$whose.")
+        // Honest about what it can't see (A20e 2026-09-30: WhatsApp's own notifications were switched off, so nothing arrived).
+        if (msgs.isEmpty()) return handled(intent, "I haven't seen any ${intent.app} messages$whose. I hear them through " +
+            "${intent.app}'s notifications — if those are turned off for ${intent.app} in the phone's settings, I can't hear new ones.")
         val line = if (intent.latestOnly) {
             val m = msgs.first()
             val who = m.sender?.takeIf { it.isNotBlank() } ?: m.title?.takeIf { it.isNotBlank() } ?: "someone"
@@ -660,11 +662,16 @@ class LocalFastRouter(
     private fun countOf(n: Int, noun: String) = "$n $noun${if (n == 1) "" else "s"}"
 
     /** The persistent index (H-09, survives dismissal and restarts); the live ring only when the index is switched off. */
-    private fun capturedMessages(): List<com.tekyerema.notifications.IndexedMessage> =
-        if (com.tekyerema.core.config.FeatureFlags.isEnabled("H-09", true)) com.tekyerema.notifications.MessageIndex.all()
-        else com.tekyerema.notifications.NotificationStore.recent(50).map {
+    private fun capturedMessages(): List<com.tekyerema.notifications.IndexedMessage> {
+        val live = com.tekyerema.notifications.NotificationStore.recent(50).map {
             com.tekyerema.notifications.IndexedMessage(it.postTime, it.packageName, it.appLabel, it.sender, it.title, it.text)
         }
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled("H-09", true)) return live
+        // The index AND what is in the shade now, one row per (app, conversation, text): a message in the shade is never
+        // "not seen" because the index missed its post (A20e 2026-09-30, after an app update).
+        return (com.tekyerema.notifications.MessageIndex.all() + live)
+            .distinctBy { Triple(it.pkg, it.title, it.text) }.sortedByDescending { it.t }
+    }
 
     /** Missed calls after [since] from the call log (cached name, else the number); null when it can't be read. */
     private fun missedCallsSince(since: Long): List<com.tekyerema.notifications.NotificationDigest.MissedCall>? = try {
