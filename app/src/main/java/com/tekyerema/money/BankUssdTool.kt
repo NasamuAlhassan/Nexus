@@ -102,7 +102,7 @@ object BankUssdTool : Tool {
     private suspend fun reply(args: JSONObject, ctx: ToolContext, ctrl: com.tekyerema.accessibility.AccessibilityController): ToolResult {
         val session = BankSession.current() ?: return ToolResult(false, "The bank's menu isn't open any more. Nothing was sent.", recoverable = false)
         val value = args.str(ARG_TEXT)?.trim().orEmpty()
-        val now = UssdDialog.read(ctrl)
+        val now = UssdDialog.awaitCurrent(ctrl)
             ?: return ToolResult(false, "${session.bank.name}'s menu has closed — it may have timed out. Nothing was sent.", recoverable = false)
         // Never type into a PIN or a payment confirmation (the guide ends there; this is the second lock).
         val kind = BankUssd.kind(now.text, now.hasInput, now.masked)

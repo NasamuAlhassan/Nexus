@@ -135,7 +135,7 @@ object TelcoUssdTool : Tool {
         val value = args.str(ARG_TEXT)?.trim().orEmpty()
         val auto = args.optBoolean(ARG_AUTO)
         val more = args.optBoolean(ARG_MORE)
-        val now = UssdDialog.read(ctrl)
+        val now = UssdDialog.awaitCurrent(ctrl)
             ?: return ToolResult(false, "${session.flow.netName}'s menu has closed — it may have timed out. Nothing was bought.", recoverable = false)
         // Never type into a PIN or a payment confirmation (the guide ends there; this is the second lock). And an AUTO
         // press only lands on the screen its row was matched on — a menu that moved on is read afresh, never pressed blind.

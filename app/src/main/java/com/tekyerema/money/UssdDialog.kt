@@ -26,7 +26,10 @@ internal object UssdDialog {
         val snap = try { ctrl.buildSnapshot() } catch (_: Throwable) { return null }
         // Only the phone app's own window is the USSD dialog — the app underneath must never be read (or typed
         // into) as if it were the bank's menu (audit 2026-09-30, half 2 #2).
-        if (!TelephonyWindows.matches(snap.appPackage)) return null
+        if (!TelephonyWindows.matches(snap.appPackage)) {
+            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[USSD] not a phone window: ${snap.appPackage}")
+            return null
+        }
         val labels = ArrayList<String>()
         snap.screenTitle?.takeIf { it.isNotBlank() }?.let { labels += it }
         var inputId: Int? = null
@@ -63,6 +66,18 @@ internal object UssdDialog {
             if (sawGap || s.text != prevText) return s
         }
         return null
+    }
+
+    /** The dialog as it stands, waiting briefly for it — one immediate read misses it while the phone app is still
+     *  settling (A20e 2026-09-30: the guided walk's reply read once, saw another window, and wrongly said the menu
+     *  had closed). Null only after [timeoutMs] of genuinely no dialog. */
+    suspend fun awaitCurrent(ctrl: AccessibilityController, timeoutMs: Long = 5_000L): Screen? {
+        val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
+        while (true) {
+            read(ctrl)?.let { return it }
+            if (android.os.SystemClock.uptimeMillis() >= deadline) return null
+            delay(400)
+        }
     }
 
     /** Type [value] into the dialog's box and press its Send (or the box's own submit). False when it has no box. */
