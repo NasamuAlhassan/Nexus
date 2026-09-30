@@ -1001,7 +1001,7 @@ class VoiceController(
             tel.update { goal = tr.canonical }
             fastRouter?.tryHandle(tr.canonical, tr.language)?.let { fast ->
                 tel.mark("route"); tel.update { tier = com.tekyerema.agent.RouterTiers.FAST_PATH }   // Q-01 / Q-02
-                if (fast.ok) cues.done() else cues.error()   // K-03: a failure line never plays the "done" sound
+                if (fast.listenAfter) {} else if (fast.ok) cues.done() else cues.error()   // K-03: a failure line never plays the "done" sound
                 set(VoiceState.SPEAKING, fast.spoken)
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
@@ -1020,12 +1020,19 @@ class VoiceController(
                 }
                 // Habits (agent/habits): a request that went well is noted; one made at the same time every week (or day)
                 // gets ONE offer of a spoken reminder — never of doing it for them.
-                if (fast.ok) offerHabit(tr, source, fast.intent)
+                // "Did you mean …?" (the offline meaning matcher): listen for the yes or no right here, like the agent's questions.
+                if (fast.listenAfter) {
+                    if (source == InputSource.ASR && speakAloud() && hasMicPermission() && followUpChain < maxFollowUps) {
+                        followUpChain++
+                        runOnce(quiet = true, questionPending = true)
+                    }
+                } else if (fast.ok) offerHabit(tr, source, fast.intent)
                 return
             }
 
             tel.mark("route")
-            val outcome = runAgent(tr.canonical) ?: return   // null: already set fail/cancel
+            // Offline, words the meaning matcher mapped to a command only the LocalBrain runs ("read the screen") go as that command.
+            val outcome = runAgent(fastRouter?.agentGoal(tr.canonical) ?: tr.canonical) ?: return   // null: already set fail/cancel
             when (outcome.status) {
                 AgentStatus.COMPLETED -> cues.done()
                 AgentStatus.COMPLETED_UNVERIFIED -> cues.unverified()   // K-03: never the "done" sound without evidence

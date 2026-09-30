@@ -46,6 +46,21 @@ class LocalFastRouter(
 
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
+        handOff = null
+        // The answer to "Did you mean …?" (the meaning matcher, below): yes runs it and remembers the wording, no drops it.
+        // Anything else drops it too and is handled as said — so a stale suggestion never catches a later "yes".
+        IntentMatcher.takePending()?.let { (said, canonical) ->
+            when (com.tekyerema.voice.Confirmation.interpret(text)) {
+                com.tekyerema.voice.Confirmation.Answer.YES -> {
+                    IntentMatcher.get(appContext)?.learn(said, canonical)
+                    Log.i(TAG, "[MEANING] yes → '$canonical' (wording learned)")
+                    return runMeant(text, canonical)
+                }
+                com.tekyerema.voice.Confirmation.Answer.NO ->
+                    return FastOutcome("MEANING_NO", "Okay. Say it another way.", systemVoice = true, listenAfter = true)
+                else -> {}
+            }
+        }
         // WS-C: the user's own controls ("offline mode", "ask me before every step", "what do you keep about me",
         // "delete everything"…) come first and always work — they are how the user stays in charge (operator/).
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -75,9 +90,15 @@ class LocalFastRouter(
         // them") and the helper's PIN rule ("call my helper" is refused at a PIN). Null = not one of those.
         com.tekyerema.agent.helper.TrustFast.handle(appContext, text, controller())?.let { return it }
         val intent = FastIntentClassifier.classify(text) ?: run {
+            meaning(text, language)?.let { return it }
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
         }
+        return run(intent)
+    }
+
+    /** One classified command: the user's execution mode, the undo snapshot, the command itself, the log line. */
+    private suspend fun run(intent: FastIntent): FastOutcome? {
         // WS-C: the execution mode and switched-off capabilities bind the fast path too — Ask every step / Guide only hand an
         // action to the agent (whose gate asks or explains), a switched-off capability is refused with the reason.
         when (val hold = com.tekyerema.operator.FastGate.check(intent, isAction = fastWords(intent) != null)) {
@@ -104,6 +125,57 @@ class LocalFastRouter(
         Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} llm_called=false latency_ms=$dt result='${com.tekyerema.core.Privacy.content(outcome.spoken.take(60))}'")
         return outcome
     }
+
+    // ---- the meaning matcher (agent/IntentMatcher): offline, words the rules and the LocalBrain don't know are matched
+    //      by meaning to a command they do ("how much juice is left" → the battery). English only (the model is).
+
+    /** The command the matcher found for words only the LocalBrain runs ("read the screen") — see [agentGoal]. */
+    @Volatile private var handOff: Pair<String, String>? = null
+
+    /** What the agent should get for [said]: the command the meaning matcher found for it, else [said]. Taken once. */
+    fun agentGoal(said: String): String {
+        val h = handOff
+        handOff = null
+        return if (h != null && h.first == said) h.second else said
+    }
+
+    private suspend fun meaning(text: String, language: String): FastOutcome? {
+        val cfg = com.tekyerema.core.config.AppConfig
+        if (language == Lang.TWI || !cfg.bool("intent.matcher.enabled", true)) return null
+        // Online the cloud planner understands far more; the matcher is the offline brain's ears.
+        if (com.tekyerema.core.NetworkMonitor.isOnline() && !cfg.bool("intent.matcher.online", false)) return null
+        if (localBrainKnows(text)) return null
+        val t0 = SystemClock.uptimeMillis()
+        val m = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            try { IntentMatcher.get(appContext)?.match(text) } catch (t: Throwable) { Log.w(TAG, "[MEANING] failed: ${t.message}"); null }
+        }
+        val said = com.tekyerema.core.Privacy.content(text.take(60))
+        return when (m) {
+            null -> { Log.i(TAG, "[MEANING] no match (${SystemClock.uptimeMillis() - t0} ms) text='$said'"); null }
+            is IntentMatcher.Meaning.Act -> {
+                Log.i(TAG, "[MEANING] act '${m.canonical}' score=${"%.2f".format(m.score)} (${SystemClock.uptimeMillis() - t0} ms) text='$said'")
+                runMeant(text, m.canonical)
+            }
+            is IntentMatcher.Meaning.Ask -> {
+                Log.i(TAG, "[MEANING] ask '${m.canonical}' score=${"%.2f".format(m.score)} (${SystemClock.uptimeMillis() - t0} ms) text='$said'")
+                IntentMatcher.suggest(text, m.canonical)
+                FastOutcome("MEANING_ASK", "Did you mean, ${m.canonical}? Say yes or no.", systemVoice = true, listenAfter = true)
+            }
+        }
+    }
+
+    /** Run [canonical] for what was [said]: here when it is a fast command, else by the agent (its LocalBrain) — [agentGoal]. */
+    private suspend fun runMeant(said: String, canonical: String): FastOutcome? {
+        handOff = said to canonical
+        val intent = FastIntentClassifier.classify(canonical) ?: return null
+        return run(intent)?.also { handOff = null }
+    }
+
+    /** True when the offline LocalBrain runs [text] as it is (a tool call or an answer) — then the words are left to it. */
+    private suspend fun localBrainKnows(text: String): Boolean = try {
+        LocalBrain().decide(BrainContext(text, org.json.JSONObject(), emptyList(), org.json.JSONArray(), org.json.JSONArray()))
+            .let { it is AgentDecision.CallTool || it is AgentDecision.Done }
+    } catch (_: Throwable) { false }
 
     private suspend fun execute(intent: FastIntent): FastOutcome? = when (intent) {
         FastIntent.Time -> handled(intent, timeText())
@@ -1402,7 +1474,9 @@ data class FastOutcome(
     val spoken: String,
     val systemVoice: Boolean = false,
     /** K-03: false when the line reports a failure ("Sorry, I couldn't…") — the error cue plays, not "done". */
-    val ok: Boolean = !FAILURE_LINE.containsMatchIn(spoken)
+    val ok: Boolean = !FAILURE_LINE.containsMatchIn(spoken),
+    /** The line asks something ("Did you mean …?"): after a spoken turn the mic opens again for the answer. */
+    val listenAfter: Boolean = false
 )
 
 private val FAILURE_LINE = Regex("(?i)^(sorry\\b|i couldn't|i can't|i could not|i cannot|this phone (doesn't|does not|has no))")
