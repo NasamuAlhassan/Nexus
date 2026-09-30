@@ -8,6 +8,7 @@ import com.tekyerema.money.TelcoSession
 import com.tekyerema.money.TelcoUssd
 import com.tekyerema.money.TelcoUssdTool
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -115,6 +116,9 @@ class TelcoGuideTest {
         val req = TelcoUssd.parse("Send ₵0.1 mashup to 0552093690", "mtn") as TelcoUssd.Request.Open
         assertEquals("0552093690", req.flow.number)
         assertEquals("0.1", req.flow.amount)
+        // "10 pesewas" is 0.10 cedis, NEVER 10 — the 100× error the network rejected (live A20e 2026-09-30).
+        assertEquals("0.10", (TelcoUssd.parse("send 10 pesewas mashup to 0552093690", "mtn") as TelcoUssd.Request.Open).flow.amount)
+        assertEquals("5", (TelcoUssd.parse("buy 5 cedis mashup for 0552093690", "mtn") as TelcoUssd.Request.Open).flow.amount)
         TelcoSession.opened(req.flow, "Enter Phone Number", BankUssd.ScreenKind.MENU)
         val d = TelcoGuide.decide("Send ₵0.1 mashup to 0552093690", listOf(openLine, replyLine), network = "mtn")
         assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).args.optString("_text") == "0552093690")
@@ -124,6 +128,27 @@ class TelcoGuideTest {
         // "+233" folds to the 0-form; an unknown-length number stays null (never a guess).
         assertEquals("0552093690", (TelcoUssd.parse("mashup for +233 552093690", "mtn") as TelcoUssd.Request.Open).flow.number)
         assertNull((TelcoUssd.parse("buy a mashup bundle", "mtn") as TelcoUssd.Request.Open).flow.number)
+    }
+
+    /** A "wrong amount, enter again" re-prompt is NEVER auto-repeated, and an amount outside the shown range is
+     *  not entered (live A20e 2026-09-30: "10" outside MTN's 0.07–4.99 was re-typed until the session timed out). */
+    @Test fun `a rejected amount is asked, not blindly re-entered`() {
+        assertTrue(TelcoGuide.inRange("0.1", "Enter amount (GHC 0.07 - 4.99)"))
+        assertFalse(TelcoGuide.inRange("10", "Enter amount (GHC 0.07 - 4.99)"))
+        assertTrue(TelcoGuide.inRange("10", "Enter amount"))          // no stated range → allowed
+
+        val f = TelcoUssd.Flow("mashup", "*567#", emptyList(), "a bundle", "MTN", amount = "10")
+        // In-range amount would be entered; an error re-prompt (same rejected value) must instead ASK.
+        TelcoSession.opened(f, "You have entered wrong amount value. Enter Amount again", BankUssd.ScreenKind.MENU)
+        TelcoSession.screen("You have entered wrong amount value. Enter Amount again", BankUssd.ScreenKind.MENU,
+            auto = false, more = false, user = true)
+        val d = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).name == "ask_user")
+        // An out-of-range amount on a fresh amount screen is also asked, with the range read.
+        TelcoSession.screen("Enter amount to buy your preferred bundle (GHC 0.07 - 4.99)", BankUssd.ScreenKind.MENU,
+            auto = false, more = false, user = true)
+        val e = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(e.toString(), e is AgentDecision.CallTool && (e as AgentDecision.CallTool).name == "ask_user")
     }
 
     /** MTN's Enter → Confirm double-entry: the number the user just dictated is offered back as ONE yes

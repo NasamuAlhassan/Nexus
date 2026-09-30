@@ -67,9 +67,9 @@ object TelcoUssd {
         // The request's own slots: a 10-digit Ghana number (folded from +233/233 forms) and a cedi amount.
         val number = Regex("(?:\\+?233|0)\\s?\\d[\\d\\s-]{7,}").find(goal)?.value?.filter { it.isDigit() }
             ?.let { if (it.startsWith("233") && it.length == 12) "0" + it.drop(3) else it }?.takeIf { it.length == 10 && it.startsWith("0") }
-        val amount = MoneyLimits.parseAmount(
-            Regex("(?:GH[S₵C¢]|₵|¢)?\\s*(\\d+(?:\\.\\d{1,2})?)\\s*(?:cedis?|GHS|GHC|₵)?").find(
-                goal.replace(number ?: "\u0000", " "))?.value)?.toPlainString()
+        // The recipient number is stripped FIRST so it isn't read as the amount; then the whole remaining text goes to
+        // MoneyLimits.parseAmount, which converts pesewas → cedis ("10 pesewas" → 0.1, NOT 10 — live A20e 2026-09-30).
+        val amount = MoneyLimits.parseAmount(goal.replace(number ?: "\u0000", " "))?.toPlainString()
         fun open(key: String, code: String?, auto: List<Regex>, what: String, missing: String): Request =
             code?.let { Request.Open(Flow(key, it, auto, what, net.name, number = number, amount = amount)) } ?: Request.Unsupported(
                 "I don't have a checked code for $missing on ${net.name}, and I never guess codes. " +

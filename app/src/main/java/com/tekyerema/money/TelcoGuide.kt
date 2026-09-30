@@ -105,14 +105,24 @@ object TelcoGuide {
         // and send it?"), so nothing is typed unheard (live A20e 2026-09-30: the ask came and the recogniser then
         // failed on the digits twice; the walk stalled on information the user had already said).
         if (TelcoUssd.rows(session.screen).isEmpty()) {
+            // A "wrong value / enter again" re-prompt is NEVER auto-filled: the value we hold is exactly what the
+            // network just rejected, and re-typing it is the blind-retry money safety forbids (live A20e 2026-09-30:
+            // "10" was outside MTN's 0.07–4.99 range and got re-entered until the session timed out). Ask the user.
+            if (RE_REJECT.containsMatchIn(session.screen))
+                return ask("The network didn't accept that. It says: “${BankUssd.spokenScreen(session.screen)}”. What should I enter?")
             val slot = com.tekyerema.money.ussd.MenuModel.slotOf(session.screen)
             val value = when (slot) {
                 com.tekyerema.money.ussd.SlotKind.PHONE_NUMBER -> session.flow.number
                 com.tekyerema.money.ussd.SlotKind.CONFIRM_NUMBER -> session.lastNumber ?: session.flow.number
-                com.tekyerema.money.ussd.SlotKind.AMOUNT -> session.flow.amount
+                // Only fill an amount the screen's OWN stated range accepts — otherwise read the range and ask.
+                com.tekyerema.money.ussd.SlotKind.AMOUNT -> session.flow.amount?.takeIf { inRange(it, session.screen) }
                 else -> null
             }
             if (value != null) return reply(session, value, auto = false, more = false, row = null)
+            // An amount we hold but that's out of range: say so rather than let the network reject it.
+            if (slot == com.tekyerema.money.ussd.SlotKind.AMOUNT && session.flow.amount != null)
+                return ask("Your amount, ${session.flow.amount} cedis, is outside what this offer allows. " +
+                    "It says: “${BankUssd.spokenScreen(session.screen)}”. What amount should I enter?")
         }
         // The network asking to CONFIRM a number the user dictated mid-walk: the same one back — one YES, never
         // ten digits said twice (MTN's Enter → Confirm double-entry).
@@ -184,6 +194,19 @@ object TelcoGuide {
 
     /** A screen asking the number be entered AGAIN ("Confirm Phone Number", "Re-enter number"). */
     private val RE_CONFIRM_NUMBER = Regex("(?i)\\b(?:confirm|re-?enter|repeat)\\b.{0,20}\\b(?:phone|number|msisdn)\\b")
+    /** The network rejected the last entry and wants it again ("wrong amount value. Enter Amount again", "invalid"). */
+    private val RE_REJECT = Regex("(?i)\\b(?:wrong|invalid|incorrect|not valid|not allowed)\\b|\\btry again\\b|enter .{0,20}again")
+    /** The valid range a screen states ("(GHC 0.07 - 4.99)") — an amount outside it is never auto-entered. */
+    private val RE_RANGE = Regex("(?i)(?:GH[SC₵¢]?)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:-|to|–)\\s*(?:GH[SC₵¢]?)?\\s*(\\d+(?:\\.\\d+)?)")
+
+    /** True when [amount] is within any range the [screen] states, or the screen states none. */
+    internal fun inRange(amount: String, screen: String): Boolean {
+        val v = amount.toBigDecimalOrNull() ?: return true
+        val m = RE_RANGE.find(screen) ?: return true
+        val lo = m.groupValues[1].toBigDecimalOrNull() ?: return true
+        val hi = m.groupValues[2].toBigDecimalOrNull() ?: return true
+        return v >= lo && v <= hi
+    }
 
     private val STEP_LINE = Regex("^[a-z_]+\\(")
     private val RECOVERY_HINT = Regex(" — (?:this route|re-observe|only the user|the '[^']*' accelerator)")
