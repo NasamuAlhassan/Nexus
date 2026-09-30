@@ -75,7 +75,8 @@ object RunUssdTool : Tool {
                 }
             }
         }
-        return if (response != null) ToolResult(true, "USSD $code replied: $response", channel = "native")
+        // Paced and in words (money/UssdSpeech): the carrier's run-on blob was unfollowable read raw (owner, 2026-09-30).
+        return if (response != null) ToolResult(true, com.tekyerema.money.UssdSpeech.forEar(response), channel = "native")
         else ToolResult(false, "USSD $code did not return a response (network refused, timed out, or SIM/carrier not supported).")
     }
 

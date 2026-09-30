@@ -43,6 +43,16 @@ class AuditFixes2Test {
         assertEquals(listOf("k1"), NotificationStore.replyables(null).map { it.key })
     }
 
+    /** A balance code is a query — never deduped or read back as "this payment"; a money-root code still is. */
+    @Test fun `a self-care code is not a payment, a money-root code is`() {
+        fun spec(code: String) = com.tekyerema.agent.journal.EffectKeys.describe(
+            "run_ussd", JSONObject().put("code", code), null, null, false, null)
+        assertNull(spec("*124#"))
+        assertNull(spec("*156#"))
+        assertEquals(com.tekyerema.agent.journal.EffectKind.PAYMENT, spec("*170#")!!.kind)
+        assertEquals(com.tekyerema.agent.journal.EffectKind.PAYMENT, spec("*170*1#")!!.kind)
+    }
+
     @Test fun `an argument that is not a whole number stays null instead of becoming 0`() {
         val o = JSONObject().put("hour", "7am").put("ok", "7").put("n", 5)
         assertNull(o.intOrNull("hour"))         // used to be 0 → a midnight alarm

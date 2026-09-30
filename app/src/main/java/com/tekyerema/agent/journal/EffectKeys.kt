@@ -64,7 +64,16 @@ object EffectKeys {
                 Spec(EffectKind.PAYMENT, who, a(args, "_recipient") ?: who,
                     (a(args, "_kind") ?: a(args, "action") ?: "") + " amount=" + (a(args, "_amount") ?: a(args, "amount")).orEmpty())
             }
-            "run_ussd" -> a(args, "code")?.let { Spec(EffectKind.PAYMENT, "ussd", "the USSD service", it) }
+            // A dialed code that can move money (a Mobile-Money or bank ROOT) is a payment for the dedupe. A self-care
+            // code (*124# balance, *156#…) is a QUERY: running it twice is harmless, and the gate's "I may already have
+            // started this payment…" read-back frightened a balance check (A20e 2026-09-30).
+            "run_ussd" -> a(args, "code")?.let { code ->
+                val money = try {
+                    (com.tekyerema.tools.GhanaMobileMoney.moneyPrefixes() + com.tekyerema.money.BankUssd.moneyPrefixes())
+                        .any { code.startsWith(it) }
+                } catch (_: Throwable) { true }   // in doubt, keep the safer payment dedupe
+                if (money) Spec(EffectKind.PAYMENT, "ussd", "the USSD service", code) else null
+            }
             // Money safety round 2: a guided bank-menu step is navigation, like a keypad digit — the transfer is the user's own
             // final step with their PIN, never ours (money/BankUssdTool), so two "1"s on two screens are not "the same thing".
             "bank_ussd" -> null

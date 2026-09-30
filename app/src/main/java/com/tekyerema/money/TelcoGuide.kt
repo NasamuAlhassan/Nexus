@@ -112,6 +112,8 @@ object TelcoGuide {
 
     /** The last line at a payment confirmation, a PIN prompt or a final message — read out, then the user takes over. */
     fun handOffLine(s: TelcoSession.View): String {
+        // A FINAL screen (a balance, a receipt) is the ANSWER: paced, in words, one item per breath (UssdSpeech).
+        if (s.kind == BankUssd.ScreenKind.FINAL) return UssdSpeech.forEar(s.screen, intro = "${s.flow.netName} says")
         val said = "${s.flow.netName}'s screen says: “${BankUssd.spokenScreen(s.screen)}”."
         return when (s.kind) {
             BankUssd.ScreenKind.MONEY -> "$said If that's right, confirm it on the screen and enter your PIN yourself; if not, press Cancel. " +
