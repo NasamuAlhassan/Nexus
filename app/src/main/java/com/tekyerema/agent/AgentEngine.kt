@@ -928,6 +928,9 @@ object AgentEngine {
                         finish(AgentStatus.COMPLETED_UNVERIFIED, stats); return
                     }
                     is AgentDecision.CannotDo -> {
+                        // The task itself cut the connection ("turn on airplane mode", verified) — done, not "paused" (ConnectivityGoal).
+                        if (lastMutatingVerified == true && (decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST))
+                            ConnectivityGoal.doneLine(goal, ctxApp)?.let { line -> log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.COMPLETED, stats); return }
                         // WS-A: the network dropped, or no capable model / quota / budget is left (Workstream B's reason
                         // classes) — that is not "can't do it": the task PAUSES with a checkpoint (journaled tasks only).
                         val pauseFor = if (taskRun != null) com.tekyerema.agent.journal.PauseRules.forCannotDo(decision.reasonClass) else null

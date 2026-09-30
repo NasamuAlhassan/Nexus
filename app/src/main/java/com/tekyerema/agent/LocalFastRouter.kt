@@ -1265,13 +1265,13 @@ class LocalFastRouter(
         }
         val found = el ?: run { c.globalAction("back"); return null }   // this phone's panel has no such tile → agent
         val state = if (t.on) "on" else "off"
-        if (found.checked == t.on) {
+        if (QuickTiles.isOn(found) == t.on) {
             c.globalAction("back")
             return action(t.name, "${tile.spoken} is already $state.")
         }
         if (!c.clickElement(found.id)) return null
         var ok = false
-        repeat(8) { if (!ok) { kotlinx.coroutines.delay(150); c.waitForSettle(1000); ok = QuickTiles.find(c.buildSnapshot(), tile)?.checked == t.on } }
+        repeat(8) { if (!ok) { kotlinx.coroutines.delay(150); c.waitForSettle(1000); ok = QuickTiles.find(c.buildSnapshot(), tile)?.let { QuickTiles.isOn(it) } == t.on } }
         if (!ok) {
             Log.i(TAG, "[LOCAL_FAST_PATH] ${tile.key} tile didn't flip (dialog?) → agent continues from this screen")
             return null

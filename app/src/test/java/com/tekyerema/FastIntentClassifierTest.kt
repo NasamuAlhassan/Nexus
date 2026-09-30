@@ -72,6 +72,27 @@ class FastIntentClassifierTest {
         assertEquals(3, com.tekyerema.agent.QuickTiles.find(snap(el(1, "Internet, AndroidWifi", true),
             el(2, "Do Not Disturb settings", false), el(3, "Do Not Disturb, Off", true)), t)?.id)
         assertNull(com.tekyerema.agent.QuickTiles.find(snap(el(2, "Do Not Disturb settings", false)), t))
+        // Samsung One UI (A20e 2026-09-30): a plain button, commas for spaces, the state in the label.
+        val air = com.tekyerema.agent.QuickTiles.byKey("airplane")!!
+        val off = com.tekyerema.agent.QuickTiles.find(snap(el(7, "Wi-Fi,On.,Button", false), el(9, "Flight,mode,Off.,Button", false)), air)
+        assertEquals(9, off?.id)
+        org.junit.Assert.assertFalse(com.tekyerema.agent.QuickTiles.isOn(off!!))
+        assertTrue(com.tekyerema.agent.QuickTiles.isOn(el(9, "Flight,mode,On.,Button", false)))
+        assertTrue(com.tekyerema.agent.QuickTiles.isOn(el(3, "Do Not Disturb, Off", true, checked = true)))   // checkable: its state
+    }
+
+    /** A20e 2026-09-30: "turn on airplane mode" succeeded, then the user heard "paused because the internet dropped". */
+    @Test fun a_request_that_cuts_the_connection_is_recognised() {
+        val g = com.tekyerema.agent.ConnectivityGoal
+        assertEquals(com.tekyerema.agent.ConnectivityGoal.Want.AIRPLANE_ON, g.asks("turn on airplane mode"))
+        assertEquals(com.tekyerema.agent.ConnectivityGoal.Want.AIRPLANE_ON, g.asks("switch on flight mode"))
+        assertEquals(com.tekyerema.agent.ConnectivityGoal.Want.AIRPLANE_ON, g.asks("put the phone in airplane mode".replace("the phone in ", "")))
+        assertEquals(com.tekyerema.agent.ConnectivityGoal.Want.WIFI_OFF, g.asks("turn off wifi"))
+        assertEquals(com.tekyerema.agent.ConnectivityGoal.Want.WIFI_OFF, g.asks("switch the Wi-Fi off"))
+        assertEquals(com.tekyerema.agent.ConnectivityGoal.Want.DATA_OFF, g.asks("turn off mobile data"))
+        assertNull(g.asks("turn off airplane mode"))
+        assertNull(g.asks("turn on wifi"))
+        assertNull(g.asks("open WhatsApp"))
     }
 
     @Test fun storage_question_is_fast_but_storage_actions_are_not() {

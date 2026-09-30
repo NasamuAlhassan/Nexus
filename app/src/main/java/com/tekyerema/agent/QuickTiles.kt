@@ -47,8 +47,24 @@ object QuickTiles {
         return ALL.firstOrNull { p in it.phrases } ?: ALL.firstOrNull { p.removeSuffix(" setting").removeSuffix(" feature") in it.phrases }
     }
 
-    /** The CHECKABLE element that is this tile on the current screen (the label may carry the state: "…, Off"). */
+    /**
+     * The element that is this tile on the current screen: a checkable one, or — Samsung One UI (A20e 2026-09-30) — a plain
+     * button whose label carries the name AND the state with commas for spaces: "Flight,mode,Off.,Button". That tile was
+     * never found (10 looks, 7.7 s) and the planner had to tap it.
+     */
     fun find(snap: UiSnapshot?, tile: Tile): UiElement? = snap?.elements?.firstOrNull { e ->
-        e.checkable && e.label?.lowercase()?.let { l -> tile.labels.any { l.contains(it) } } == true
+        val l = norm(e.label) ?: return@firstOrNull false
+        (e.checkable || STATE.containsMatchIn(l)) && tile.labels.any { l.contains(it) }
     }
+
+    /** On or off: the checked state, or the state word in the label ("Flight,mode,On.,Button"). */
+    fun isOn(e: UiElement): Boolean {
+        if (e.checkable) return e.checked
+        val l = norm(e.label).orEmpty()
+        return Regex("\\bon\\b").containsMatchIn(l) && !Regex("\\boff\\b").containsMatchIn(l)
+    }
+
+    private val STATE = Regex("\\b(?:on|off)\\b")
+    private fun norm(label: String?): String? =
+        label?.lowercase()?.replace(Regex("[,._;:]+"), " ")?.replace(Regex("\\s+"), " ")?.trim()?.takeIf { it.isNotEmpty() }
 }
