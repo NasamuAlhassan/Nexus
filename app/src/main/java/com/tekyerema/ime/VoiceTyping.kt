@@ -14,22 +14,22 @@ import com.tekyerema.language.TwiText
 /**
  * G-05 — the keyboard's voice key.
  *
- * Why the phone's own voice input and not Tɛkyerɛma's on-device recogniser (the brief's first choice), for now:
- *  - the on-device Twi model is disqualified (2026-09-19 audit: its test clips were in its training data) and both
- *    whisper-tiny models are tuned to short commands, not free dictation;
- *  - SherpaAsr is private to VoiceEngine; a second copy in the keyboard would double ~hundreds of MB on a 3 GB phone
- *    and fight the wake word for the microphone;
- *  - SherpaAsr writes the transcript to logcat in debug builds, and the keyboard must never log what is typed.
- * So the key uses the phone's speech service in place (SpeechRecognizer, offline preferred), or hands over to an
- * installed voice keyboard (Google/Samsung voice input), which returns to this keyboard by itself. The keyboard
- * itself never touches the network: whatever the phone's own voice service does is the same as tapping its mic.
- * [VoicePlan] is where an on-device route slots in once voice/ exposes a shared, non-logging dictation call.
+ * The FIRST choice is now Tɛkyerɛma's own stack ([com.tekyerema.voice.Dictation] — the "shared, non-logging
+ * dictation call" this header used to wait for, §3(a) interaction_details.md): the IME runs in the app's own
+ * process, so the mic key reuses the voice turn's MicCapture + HybridAsr (online recogniser when configured,
+ * the on-device models offline) with no second model copy, behind the wake word's own mic hand-over. The
+ * phone's SpeechRecognizer has no Twi and its offline pack is broken on this Android 11 device, so it — and
+ * the hand-over to an installed voice keyboard (Google/Samsung voice input, which returns here by itself) —
+ * stay as the fallbacks. Config: `ime.dictation.ownAsr` (default true) turns the own-ASR route off.
+ * This file itself never touches the network and never logs: Dictation logs lengths only (its own test).
  */
-enum class VoiceRoute { OFF_IN_THIS_FIELD, IN_KEYBOARD, VOICE_KEYBOARD, UNAVAILABLE }
+enum class VoiceRoute { OFF_IN_THIS_FIELD, OWN_ASR, IN_KEYBOARD, VOICE_KEYBOARD, UNAVAILABLE }
 
 object VoicePlan {
-    fun route(fieldAllowsVoice: Boolean, micGranted: Boolean, recognizerAvailable: Boolean, voiceKeyboardAvailable: Boolean): VoiceRoute = when {
+    fun route(fieldAllowsVoice: Boolean, micGranted: Boolean, recognizerAvailable: Boolean, voiceKeyboardAvailable: Boolean,
+              ownAsrAvailable: Boolean = false): VoiceRoute = when {
         !fieldAllowsVoice -> VoiceRoute.OFF_IN_THIS_FIELD      // passwords/PINs: never say a secret out loud
+        micGranted && ownAsrAvailable -> VoiceRoute.OWN_ASR    // our own mic + recogniser, in this process
         micGranted && recognizerAvailable -> VoiceRoute.IN_KEYBOARD
         voiceKeyboardAvailable -> VoiceRoute.VOICE_KEYBOARD     // it has its own microphone permission
         else -> VoiceRoute.UNAVAILABLE
@@ -38,7 +38,7 @@ object VoicePlan {
     fun explain(route: VoiceRoute): String = when (route) {
         VoiceRoute.OFF_IN_THIS_FIELD -> "Voice typing is off in password and PIN boxes. Type it with the keys."
         VoiceRoute.UNAVAILABLE -> "Voice typing isn't available on this phone. In Tɛkyerɛma, allow the microphone, then try again."
-        VoiceRoute.IN_KEYBOARD, VoiceRoute.VOICE_KEYBOARD -> ""
+        VoiceRoute.OWN_ASR, VoiceRoute.IN_KEYBOARD, VoiceRoute.VOICE_KEYBOARD -> ""
     }
 
     /** First enabled voice-mode subtype of another input method, as (imeId, subtypeIndex); null if none. */
@@ -74,6 +74,9 @@ object DictationText {
         val needsSpace = prev != null && !prev.isWhitespace() && prev !in "([{“‘\"'/@#"
         return if (needsSpace) " $t" else t
     }
+
+    /** What TalkBack hears after a commit (§3(b)): the words that went in, without the spacing detail. */
+    fun announceTyped(inserted: String): String = if (inserted.isBlank()) "" else "Typed: ${inserted.trim()}"
 }
 
 /** Finds an installed voice keyboard (an input method with a "voice" subtype) to hand over to. */

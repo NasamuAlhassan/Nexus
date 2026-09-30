@@ -49,6 +49,19 @@ object VoiceEngine {
     fun onlineAsrFor(lang: String?): AsrProvider? = com.tekyerema.language.LanguageLayer.onlineAsr(lang, asrRegistry,
         cloudAllowed = com.tekyerema.core.NetworkMonitor.isOnline() && AgentEngine.state.value.status != AgentStatus.SECURE_INPUT)
 
+    // ===== G-05 keyboard dictation (voice/Dictation.kt): the IME shares this process, so the mic key reuses the
+    // SAME recogniser stack as a voice turn — no second model copy. Set only when the captured stack is built
+    // (profiles ghana / gh_mixed); null under builtin_en, where Dictation honestly reports unavailable.
+    @Volatile internal var dictationAsr: AsrProvider? = null
+        private set
+    @Volatile internal var dictationMic: Recorder? = null
+        private set
+
+    /** The keyboard's own dictation can produce text in this language right now: the on-device models are
+     *  present, or an online recogniser for the language is configured and reachable. */
+    fun dictationReady(twi: Boolean): Boolean = initialized && dictationAsr != null &&
+        (sherpa?.ready == true || onlineAsrFor(if (twi) Lang.TWI else null) != null)
+
     /** Live microphone level 0..1 — drives the living voice visual while listening (either mic). */
     val level: StateFlow<Float> get() = _level
     private val _level = kotlinx.coroutines.flow.MutableStateFlow(0f)
@@ -177,6 +190,11 @@ object VoiceEngine {
                     forceLanguage = { settings.forcedLanguage },
                     sessionLanguage = { language.current() }
                 )
+                // G-05: the keyboard's dictation (voice/Dictation.kt) — the same hybrid recogniser, through its own
+                // dedicated mic (a dictation-length no-speech window; never shared with a turn's mics — Dictation
+                // refuses while a turn runs). Its level joins the living visual like every other microphone.
+                dictationAsr = hybrid
+                dictationMic = MicCapture(appContext = app, noSpeechTimeoutMs = 8000).also { levels.add(it.level) }
                 return com.tekyerema.voice.io.CapturedAudioInput(mic, answerMic, hybrid, sessionLang, forced)
             }
             // gh_mixed (owner, 2026-09-29): English listens → the phone's recognizer; Twi listens → the captured path (UG HCI

@@ -16,6 +16,8 @@ import android.view.inputmethod.InputConnection
 import android.view.inputmethod.InputMethodManager
 import androidx.core.content.ContextCompat
 import com.tekyerema.core.Privacy
+import com.tekyerema.core.config.AppConfig
+import com.tekyerema.voice.Dictation
 
 /**
  * G-05 — the Tɛkyerɛma Twi keyboard (an InputMethodService). Owner request: "the local language has keyboards — when
@@ -86,6 +88,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         super.onStartInputView(info, restarting)
         cancelPendingVoiceStart()
         voice?.cancel()
+        Dictation.cancel()   // the field changed: never carry a dictation into it
         optSuggest = prefs.suggestions; optHabit = prefs.textingHabit; optLearn = prefs.learnWords
         optVibrate = prefs.vibrate; optSound = prefs.sound
         inputType = info.inputType
@@ -110,6 +113,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     override fun onFinishInputView(finishingInput: Boolean) {
         cancelPendingVoiceStart()
         voice?.cancel()
+        Dictation.cancel()
         habit.reset()
         variantsOpen = false
         view?.showSuggestions(emptyList())
@@ -120,6 +124,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     override fun onDestroy() {
         voice?.release()
         voice = null
+        Dictation.cancel()
         if (optLearn) LearnedWordStore.saveIfDirty(this)
         super.onDestroy()
     }
@@ -344,27 +349,68 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     // ------------------------------------------------------------------------------------ voice key
 
     override fun onVoiceKey() {
+        if (Dictation.active) { Dictation.cancel(); view?.say("Stopped"); return }   // our mic: a second tap cancels
         val v = voice ?: VoiceTyping(this, this).also { voice = it }
         if (v.listening) { v.stop(); return }
         if (listeningShown) { onIdle(); return }   // tapped again before the microphone opened: don't open it
         val micGranted = ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         val voiceKeyboard = voiceKeyboard()
-        when (val route = VoicePlan.route(policy.voice && !Privacy.secureStep, micGranted, v.available(), voiceKeyboard != null)) {
-            VoiceRoute.IN_KEYBOARD -> {
-                if (variantsOpen) closeVariants()
-                listeningShown = true
-                view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
-                view?.showMessage("Starting voice typing…")
-                listenCue()
-                val lang = language
-                // The field may change (or the keyboard close) during the cue: re-check it's still this field's voice
-                // turn — a password field or a Secure Input step never gets the mic.
-                val start = Runnable { if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) v.start(lang) }
-                pendingVoiceStart = start
-                view?.postDelayed(start, 250)
+        when (val route = VoicePlan.route(policy.voice && !Privacy.secureStep, micGranted, v.available(), voiceKeyboard != null, ownAsrReady())) {
+            VoiceRoute.OWN_ASR -> beginListening("Starting voice typing…") {
+                // §3(a): our own mic + recogniser. A refusal before the mic opens falls back to the system route.
+                if (!Dictation.start(it == KbLanguage.TWI, dictationEars(it, fallbackAvailable = v.available()))) onIdle()
             }
+            VoiceRoute.IN_KEYBOARD -> beginListening("Starting voice typing…") { v.start(it) }
             VoiceRoute.VOICE_KEYBOARD -> switchToVoiceKeyboard()
             else -> VoicePlan.explain(route).let { view?.showMessage(it); view?.say(it) }
+        }
+    }
+
+    /** §3(a): our own dictation is the first choice when the config flag is on and the voice stack can serve it. */
+    private fun ownAsrReady(): Boolean =
+        AppConfig.bool("ime.dictation.ownAsr", true) &&
+            try { Dictation.available(language == KbLanguage.TWI) } catch (_: Throwable) { false }
+
+    /** The shared listen choreography: cue, then start [go] after 250 ms. The field may change (or the keyboard
+     *  close) during the cue: re-check it's still this field's voice turn — a password field or a Secure Input
+     *  step never gets the mic. */
+    private fun beginListening(message: String, go: (KbLanguage) -> Unit) {
+        if (variantsOpen) closeVariants()
+        listeningShown = true
+        view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
+        view?.showMessage(message)
+        listenCue()
+        val lang = language
+        val start = Runnable { if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) go(lang) }
+        pendingVoiceStart = start
+        view?.postDelayed(start, 250)
+    }
+
+    /** Dictation callbacks → the same show/say/commit paths the system route uses. [fallbackAvailable] = the
+     *  phone's SpeechRecognizer existed at tap time, so a stack-not-ready refusal can hand the attempt over. */
+    private fun dictationEars(lang: KbLanguage, fallbackAvailable: Boolean) = object : Dictation.Listener {
+        private var fellBack = false
+        override fun onListening() {
+            view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
+            view?.showMessage("Listening… I stop when you pause.")
+            view?.say("Listening")
+        }
+        override fun onText(text: String) { commitDictation(text, lang) }
+        override fun onNothing(message: String, fallbackToSystem: Boolean) {
+            if (fallbackToSystem) {
+                if (fallbackAvailable) { fellBack = true; return }   // onDone starts the system route instead
+                VoicePlan.explain(VoiceRoute.UNAVAILABLE).let { listeningShown = false; view?.showMessage(it); view?.say(it) }
+                return
+            }
+            listeningShown = false   // so onIdle below leaves this honest line in the strip
+            view?.showMessage(message)
+            view?.say(message)
+        }
+        override fun onDone() {
+            if (!fellBack) { onIdle(); return }
+            val v = voice ?: VoiceTyping(this@TwiKeyboardService, this@TwiKeyboardService).also { voice = it }
+            // The cue already played at the tap; keep the listening state and hand straight over.
+            if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) v.start(lang) else onIdle()
         }
     }
 
@@ -396,18 +442,22 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     override fun onListening() {
         view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
         view?.showMessage("Listening… tap the microphone when you finish.")
+        view?.say("Listening")   // §3(b): a blind user hears when the microphone really opens
     }
 
     override fun onPartial(text: String) { view?.showMessage(text) }
 
-    override fun onFinal(text: String, spokenIn: KbLanguage) {
+    override fun onFinal(text: String, spokenIn: KbLanguage) { commitDictation(text, spokenIn) }
+
+    /** Recognised speech → the field, one path for both voice routes. Announces what went in (§3(b)). */
+    private fun commitDictation(text: String, spokenIn: KbLanguage) {
         // The field may have changed, or the agent's Secure Input step begun, while the user spoke.
         if (!policy.voice || Privacy.secureStep) return
         val ic = currentInputConnection ?: return
         val before = ic.getTextBeforeCursor(WINDOW, 0)
         val capital = policy.autoCapitalize && try { ic.getCursorCapsMode(inputType) != 0 } catch (_: Throwable) { false }
         val insert = DictationText.forInsertion(text, spokenIn == KbLanguage.TWI, capital, before)
-        if (insert.isNotEmpty()) ic.commitText(insert, 1)
+        if (insert.isNotEmpty()) { ic.commitText(insert, 1); view?.say(DictationText.announceTyped(insert)) }
         habit.onOtherInput()
     }
 
