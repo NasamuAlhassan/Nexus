@@ -22,14 +22,80 @@ import kotlin.coroutines.resume
 class AndroidTts(context: Context) : TtsProvider {
     override val name = "android-system-tts (English; Twi=gap)"
 
+    companion object {
+        /** Ghana's words as they are SAID: "cedi" is SEE-dee (the voices said "seh-di"), "pesewa" is peh-SEH-wah,
+         *  and the app's own name — Twi "ky" is "ch", "ɛ" is "eh". */
+        private val RESPELL: List<Pair<Regex, String>> = listOf(
+            Regex("(?i)\\bcedis\\b") to "seedees",
+            Regex("(?i)\\bcedi\\b") to "seedee",
+            Regex("(?i)\\bpesewas\\b") to "pessaywahs",
+            Regex("(?i)\\bpesewa\\b") to "pessaywah",
+            Regex("(?i)\\btɛkyerɛma\\b|\\btekyerema\\b") to "techeremah"
+        )
+    }
+
     private val ready = CompletableDeferred<Boolean>()
     private var loggedEngine = false
-    private val engine = TextToSpeech(context.applicationContext) { status ->
+    /**
+     * Judge feedback (2026-09-30): the default Samsung engine has ONE English voice and mangles our words. When
+     * Google's engine is installed (it is, on the A20e) it is preferred (`speech.tts.engine`, "auto") — it carries
+     * many more voices, and [bestVoice] then picks the closest English to ours: en-GH, else en-NG (the nearest West
+     * African English Google ships), else what the phone had. "system" or a package name overrides.
+     */
+    private val preferred: String? = run {
+        val want = try { com.tekyerema.core.config.AppConfig.string("speech.tts.engine", "auto") } catch (_: Throwable) { "auto" }
+        when {
+            want == "system" -> null
+            want != "auto" && want.isNotBlank() -> want
+            else -> "com.google.android.tts".takeIf {
+                try { context.packageManager.getPackageInfo(it, 0); true } catch (_: Throwable) { false }
+            }
+        }
+    }
+    private val engine = if (preferred != null)
+        TextToSpeech(context.applicationContext, { status -> ready.complete(status == TextToSpeech.SUCCESS) }, preferred)
+    else TextToSpeech(context.applicationContext) { status ->
         ready.complete(status == TextToSpeech.SUCCESS)
     }
     private fun logEngineOnce() {
         if (loggedEngine) return; loggedEngine = true
-        try { Log.i("Tekyerema", "[TTS] system engine=${engine.defaultEngine}") } catch (_: Throwable) {}
+        try { Log.i("Tekyerema", "[TTS] system engine=${engine.defaultEngine} preferred=${preferred ?: "(default)"} voice=${engine.voice?.name}") } catch (_: Throwable) {}
+    }
+
+    /** The closest installed English voice to Ghana: en-GH, else en-NG, else en-GB — never a network-only voice.
+     *  Cached once and re-applied on every speak (setLanguage resets the engine's voice). */
+    private var voicePicked = false
+    private var pickedVoice: android.speech.tts.Voice? = null
+    private fun applyBestVoice() {
+        if (!voicePicked) {
+            voicePicked = true
+            pickedVoice = try {
+                val voices = engine.voices?.filter {
+                    it.locale?.language.equals("en", true) && !it.isNetworkConnectionRequired &&
+                        !it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED)
+                }.orEmpty()
+                listOf("GH", "NG", "GB").firstNotNullOfOrNull { c ->
+                    voices.filter { (it.locale?.country ?: "").equals(c, true) }.maxByOrNull { it.quality }
+                }?.also { Log.i("Tekyerema", "[TTS] voice picked: ${it.name} (${it.locale}, q=${it.quality})") }
+            } catch (_: Throwable) { null }
+        }
+        pickedVoice?.let { try { engine.voice = it } catch (_: Throwable) {} }
+    }
+
+    /**
+     * Words the system voices mangle, respelled the way they are SAID in Ghana (judge feedback 2026-09-30: "cedis",
+     * numbers, the app's own name). Speech only — the screen keeps real spellings; the lab's Ghanaian voices never
+     * pass through here. `speech.tts.respell` (config) adds or overrides pairs.
+     */
+    private fun respell(text: String): String {
+        var t = text
+        for ((re, word) in RESPELL) t = re.replace(t, word)
+        val extra = try { com.tekyerema.core.config.AppConfig.obj("speech.tts.respell") } catch (_: Throwable) { null }
+        if (extra != null) for (k in extra.keys()) {
+            val v = extra.optString(k)
+            if (v.isNotBlank()) t = Regex("(?i)\b" + Regex.escape(k) + "\b").replace(t, v)
+        }
+        return t
     }
 
     /**
@@ -69,6 +135,8 @@ class AndroidTts(context: Context) : TtsProvider {
             Log.i("Tekyerema", "[TTS] no voice for '$language'; not speaking (honest gap)")
             return false
         }
+        applyBestVoice()   // setLanguage (in supports) resets the voice — put the picked one back
+        @Suppress("NAME_SHADOWING") val text = respell(text)
         // B-15/K-07: our stream (accessibility when TalkBack drives the phone) + may-duck focus for the duration.
         try { engine.setAudioAttributes(focus.attributes(AudioFocus.Kind.SPEAK)) } catch (_: Throwable) {}
         // Our OWN focus request, released only by us: a newer line used to acquire focus, then this line's finally

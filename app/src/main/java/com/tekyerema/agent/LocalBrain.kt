@@ -142,9 +142,24 @@ class LocalBrain : AgentBrain {
         if (g.contains("timer") || g.contains("simma") || g.contains("sima") || (twi && g.contains("bere")))
             timerDecision(raw)?.let { return it }
 
-        // --- §A.2 Mobile Money: buy airtime / send money → open the network menu, user does amount + PIN ---
-        if (g.contains("airtime") || g.contains("top up") || g.contains("top-up") || g.contains("recharge"))
+        // --- an explicit dialed code ANYWHERE in the words wins ("check my airtime with *124#"): run_ussd runs it and
+        //     its reply is spoken. It used to fall to the airtime branch below, which read the code's digits as a
+        //     124-cedi PURCHASE (A20e 2026-09-30) — the read-back caught it, but it should never be proposed. ---
+        RE_USSD_CODE.find(raw)?.let { m ->
+            pendingResultSpeak = true
+            return call("run_ussd", JSONObject().put("code", m.groupValues[1]), "run a dialed code")
+        }
+
+        // --- §A.2 Mobile Money: buy airtime / send money → open the network menu, user does amount + PIN.
+        //     A QUESTION about airtime ("check my airtime", "how much credit do I have") is a balance code, never a buy. ---
+        if (g.contains("airtime") || g.contains("top up") || g.contains("top-up") || g.contains("recharge")) {
+            if (RE_BALANCE_ASK.containsMatchIn(g)) {
+                pendingResultSpeak = true
+                return call("run_ussd", JSONObject().put("code",
+                    com.tekyerema.core.config.AppConfig.string("connectors.telco.airtimeBalanceCode", "*124#")), "airtime balance")
+            }
             buyAirtimeDecision(raw)?.let { return it }
+        }
         if ((g.contains("send") || g.contains("transfer") || g.contains("fa")) &&
             (g.contains("money") || g.contains("cash") || g.contains("cedi") || g.contains("pesewa") || g.contains("momo") || g.contains("mobile money") || g.contains("sika")))
             sendMoneyDecision(raw)?.let { return it }
@@ -180,16 +195,7 @@ class LocalBrain : AgentBrain {
             }
         }
 
-        // --- an explicit self-care code ("dial *124#"): run_ussd runs it and its reply is spoken — never a hunt
-        //     through the dialer's screens (A20e 2026-09-30: that path ended on the wrong button and 47 s of taps).
-        //     Before RE_CALL, which would read the code as a contact's name. The engine still confirms per policy
-        //     (a money-root code is TIER3 by J-01). ---
-        RE_USSD_CODE.find(raw)?.let { m ->
-            pendingResultSpeak = true
-            return call("run_ussd", JSONObject().put("code", m.groupValues[1]), "run a dialed code")
-        }
-
-        // --- call a contact / number ---
+        // --- call a contact / number (an explicit dialed code was caught above, before the airtime branch) ---
         RE_CALL.find(raw)?.let { m ->
             val target = m.groupValues[2].trim().trimEnd('.', '!', '?')
             val digits = target.filter { it.isDigit() }
@@ -733,6 +739,8 @@ class LocalBrain : AgentBrain {
         private val RE_CALL = Regex("^\\s*$PREVERB$LEADIN(call|phone|dial|ring|get\\s+me|reach|call\\s+up|phone\\s+up|frɛ\\S*)\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** An explicit dialed code in the words ("*124#") — however the sentence around it is phrased. */
         private val RE_USSD_CODE = Regex("(\\*\\d[\\d*]*#)")
+        /** Airtime asked ABOUT, not bought: check / balance / how much / left. */
+        private val RE_BALANCE_ASK = Regex("\\bcheck\\b|\\bbalance\\b|how much|\\bleft\\b|\\bremaining\\b|do i have")
         // §6.1/§6.6 — read notifications / messages. Requires a read/check verb + messages/nkra, OR the word
         // "notifications", OR a bare "nkra" — so "send prince a message" (a send, not a read) does NOT match.
         private val RE_READ_NOTIFS = Regex("\\bnotifications?\\b|\\b(read|check|show|any|new|hwɛ|kenkan)\\b[^.?!]*\\b(messages?|nkra)\\b|^\\s*nkra\\b", RegexOption.IGNORE_CASE)
