@@ -222,9 +222,24 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     private val beams = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /** §2.4 — preload the SESSION language off the critical path so the first request isn't slow. On the
-     *  4 GB+ target the other language also stays resident (MAX_RESIDENT=2, §2.5), so a switch is instant. */
+     *  4 GB+ target the other language also stays resident (MAX_RESIDENT=2, §2.5), so a switch is instant.
+     *
+     *  Only with RAM to spare (A20e, 2026-09-30): the eager load on the airplane-mode flip ballooned past what the
+     *  phone had free and lmkd KILLED the app ("Reclaim 'com.tekyerema' … to free 1515036kB") — a dead app is worse
+     *  than a slow first offline request. Below `speech.asr.warmMinAvailMb` (default 1500) the warm is skipped and
+     *  the model loads on first use instead (the turn shows Transcribing… for the load, ~15 s once). */
     suspend fun warm(sessionLanguage: String? = null) {
-        if (ready) withContext(Dispatchers.Default) { lock.withLock { rec(langKey(sessionLanguage)) } }
+        if (!ready) return
+        val minMb = com.tekyerema.core.config.AppConfig.long("speech.asr.warmMinAvailMb", 1500L)
+        val availMb = try {
+            val am = appContext.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem / (1024 * 1024)
+        } catch (_: Throwable) { Long.MAX_VALUE }
+        if (availMb < minMb) {
+            Log.i("Tekyerema", "[ASR] warm skipped: ${availMb} MB free < $minMb MB — the model will load on first use")
+            return
+        }
+        withContext(Dispatchers.Default) { lock.withLock { rec(langKey(sessionLanguage)) } }
     }
 
     /** N-08: model load and decode are seconds of CPU work — never on the caller's (often the main) thread. The

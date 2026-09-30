@@ -83,7 +83,7 @@ object TelcoGuide {
         val step = session.flow.auto.getOrNull(session.stepDone)
         if (step != null) {
             TelcoUssd.autoAnswer(session.screen, step)?.let { n ->
-                val row = session.screen.lines().firstOrNull { it.contains(Regex("^\\s*$n\\s*[.):-]")) }?.trim()
+                val row = TelcoUssd.rows(session.screen).firstOrNull { it.first == n }?.second
                 return reply(session, n, auto = true, more = false, row = row)
             }
             if (session.morePressed < 3) TelcoUssd.moreOption(session.screen)?.let { n ->

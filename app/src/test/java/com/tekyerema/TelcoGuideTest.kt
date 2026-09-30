@@ -36,6 +36,16 @@ class TelcoGuideTest {
         assertTrue(u is TelcoUssd.Request.Unsupported && u.line.contains("never guess"))
     }
 
+    /** The A20e hands the WHOLE menu as one line (seen live 2026-09-30) — rows are found anywhere in it. */
+    @Test fun `a single-line Samsung menu still yields its rows`() {
+        val live = "Welcome to the Bundle Portal. Please select an option 1. Proceed to buy bundle (No 4G bonus) 99. More"
+        assertEquals(listOf("1" to "Proceed to buy bundle (No 4G bonus)", "99" to "More"), TelcoUssd.rows(live))
+        assertEquals("1", TelcoUssd.autoAnswer(live, Regex("(?i)buy|proceed")))
+        assertEquals("99", TelcoUssd.moreOption(live))
+        // Figures are not rows: "GHS 5.00" and "4G" never become options.
+        assertEquals(listOf("1" to "Daily GHS 5.00 bundle", "2" to "Weekly"), TelcoUssd.rows("1. Daily GHS 5.00 bundle 2. Weekly"))
+    }
+
     @Test fun `an auto-step presses only the row the LIVE screen shows`() {
         val screen = "MTN Data\n1. Proceed to buy bundle\n3. Kokrokoo\n99. More"
         assertEquals("1", TelcoUssd.autoAnswer(screen, Regex("(?i)buy|proceed")))

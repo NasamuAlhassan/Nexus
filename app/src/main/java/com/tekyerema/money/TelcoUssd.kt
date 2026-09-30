@@ -85,25 +85,25 @@ object TelcoUssd {
         }
     }
 
+    /**
+     * The menu's rows as (option number, its words). The A20e's USSD dialog hands the WHOLE menu as one line
+     * ("…select an option 1. Proceed to buy bundle (No 4G bonus) 99. More", seen live 2026-09-30), so rows are found
+     * anywhere in the text, each ending where the next "n." begins — never only at line starts.
+     */
+    fun rows(screen: String): List<Pair<String, String>> =
+        ROW.findAll(" " + screen.replace('\n', ' ')).map { it.groupValues[1] to it.groupValues[2].trim() }.toList()
+
     /** The next auto-step's row on [screen] as its option number, or null (then the guide asks). "2. Buy Data Bundles" → "2". */
-    fun autoAnswer(screen: String, step: Regex): String? {
-        for (line in screen.split('\n')) {
-            val m = ROW.find(line) ?: continue
-            if (step.containsMatchIn(m.groupValues[2])) return m.groupValues[1]
-        }
-        return null
-    }
+    fun autoAnswer(screen: String, step: Regex): String? =
+        rows(screen).firstOrNull { (_, words) -> step.containsMatchIn(words) }?.first
 
     /** The "More"/"Next" row's number on [screen], or null — pressed while a step's row isn't on this page yet. */
-    fun moreOption(screen: String): String? {
-        for (line in screen.split('\n')) {
-            val m = ROW.find(line) ?: continue
-            if (Regex("(?i)^(?:more|next)\\b").containsMatchIn(m.groupValues[2].trim())) return m.groupValues[1]
-        }
-        return null
-    }
+    fun moreOption(screen: String): String? =
+        rows(screen).firstOrNull { (_, words) -> Regex("(?i)^(?:more|next)\\b").containsMatchIn(words) }?.first
 
-    private val ROW = Regex("^\\s*(\\d{1,3})\\s*[.):-]\\s*(.+)$")
+    /** A row: a number, a separator, then its words up to the next row (or the end). "(No 4G bonus)" must not start one,
+     *  so the number can't follow a letter, '(' or a digit directly — it follows a space/start; "4G" never matches ([.):-] needed). */
+    private val ROW = Regex("(?<=[\\s])(\\d{1,3})\\s*[.):-]\\s+(.+?)(?=\\s+\\d{1,3}\\s*[.):-]\\s+|$)")
 
     /** "*138#" spoken: "star 1 3 8 hash" (BankUssd's reader — never a number). */
     fun spokenCode(code: String): String = BankUssd.spokenCode(code)
