@@ -100,6 +100,12 @@ class RunGoalReceiver : BroadcastReceiver() {
             com.tekyerema.voice.VoiceDebug.asrDiag(context.applicationContext, name, intent.getStringExtra("lang"))
             return
         }
+        // Offline English bake-off: every WAV in files/<dir>/ through ONE production recogniser. No goal submitted.
+        //   adb ... --es asr_batch bench --es lang gh_en
+        intent.getStringExtra("asr_batch")?.let { dir ->
+            com.tekyerema.voice.VoiceDebug.asrBatch(context.applicationContext, dir, intent.getStringExtra("lang"))
+            return
+        }
         // §P0 VAD probe: run the segmenter over a pushed WAV (no mic). --es vad_probe <wav> [--es scale <f>]
         intent.getStringExtra("vad_probe")?.let { name ->
             com.tekyerema.voice.VoiceDebug.vadProbe(context.applicationContext, name, intent.getStringExtra("scale"))

@@ -81,6 +81,33 @@ object VoiceDebug {
     }
 
     /**
+     * `--es asr_batch <dir> [--es lang gh_en|twi]` — transcribe every WAV in the app's files/<dir>/ with ONE on-device
+     * recogniser on the production path (the bundled model, contact/app hotwords, the language pipeline and its name
+     * corrector), logging `[ASR-BATCH] <file> ms=… raw='…' final='…'` per clip. Scores a model on the phone itself with
+     * the phone's own contacts (2026-09-30 offline English bake-off). Never submits anything to the agent. DEBUG-only.
+     */
+    fun asrBatch(ctx: Context, dir: String, lang: String?) {
+        val settings = Settings(ctx)
+        val files = File(ctx.getExternalFilesDir(null), dir).listFiles { f -> f.name.endsWith(".wav") }?.sortedBy { it.name }.orEmpty()
+        if (files.isEmpty()) { Log.w("Tekyerema", "[ASR-BATCH] no WAVs in $dir"); return }
+        val sherpa = SherpaAsr(ctx).also { it.hotwords = { SpeechVocabulary.current().entries.map { e -> e.text } } }
+        val force = lang?.takeIf { it == Lang.GH_EN || it == Lang.TWI } ?: Lang.GH_EN
+        scope.launch {
+            try { SpeechVocabulary.refresh(ctx) } catch (_: Throwable) {}
+            var total = 0L
+            for (f in files) {
+                val t0 = android.os.SystemClock.uptimeMillis()
+                val raw = sherpa.rawTranscript(f.readBytes(), force).orEmpty()
+                val ms = android.os.SystemClock.uptimeMillis() - t0
+                total += ms
+                val tr = LanguagePipeline.process(raw, settings.sessionLanguage, force, backend = sherpa.name)
+                Log.i("Tekyerema", "[ASR-BATCH] ${f.name} ms=$ms raw='$raw' final='${tr.canonical}'")
+            }
+            Log.i("Tekyerema", "[ASR-BATCH] done ${files.size} files in ${total} ms, model=${sherpa.name}")
+        }
+    }
+
+    /**
      * §P0 `--es vad_probe <wav> [--es scale <f>]` — run the REAL segmenter (Silero if loaded, else energy)
      * over a WAV's frames with no microphone, and log the decision (end reason, onset, RMS). `scale` lets us
      * simulate the quiet raw mic from a louder recording (e.g. scale=0.06). Proves the fix on real speech.

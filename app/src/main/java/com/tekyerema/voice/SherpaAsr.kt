@@ -5,8 +5,10 @@ import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OfflineWhisperModelConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -31,7 +33,10 @@ import java.nio.ByteOrder
  * Licence: CC BY-NC 4.0 (MMS/scripture-derived) — non-commercial.
  */
 class SherpaAsr(private val appContext: Context) : SpeechToRaw {
-    override val name = "sherpa-whisper-tiny(eng+twi)"
+    /** Names the models loaded so far ("sherpa-parakeet-110m-ghen(eng)"); never touches the disk (read on the main thread). */
+    override val name: String
+        get() = "sherpa-" + (loaded.entries.joinToString("+") { "${it.value}(${it.key})" }.ifEmpty { "on-device" })
+    private val loaded = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     // §2.5 — target is now a 4 GB+ RAM phone (the A20e ~600 MB ceiling is retired). Such a device holds
     // tiny-en (~273 MB) + a Twi recognizer + TTS concurrently, so keep BOTH language recognizers resident
@@ -57,10 +62,18 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         storeDir(lang)?.let { return it }
         extractBundledIfPresent(lang)
         val internal = File(internalRoot(), "$lang/asr")
-        if (File(internal, "tiny-encoder.onnx").exists()) return internal
+        if (hasModel(internal)) return internal
         val external = externalRoot()?.let { File(it, "$lang/asr") }
-        return if (external != null && File(external, "tiny-encoder.onnx").exists()) external else internal
+        return if (external != null && hasModel(external)) external else internal
     }
+
+    /** The model a directory holds: its `model.json`, else the legacy Whisper-tiny layout; null if neither. */
+    private fun specOf(dir: File): ModelSpec? =
+        File(dir, ModelSpec.FILE).takeIf { it.exists() }?.let { f -> try { ModelSpec.parse(f.readText()) } catch (_: Throwable) { null } }
+            ?: ModelSpec.LEGACY_WHISPER.takeIf { File(dir, "tiny-encoder.onnx").exists() }
+
+    /** Every file the directory's model needs is there. */
+    private fun hasModel(dir: File): Boolean = specOf(dir)?.let { s -> s.required().all { File(dir, it).exists() } } == true
 
     /** The verified-ready downloaded model dir for this language, or null. */
     private fun storeDir(lang: String): File? {
@@ -71,26 +84,31 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             else null
         } catch (t: Throwable) { null }
     }
-    private fun encoder(lang: String) = modelDir(lang)?.let { File(it, "tiny-encoder.onnx") }
-
     /**
      * §2.3 — if the APK bundles this language's model under assets/models/ondevice/<lang>/asr/, extract it
      * once to the files dir (sherpa needs a path, not an asset stream) and mark it ready. No-op when nothing
-     * is bundled (today's state: no shippable model exists yet — see Phase 9). Idempotent.
+     * is bundled. The marker records WHICH files were extracted (names + sizes): a new bundled model replaces the old
+     * one (the old marker was "1", so a model swap would never have been extracted), and files the new model doesn't
+     * use are deleted — the A20e has ~2 GB free. Idempotent.
      */
     private fun extractBundledIfPresent(lang: String) {
         val assetDir = "models/ondevice/$lang/asr"
-        val names = try { appContext.assets.list(assetDir)?.toList().orEmpty() } catch (_: Throwable) { emptyList() }
+        val names = try { appContext.assets.list(assetDir)?.toList().orEmpty().sorted() } catch (_: Throwable) { emptyList() }
         if (names.isEmpty()) return
         val dest = File(internalRoot(), "$lang/asr")
         val marker = File(dest, ".bundled")
-        if (marker.exists()) return
+        val signature = names.joinToString("\n") { n ->
+            val size = try { appContext.assets.openFd("$assetDir/$n").use { it.length } } catch (_: Throwable) { -1L }
+            "$n:$size"
+        }
+        if (marker.exists() && marker.readText() == signature) return
         try {
             dest.mkdirs()
+            dest.listFiles()?.filter { it.isFile && it.name !in names }?.forEach { it.delete() }   // the previous model's files
             for (n in names) appContext.assets.open("$assetDir/$n").use { ins ->
                 File(dest, n).outputStream().use { ins.copyTo(it) }
             }
-            marker.writeText("1")
+            marker.writeText(signature)
             Log.i("Tekyerema", "[ASR] extracted bundled $lang model (${names.size} files) to ${dest.absolutePath}")
         } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] bundled extract failed ($lang): ${t.message}") }
     }
@@ -107,13 +125,17 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
 
     override val ready: Boolean
         get() = Build.SUPPORTED_ABIS.any { it.equals("arm64-v8a", true) || it.startsWith("armeabi") } &&
-                (encoder("eng")?.exists() == true || encoder("twi")?.exists() == true)
+                (modelDir("eng")?.let(::hasModel) == true || modelDir("twi")?.let(::hasModel) == true)
+
+    /** Hotwords (contact and app names) for the next stream, when the loaded model takes them; see [ModelSpec.hotwords]. */
+    @Volatile var hotwords: () -> List<String> = { emptyList() }
 
     @Synchronized
     private fun rec(lang: String): OfflineRecognizer? {
         cache[lang]?.let { return it }
         val d = modelDir(lang) ?: return null
-        if (!File(d, "tiny-encoder.onnx").exists()) return null
+        val spec = specOf(d)?.takeIf { hasModel(d) } ?: return null
+        if (spec.type != ModelSpec.WHISPER) return recFor(lang, d, spec)
         // §3.9 per-model tail padding: Twi-type models need a small trailing pad (300) so a short word like
         // "kofi" isn't truncated to "kof"; Gh-EN uses the sherpa default. The big speedup comes from NOT
         // zero-padding the waveform to 30 s (see rawTranscript) — sherpa 1.13.8 encodes the real length.
@@ -136,11 +158,45 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
                 modelType = "whisper"),
             decodingMethod = "greedy_search")
         return try {
-            OfflineRecognizer(config = cfg).also { cache[lang] = it; Log.i("Tekyerema", "[ASR] sherpa recognizer ready ($lang)") }
+            OfflineRecognizer(config = cfg).also { cache[lang] = it; loaded[lang] = spec.label; Log.i("Tekyerema", "[ASR] sherpa recognizer ready ($lang)") }
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa load failed ($lang): ${t.message}"); null
         }
     }
+
+    /**
+     * A non-Whisper model from its `model.json` — NVIDIA NeMo transducer (Parakeet TDT) or CTC. Chosen for offline
+     * Ghanaian English by the 2026-09-30 bake-off (campaign/kaggle/offline-en-*, build/asr_bench): scored on the owner's
+     * recordings and AfriSpeech's Ghanaian speakers, timed on the A20e itself.
+     */
+    private fun recFor(lang: String, d: File, spec: ModelSpec): OfflineRecognizer? {
+        fun path(role: String) = File(d, spec.files.getValue(role)).absolutePath
+        val threads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads.${spec.type}", spec.threads ?: 4).coerceIn(1, 8)
+        val beam = spec.hotwords && spec.bpeVocab != null
+        val model = when (spec.type) {
+            ModelSpec.NEMO_TRANSDUCER -> OfflineModelConfig(
+                transducer = OfflineTransducerModelConfig(encoder = path("encoder"), decoder = path("decoder"), joiner = path("joiner")),
+                tokens = File(d, spec.tokens).absolutePath, numThreads = threads, modelType = "nemo_transducer",
+                modelingUnit = if (beam) "bpe" else "", bpeVocab = if (beam) File(d, spec.bpeVocab!!).absolutePath else "")
+            ModelSpec.NEMO_CTC -> OfflineModelConfig(
+                nemo = OfflineNemoEncDecCtcModelConfig(model = path("model")),
+                tokens = File(d, spec.tokens).absolutePath, numThreads = threads)
+            else -> { Log.w("Tekyerema", "[ASR] unknown model type '${spec.type}' in ${d.name}/model.json"); return null }
+        }
+        val cfg = OfflineRecognizerConfig(modelConfig = model,
+            decodingMethod = if (beam) "modified_beam_search" else "greedy_search", maxActivePaths = 4,
+            hotwordsScore = com.tekyerema.core.config.AppConfig.float("speech.asr.hotwordsScore", 1.5f))
+        return try {
+            val t0 = SystemClock.uptimeMillis()
+            OfflineRecognizer(config = cfg).also {
+                cache[lang] = it; loaded[lang] = spec.label; beams[lang] = beam
+                Log.i("Tekyerema", "[ASR] sherpa ${spec.label} ready ($lang, ${spec.type}, $threads threads${if (beam) ", hotwords" else ""}) in ${SystemClock.uptimeMillis() - t0} ms")
+            }
+        } catch (t: Throwable) {
+            Log.w("Tekyerema", "[ASR] sherpa load failed ($lang, ${spec.label}): ${t.message}"); null
+        }
+    }
+    private val beams = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /** §2.4 — preload the SESSION language off the critical path so the first request isn't slow. On the
      *  4 GB+ target the other language also stays resident (MAX_RESIDENT=2, §2.5), so a switch is instant. */
@@ -183,7 +239,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             voice.putIfAbsent("asrAudioMs", raw.size * 1000L / sr); voice.putIfAbsent("asrDecodeMs", decodeMs)
             voice.putIfAbsent("asrModel", lang)
         }
-        Log.i("Tekyerema", "[ASR] sherpa-tiny($lang) ${raw.size * 1000L / sr}ms audio → ${decodeMs}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
+        Log.i("Tekyerema", "[ASR] sherpa-${loaded[lang] ?: "?"}($lang) ${raw.size * 1000L / sr}ms audio → ${decodeMs}ms -> '${com.tekyerema.core.Privacy.content(out.take(60))}'")   // J-15: never a PIN in logcat
         return out.ifEmpty { null }
     }
 
@@ -191,7 +247,8 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     private fun decodeSamples(lang: String, raw: FloatArray, sr: Int): String? {
         val r = rec(lang) ?: return null
         val samples = padFor(lang, raw, sr)                       // §3.9 per-model padding (not a fixed 30 s)
-        val s = r.createStream()
+        val words = if (beams[lang] == true) ModelSpec.hotwordLine(try { hotwords() } catch (_: Throwable) { emptyList() }) else ""
+        val s = if (words.isNotEmpty()) r.createStream(words) else r.createStream()
         return try {
             s.acceptWaveform(samples, sr)
             r.decode(s)

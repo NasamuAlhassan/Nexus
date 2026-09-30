@@ -89,7 +89,7 @@ object VoiceEngine {
         var onLang: (String) -> Unit = {}
         var forced: () -> String? = { plan.pinnedLanguage }
         val built = com.tekyerema.voice.io.VoiceLayer.build(plan, object : com.tekyerema.voice.io.VoiceLayer.Factory<SherpaAsr, com.tekyerema.language.LanguageLayer.Registries> {
-            override fun onDeviceAsr() = SherpaAsr(app).also { sherpa = it }
+            override fun onDeviceAsr() = SherpaAsr(app).also { sherpa = it; it.hotwords = { SpeechVocabulary.current().entries.map { e -> e.text } } }
             override fun languageLayer() = com.tekyerema.language.LanguageLayer.build(app)
             override fun systemInput(): com.tekyerema.voice.io.VoiceInput {
                 val cfg = { com.tekyerema.voice.io.SystemSpeechConfig.fromConfig() }
