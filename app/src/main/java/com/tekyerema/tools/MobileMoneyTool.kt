@@ -166,8 +166,10 @@ object MobileMoneyTool : Tool {
     // wording matches reality: we OPEN Mobile Money, the user finishes the amount and PIN).
     override fun confirmationPrompt(args: JSONObject): String {
         val amt = args.str("_amount")?.let { "$it cedis" } ?: "money"
+        // No amount said: never "Buy money of airtime" (A20e 2026-09-29, offline) — the user picks the amount in the menu.
         if (args.str("_kind") == "buy_airtime")
-            return "Buy $amt of airtime with Mobile Money? I'll go through the menu; you'll enter your PIN."
+            return if (args.str("_amount") == null) "Open Mobile Money to buy airtime? You'll choose the amount in the menu and enter your PIN."
+            else "Buy $amt of airtime with Mobile Money? I'll go through the menu; you'll enter your PIN."
         // Money safety (2026-09-29): a number is read in groups with its network ("0 5 5, 3 2 3, 8 0 1 1, an MTN number"),
         // and an unknown prefix is said so the user checks it.
         val name = args.str("_recipient")?.trim()?.takeIf { it.isNotEmpty() }

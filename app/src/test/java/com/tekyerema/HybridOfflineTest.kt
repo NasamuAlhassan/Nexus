@@ -370,6 +370,26 @@ class HybridOfflineTest {
         assertEquals("hello", LocalBrain.parseSms("text Prince saying hello")!!.message)
     }
 
+    /** Owner, A20e 2026-09-29 offline: "send hi to Prince on WhatsApp" had no local parse and was refused. */
+    @Test fun send_a_few_words_to_someone_is_a_text() {
+        val p = LocalBrain.parseSms("Send hi to Prince on WhatsApp.")!!
+        assertEquals("Prince", p.contact); assertEquals("hi", p.message); assertTrue(p.whatsApp)
+        val q = LocalBrain.parseSms("I want you to send “I'm on my way” to Ama")!!
+        assertEquals("Ama", q.contact); assertEquals("I'm on my way", q.message); assertFalse(q.whatsApp)
+        assertEquals("0552093690", LocalBrain.parseSms("send good morning to 055 209 3690")!!.number)
+        for (notWords in listOf("send 50 cedis to Ama", "send money to Kofi", "send the PDF to Prince", "send it to Ama",
+                "send my location to Kofi", "send a text to Ama", "send photos to Ama on WhatsApp", "send airtime to Kofi",
+                "send hi to me", "send this to ChatGPT"))
+            assertNull(notWords, LocalBrain.parseSms(notWords))
+    }
+
+    @Test fun offline_send_hi_on_whatsapp_is_done_locally() = runBlocking {
+        val t = tool(router(null, false).decide(ctx("send hi to Prince on WhatsApp")))
+        assertEquals("send_sms", t.name)
+        assertEquals("Prince", t.args.getString("contact")); assertEquals("hi", t.args.getString("message"))
+        assertEquals("whatsapp", t.args.getString("via"))
+    }
+
     @Test fun install_requests_go_straight_to_install_app() {
         val t = LocalBrain::installTarget
         assertEquals("Claude", t("install the Claude app from the Play Store"))

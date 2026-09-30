@@ -342,6 +342,14 @@ class AppTasksTest {
         assertEquals(FastIntent.PlayMusic(null, "stonebwoy", null), c("play songs by Stonebwoy"))
     }
 
+    /** A20e 2026-09-30: "Play all" restarted the song already playing (the list's first); that is playing, not a failure. */
+    @Test fun the_same_song_from_the_top_counts_as_started() {
+        assertTrue(MediaSessions.restarted(61_000L, 900L))
+        assertFalse("still going on from where it was", MediaSessions.restarted(61_000L, 64_000L))
+        assertFalse("had only just started — can't tell", MediaSessions.restarted(2_000L, 500L))
+        assertFalse(MediaSessions.restarted(null, 500L)); assertFalse(MediaSessions.restarted(61_000L, null))
+    }
+
     @Test fun youtube_musics_library_tab_is_the_lowest_button_named_library() {
         val s = snap("com.google.android.apps.youtube.music",
             el("Library", top = 300), el("Home", top = 1368, left = 0, right = 180), el("Library", top = 1368, left = 540, right = 720),
@@ -349,6 +357,14 @@ class AppTasksTest {
         val tab = PlayMusicTool.libraryTab(s)
         assertEquals(1368, tab?.bounds?.top); assertEquals(540, tab?.bounds?.left); assertTrue(tab!!.clickable)
         assertNull(PlayMusicTool.libraryTab(snap("com.google.android.apps.youtube.music", el("Home", top = 1368))))
+        // A20e 2026-09-30, the Downloaded songs page: the tab words are plain text, the buttons around them unnamed.
+        val plain = PlayMusicTool.libraryTab(snap("com.google.android.apps.youtube.music",
+            el("Library", top = 150, clickable = false),
+            el("Home", top = 1384, left = 24, right = 156, clickable = false), el("Samples", top = 1384, left = 204, right = 336, clickable = false),
+            el("Library", top = 1384, left = 564, right = 696, clickable = false)))
+        assertEquals(564, plain?.bounds?.left); assertEquals(1384, plain?.bounds?.top)
+        assertNull("a page title is not the tab", PlayMusicTool.libraryTab(snap("com.google.android.apps.youtube.music",
+            el("Library", top = 150, clickable = false), el("Home", top = 1384, clickable = false))))
     }
 
     @Test fun fast_path_asks_assistant_apps_with_the_users_own_words() {

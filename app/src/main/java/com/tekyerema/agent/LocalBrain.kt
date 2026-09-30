@@ -599,7 +599,7 @@ class LocalBrain : AgentBrain {
         fun parseSms(raw: String): Sms? {
             val s = raw.trim().trimEnd('.', '!').replace(Regex("\\s+"), " ")
             val m = SMS_STRONG.firstNotNullOfOrNull { it.find(s) } ?: SMS_WEAK.firstNotNullOfOrNull { it.find(s) }
-                ?: return parseRelay(s)
+                ?: return parseSendWords(s) ?: parseRelay(s)
             var who = m.groupValues[1].trim().removePrefix("to ").trim()
             var whatsApp = RE_VIA_WHATSAPP.containsMatchIn(s.substring(0, m.groups[2]!!.range.first))
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
@@ -608,6 +608,24 @@ class LocalBrain : AgentBrain {
             val digits = who.filter { it.isDigit() }
             val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
             return Sms(if (isNumber) null else who, if (isNumber) (if (who.trim().startsWith("+")) "+$digits" else digits) else null, msg, whatsApp)
+        }
+
+        /**
+         * "send hi to Prince on WhatsApp" / "send “I'm on my way” to Ama": a few words sent TO someone. Offline this had no
+         * parse and the request was refused (A20e 2026-09-29). Never money, a file, a place or a pronoun ("send it / the
+         * PDF / my location / 50 cedis to Ama") — those go to their own handlers or the planner. Pure.
+         */
+        internal fun parseSendWords(s: String): Sms? {
+            val m = RE_SEND_WORDS.matchEntire(s) ?: return null
+            val msg = m.groupValues[1].trim().trim('"', '\'', '“', '”').trim()
+            var who = m.groupValues[2].trim()
+            if (msg.isEmpty() || msg.split(' ').size > 6 || RE_NOT_WORDS.containsMatchIn(msg)) return null
+            var whatsApp = false
+            RE_VIA_TAIL.find(who)?.let { t -> whatsApp = t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
+            if (who.isEmpty() || who.split(' ').size > 4 || RE_NOT_A_PERSON.matches(who.lowercase())) return null
+            val digits = who.filter { it.isDigit() }
+            val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
+            return Sms(if (isNumber) null else who, if (isNumber) (if (who.startsWith("+")) "+$digits" else digits) else null, msg, whatsApp)
         }
 
         /**
@@ -778,6 +796,11 @@ class LocalBrain : AgentBrain {
         private val SMS_STRONG = smsPatterns(MARK_STRONG)
         private val SMS_WEAK = smsPatterns(MARK_WEAK)
         private val RE_VIA_WHATSAPP = Regex("\\bwhatsapp\\b", RegexOption.IGNORE_CASE)
+        private val RE_SEND_WORDS = Regex("^\\s*$LEADIN(?:send)\\s+(.+?)\\s+to\\s+(.+)$", RegexOption.IGNORE_CASE)
+        // What "send X to Y" means when X is NOT the words of a message: money, a file or thing, a pronoun, a number.
+        private val RE_NOT_WORDS = Regex("(?i)^(?:an?|the|my|your|his|her|our|their|this|that|these|those|it|them|some|all|me|him|us)\\b|" +
+            "\\d|\\b(?:money|cash|momo|mobile money|airtime|cedis?|pesewas?|ghs|gh₵|credit|bundles?|data|photos?|pictures?|pics?|images?|" +
+            "videos?|files?|pdfs?|documents?|docs?|locations?|contacts?|voice ?notes?|audios?|songs?|links?|emails?|messages?|texts?|sms)\\b")
         // "text|message|whatsapp|tell|ask <who> [on WhatsApp] to <request>" — the request must start with a verb-like word
         // (not "to Ama"), so "text Ama to say hi" is a relay and "send a text to Ama" never reaches here.
         private val RE_RELAY = Regex("^\\s*$LEADIN(text|sms|message|whatsapp|tell|ask)\\s+(.+?)(\\s+(?:on|via|through|by)\\s+(?:whatsapp|sms|text))?\\s+to\\s+" +

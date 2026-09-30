@@ -28,6 +28,20 @@ object MediaSessions {
         }
     } catch (_: SecurityException) { null } catch (_: Throwable) { null }
 
+    /** How far [pkg]'s player is into its track, in ms (carried forward to now while playing), or null. */
+    fun positionMs(context: android.content.Context, pkg: String): Long? = try {
+        val msm = context.getSystemService(android.media.session.MediaSessionManager::class.java)
+        val listener = android.content.ComponentName(context, com.tekyerema.notifications.TekyeremaNotificationListener::class.java)
+        msm?.getActiveSessions(listener)?.firstOrNull { it.packageName == pkg }?.playbackState?.takeIf { it.position >= 0 }?.let { st ->
+            if (st.state != android.media.session.PlaybackState.STATE_PLAYING) st.position
+            else st.position + ((android.os.SystemClock.elapsedRealtime() - st.lastPositionUpdateTime) * st.playbackSpeed).toLong()
+        }
+    } catch (_: SecurityException) { null } catch (_: Throwable) { null }
+
+    /** The same track started again from the top: [before] well into it, [now] back near the start. Pure. */
+    fun restarted(before: Long?, now: Long?): Boolean =
+        before != null && now != null && before >= 5_000L && now < before - 3_000L && now < 20_000L
+
     /** The playing track, from [pkg] when given. */
     fun playing(tracks: List<Track>?, pkg: String? = null): Track? =
         tracks?.firstOrNull { it.playing && (pkg == null || it.pkg == pkg) }
@@ -161,6 +175,9 @@ object PlayMusicTool : Tool {
         // What was already playing (maybe a search from a minute ago): only a DIFFERENT song, or a start from silence,
         // proves the press worked.
         val before = MediaSessions.playing(MediaSessions.current(ctx.appContext), YT_MUSIC)
+        // …or the SAME song from the top: the list's first song was the one already playing, and "Play all" restarted it
+        // (A20e 2026-09-30: music played, but the tool said nothing was playing).
+        val beforeAt = before?.let { MediaSessions.positionMs(ctx.appContext, YT_MUSIC) }
         if (collection == "liked") {
             try {
                 ctx.appContext.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse("https://music.youtube.com/playlist?list=LM"))
@@ -216,7 +233,9 @@ object PlayMusicTool : Tool {
             ctrl.clickElement(go.id)
             stage("pressed '${go.label}'")
         }
-        val playing = awaitPlaying(ctx, YT_MUSIC, wait) { t -> before == null || t != before }
+        val playing = awaitPlaying(ctx, YT_MUSIC, wait) { t ->
+            before == null || t != before || MediaSessions.restarted(beforeAt, MediaSessions.positionMs(ctx.appContext, YT_MUSIC))
+        }
         stage(if (playing != null) "playing" else "not playing")
         return if (playing != null) ToolResult(true, "Playing $label in YouTube Music. Now playing ${MediaSessions.words(playing) ?: "your music"}.",
             JSONObject().put("playing", true).put("collection", collection), channel = "a11y")
@@ -225,9 +244,17 @@ object PlayMusicTool : Tool {
     }
 
     /** YouTube Music's Library tab: its label is hidden (zero-size) in the tree, so it is the tab button whose label
-     *  names it (the snapshot gives such a button its child's label), lowest on screen. Pure. */
-    internal fun libraryTab(s: UiSnapshot): com.tekyerema.accessibility.UiElement? =
-        s.elements.filter { it.clickable && it.label?.trim().equals("library", true) && !it.bounds.isEmpty() }.maxByOrNull { it.bounds.top }
+     *  names it (the snapshot gives such a button its child's label), lowest on screen. Other times the tab's word is
+     *  plain text and the button around it has no name (A20e 2026-09-30, on the Downloaded songs page: "Library" at
+     *  y 1384 beside "Home", neither tappable, so the second "play my downloads" said there was no Library tab): then
+     *  the tab is the "Library" text on the same row as "Home" (pressElement taps it). Pure. */
+    internal fun libraryTab(s: UiSnapshot): com.tekyerema.accessibility.UiElement? {
+        fun named(n: String) = s.elements.filter { it.label?.trim().equals(n, true) && !it.bounds.isEmpty() }
+        named("library").filter { it.clickable }.maxByOrNull { it.bounds.top }?.let { return it }
+        val homes = named("home")
+        return named("library").filter { l -> homes.any { h -> kotlin.math.abs(h.bounds.centerY - l.bounds.centerY) < 40 } }
+            .maxByOrNull { it.bounds.top }
+    }
 
     private suspend fun awaitPlaying(ctx: ToolContext, pkg: String?, timeoutMs: Long,
                                      accept: (MediaSessions.Track) -> Boolean = { true }): MediaSessions.Track? {

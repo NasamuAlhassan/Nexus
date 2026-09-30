@@ -107,6 +107,22 @@ class VoiceLogicTest {
         assertTrue(money.contains("Adwoa") && money.contains("anum zero"))   // 5,0
     }
 
+    /** A20e 2026-09-29, offline "buy airtime for me" (no amount) was asked "Buy money of airtime with Mobile Money?". */
+    @Test fun airtime_with_no_amount_is_asked_plainly() {
+        val t = com.tekyerema.voice.ConfirmTemplates
+        val en = com.tekyerema.tools.MobileMoneyTool.confirmationPrompt(org.json.JSONObject().put("_kind", "buy_airtime"))
+        assertFalse(en, en.contains("money of airtime"))
+        assertTrue(en, en.startsWith("Open Mobile Money to buy airtime?") && en.contains("choose the amount"))
+        val five = com.tekyerema.tools.MobileMoneyTool.confirmationPrompt(org.json.JSONObject().put("_kind", "buy_airtime").put("_amount", "5"))
+        assertTrue(five, five.startsWith("Buy 5 cedis of airtime"))
+        val tw = t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.BUY_AIRTIME))
+        assertFalse(tw, tw.contains("cedi"))
+        assertTrue(tw, tw.startsWith("Menbue Mobile Money sɛ wobɛtɔ airtime?"))
+        assertTrue(t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.BUY_AIRTIME, amount = "5")).contains("airtime cedi anum?"))
+        val send = t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY, name = "Adwoa"))
+        assertTrue(send, send.contains("wode sika bɛkɔma Adwoa"))
+    }
+
     // ---------------------------------------------------------------- Verbalize (§23)
     @Test fun verbalize_speaks_quantities_but_spells_long_digit_runs() {
         assertTrue(Verbalize.apply("You have 1500 cedis").contains("one thousand five hundred"))

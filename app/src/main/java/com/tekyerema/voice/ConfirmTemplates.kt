@@ -53,7 +53,10 @@ object ConfirmTemplates {
             .map { if (it == '+') "plus" else it.toString() }
             .joinToString(" ")
 
-    private const val TWI_YESNO = " Ka aane anaa daabi."   // "Say yes or no." [owner: verify]
+    /** "cedi <digits>", or null when no amount was said. */
+    private fun cedis(amount: String?): String? = amount?.takeIf { a -> a.any { it.isDigit() } }?.let { "cedi ${twiDigits(it)}" }
+
+    private const val TWI_YESNO =" Ka aane anaa daabi."   // "Say yes or no." [owner: verify]
 
     /** The Twi confirmation question for [spec], slots filled verbatim / digit-by-digit. */
     fun twi(spec: Spec): String {
@@ -63,11 +66,12 @@ object ConfirmTemplates {
                 else "Wopɛ sɛ mefrɛ ${twiNumber(spec.number.orEmpty())}?"
             // §P2.1 — the app OPENS Mobile Money; the user finishes the amount + PIN. Say that, don't imply
             // the app itself pays. [owner: verify Twi]
+            // No amount said: no empty "cedi" slot — "sika" (money), and the user picks the amount in the menu.
             Spec.Kind.SEND_MONEY ->
-                "Menbue Mobile Money sɛ wode cedi ${twiDigits(spec.amount.orEmpty())} bɛkɔma " +
+                "Menbue Mobile Money sɛ wode ${cedis(spec.amount) ?: "sika"} bɛkɔma " +
                     (spec.name?.takeIf { it.isNotBlank() } ?: twiNumber(spec.number.orEmpty())) +
                     "? Wo ankasa na wobɛhyɛ PIN."
-            Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime cedi ${twiDigits(spec.amount.orEmpty())}? Wo ankasa na wobɛhyɛ PIN."
+            Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime${cedis(spec.amount)?.let { " $it" }.orEmpty()}? Wo ankasa na wobɛhyɛ PIN."
             // K-05: the words themselves are read back too (verbatim), not only the recipient.
             Spec.Kind.SEND_MESSAGE -> "Wopɛ sɛ mesoma nkra kɔ ${spec.name ?: "no"} hɔ?" +
                 (spec.message?.takeIf { it.isNotBlank() }?.let { " Nkra no se: “$it”." } ?: "")
