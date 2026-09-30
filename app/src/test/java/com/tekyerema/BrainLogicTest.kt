@@ -200,6 +200,16 @@ class BrainLogicTest {
         val n = tool(decide(LocalBrain(), "call 0552093690")); assertEquals("0552093690", n.args.getString("number"))
     }
 
+    /** A BARE app name only OPENS the app — the cloud, given just "camera", took a selfie unasked (A20e 2026-09-30). */
+    @Test fun local_bare_app_name_opens_only() {
+        val c = tool(decide(LocalBrain(), "camera"))
+        assertEquals("open_app", c.name); assertEquals("camera", c.args.getString("app"))
+        assertEquals("open_app", tool(decide(LocalBrain(), "The Settings.")).name)
+        // Words with a verb or extra intent never fall into the bare-name open (the fast path owns "take a photo").
+        val photo = decide(LocalBrain(), "take a photo")
+        assertFalse((photo as? AgentDecision.CallTool)?.name == "open_app")
+    }
+
     /** A spoken dialed code goes to run_ussd — never read as a contact's name, never a hunt through the dialer's
      *  screens (A20e 2026-09-30: that ended on the wrong button after 47 s). */
     @Test fun local_dialed_code_goes_to_run_ussd() {

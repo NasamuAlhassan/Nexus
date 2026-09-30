@@ -31,6 +31,22 @@ class ConsentTargetsTest {
     private fun tier(label: String, role: String = "Button") = TargetSemantics.classify("tap", btn(1, label, role), null, false).tier
     private val screen = UiSnapshot("com.example.app", null, emptyList(), 0L, PerceptionRoute("tree", "test"))
 
+    /** A SYSTEM permission dialog: the user hears WHAT is asked and WHICH button — "Allow “Don't allow”?" told a
+     *  blind user neither, and their yes DENIED Telegram contacts access unknowingly (A20e 2026-09-30). */
+    @Test fun a_permission_dialog_read_back_names_the_ask_and_the_button() {
+        val dialog = UiSnapshot("com.google.android.permissioncontroller", null,
+            listOf(UiElement(0, "TextView", "Allow Telegram to access your contacts?", Box(0, 0, 600, 90), clickable = false),
+                btn(1, "Allow"), btn(2, "Don't allow")),
+            0L, PerceptionRoute("tree", "test"))
+        val deny = ActionSemantics.confirmation("tap", btn(2, "Don't allow"), null, dialog)!!
+        assertTrue(deny, deny.contains("Allow Telegram to access your contacts?") && deny.contains("Tap “Don't allow”?"))
+        val allow = ActionSemantics.confirmation("tap", btn(1, "Allow"), null, dialog)!!
+        assertTrue(allow, allow.contains("access your contacts") && allow.contains("Tap “Allow”?"))
+        // The camera's shutter is consequential: a photo taken unasked is a real-world act (A20e: "camera" → a selfie).
+        assertEquals(RiskTier.TIER2, tier("Take picture"))
+        assertEquals(RiskTier.TIER2, tier("Shutter"))
+    }
+
     @Test fun signing_in_up_and_sharing_an_account_are_confirmed() {
         for (l in listOf("Sign in", "Sign in with Google", "Log in", "Login", "Sign up", "Register", "Create account",
                 "Create an account", "Continue with Google", "Continue with Facebook", "Link a device", "Use another account"))

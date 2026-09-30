@@ -215,6 +215,14 @@ class LocalBrain : AgentBrain {
         }
 
         // --- launch an app ---
+        // A BARE app name ("camera") means open it — nothing more. Handed to the cloud, "camera" opened the
+        // camera and then took a selfie unasked (A20e 2026-09-30).
+        RE_BARE_APP.find(g.trimEnd('.', '!', '?').trim())?.let { m ->
+            val app = m.groupValues[1]
+            doneLine = if (twi) "Mabue no." else "$app is open."
+            return call("open_app", JSONObject().put("app", app), "launch app (bare name)")
+        }
+
         RE_OPEN.find(raw)?.let { m ->
             val app = m.groupValues[3].trim().trimEnd('.', '!', '?')
             // Guard against treating a whole second instruction as an app name (§1.9). An app label is a
@@ -739,6 +747,10 @@ class LocalBrain : AgentBrain {
         private val RE_CALL = Regex("^\\s*$PREVERB$LEADIN(call|phone|dial|ring|get\\s+me|reach|call\\s+up|phone\\s+up|frɛ\\S*)\\s+(.+)$", RegexOption.IGNORE_CASE)
         /** An explicit dialed code in the words ("*124#") — however the sentence around it is phrased. */
         private val RE_USSD_CODE = Regex("(\\*\\d[\\d*]*#)")
+        /** A goal that is ONLY an app's name: opened, never acted in. */
+        private val RE_BARE_APP = Regex("^(?:the\\s+|my\\s+)?(camera|gallery|photos|settings|calculator|clock|calendar|" +
+            "contacts|files|whatsapp|telegram|youtube|chrome|maps|instagram|facebook|tiktok|spotify|gmail|recorder|notes|" +
+            "play store|playstore|messages)$", RegexOption.IGNORE_CASE)
         /** Airtime asked ABOUT, not bought: check / balance / how much / left. */
         private val RE_BALANCE_ASK = Regex("\\bcheck\\b|\\bbalance\\b|how much|\\bleft\\b|\\bremaining\\b|do i have")
         // §6.1/§6.6 — read notifications / messages. Requires a read/check verb + messages/nkra, OR the word

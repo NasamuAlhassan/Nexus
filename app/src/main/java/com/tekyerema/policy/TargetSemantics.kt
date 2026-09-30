@@ -18,7 +18,8 @@ object TargetSemantics {
      *  confirmed by the consent classes, whose read-back says what installing means.) */
     val consequential = Regex(
         "\\b(send|pay|transfer|delete|remove|confirm|call|buy|purchase|checkout|submit|post|share|forward|" +
-            "archive|block|report|unsubscribe|sign out|log out|logout|reset|format|erase|uninstall|accept|agree|allow)\\b",
+            "archive|block|report|unsubscribe|sign out|log out|logout|reset|format|erase|uninstall|accept|agree|allow|" +
+            "shutter|capture|take (?:a )?(?:photo|picture|selfie)|record)\\b",
         RegexOption.IGNORE_CASE
     )
 

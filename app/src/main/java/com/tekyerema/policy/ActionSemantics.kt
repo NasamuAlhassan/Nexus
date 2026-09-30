@@ -15,6 +15,9 @@ import com.tekyerema.accessibility.UiSnapshot
 object ActionSemantics {
 
     private val SEND_VERBS = setOf("send", "reply", "post", "share", "forward")
+    /** The system's runtime-permission dialogs (Google's and the older installer's). */
+    private val PERMISSION_PKGS = setOf("com.google.android.permissioncontroller", "com.android.permissioncontroller",
+        "com.android.packageinstaller", "com.samsung.android.permissioncontroller")
 
     /** A send read-back with neither recipient nor message — the caller re-reads the screen before settling for it. */
     const val BARE_SEND = "Send this message?"
@@ -103,6 +106,16 @@ object ActionSemantics {
             val stripped = text.replaceFirst(Regex("(?i)^call\\s+"), "").trim()
             val who = requestedLabel?.trim()?.ifBlank { null } ?: recipient ?: stripped.ifBlank { null }
             return "Call ${who ?: "this contact"}?"
+        }
+        // A SYSTEM PERMISSION dialog: the user must hear WHAT is being asked and WHICH button will be pressed —
+        // the generic line below produced "Allow “Don't allow”?", which told a blind user neither, and their yes
+        // DENIED Telegram contacts access without them knowing (A20e 2026-09-30).
+        if (primitive == "tap" && before?.appPackage in PERMISSION_PKGS) {
+            val q = before?.elements?.mapNotNull { it.label?.trim() }
+                ?.firstOrNull { it.length in 12..160 && Regex("(?i)\\ballow\\b.+\\bto\\b").containsMatchIn(it) }
+                ?: before?.screenTitle?.takeIf { !it.isNullOrBlank() }
+            val ask = q?.trimEnd('?')?.let { "The phone is asking: “$it?” " } ?: "The phone is asking for a permission. "
+            return ask + "Tap “${text.trim().take(40)}”?"
         }
         if (verb != null && text.isNotBlank()) {
             return "${verb.replaceFirstChar { it.uppercaseChar() }} “${text.take(60)}”?"
