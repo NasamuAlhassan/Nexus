@@ -180,6 +180,15 @@ class LocalBrain : AgentBrain {
             }
         }
 
+        // --- an explicit self-care code ("dial *124#"): run_ussd runs it and its reply is spoken — never a hunt
+        //     through the dialer's screens (A20e 2026-09-30: that path ended on the wrong button and 47 s of taps).
+        //     Before RE_CALL, which would read the code as a contact's name. The engine still confirms per policy
+        //     (a money-root code is TIER3 by J-01). ---
+        RE_USSD_CODE.find(raw)?.let { m ->
+            pendingResultSpeak = true
+            return call("run_ussd", JSONObject().put("code", m.groupValues[1]), "run a dialed code")
+        }
+
         // --- call a contact / number ---
         RE_CALL.find(raw)?.let { m ->
             val target = m.groupValues[2].trim().trimEnd('.', '!', '?')
@@ -722,6 +731,8 @@ class LocalBrain : AgentBrain {
         // -ing forms too ("opening the calculator." went to the cloud, which paged the home screen hunting the icon).
         private val RE_OPEN = Regex("^\\s*$PREVERB$LEADIN(open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s*to|goto|bring\\s*up|pull\\s*up|show\\s*me|take\\s*me\\s*to|put\\s*on|bue\\S*|bua\\S*)\\s+(?!hours?\\b|times?\\b)(?:up\\s+)?(the\\s+|my\\s+)?(.+?)(?:\\s+app)?$", RegexOption.IGNORE_CASE)
         private val RE_CALL = Regex("^\\s*$PREVERB$LEADIN(call|phone|dial|ring|get\\s+me|reach|call\\s+up|phone\\s+up|frɛ\\S*)\\s+(.+)$", RegexOption.IGNORE_CASE)
+        /** An explicit dialed code in the words ("*124#") — however the sentence around it is phrased. */
+        private val RE_USSD_CODE = Regex("(\\*\\d[\\d*]*#)")
         // §6.1/§6.6 — read notifications / messages. Requires a read/check verb + messages/nkra, OR the word
         // "notifications", OR a bare "nkra" — so "send prince a message" (a send, not a read) does NOT match.
         private val RE_READ_NOTIFS = Regex("\\bnotifications?\\b|\\b(read|check|show|any|new|hwɛ|kenkan)\\b[^.?!]*\\b(messages?|nkra)\\b|^\\s*nkra\\b", RegexOption.IGNORE_CASE)

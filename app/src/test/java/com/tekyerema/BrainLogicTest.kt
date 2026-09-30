@@ -200,6 +200,16 @@ class BrainLogicTest {
         val n = tool(decide(LocalBrain(), "call 0552093690")); assertEquals("0552093690", n.args.getString("number"))
     }
 
+    /** A spoken dialed code goes to run_ussd — never read as a contact's name, never a hunt through the dialer's
+     *  screens (A20e 2026-09-30: that ended on the wrong button after 47 s). */
+    @Test fun local_dialed_code_goes_to_run_ussd() {
+        val d = tool(decide(LocalBrain(), "dial *124# on the phone app"))
+        assertEquals("run_ussd", d.name); assertEquals("*124#", d.args.getString("code"))
+        assertEquals("*156#", tool(decide(LocalBrain(), "check *156# for me")).args.getString("code"))
+        // Words without an explicit code stay a call.
+        assertEquals("make_call", tool(decide(LocalBrain(), "dial Prince")).name)
+    }
+
     @Test fun local_navigation_keys() {
         assertEquals("back", tool(decide(LocalBrain(), "go back")).args.getString("key"))
         assertEquals("home", tool(decide(LocalBrain(), "home")).args.getString("key"))
