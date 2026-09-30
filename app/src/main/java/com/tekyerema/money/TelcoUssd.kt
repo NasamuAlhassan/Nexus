@@ -71,9 +71,10 @@ object TelcoUssd {
             // "check my data balance", "how much data do I have left" — MTN: *138# → buy → (More…) → Check Bundle Balance.
             Regex("\\bdata balance\\b|how much data\\b|\\bbundle balance\\b|data (?:do i have|left|remaining)").containsMatchIn(g) ->
                 open("data_balance", net.data, listOf(BUY, BALANCE), "your ${net.name} data balance", "its data menu")
-            // "buy a mashup/pulse bundle" — MTN's no-expiry voice+data combos (*567#, HIGH).
+            // "buy a mashup/pulse bundle" — MTN's no-expiry voice+data combos. The LIVE *567# menu (A20e 2026-09-30)
+            // goes buy → "MashUp for Self / Others" directly; steps are skippable anyway, but the plan matches reality.
             Regex("\\bmash ?up\\b|\\bpulse\\b|\\bfuse\\b").containsMatchIn(g) ->
-                open("mashup", net.mashup, listOf(BUY, DATA_ROW, if (other) OTHER else SELF), "a ${net.name} Mashup bundle", "a combo-bundle menu")
+                open("mashup", net.mashup, listOf(BUY, if (other) OTHER else SELF), "a ${net.name} Mashup bundle", "a combo-bundle menu")
             // "buy data", "buy a data bundle", "I need internet bundles" (airtime/credit stays with Mobile Money).
             Regex("\\b(?:buy|purchase|get|need|want)\\b.{0,24}\\b(?:data|internet|bundles?)\\b|\\bdata bundle\\b").containsMatchIn(g) &&
                 !Regex("\\bairtime\\b|\\bcredit\\b|\\btop.?up\\b").containsMatchIn(g) ->

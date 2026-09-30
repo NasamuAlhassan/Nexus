@@ -20,10 +20,13 @@ import org.json.JSONObject
  */
 object TelcoSession {
     data class View(val flow: TelcoUssd.Flow, val screen: String, val kind: BankUssd.ScreenKind, val openedAt: Long, val at: Long,
-                    /** How many auto-steps have been taken (index into flow.auto). */
+                    /** How many auto-steps have been taken (index into flow.auto; a lookahead match jumps it forward). */
                     val stepDone: Int = 0,
                     /** "More" presses spent looking for the CURRENT step's row (bounded — a loop must end as guided). */
-                    val morePressed: Int = 0)
+                    val morePressed: Int = 0,
+                    /** The USER answered a screen by voice: from then on the walk stays guided — the autopilot never
+                     *  takes the wheel back (live A20e 2026-09-30: it resumed a stale step and looped into More). */
+                    val userDrove: Boolean = false)
 
     const val MAX_MS = 10 * 60_000L
     @Volatile private var view: View? = null
@@ -32,11 +35,14 @@ object TelcoSession {
         view = View(flow, screen, kind, now, now)
     }
 
-    fun screen(screen: String, kind: BankUssd.ScreenKind, auto: Boolean, more: Boolean, now: Long = System.currentTimeMillis()) {
+    fun screen(screen: String, kind: BankUssd.ScreenKind, auto: Boolean, more: Boolean, stepIdx: Int = -1,
+               user: Boolean = false, now: Long = System.currentTimeMillis()) {
         view = view?.let {
             it.copy(screen = screen, kind = kind, at = now,
-                stepDone = if (auto && !more) it.stepDone + 1 else it.stepDone,
-                morePressed = if (more) it.morePressed + 1 else 0)
+                // A matched step (possibly a LATER one than expected — menus drift) moves the walk past itself.
+                stepDone = if (auto && !more && stepIdx >= 0) maxOf(it.stepDone, stepIdx + 1) else it.stepDone,
+                morePressed = if (more) it.morePressed + 1 else 0,
+                userDrove = it.userDrove || user)
         }
     }
 
@@ -66,6 +72,7 @@ object TelcoUssdTool : Tool {
     const val ARG_AUTO = "_auto"
     const val ARG_MORE = "_more"
     const val ARG_ROW = "_row"
+    const val ARG_STEP = "_step"
     const val ARG_SCREEN = "_screen"
     const val OPEN = "open"
     const val REPLY = "reply"
@@ -141,7 +148,7 @@ object TelcoUssdTool : Tool {
         // press only lands on the screen its row was matched on — a menu that moved on is read afresh, never pressed blind.
         val kindNow = BankUssd.kind(now.text, now.hasInput, now.masked)
         if (kindNow != BankUssd.ScreenKind.MENU || (auto && now.text != session.screen)) {
-            TelcoSession.screen(now.text, kindNow, auto = false, more = false)
+            TelcoSession.screen(now.text, kindNow, auto = true, more = false)   // a re-read, nobody pressed: not user-driven
             if (kindNow != BankUssd.ScreenKind.MENU && kindNow != BankUssd.ScreenKind.FINAL) handOver()
             return ToolResult(true, "${session.flow.netName}'s screen needs a look first.", data = JSONObject().put("kind", kindNow.name.lowercase()), channel = "native")
         }
@@ -154,7 +161,8 @@ object TelcoUssdTool : Tool {
             ?: return ToolResult(false, "${session.flow.netName}'s menu didn't answer in time, so it may have closed. Nothing is paid without your PIN.",
                 recoverable = false)
         val kind = BankUssd.kind(next.text, next.hasInput, next.masked)
-        TelcoSession.screen(next.text, kind, auto = auto, more = more)
+        TelcoSession.screen(next.text, kind, auto = auto, more = more,
+            stepIdx = args.optInt(ARG_STEP, -1), user = !auto)
         Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(next.text.take(120).replace("\n", " | "))}")
         if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) handOver()
         return ToolResult(true, "${session.flow.netName}: ${BankUssd.spokenScreen(next.text, speakBalance = false).take(120)}",

@@ -78,26 +78,33 @@ object TelcoGuide {
             return AgentDecision.CannotDo(REASON, stepMessage(last).ifBlank { "The network's menu didn't work just now. Nothing was bought." })
         val session = s ?: return AgentDecision.Done(STOPPED)
         if (session.kind != BankUssd.ScreenKind.MENU) return AgentDecision.Done(handOffLine(session))
-        // The hybrid: while researched steps remain, press the one whose row the LIVE screen shows; a long menu is paged
-        // with "More" a bounded few times; anything else falls back to asking the user.
-        val step = session.flow.auto.getOrNull(session.stepDone)
-        if (step != null) {
-            TelcoUssd.autoAnswer(session.screen, step)?.let { n ->
-                val row = TelcoUssd.rows(session.screen).firstOrNull { it.first == n }?.second
-                return reply(session, n, auto = true, more = false, row = row)
+        // The hybrid: while researched steps remain, press the one whose row the LIVE screen shows. Steps are
+        // SKIPPABLE — the live menu may fold a level the research expected (A20e 2026-09-30: *567# went straight to
+        // "MashUp for Self/Others", and the missing middle step sent the walk paging into a dead end) — so the FIRST
+        // remaining step with a matching row wins. A long menu is paged with "More" a bounded few times. And once the
+        // USER has answered a screen themselves, the autopilot stays off: every screen after is read and asked.
+        if (!session.userDrove) {
+            for (i in session.stepDone until session.flow.auto.size) {
+                TelcoUssd.autoAnswer(session.screen, session.flow.auto[i])?.let { n ->
+                    val row = TelcoUssd.rows(session.screen).firstOrNull { it.first == n }?.second
+                    return reply(session, n, auto = true, more = false, row = row, stepIdx = i)
+                }
             }
-            if (session.morePressed < 3) TelcoUssd.moreOption(session.screen)?.let { n ->
-                return reply(session, n, auto = true, more = true, row = "More")
-            }
+            if (session.stepDone < session.flow.auto.size && session.morePressed < 3)
+                TelcoUssd.moreOption(session.screen)?.let { n ->
+                    return reply(session, n, auto = true, more = true, row = "More")
+                }
         }
         // First ask of this walk: no reply and no ask has happened yet (like the bank's first-question check).
         return ask(question(session, first = !last.contains("\"${TelcoUssdTool.ARG_ACTION}\":\"${TelcoUssdTool.REPLY}\"")))
     }
 
-    private fun reply(session: TelcoSession.View, value: String, auto: Boolean, more: Boolean, row: String?): AgentDecision {
+    private fun reply(session: TelcoSession.View, value: String, auto: Boolean, more: Boolean, row: String?,
+                      stepIdx: Int = -1): AgentDecision {
         val args = JSONObject().put(TelcoUssdTool.ARG_ACTION, TelcoUssdTool.REPLY).put(TelcoUssdTool.ARG_TEXT, value)
         if (auto) args.put(TelcoUssdTool.ARG_AUTO, true)
         if (more) args.put(TelcoUssdTool.ARG_MORE, true)
+        if (stepIdx >= 0) args.put(TelcoUssdTool.ARG_STEP, stepIdx)
         row?.let { args.put(TelcoUssdTool.ARG_ROW, it.take(60)) }
         if (!auto) args.put(TelcoUssdTool.ARG_SCREEN, BankUssd.spokenScreen(session.screen).take(160))
         return AgentDecision.CallTool(TelcoUssdTool.NAME, args, RATIONALE)

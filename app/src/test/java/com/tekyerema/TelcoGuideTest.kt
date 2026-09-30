@@ -87,6 +87,27 @@ class TelcoGuideTest {
         assertTrue(e is AgentDecision.CallTool && (e as AgentDecision.CallTool).name == "ask_user")
     }
 
+    /** The LIVE *567# menu folds a level (straight to "MashUp for Self/Others") — the first REMAINING step whose
+     *  row is on screen wins, so the missing middle step no longer sends the walk paging into a dead end. */
+    @Test fun `a folded menu skips ahead to the step that IS on screen`() {
+        val f = flow(Regex("(?i)buy|proceed|bundle"), Regex("(?i)data bundle"), Regex("(?i)\\bself\\b"))
+        TelcoSession.opened(f, "Welcome to MTN Pulse. 1. MashUp for Self 2. MashUp for Others 3. Convert Minutes", BankUssd.ScreenKind.MENU)
+        TelcoSession.screen(TelcoSession.current()!!.screen, BankUssd.ScreenKind.MENU, auto = true, more = false, stepIdx = 0)
+        val d = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).args.optString("_text") == "1" &&
+            d.args.optBoolean("_auto") && d.args.optInt("_step", -1) == 2)
+    }
+
+    /** Once the user answers a screen by voice, the autopilot stays OFF — every later screen is read and asked
+     *  (live A20e 2026-09-30: it resumed a stale step after the user's "0, go back" and looped into More). */
+    @Test fun `after the user takes the wheel the walk stays guided`() {
+        val f = flow(Regex("(?i)buy|proceed"))
+        TelcoSession.opened(f, "1. Proceed to buy bundle 99. More", BankUssd.ScreenKind.MENU)
+        TelcoSession.screen("1. Proceed to buy bundle 99. More", BankUssd.ScreenKind.MENU, auto = false, more = false, user = true)
+        val d = TelcoGuide.decide("buy data", listOf(openLine, replyLine), network = "mtn")
+        assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).name == "ask_user")
+    }
+
     @Test fun `a payment confirmation or a PIN ends the task with the user`() {
         val f = flow()
         TelcoSession.opened(f, "Pay GHS 20.00 for 5GB. Enter PIN to confirm", BankUssd.ScreenKind.PIN)
