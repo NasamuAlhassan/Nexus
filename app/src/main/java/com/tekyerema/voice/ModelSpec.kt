@@ -21,7 +21,10 @@ data class ModelSpec(
     val bpeVocab: String? = null,
     val threads: Int? = null,
     /** Bias decoding toward the user's contact and app names (transducers with a bpe.vocab only). */
-    val hotwords: Boolean = false
+    val hotwords: Boolean = false,
+    /** Read straight from the APK's assets (uncompressed): no second copy on the phone's storage — for big models (the
+     *  660 MB Parakeet on a phone with ~2 GB free). */
+    val fromAssets: Boolean = false
 ) {
     /** Every file this model needs. */
     fun required(): List<String> = files.values + tokens + listOfNotNull(bpeVocab.takeIf { hotwords })
@@ -52,7 +55,8 @@ data class ModelSpec(
                 label = o.optString("label").trim().ifEmpty { type },
                 bpeVocab = o.optString("bpeVocab").trim().ifEmpty { null },
                 threads = if (o.has("threads")) o.optInt("threads") else null,
-                hotwords = o.optBoolean("hotwords", false))
+                hotwords = o.optBoolean("hotwords", false),
+                fromAssets = o.optBoolean("fromAssets", false))
         }
 
         /**

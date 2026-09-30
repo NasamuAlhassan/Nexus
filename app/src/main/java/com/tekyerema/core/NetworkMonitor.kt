@@ -38,6 +38,10 @@ object NetworkMonitor {
     /** The application context, for plumbing that must act when the network returns (the offline queue). */
     val context: Context? get() = appContext
 
+    /** Called when the phone loses its network — the voice layer loads the on-device recogniser then (a 660 MB model is
+     *  not held in RAM while the phone's online recogniser does the work). */
+    @Volatile var onWentOffline: (() -> Unit)? = null
+
     fun init(context: Context) {
         val mgr = context.applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
         cm = mgr
@@ -68,7 +72,10 @@ object NetworkMonitor {
                     recompute()
                     if (was == Connectivity.OFFLINE && cached != Connectivity.OFFLINE) LinkHealth.fireRestored()
                 }
-                override fun onLost(network: Network) { cached = Connectivity.OFFLINE; currentNet = null; LinkHealth.reset() }
+                override fun onLost(network: Network) {
+                    cached = Connectivity.OFFLINE; currentNet = null; LinkHealth.reset()
+                    try { onWentOffline?.invoke() } catch (_: Throwable) {}
+                }
                 override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                     // Fires often (every bandwidth-estimate change): recompute only — never reset the stall evidence here.
                     val was = cached

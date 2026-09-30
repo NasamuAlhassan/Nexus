@@ -91,7 +91,23 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
      * one (the old marker was "1", so a model swap would never have been extracted), and files the new model doesn't
      * use are deleted — the A20e has ~2 GB free. Idempotent.
      */
+    /** The bundled model when its model.json says `"fromAssets": true` (read straight from the APK), else null. */
+    private fun assetSpec(lang: String): ModelSpec? = assetSpecs.getOrPut(lang) {
+        try {
+            appContext.assets.open("models/ondevice/$lang/asr/${ModelSpec.FILE}").use { ModelSpec.parse(it.readBytes().decodeToString()) }
+                ?.takeIf { it.fromAssets && it.type != ModelSpec.WHISPER }
+        } catch (_: Throwable) { null }
+    }
+    private val assetSpecs = java.util.concurrent.ConcurrentHashMap<String, ModelSpec?>()
+
     private fun extractBundledIfPresent(lang: String) {
+        if (assetSpec(lang) != null) {
+            // Read from the APK: nothing to extract, and an old extracted model (Whisper-tiny, 128 MB) is only in the way.
+            File(internalRoot(), "$lang/asr").takeIf { it.exists() }?.let { d ->
+                if (d.deleteRecursively()) Log.i("Tekyerema", "[ASR] removed the old extracted $lang model (the new one is read from the APK)")
+            }
+            return
+        }
         val assetDir = "models/ondevice/$lang/asr"
         val names = try { appContext.assets.list(assetDir)?.toList().orEmpty().sorted() } catch (_: Throwable) { emptyList() }
         if (names.isEmpty()) return
@@ -125,7 +141,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
 
     override val ready: Boolean
         get() = Build.SUPPORTED_ABIS.any { it.equals("arm64-v8a", true) || it.startsWith("armeabi") } &&
-                (modelDir("eng")?.let(::hasModel) == true || modelDir("twi")?.let(::hasModel) == true)
+                (assetSpec("eng") != null || modelDir("eng")?.let(::hasModel) == true || modelDir("twi")?.let(::hasModel) == true)
 
     /** Hotwords (contact and app names) for the next stream, when the loaded model takes them; see [ModelSpec.hotwords]. */
     @Volatile var hotwords: () -> List<String> = { emptyList() }
@@ -133,6 +149,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     @Synchronized
     private fun rec(lang: String): OfflineRecognizer? {
         cache[lang]?.let { return it }
+        assetSpec(lang)?.let { spec -> extractBundledIfPresent(lang); return recFor(lang, null, spec) }
         val d = modelDir(lang) ?: return null
         val spec = specOf(d)?.takeIf { hasModel(d) } ?: return null
         if (spec.type != ModelSpec.WHISPER) return recFor(lang, d, spec)
@@ -169,26 +186,28 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
      * Ghanaian English by the 2026-09-30 bake-off (campaign/kaggle/offline-en-*, build/asr_bench): scored on the owner's
      * recordings and AfriSpeech's Ghanaian speakers, timed on the A20e itself.
      */
-    private fun recFor(lang: String, d: File, spec: ModelSpec): OfflineRecognizer? {
-        fun path(role: String) = File(d, spec.files.getValue(role)).absolutePath
+    private fun recFor(lang: String, d: File?, spec: ModelSpec): OfflineRecognizer? {
+        // d == null: the model is read straight from the APK's assets (ModelSpec.fromAssets) — paths are asset paths.
+        fun file(name: String) = if (d == null) "models/ondevice/$lang/asr/$name" else File(d, name).absolutePath
+        fun path(role: String) = file(spec.files.getValue(role))
         val threads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads.${spec.type}", spec.threads ?: 4).coerceIn(1, 8)
         val beam = spec.hotwords && spec.bpeVocab != null
         val model = when (spec.type) {
             ModelSpec.NEMO_TRANSDUCER -> OfflineModelConfig(
                 transducer = OfflineTransducerModelConfig(encoder = path("encoder"), decoder = path("decoder"), joiner = path("joiner")),
-                tokens = File(d, spec.tokens).absolutePath, numThreads = threads, modelType = "nemo_transducer",
-                modelingUnit = if (beam) "bpe" else "", bpeVocab = if (beam) File(d, spec.bpeVocab!!).absolutePath else "")
+                tokens = file(spec.tokens), numThreads = threads, modelType = "nemo_transducer",
+                modelingUnit = if (beam) "bpe" else "", bpeVocab = if (beam) file(spec.bpeVocab!!) else "")
             ModelSpec.NEMO_CTC -> OfflineModelConfig(
                 nemo = OfflineNemoEncDecCtcModelConfig(model = path("model")),
-                tokens = File(d, spec.tokens).absolutePath, numThreads = threads)
-            else -> { Log.w("Tekyerema", "[ASR] unknown model type '${spec.type}' in ${d.name}/model.json"); return null }
+                tokens = file(spec.tokens), numThreads = threads)
+            else -> { Log.w("Tekyerema", "[ASR] unknown model type '${spec.type}' in ${d?.name ?: "assets"}/model.json"); return null }
         }
         val cfg = OfflineRecognizerConfig(modelConfig = model,
             decodingMethod = if (beam) "modified_beam_search" else "greedy_search", maxActivePaths = 4,
             hotwordsScore = com.tekyerema.core.config.AppConfig.float("speech.asr.hotwordsScore", 1.5f))
         return try {
             val t0 = SystemClock.uptimeMillis()
-            OfflineRecognizer(config = cfg).also {
+            OfflineRecognizer(assetManager = if (d == null) appContext.assets else null, config = cfg).also {
                 cache[lang] = it; loaded[lang] = spec.label; beams[lang] = beam
                 Log.i("Tekyerema", "[ASR] sherpa ${spec.label} ready ($lang, ${spec.type}, $threads threads${if (beam) ", hotwords" else ""}) in ${SystemClock.uptimeMillis() - t0} ms")
             }

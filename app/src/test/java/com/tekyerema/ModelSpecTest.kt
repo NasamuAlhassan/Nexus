@@ -17,6 +17,8 @@ class ModelSpecTest {
         assertEquals("parakeet-110m-ghen", s.label)
         assertEquals(4, s.threads)
         assertFalse("hotwords are opt-in", s.hotwords)
+        assertFalse("extracted unless it says so", s.fromAssets)
+        assertTrue(ModelSpec.parse("""{"type":"nemo_ctc","model":"m.onnx","fromAssets":true}""")!!.fromAssets)
         assertEquals(listOf("encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"), s.required())
         val hw = s.copy(hotwords = true)
         assertTrue("with hotwords the bpe.vocab is needed too", "bpe.vocab" in hw.required())

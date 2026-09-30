@@ -140,7 +140,12 @@ object VoiceEngine {
                 onLang = { language.onTurn(it) }
                 forced = { settings.forcedLanguage }
                 // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
-                scope.launch(Dispatchers.Default) { try { onDevice.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
+                // Offline only (2026-09-30): the offline English model is now 660 MB (fine-tuned Parakeet) — online, the phone's
+                // recogniser does English, so it isn't held in RAM (~600 MB free on the A20e); it loads when the network goes.
+                if (!isOnline()) scope.launch(Dispatchers.Default) { try { onDevice.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
+                com.tekyerema.core.NetworkMonitor.onWentOffline = {
+                    scope.launch(Dispatchers.Default) { try { onDevice.warm(settings.sessionLanguage) } catch (_: Throwable) {} }
+                }
                 // B-19 speculative recognition: start the on-device decode during the end-of-turn silence (MicCapture.onPause).
                 // Only when this turn would be recognised ON the phone anyway — never a second call to a quota'd online API
                 // (a forced-Twi turn with the HCI Lab online skips it). `speech.asr.speculative` = false turns it off.
