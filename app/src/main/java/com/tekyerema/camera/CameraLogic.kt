@@ -364,3 +364,69 @@ object QualityGate {
         return max(0.0, sumSq / n - m * m)
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------- cedi
+
+/**
+ * Ghana banknotes and coins read by camera (docs/agent/research/cedi_integration.md). Seeing AI and Lookout both
+ * skip the cedi, so this is the first of its kind — which is exactly why it must be HONEST: a wrong amount is worse
+ * than no answer. A denomination is spoken only when the SAME class holds two consecutive frames and both clear
+ * [minConfidence]; anything else coaches instead. Pure → unit-tested.
+ */
+class CurrencyAnnouncer(
+    private val minConfidence: Double = 0.85,
+    private val agreeFrames: Int = 2,
+    /** The same note, having gone away, isn't re-announced sooner than this. */
+    private val repeatMs: Long = 4_000L
+) {
+    private var runClass: String? = null
+    private var runLength = 0
+    private var spoken: String? = null
+    private var spokenAt = 0L
+
+    /** One frame's verdict. Returns the line to speak, or null (sub-gate, unchanged, or still settling). */
+    fun offer(topClass: String, confidence: Double, nowMs: Long): String? {
+        // Not money, or not sure enough: the run breaks — two AGREEING, CONFIDENT frames are required.
+        if (topClass == NOT_MONEY || confidence < minConfidence) {
+            runClass = null; runLength = 0
+            return null
+        }
+        if (topClass == runClass) runLength++ else { runClass = topClass; runLength = 1 }
+        if (runLength < agreeFrames) return null
+        // Stable. Speak when it CHANGED, or when the same note comes back after a while (counting cash).
+        if (topClass == spoken && nowMs - spokenAt < repeatMs) return null
+        spoken = topClass
+        spokenAt = nowMs
+        return spokenFor(topClass)
+    }
+
+    /** True while nothing has been announced — the caller's "I can't tell" coaching applies. */
+    val quiet: Boolean get() = spoken == null
+
+    companion object {
+        const val NOT_MONEY = "not_money"
+
+        /** The class as a person says it. Verbalize runs on the output as everywhere else. */
+        fun spokenFor(cls: String): String = when (cls) {
+            "note_1" -> "One cedi."
+            "note_2" -> "Two cedis."
+            "note_5" -> "Five cedis."
+            "note_10" -> "Ten cedis."
+            "note_20" -> "Twenty cedis."
+            "note_50" -> "Fifty cedis."
+            "note_100" -> "One hundred cedis."
+            "note_200" -> "Two hundred cedis."
+            "coin_1_pesewa" -> "One pesewa — a coin."
+            "coin_5_pesewas" -> "Five pesewas — a coin."
+            "coin_10_pesewas" -> "Ten pesewas — a coin."
+            "coin_20_pesewas" -> "Twenty pesewas — a coin."
+            "coin_50_pesewas" -> "Fifty pesewas — a coin."
+            "coin_1_cedi" -> "One cedi — a coin."
+            "coin_2_cedis" -> "Two cedis — a coin."
+            else -> cls
+        }
+
+        /** A note or coin class (as opposed to [NOT_MONEY]) — "money is there, I just can't read it". */
+        fun isMoney(cls: String): Boolean = cls != NOT_MONEY
+    }
+}

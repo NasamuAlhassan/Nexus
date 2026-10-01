@@ -1,0 +1,16 @@
+note_1
+note_2
+note_5
+note_10
+note_20
+note_50
+note_100
+note_200
+coin_1_pesewa
+coin_5_pesewas
+coin_10_pesewas
+coin_20_pesewas
+coin_50_pesewas
+coin_1_cedi
+coin_2_cedis
+not_money

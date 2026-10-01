@@ -110,3 +110,47 @@ object FrameConvert {
         null
     }
 }
+
+/**
+ * The centre square of a YUV frame as RGB floats 0–255, scaled to [side]×[side] (NHWC, row-major) — what the cedi
+ * model eats (camera/CediClassifier). No JPEG round-trip: at 2 fps this runs straight on the analyser thread.
+ * Nearest-neighbour sampling is enough for a note filling the frame, and keeps the per-frame cost in microseconds.
+ */
+object RgbSquare {
+    fun from(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?): FloatArray {
+        val out = if (reuse != null && reuse.size == side * side * 3) reuse else FloatArray(side * side * 3)
+        val w = image.width
+        val h = image.height
+        val crop = minOf(w, h)               // the centre square of the sensor frame
+        val x0 = (w - crop) / 2
+        val y0 = (h - crop) / 2
+        val yP = image.planes[0]
+        val uP = image.planes[1]
+        val vP = image.planes[2]
+        val yB = yP.buffer
+        val uB = uP.buffer
+        val vB = vP.buffer
+        val yRow = yP.rowStride
+        val uRow = uP.rowStride
+        val uPix = uP.pixelStride
+        var o = 0
+        for (j in 0 until side) {
+            val sy = y0 + j * crop / side
+            val uvRow = (sy / 2) * uRow
+            for (i in 0 until side) {
+                val sx = x0 + i * crop / side
+                val yv = (yB.get(sy * yRow + sx).toInt() and 0xFF)
+                val uvCol = (sx / 2) * uPix
+                val u = (uB.get(uvRow + uvCol).toInt() and 0xFF) - 128
+                val v = (vB.get(uvRow + uvCol).toInt() and 0xFF) - 128
+                // BT.601, the conversion CameraX's YUV_420_888 frames assume.
+                out[o++] = clamp(yv + 1.402f * v)
+                out[o++] = clamp(yv - 0.344f * u - 0.714f * v)
+                out[o++] = clamp(yv + 1.772f * u)
+            }
+        }
+        return out
+    }
+
+    private fun clamp(v: Float): Float = if (v < 0f) 0f else if (v > 255f) 255f else v
+}

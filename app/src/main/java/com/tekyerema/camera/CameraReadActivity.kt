@@ -80,6 +80,7 @@ class CameraReadActivity : ComponentActivity() {
         const val MODE_TEXT = "text"
         const val MODE_COLOR = "color"
         const val MODE_DESCRIBE = "describe"
+        const val MODE_CURRENCY = "currency"
 
         private const val TAG = "Tekyerema"
         /** Finish even if the TTS engine never reports the last line done (engine died, no voice). */
@@ -137,6 +138,19 @@ class CameraReadActivity : ComponentActivity() {
 
     // --- colour (P-06), main thread ---
     private val colourAnnouncer by lazy { ChangeAnnouncer(AppConfig.long("camera.color.minIntervalMs", 2_000L)) }
+    private val currencyAnnouncer by lazy {
+        CurrencyAnnouncer(
+            minConfidence = AppConfig.double("camera.currency.minConfidence", 0.85),
+            agreeFrames = AppConfig.int("camera.currency.agreeFrames", 2)
+        )
+    }
+    /** Loaded on the first currency frame (~0.2 s); null when the model isn't bundled (said honestly, once). */
+    private var cedi: CediClassifier? = null
+    private var cediTried = false
+    private var rgbBuf: FloatArray? = null
+    /** When money was last SEEN but not readable — drives the honest "I can see money but…" coaching. */
+    private var moneySeenAt = 0L
+    private var lastCurrencyHintAt = 0L
 
     // --- describe (P-01 / P-09) ---
     private val describeClaimed = AtomicBoolean(false)
@@ -162,6 +176,7 @@ class CameraReadActivity : ComponentActivity() {
         mode = when (intent?.getStringExtra(EXTRA_MODE)) {
             MODE_COLOR -> MODE_COLOR
             MODE_DESCRIBE -> MODE_DESCRIBE
+            MODE_CURRENCY -> MODE_CURRENCY
             else -> MODE_TEXT
         }
         intervalMs = AppConfig.long("camera.analysis.intervalMs", 500L).coerceAtLeast(100L)
@@ -214,6 +229,8 @@ class CameraReadActivity : ComponentActivity() {
                 }
                 else -> announce(phrase("modeDescribe", "Hold still, I'll describe what's in front of you."))
             }
+        } else if (mode == MODE_CURRENCY) {
+            announce(phrase("modeCurrency", "Checking money. Hold the note flat, about a hand away."))
         } else if (mode == MODE_COLOR) {
             announce(phrase("modeColor", "Checking colour and light."))
         } else {
@@ -301,6 +318,7 @@ class CameraReadActivity : ComponentActivity() {
         when (mode) {
             MODE_TEXT -> readText(image)   // closes the image when OCR completes
             MODE_COLOR -> try { checkColour(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
+            MODE_CURRENCY -> try { checkCurrency(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
             else -> try { gateForDescribe(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
         }
     }
@@ -365,6 +383,49 @@ class CameraReadActivity : ComponentActivity() {
     private fun onColour(label: String) {
         if (closing || mode != MODE_COLOR) return
         colourAnnouncer.offer(label, SystemClock.elapsedRealtime())?.let { deliver(it) }
+    }
+
+    // ------------------------------------------------------------------------------------------------ cedi money
+
+    /** Analyser thread: the centre square → the on-phone cedi model. Never speaks a denomination itself. */
+    private fun checkCurrency(image: ImageProxy) {
+        if (closing || mode != MODE_CURRENCY) return
+        if (!cediTried) { cediTried = true; cedi = CediClassifier.create(this) }
+        val model = cedi ?: run {
+            main.post { if (!closing) speakThenFinish(phrase("currencyNoModel",
+                "I can't read money on this phone yet — the money reader isn't installed.")) }
+            return
+        }
+        // It's dark: money is counted indoors and at night — put the light on before guessing at shadows.
+        val yP = image.planes[0]
+        val luma = FrameStats.mean(FrameConvert.planeBytes(yP, yBuf).also { yBuf = it },
+            yP.rowStride, yP.pixelStride, 0, 0, image.width, image.height, step = 16)
+        if (luma < AppConfig.double("camera.quality.darkBelow", QualityGate.DARK_BELOW)) main.post { turnTorchOn() }
+
+        val rgb = RgbSquare.from(image, CediClassifier.SIDE, rgbBuf).also { rgbBuf = it }
+        val (cls, confidence) = model.classify(rgb)
+        main.post { onCurrency(cls, confidence) }
+    }
+
+    private fun onCurrency(cls: String, confidence: Double) {
+        if (closing || mode != MODE_CURRENCY) return
+        val now = SystemClock.elapsedRealtime()
+        if (CurrencyAnnouncer.isMoney(cls)) moneySeenAt = now
+        currencyAnnouncer.offer(cls, confidence, now)?.let { deliver(it); return }
+        // Silence is ambiguous to someone who can't see the screen — say WHY, on the guidance cadence, and never a
+        // number below the gate (a wrong amount is worse than no answer).
+        if (isSpeaking() || now - lastCurrencyHintAt < AppConfig.long("camera.currency.hintEveryMs", 6_000L)) return
+        val sawMoney = moneySeenAt > 0 && now - moneySeenAt < 2_000L
+        val waited = now - describeStartedAt
+        val line = when {
+            sawMoney && waited > AppConfig.long("camera.currency.unsureHintMs", 8_000L) ->
+                phrase("currencyUnsure", "I can see money but I can't tell which note. Hold it flatter and fill the screen.")
+            !sawMoney && waited > AppConfig.long("camera.currency.noMoneyHintMs", 10_000L) ->
+                phrase("currencyNone", "I don't see any money yet. Hold the note flat, about a hand away.")
+            else -> return
+        }
+        lastCurrencyHintAt = now
+        deliver(line)
     }
 
     // ------------------------------------------------------------------------------------------------ P-01 / P-09 describe

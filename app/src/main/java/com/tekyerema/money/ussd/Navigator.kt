@@ -36,8 +36,9 @@ class Navigator(
         Log.i(TAG, "[NAV] $state ${com.tekyerema.core.Privacy.content(detail.take(120).replace('\n', ' '))}")
     }
 
-    /** Walk from [first] until a boundary, an end, or the user is needed. At most [maxSteps] presses. */
-    suspend fun run(first: UssdDialog.Screen, maxSteps: Int = 12): Outcome {
+    /** Walk from [first] until a boundary, an end, or the user is needed. At most [maxSteps] presses.
+     *  Internal: the dialog type is the money module's own, and no model ever calls the navigator directly. */
+    internal suspend fun run(first: UssdDialog.Screen, maxSteps: Int = 12): Outcome {
         var screen: UssdDialog.Screen = first
         var lastPressedMenu: String? = null
         var morePressed = 0

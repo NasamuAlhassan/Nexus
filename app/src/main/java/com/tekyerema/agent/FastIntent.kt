@@ -273,6 +273,7 @@ object FastIntentClassifier {
             // H-08 preferences by voice (before the phone actions: "talk slower" is not a call).
             preference(g) != null -> preference(g)
             // W6: camera, screen changes, magnification, emergency set-up.
+            RE_CAMERA_MONEY.containsMatchIn(g) -> FastIntent.Camera("currency")
             RE_CAMERA_COLOR.containsMatchIn(g) -> FastIntent.Camera("color")
             RE_CAMERA_TEXT.containsMatchIn(g) -> FastIntent.Camera("text")
             RE_CAMERA_DESCRIBE.containsMatchIn(g) -> FastIntent.Camera("describe")
@@ -522,6 +523,13 @@ object FastIntentClassifier {
     private val RE_CAMERA_TEXT = Regex("\\bwhat does (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book) say\\b|" +
         "\\bread (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book)\\b|" +
         "\\bread (?:it |this |the text )?(?:with|using) the camera\\b|^scan (?:this|it)$")
+    /** The cedi reader: a note or coin held to the camera. "How much is this" alone is money too — nobody asks
+     *  that of a chair (camera/CurrencyAnnouncer; first-of-its-kind for the cedi). */
+    private val RE_CAMERA_MONEY = Regex("(?i)\bwhat (?:note|bill|cedi|denomination) is (?:this|that|it)\b|" +
+            "\bhow much (?:money |cash )?is (?:this|that|it)\b|\bwhat(?:'s| is) this (?:note|money|cash|bill)\b|" +
+            "\b(?:check|read|count|identify) (?:this |the |my )?(?:money|cash|note|notes|cedis?|bill)\b|" +
+            "\bhow many cedis? is (?:this|that|it)\b|\bwhich note is (?:this|that|it)\b")
+
     private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")
     private val RE_CAMERA_DESCRIBE = Regex("\\bwhat(?:'s| is) in front of me\\b|\\bwhat am i holding\\b|\\bdescribe what (?:you see|is in front of me)\\b|" +
         "\\blook at this for me\\b|\\bwhat is this (?:thing|object)\\b")

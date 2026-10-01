@@ -547,7 +547,7 @@ class LocalFastRouter(
     // ---------------------------------------------------------------- W6
     /** P-03 / P-06 / P-01: the camera reader, opened in front (CameraX needs a visible activity). */
     private fun openCameraReader(mode: String): FastOutcome? {
-        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(when (mode) { "color" -> "P-06"; "describe" -> "P-01"; else -> "P-03" }, true)) return null
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(when (mode) { "color" -> "P-06"; "describe" -> "P-01"; "currency" -> "P-11"; else -> "P-03" }, true)) return null
         return try {
             appContext.startActivity(com.tekyerema.camera.CameraReadActivity.intent(appContext, mode))
             // The reader announces itself; nothing extra to say here.
