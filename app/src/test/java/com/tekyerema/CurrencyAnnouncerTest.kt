@@ -67,3 +67,31 @@ class CurrencyAnnouncerTest {
             assertTrue(l, CurrencyAnnouncer.spokenFor(l) != l && CurrencyAnnouncer.spokenFor(l).endsWith("."))
     }
 }
+
+/** The spoken phrases that open each camera mode — the money ones were dead for a day because a Kotlin
+ *  "\b" is a BACKSPACE, not a word boundary (A20e 2026-10-01). */
+class CameraPhrasesTest {
+    private fun mode(said: String): String? =
+        (com.tekyerema.agent.FastIntentClassifier.classify(said) as? com.tekyerema.agent.FastIntent.Camera)?.mode
+
+    @Test fun `money phrases open the money reader`() {
+        for (s in listOf("what note is this", "how much money is this", "check this money", "count my cash",
+                "which note is this", "what kind of note is this", "how much is this"))
+            assertEquals(s, "currency", mode(s))
+    }
+
+    @Test fun `reading a held thing opens the camera, not the screen reader`() {
+        for (s in listOf("read this letter", "read this label", "read my page", "what does this receipt say",
+                "read what I'm holding", "read it with the camera", "scan this"))
+            assertEquals(s, "text", mode(s))
+    }
+
+    @Test fun `colour and describe still route as before, and the screen reader is untouched`() {
+        assertEquals("color", mode("what colour is this"))
+        assertEquals("describe", mode("what's in front of me"))
+        // A bare "read this" is NOT a camera intent — it stays the screen reader unless the Camera app is in front
+        // (that case is handled in LocalFastRouter, which has the foreground app).
+        assertEquals(null, mode("read this"))
+        assertEquals(null, mode("read my screen"))
+    }
+}

@@ -521,14 +521,19 @@ object FastIntentClassifier {
     // ---- W6 camera / screen / magnification / emergency ----
     // Camera phrases name a physical object or the camera, so "read my screen" never opens the camera.
     private val RE_CAMERA_TEXT = Regex("\\bwhat does (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book) say\\b|" +
-        "\\bread (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book)\\b|" +
-        "\\bread (?:it |this |the text )?(?:with|using) the camera\\b|^scan (?:this|it)$")
+        "\\bread (?:this|the|that|my) (?:label|sign|paper|page|letter|document|note|package|box|bottle|card|receipt|medicine|book|menu|form)\\b|" +
+        "\\bread (?:it |this |the text )?(?:with|using) (?:the )?camera\\b|^scan (?:this|it)$|" +
+        // What a blind user actually says when holding something (A20e 2026-10-01: "read this" read the SCREEN
+        // and listed home-screen icons — useless with a letter in hand).
+        "\\bread what(?:'s| is)? (?:in )?(?:my hand|in front of me|here)\\b|\\bread what i(?:'m| am) holding\\b|" +
+        "\\bread (?:this|it) (?:out )?(?:for me |aloud )?with (?:the )?camera\\b")
     /** The cedi reader: a note or coin held to the camera. "How much is this" alone is money too — nobody asks
      *  that of a chair (camera/CurrencyAnnouncer; first-of-its-kind for the cedi). */
-    private val RE_CAMERA_MONEY = Regex("(?i)\bwhat (?:note|bill|cedi|denomination) is (?:this|that|it)\b|" +
-            "\bhow much (?:money |cash )?is (?:this|that|it)\b|\bwhat(?:'s| is) this (?:note|money|cash|bill)\b|" +
-            "\b(?:check|read|count|identify) (?:this |the |my )?(?:money|cash|note|notes|cedis?|bill)\b|" +
-            "\bhow many cedis? is (?:this|that|it)\b|\bwhich note is (?:this|that|it)\b")
+    private val RE_CAMERA_MONEY = Regex("(?i)\\bwhat (?:note|bill|cedi|denomination) is (?:this|that|it)\\b|" +
+            "\\bhow much (?:money |cash )?is (?:this|that|it)\\b|\\bwhat(?:'s| is) this (?:note|money|cash|bill)\\b|" +
+            "\\b(?:check|read|count|identify|tell me) (?:this |the |my )?(?:money|cash|note|notes|cedis?|bill)\\b|" +
+            "\\bhow many cedis? is (?:this|that|it)\\b|\\bwhich note is (?:this|that|it)\\b|" +
+            "\\bwhat kind of (?:note|money) is (?:this|that|it)\\b")
 
     private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")
     private val RE_CAMERA_DESCRIBE = Regex("\\bwhat(?:'s| is) in front of me\\b|\\bwhat am i holding\\b|\\bdescribe what (?:you see|is in front of me)\\b|" +

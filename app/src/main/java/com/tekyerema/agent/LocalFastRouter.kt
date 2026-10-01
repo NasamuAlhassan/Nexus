@@ -97,6 +97,13 @@ class LocalFastRouter(
         // Trust (2026-09-29, agent/helper/TrustFast.kt): private reading by voice ("read my messages privately", "read
         // them") and the helper's PIN rule ("call my helper" is refused at a PIN). Null = not one of those.
         com.tekyerema.agent.helper.TrustFast.handle(appContext, text, controller())?.let { return it }
+        // "Read this" with the CAMERA APP in front means the camera, not our screen reader (A20e 2026-10-01: the
+        // user opened Camera, said it, and heard the camera app's own buttons listed back). Anywhere else the bare
+        // phrase keeps its old meaning — read the screen.
+        if (RE_BARE_READ.matches(text.trim().lowercase().trimEnd('.', '!', '?')) &&
+            controller()?.foregroundPackage()?.let { CAMERA_APPS.any { c -> it.contains(c, true) } } == true)
+            openCameraReader("text")?.let { return it }
+
         val intent = FastIntentClassifier.classify(text) ?: run {
             // Vision follow-up (camera/VisionQa, the Be My AI pattern): while the camera's last photo is still held,
             // a question nothing above claimed is asked OF THAT PHOTO — "what's in front of me" … "what colour is
@@ -1487,6 +1494,11 @@ class LocalFastRouter(
             pkg in SMS_APPS -> "SMS"
             else -> null
         }
+        /** A bare "read this" — its meaning depends on what is in front (see tryHandle). */
+        private val RE_BARE_READ = Regex("(?:please )?(?:read|scan) (?:this|it|that)(?: (?:out|aloud|for me|please))*")
+        /** Camera apps: the phrase means the CAMERA while one of these is in front. */
+        private val CAMERA_APPS = listOf("camera", "com.sec.android.app.camera", "com.google.android.GoogleCamera")
+
         private val SMS_APPS = setOf("com.samsung.android.messaging", "com.google.android.apps.messaging", "com.android.mms",
             "com.android.messaging")
         /** [FastIntent.ChatMessages]: the packages behind each chat app's name. */
