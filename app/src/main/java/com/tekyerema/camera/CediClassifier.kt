@@ -51,6 +51,14 @@ class CediClassifier private constructor(ctx: Context) {
     companion object {
         private const val DIR = "cedi"
         const val SIDE = 224
+        /** What the user is told when the model isn't in this build (audit 2026-10-01, CAM04: the screen opened and
+         *  closed and the log held no spoken line at all). */
+        const val NOT_INSTALLED = "The money reader isn't installed on this phone yet."
+
+        /** Is the model file in the APK? A cheap look (no load) so the money mode can say so BEFORE opening the camera. */
+        fun installed(ctx: Context): Boolean = try {
+            ctx.assets.list(DIR)?.contains("cedi.onnx") == true
+        } catch (_: Throwable) { false }
 
         /** Loaded on first use; null when the model isn't bundled or can't load (then the mode says so honestly). */
         fun create(ctx: Context): CediClassifier? = try {

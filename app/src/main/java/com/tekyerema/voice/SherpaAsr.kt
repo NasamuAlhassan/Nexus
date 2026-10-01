@@ -20,6 +20,38 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
+ * The loaded recognisers, ONE set for the whole process (audit 2026-10-01, V00): every [SherpaAsr] instance used to keep
+ * its own cache, and the debug hooks, the wake monitor and the voice engine each build an instance — two instances
+ * meant two copies of a 660 MB model. Now they all share one model per language, one lock, and one memory verdict.
+ */
+private object ResidentModels {
+    // §2.5 — keep BOTH language recognizers resident where the phone can hold them (maxResidentAsrModels: 1 on a
+    // 2.8 GB phone, N-08); LRU-eviction beyond that. LinkedHashMap(accessOrder) gives the LRU ordering for free.
+    val cache = object : LinkedHashMap<String, OfflineRecognizer>(2, 0.75f, true) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, OfflineRecognizer>): Boolean {
+            val evict = size > com.tekyerema.core.DeviceProfile.maxResidentAsrModels()   // N-08: 1 on a 2.8 GB phone
+            if (evict) {
+                try { eldest.value.release() } catch (_: Throwable) {}
+                loaded.remove(eldest.key)
+                Log.i("Tekyerema", "[ASR] LRU-evicted recognizer (${eldest.key})")
+            }
+            return evict
+        }
+    }
+    /** lang → the loaded model's label. */
+    val loaded = java.util.concurrent.ConcurrentHashMap<String, String>()
+    val beams = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    /** lang → the model fits only just: let it go again after each use ([AsrMemory.Decision.unloadAfterUse]). */
+    val unloadAfterUse = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    /** model location → its files' total size (never changes while the app runs). */
+    val sizes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Guards [cache] (not thread-safe) for the short, non-suspending sections. */
+    val monitor = Any()
+    /** N-08: model load and decode are seconds of CPU work, serialised across every instance. */
+    val lock = Mutex()
+}
+
+/**
  * On-device ASR (§5/§8/§19) — sherpa-onnx running whisper-TINY per-language models. Gh-EN = tekyerema-ghen-
  * whisper-tiny-v1. Twi = tekyerema-whisper-tiny-twi — **DISQUALIFIED** (2026-09-19 audit: the owner's 72 GOLD
  * Twi clips were in its training set ×20, so its "Twi WER 2.2 / 1.000 entity" was measured ON TRAINING DATA;
@@ -31,24 +63,16 @@ import java.nio.ByteOrder
  *   - depua(): tokens.txt maps byte-BPE bytes (ɛ/ɔ/ʋ) to U+E000+byte; turn them back.
  * Models live under the app's external files dir (…/files/ondevice/<lang>/asr/), pushed/downloaded once.
  * Licence: CC BY-NC 4.0 (MMS/scripture-derived) — non-commercial.
+ *
+ * Memory (audit 2026-10-01): a model is only loaded when the phone has room for it ([admit] / [AsrMemory]); otherwise
+ * [rawTranscript] throws [AsrLowMemoryException] — a sentence for the user instead of a low-memory kill.
  */
 class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     /** Names the models loaded so far ("sherpa-parakeet-110m-ghen(eng)"); never touches the disk (read on the main thread). */
     override val name: String
         get() = "sherpa-" + (loaded.entries.joinToString("+") { "${it.value}(${it.key})" }.ifEmpty { "on-device" })
-    private val loaded = java.util.concurrent.ConcurrentHashMap<String, String>()
-
-    // §2.5 — target is now a 4 GB+ RAM phone (the A20e ~600 MB ceiling is retired). Such a device holds
-    // tiny-en (~273 MB) + a Twi recognizer + TTS concurrently, so keep BOTH language recognizers resident
-    // (MAX_RESIDENT=2) to avoid reload latency on a language switch. LRU-eviction is still the fallback if
-    // more than MAX_RESIDENT are ever loaded. LinkedHashMap(accessOrder) gives us the LRU ordering for free.
-    private val cache = object : LinkedHashMap<String, OfflineRecognizer>(2, 0.75f, true) {
-        override fun removeEldestEntry(eldest: Map.Entry<String, OfflineRecognizer>): Boolean {
-            val evict = size > com.tekyerema.core.DeviceProfile.maxResidentAsrModels()   // N-08: 1 on a 2.8 GB phone
-            if (evict) { try { eldest.value.release() } catch (_: Throwable) {}; Log.i("Tekyerema", "[ASR] LRU-evicted recognizer (${eldest.key})") }
-            return evict
-        }
-    }
+    private val loaded get() = ResidentModels.loaded
+    private val cache get() = ResidentModels.cache
 
     // §2.2 — one place decides where a language's model lives. Bundled-in-APK assets (extracted once to the
     // files dir, since sherpa-onnx needs real file paths) are the shipping path; an adb-pushed copy under the
@@ -150,12 +174,18 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     /** Hotwords (contact and app names) for the next stream, when the loaded model takes them; see [ModelSpec.hotwords]. */
     @Volatile var hotwords: () -> List<String> = { emptyList() }
 
-    @Synchronized
-    private fun rec(lang: String): OfflineRecognizer? {
+    /**
+     * The loaded recogniser for [lang], loading it if the phone has room.
+     * @throws AsrLowMemoryException when loading it now would risk the app being killed ([admit]).
+     */
+    private fun rec(lang: String): OfflineRecognizer? = synchronized(ResidentModels.monitor) { recLocked(lang) }
+
+    private fun recLocked(lang: String): OfflineRecognizer? {
         cache[lang]?.let { return it }
-        assetSpec(lang)?.let { spec -> extractBundledIfPresent(lang); return recFor(lang, null, spec) }
+        assetSpec(lang)?.let { spec -> extractBundledIfPresent(lang); admit(lang, null, spec); return recFor(lang, null, spec) }
         val d = modelDir(lang) ?: return null
         val spec = specOf(d)?.takeIf { hasModel(d) } ?: return null
+        admit(lang, d, spec)
         if (spec.type != ModelSpec.WHISPER) return recFor(lang, d, spec)
         // §3.9 per-model tail padding: Twi-type models need a small trailing pad (300) so a short word like
         // "kofi" isn't truncated to "kof"; Gh-EN uses the sherpa default. The big speedup comes from NOT
@@ -219,7 +249,86 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             Log.w("Tekyerema", "[ASR] sherpa load failed ($lang, ${spec.label}): ${t.message}"); null
         }
     }
-    private val beams = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    private val beams get() = ResidentModels.beams
+
+    // ------------------------------------------------------------------ memory guard (audit 2026-10-01, V00/V01)
+
+    /** The model's files, summed (0 = couldn't tell). [d] == null: read from the APK's assets. */
+    private fun modelBytes(lang: String, d: File?, spec: ModelSpec): Long =
+        ResidentModels.sizes.getOrPut("$lang|${d?.absolutePath ?: "assets"}|${spec.label}") {
+            spec.required().sumOf { n -> if (d != null) File(d, n).length() else assetLength("models/ondevice/$lang/asr/$n") }
+        }
+
+    private fun assetLength(path: String): Long =
+        try { appContext.assets.openFd(path).use { it.length } }                       // stored uncompressed (the big models)
+        catch (_: Throwable) { try { appContext.assets.open(path).use { it.available().toLong() } } catch (_: Throwable) { 0L } }
+
+    /** availMem (bytes) and the system's own "low memory" flag; a failed read never blocks a load. */
+    private fun memoryNow(): Pair<Long, Boolean> = try {
+        val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val mi = android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }
+        mi.availMem to mi.lowMemory
+    } catch (_: Throwable) { Long.MAX_VALUE to false }
+
+    private fun limits(fromAssets: Boolean): AsrMemory.Limits {
+        val cfg = com.tekyerema.core.config.AppConfig
+        val peak = if (fromAssets) cfg.double("speech.asr.loadPeakFactor.assets", AsrMemory.PEAK_FROM_ASSETS)
+            else cfg.double("speech.asr.loadPeakFactor.files", AsrMemory.PEAK_FROM_FILES)
+        return AsrMemory.Limits(
+            peakFactor = peak.coerceIn(1.0, 4.0),
+            reserveBytes = cfg.long("speech.asr.loadReserveMb", 100L).coerceAtLeast(0L) * AsrMemory.MB,
+            keepFreeBytes = cfg.long("speech.asr.keepFreeMb", 400L).coerceAtLeast(0L) * AsrMemory.MB)
+    }
+
+    /**
+     * May [spec] be loaded now? Loading a model the phone has no room for does not fail — Android kills the app
+     * (twelve times in a row on the A20e, each taking the accessibility service down for ~30 s). So: measure first;
+     * when short, release the other recogniser and every registered cache ([AsrMemory.release]) and measure again;
+     * still short → [AsrLowMemoryException], whose message the user hears. `speech.asr.memoryGuard` = false is the
+     * off switch. Called with [ResidentModels.monitor] held.
+     */
+    private fun admit(lang: String, d: File?, spec: ModelSpec) {
+        if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.memoryGuard", true)) return
+        val bytes = modelBytes(lang, d, spec)
+        val limits = limits(fromAssets = d == null)
+        var (avail, low) = memoryNow()
+        var decision = AsrMemory.decide(avail, low, bytes, alreadyReleased = false, limits = limits)
+        if (decision.verdict == AsrMemory.Verdict.RELEASE_THEN_LOAD) {
+            val others = releaseLocked { it != lang }
+            val hooks = AsrMemory.release()
+            try { System.gc() } catch (_: Throwable) {}
+            memoryNow().let { avail = it.first; low = it.second }
+            decision = AsrMemory.decide(avail, low, bytes, alreadyReleased = true, limits = limits)
+            Log.i("Tekyerema", "[ASR] memory short for ${spec.label}: released $others other recogniser(s) and $hooks cache(s) → " +
+                "${avail / AsrMemory.MB} MB available, ${decision.neededBytes / AsrMemory.MB} MB needed")
+        }
+        if (decision.verdict == AsrMemory.Verdict.REFUSE) {
+            Log.w("Tekyerema", "[ASR] NOT loading ${spec.label} ($lang, ${bytes / AsrMemory.MB} MB): ${avail / AsrMemory.MB} MB available" +
+                "${if (low) " (system low on memory)" else ""} < ${decision.neededBytes / AsrMemory.MB} MB needed — refused, the app would be killed")
+            try { com.tekyerema.core.telemetry.Telemetry.update { voice.putIfAbsent("asrRefused", "low_memory") } } catch (_: Throwable) {}
+            throw AsrLowMemoryException(avail / AsrMemory.MB, decision.neededBytes / AsrMemory.MB)
+        }
+        ResidentModels.unloadAfterUse[lang] = decision.unloadAfterUse
+        if (decision.unloadAfterUse) Log.i("Tekyerema", "[ASR] ${spec.label} fits only just (${avail / AsrMemory.MB} MB available) — it will be unloaded after this use")
+    }
+
+    /** Release every loaded recogniser whose language passes [which]; returns how many. Monitor held by the caller. */
+    private fun releaseLocked(which: (String) -> Boolean): Int {
+        val go = cache.keys.filter(which)
+        for (k in go) {
+            cache.remove(k)?.let { try { it.release() } catch (_: Throwable) {} }
+            loaded.remove(k); beams.remove(k); ResidentModels.unloadAfterUse.remove(k)
+        }
+        return go.size
+    }
+
+    /** After a decode: let a model that only just fitted go again, so the rest of the phone gets its memory back. */
+    private fun unloadIfTight(lang: String) {
+        if (ResidentModels.unloadAfterUse[lang] != true) return
+        synchronized(ResidentModels.monitor) {
+            if (releaseLocked { it == lang } > 0) Log.i("Tekyerema", "[ASR] unloaded the $lang recogniser after use (memory is tight)")
+        }
+    }
 
     /** §2.4 — preload the SESSION language off the critical path so the first request isn't slow. On the
      *  4 GB+ target the other language also stays resident (MAX_RESIDENT=2, §2.5), so a switch is instant.
@@ -239,21 +348,25 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             Log.i("Tekyerema", "[ASR] warm skipped: ${availMb} MB free < $minMb MB — the model will load on first use")
             return
         }
-        withContext(Dispatchers.Default) { lock.withLock { rec(langKey(sessionLanguage)) } }
+        withContext(Dispatchers.Default) {
+            lock.withLock { try { rec(langKey(sessionLanguage)) } catch (_: AsrLowMemoryException) { null } }   // a warm-up never insists
+        }
     }
 
     /** N-08: model load and decode are seconds of CPU work — never on the caller's (often the main) thread. The
-     *  recognizer cache isn't thread-safe, so warm-up and decodes are serialised. */
-    private val lock = Mutex()
+     *  recognizer cache isn't thread-safe, so warm-up and decodes are serialised — across every instance. */
+    private val lock get() = ResidentModels.lock
 
+    /** @throws AsrLowMemoryException when the model isn't loaded and the phone has no room for it right now. */
     override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? =
-        withContext(Dispatchers.Default) { lock.withLock { decodeLocked(wav, forceLanguage) } }
+        withContext(Dispatchers.Default) {
+            lock.withLock { try { decodeLocked(wav, forceLanguage) } finally { unloadIfTight(langKey(forceLanguage)) } }
+        }
 
     /** Drop every loaded recognizer (N-08 low-memory: onTrimMemory). They reload on the next request. */
     suspend fun releaseAll() = withContext(Dispatchers.Default) {
         lock.withLock {
-            cache.values.forEach { try { it.release() } catch (_: Throwable) {} }
-            cache.clear()
+            synchronized(ResidentModels.monitor) { releaseLocked { true } }
             Log.i("Tekyerema", "[ASR] released all recognizers (low memory)")
         }
     }
@@ -326,7 +439,8 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
                 val (raw, sr) = readWav(wav) ?: return@withLock
                 val t0 = SystemClock.uptimeMillis()
                 if (gen != specGeneration) return@withLock                        // already stale: don't hold the recogniser
-                val text = decodeSamples(lang, raw, sr)
+                // Speculation is a head start, never a reason to load a model the phone has no room for.
+                val text = try { decodeSamples(lang, raw, sr) } catch (_: AsrLowMemoryException) { return@withLock }
                 spec = Spec(lang, raw, text, gen)
                 Log.i("Tekyerema", "[ASR] speculative decode ${raw.size * 1000L / sr}ms audio → ${SystemClock.uptimeMillis() - t0}ms")
             }
@@ -344,8 +458,17 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         val proxyRaw: String, val raw: String
     )
 
-    fun diagnose(wav: ByteArray, forceLanguage: String?): AsrDiag? {
-        val lang = langKey(forceLanguage)
+    suspend fun diagnose(wav: ByteArray, forceLanguage: String?): AsrDiag? = withContext(Dispatchers.Default) {
+        lock.withLock {
+            val lang = langKey(forceLanguage)
+            try { diagnoseLocked(wav, lang) }
+            catch (e: AsrLowMemoryException) {
+                Log.w("Tekyerema", "[ASR-DIAG] not run: ${e.availMb} MB available, ${e.neededMb} MB needed to load the model"); null
+            } finally { unloadIfTight(lang) }
+        }
+    }
+
+    private fun diagnoseLocked(wav: ByteArray, lang: String): AsrDiag? {
         val r = rec(lang) ?: return null
         val t0 = SystemClock.uptimeMillis()
         val (raw, sr) = readWav(wav) ?: return null

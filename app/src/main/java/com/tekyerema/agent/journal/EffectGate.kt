@@ -30,6 +30,8 @@ class EffectGate(
         data class AskAgain(val line: String, val prior: Effect) : Verdict()
     }
 
+    private companion object { val GUI_TOOLS = setOf("type", "tap", "long_press", "node_action", "tap_sequence") }
+
     /** UNKNOWN effects of this task the model was already told to check (it is told once; then the user decides). */
     private val warned = HashSet<String>()
     /** This run's payloads by effect id, in memory only — the chat check needs the words, the ledger keeps a hash. */
@@ -86,14 +88,43 @@ class EffectGate(
             if (success) "done: ${message.take(80)}" else "the tool reported a failure: ${message.take(80)}")
     }
 
-    /** Verification settled: verified → CONFIRMED; otherwise the chat on screen may still tell, else UNKNOWN. */
+    /**
+     * Verification settled: verified → CONFIRMED; otherwise the chat on screen may still tell, else UNKNOWN.
+     *
+     * A message is recorded as sent only when the chat agrees. For a chat message the screen is asked FIRST: words still
+     * sitting in the message box did NOT go, whatever a looser claim concluded — the row is FAILED, so the app's real
+     * Send button may still be pressed. (A20e 2026-10-01, Telegram: a `type` + submit that only typed was "verified" by a
+     * claim matching the box, the row became CONFIRMED, and the Send tap was then refused as "already happened".)
+     */
     fun settled(e: Effect, verified: Boolean, detail: String, after: UiSnapshot?) {
+        val row = EffectLedger.get(e.id) ?: e
+        val chat = if (EffectLedger.family(row.kind) == EffectKind.CHAT_MESSAGE) ChatCheck.check(row, payloads[e.id], after) else null
+        // Only for a send done through the screen (type + submit, a tap): a send tool has its own evidence (the radio's
+        // answer, the bubble it watched appear) and is not second-guessed by whatever chat happens to be in front.
+        val viaScreen = row.tool == null || row.tool in GUI_TOOLS
+        if (viaScreen && chat != null && chat.verdict == WorldVerdict.NOT_DONE) {
+            EffectLedger.mark(e.id, EffectState.FAILED, "checked: ${chat.evidence}"); return
+        }
         if (verified) { EffectLedger.mark(e.id, EffectState.CONFIRMED, "verified: ${detail.take(100)}"); return }
-        val r = ChatCheck.check(EffectLedger.get(e.id) ?: e, payloads[e.id], after)
-        when (r.verdict) {
-            WorldVerdict.DONE -> EffectLedger.mark(e.id, EffectState.CONFIRMED, "checked: ${r.evidence}")
-            WorldVerdict.NOT_DONE -> EffectLedger.mark(e.id, EffectState.FAILED, "checked: ${r.evidence}")
-            WorldVerdict.UNDETERMINED -> EffectLedger.mark(e.id, EffectState.UNKNOWN, "not verified: ${detail.take(100)}")
+        when {
+            chat != null && chat.verdict == WorldVerdict.DONE -> EffectLedger.mark(e.id, EffectState.CONFIRMED, "checked: ${chat.evidence}")
+            chat != null && chat.verdict == WorldVerdict.NOT_DONE -> EffectLedger.mark(e.id, EffectState.FAILED, "checked: ${chat.evidence}")
+            else -> EffectLedger.mark(e.id, EffectState.UNKNOWN, "not verified: ${detail.take(100)}")
+        }
+    }
+
+    /**
+     * The user already said yes to exactly this consequence in THIS task and it then demonstrably did not happen (the
+     * words stayed in the box) — the row, or null. The engine may carry that approval over to the next attempt (the real
+     * Send button) instead of asking the same question twice.
+     */
+    fun approvedButNotDone(spec: EffectKeys.Spec): Effect? {
+        val id = taskId ?: return null
+        val target = EffectLedger.normalizeTarget(spec.target)
+        val hash = EffectLedger.hash(spec.payload)
+        return EffectLedger.forTask(id).lastOrNull {
+            EffectLedger.family(it.kind) == EffectLedger.family(spec.kind) && it.target == target && it.payloadHash == hash &&
+                it.state == EffectState.FAILED && it.evidence?.startsWith("checked:") == true
         }
     }
 

@@ -82,7 +82,14 @@ class Navigator(
                 }
             }
         }
-        return Outcome.Failed("That menu went deeper than I expected, so I stopped. Nothing was sent.")
+        return Outcome.Failed("That menu went deeper than I expected, so I stopped. ${nothing()}")
+    }
+
+    /** What did NOT happen, in the intent's own word: a balance check never sends or buys anything. */
+    private fun nothing(): String = when (tx.intent) {
+        TxIntent.SEND_MONEY -> "Nothing was sent."
+        TxIntent.CHECK_BALANCE -> "Nothing was changed."
+        else -> "Nothing was bought."
     }
 
     /** §9/§10 — the ONE consolidated line at the authorization, with everything the user needs to recognise it:
@@ -114,13 +121,15 @@ class Navigator(
         return Outcome.Boundary(line, handedOff = true)
     }
 
-    private fun honestError(text: String) =
-        "The network said: “${text.take(140)}”. Nothing was ${if (tx.intent == TxIntent.SEND_MONEY) "sent" else "bought"}."
+    private fun honestError(text: String) = "The network said: “${text.take(140)}”. ${nothing()}"
 
     private fun timedOut(): Outcome {
         t("TIMEOUT", "no next screen")
-        return Outcome.Failed("The network's menu didn't answer in time, so it may have closed. " +
-            "Nothing is ${if (tx.intent == TxIntent.SEND_MONEY) "sent" else "paid"} without your PIN.")
+        return Outcome.Failed("The network's menu didn't answer in time, so it may have closed. " + when (tx.intent) {
+            TxIntent.SEND_MONEY -> "Nothing is sent without your PIN."
+            TxIntent.CHECK_BALANCE -> "Nothing was changed."
+            else -> "Nothing is paid without your PIN."
+        })
     }
 
     /** Type [value] into the CURRENT dialog and wait for the next one; null when nothing came. */

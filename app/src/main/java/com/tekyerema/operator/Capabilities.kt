@@ -16,7 +16,7 @@ import com.tekyerema.policy.RiskTier
 object Capabilities {
     private val MONEY_TOOLS = setOf("momo_send", "mobile_money", "bank_ussd")   // + the guided bank menu (money/, round 2)
     private val CALL_TOOLS = setOf("make_call")
-    private val MESSAGE_TOOLS = setOf("send_sms", "reply_to_notification", "share_text")
+    private val MESSAGE_TOOLS = setOf("send_sms", "reply_to_notification", "share_text", "share_screenshot")
     private val SETTINGS_TOOLS = setOf("open_setting")
     val NEVER_SWITCHED_OFF = setOf("emergency")
     /** Tools that send something to an online service of ours (blocked while the cloud is off). */

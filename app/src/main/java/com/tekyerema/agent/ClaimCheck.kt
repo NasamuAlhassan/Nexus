@@ -31,6 +31,10 @@ object ClaimCheck {
         Family("alarm", Regex("\\b(?:alarm|timer|remind)", I), "set (?:an? |the |your )?(?:alarm|timer|reminder)",
             setOf("set_alarm", "set_timer", "create_schedule"))
     )
+    /** A step that "succeeded" only at typing or opening a draft — its own check says the words did not go — is no evidence of
+     *  a send (A20e 2026-10-01, Telegram: the text sat in the box and the reply was "I sent the Telegram message"). */
+    private val UNSENT = Regex("still in the (?:text |message )?box|not sent yet|it is not sent|hasn'?t gone|NOT sent", I)
+
     private val NEGATION = Regex("\\b(?:couldn'?t|could not|didn'?t|did not|not|unable|failed|wasn'?t|haven'?t|won'?t|can'?t|cannot|without|never)\\b[^.!?]{0,25}$", I)
 
     data class Unsupported(val noun: String, val said: String) {
@@ -51,7 +55,8 @@ object ClaimCheck {
         for (f in FAMILIES) {
             if (!f.goal.containsMatchIn(goal)) continue
             val said = firstPersonClaim(summary, f.claim) ?: continue
-            val supported = history.any { h -> f.evidence.any { t -> h.startsWith("$t(") } && h.contains("→ success") } ||
+            val supported = history.any { h -> f.evidence.any { t -> h.startsWith("$t(") } && h.contains("→ success") &&
+                    !(f.noun == "message" && UNSENT.containsMatchIn(h)) } ||
                 (f.noun == "search" && searchShowing(goal, screen))
             if (!supported) return Unsupported(f.noun, said.lowercase())
         }

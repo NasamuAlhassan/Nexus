@@ -57,6 +57,7 @@ fun defaultTools(): List<Tool> = listOf(
     ShowAlarmsTool,       // E-05
     ClipboardTool,        // E-19
     ShareTextTool,        // E-20
+    ShareScreenshotTool,  // E-20: the screen as a picture, handed to an app's own share target
     OpenIntentTool,       // D-14 / E-04 intent + deep-link templates
     EmergencyTool,        // L-04 call + text the emergency contact (confirmed)
     // W7 GUI primitives beyond tap: node actions, find-by-scrolling, waiting, whole-page reading

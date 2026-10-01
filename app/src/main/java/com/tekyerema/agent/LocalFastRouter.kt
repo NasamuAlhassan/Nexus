@@ -82,12 +82,15 @@ class LocalFastRouter(
         if (com.tekyerema.notifications.MessageCursor.pending && ScreenReadIntent.isContinue(text))
             com.tekyerema.notifications.MessageCursor.next()?.let { return handled(FastIntent.MoreMessages, it) }
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
-        if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) return null
+        if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) { screenReadAt = SystemClock.elapsedRealtime(); return null }
         // WS-A: "carry on" / "continue" / "resume" with a paused or interrupted task on file → the engine resumes THAT task
         // (AgentEngine.submitGoal decides it from the words and the journal — no model call). With nothing resumable,
         // "continue" stays media play as before.
         if (com.tekyerema.agent.journal.ResumeIntent.shouldResume(text,
                 com.tekyerema.agent.journal.TaskJournal.resumable() != null, ScreenReadCursor.pending)) return null
+        // A screen was read a moment ago and its last part has been spoken, so nothing is pending — "continue" then
+        // fell to the media Play key (audit 2026-10-01, AX03). It means: read further down this screen.
+        if (ScreenReadIntent.isContinue(text) && recentScreenRead()) run(FastIntent.ReadMore)?.let { return it }
         // The user's routine names and relations must be known before classifying (encrypted files, read once — a
         // Keystore decrypt, so off the main thread the voice path runs on).
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -103,6 +106,9 @@ class LocalFastRouter(
         if (RE_BARE_READ.matches(text.trim().lowercase().trimEnd('.', '!', '?')) &&
             controller()?.foregroundPackage()?.let { CAMERA_APPS.any { c -> it.contains(c, true) } } == true)
             openCameraReader("text")?.let { return it }
+        // "read this" / "read the screen" is read by the agent's on-phone reader (not here) — remember that it was asked,
+        // so the "continue" that follows a one-part reading reads on down the screen (see above).
+        if (ScreenReadIntent.isRead(text)) screenReadAt = SystemClock.elapsedRealtime()
 
         val intent = FastIntentClassifier.classify(text) ?: run {
             // Vision follow-up (camera/VisionQa, the Be My AI pattern): while the camera's last photo is still held,
@@ -114,7 +120,11 @@ class LocalFastRouter(
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
         }
-        return run(intent)
+        val out = run(intent)
+        // "close X" where X turned out not to be an installed app: the words were not ours after all — the offline
+        // meaning matcher gets the turn it would have had if the classifier had passed.
+        if (out == null && intent is FastIntent.CloseApp && intent.query != null) return meaning(text, language)
+        return out
     }
 
     /** One classified command: the user's execution mode, the undo snapshot, the command itself, the log line. */
@@ -128,7 +138,8 @@ class LocalFastRouter(
         }
         val t0 = SystemClock.uptimeMillis()
         // A command that acts on the app in front must not act on OUR screen: step it aside first (StepAside).
-        if (StepAside.enabled() && StepAside.forFast(intent)) com.tekyerema.ui.OwnUi.leave()
+        // (ReadMore scrolls and reads the app underneath, so our own screen must be out of the way for it too.)
+        if (StepAside.enabled() && (StepAside.forFast(intent) || intent == FastIntent.ReadMore)) com.tekyerema.ui.OwnUi.leave()
         // J-13: snapshot what this command could change, so "undo" can put it back (not for the memory/audit commands).
         val reversible = intent !in NOT_UNDOABLE && intent !is FastIntent.WhatDidYouDo && intent !is FastIntent.Forget
         val before = if (reversible) try { com.tekyerema.audit.DeviceState.capture(appContext) } catch (_: Throwable) { null } else null
@@ -269,7 +280,17 @@ class LocalFastRouter(
         is FastIntent.CallHistory -> runTool("call_log", org.json.JSONObject()
             .put("filter", if (intent.missedOnly) "missed" else "recent").put("limit", 3))
         FastIntent.LastSms -> runTool("read_sms", org.json.JSONObject().put("limit", 1))
+        // "my last four texts": that many, and said so first ("Your last 4 texts.") — unless the reading is being held
+        // private on the loudspeaker (the tool's own line then says who and how many).
+        is FastIntent.LastSmsN -> runTool("read_sms", org.json.JSONObject().put("limit", intent.count), lead = { r ->
+            val n = r.data?.optInt("count", 0) ?: 0
+            if (r.success && n >= 2 && r.data?.optBoolean("private", false) != true) "Your last $n texts." else null
+        })
         FastIntent.WhereAmI -> runTool("location", org.json.JSONObject().put("action", "where"))
+        is FastIntent.MapSearch -> mapSearch(intent)
+        FastIntent.CloseShade -> closeShade(intent)
+        is FastIntent.CloseApp -> closeApp(intent)
+        FastIntent.ReadMore -> readMore()
         FastIntent.CalendarToday -> runTool("calendar", org.json.JSONObject().put("action", "today"))
         FastIntent.ShowAlarms -> runTool("show_alarms", org.json.JSONObject(), action = true)
         FastIntent.StopTimer -> stopTimer(intent)
@@ -381,6 +402,8 @@ class LocalFastRouter(
         is FastIntent.DeleteRoutine -> "deleted the routine “${intent.routine}”"
         is FastIntent.RunRoutine -> "ran your “${intent.routine}” routine"
         is FastIntent.OpenSetting -> "opened ${intent.target} settings"
+        FastIntent.CloseShade -> "closed the notification panel"
+        is FastIntent.CloseApp -> "left ${intent.query ?: "the app"}"
         else -> null
     }
 
@@ -464,7 +487,7 @@ class LocalFastRouter(
                 com.tekyerema.notifications.MessageIndex.clear()
                 com.tekyerema.core.telemetry.Trajectories.clear(appContext)
                 ScreenMemory.clear()
-                ScreenReadCursor.clear()
+                ScreenReadCursor.clear(); screenReadAt = 0L
                 com.tekyerema.android.Relations.clear()   // who "my mother" is: personal, like the conversation
                 com.tekyerema.agent.habits.Habits.forgetHistory(appContext)   // when everyday requests come (agent/habits)
                 IntentMatcher.get(appContext)?.forgetPersonal()   // learned wordings are the user's words too (audit half 1 #1)
@@ -1002,7 +1025,8 @@ class LocalFastRouter(
      * confirmation — anything that would need one falls through to the agent, which asks. A tool that isn't built,
      * is flagged off, or fails its preflight speaks that honest reason instead.
      */
-    private suspend fun runTool(name: String, args: org.json.JSONObject, action: Boolean = false): FastOutcome? {
+    private suspend fun runTool(name: String, args: org.json.JSONObject, action: Boolean = false,
+                                lead: (com.tekyerema.tools.ToolResult) -> String? = { null }): FastOutcome? {
         val tool = com.tekyerema.tools.defaultTools().firstOrNull { it.name == name } ?: return null
         if (!com.tekyerema.tools.ToolManifest.isAvailable(tool)) return null
         // D-08: the fast path is the "local" caller — a tool that doesn't list it goes to the agent instead.
@@ -1017,7 +1041,9 @@ class LocalFastRouter(
             // "reply saying …" answer that person by SMS.
             Regex("(?i)\\bfrom ([^,.:\\u2063\\u2064]{2,40})").find(r.message)?.groupValues?.get(1)
                 ?.let { References.noteRead(it.trim(), if (name == "read_sms") "SMS" else null) }
-        return FastOutcome(name.uppercase(), speakable(r.message), systemVoice = action, ok = r.success)
+        val said = speakable(r.message)
+        val spoken = lead(r)?.let { it + com.tekyerema.voice.SpokenText.BREAK + said } ?: said
+        return FastOutcome(name.uppercase(), spoken, systemVoice = action, ok = r.success)
     }
 
     /** Tool output → a spoken line: drop planner-only headers and list bullets; each listed item its own sentence with a
@@ -1225,7 +1251,7 @@ class LocalFastRouter(
                     ?: snap.elements.firstOrNull { it.range != null }
             }
         }
-        val s = slider ?: run { c.globalAction("back"); return null }
+        val s = slider ?: run { c.closeShade(); return null }
         val r = s.range!!
         val span = r.max - r.min
         val target = when {
@@ -1242,7 +1268,7 @@ class LocalFastRouter(
         }
         val reached = now?.let { kotlin.math.abs(it - target) <= span * 0.03f } == true
         if (!reached) return null
-        c.globalAction("back")
+        c.closeShade()
         val frac = (target - r.min) / span
         return action("BRIGHTNESS", if (fraction != null) brightnessSaid(fraction)
             else if ((delta ?: 0f) > 0) "Brightness up, now ${Math.round(frac * 100)} percent." else "Brightness down, now ${Math.round(frac * 100)} percent.")
@@ -1377,10 +1403,10 @@ class LocalFastRouter(
                 el = look(4)
             }
         }
-        val found = el ?: run { c.globalAction("back"); return null }   // this phone's panel has no such tile → agent
+        val found = el ?: run { c.closeShade(); return null }   // this phone's panel has no such tile → agent
         val state = if (t.on) "on" else "off"
         if (QuickTiles.isOn(found) == t.on) {
-            c.globalAction("back")
+            c.closeShade()
             return action(t.name, "${tile.spoken} is already $state.")
         }
         if (!c.clickElement(found.id)) return null
@@ -1390,7 +1416,7 @@ class LocalFastRouter(
             Log.i(TAG, "[LOCAL_FAST_PATH] ${tile.key} tile didn't flip (dialog?) → agent continues from this screen")
             return null
         }
-        c.globalAction("back")
+        c.closeShade()
         return action(t.name, "${tile.spoken} is $state.")
     }
 
@@ -1408,6 +1434,80 @@ class LocalFastRouter(
     private fun global(globalName: String, intent: FastIntent, say: String): FastOutcome? {
         val c = controller() ?: return null
         return if (c.globalAction(globalName)) action(intent.name, say) else null
+    }
+
+    // ---------------------------------------------------------------- close the shade / leave the app / read on (audit 2026-10-01)
+    /** "close notifications": the shade is closed and checked closed. NOTHING is cleared — the agent took these words
+     *  for "clear" and wiped every notification without asking (S23). */
+    private suspend fun closeShade(intent: FastIntent): FastOutcome? {
+        val c = controller() ?: return null
+        if (c.activeWindowPackage() != AccessibilityController.SYSTEM_UI)
+            return handled(intent, "The notification panel isn't open.")
+        return if (c.closeShade()) action(intent.name, "Closed.") else null   // still open → the agent looks at what is there
+    }
+
+    /**
+     * "close this app" / "close WhatsApp". Android gives an accessibility service no way to end ONE app, and the Recents
+     * "Close all" button ends EVERY app — which is what the agent pressed for these words (S20). So: leave the app
+     * with Home and say what really happened. A name that is not an installed app is not ours (null → the agent).
+     */
+    private fun closeApp(i: FastIntent.CloseApp): FastOutcome? {
+        val c = controller() ?: return null
+        val own = appContext.packageName
+        val fg = c.foregroundPackage()
+        // Under our own screen is the app the user means, not us.
+        val front = (if (fg == null || fg == own) c.priorForegroundPackage() else fg)?.takeUnless { it == own }
+        val named = i.query?.let { q ->
+            (AppResolver.match(AppResolver.launchable(appContext), q, tolerant = false) as? AppResolver.Match.One)?.app ?: return null
+        }
+        if (named != null && front != named.packageName)
+            return handled(i, "${named.label} isn't the app in front. Android doesn't let me shut an app that is in the background.")
+        if (front == null || front in LAUNCHERS)
+            return handled(i, "You're on the home screen — no app is open in front.")
+        if (!c.globalAction("home")) return null
+        val label = named?.label ?: appLabel(front) ?: "the app"
+        return action(i.name, "Left $label. It's still in your recent apps.")
+    }
+
+    /** "take me to X" names an app when X is exactly an installed one; otherwise — like every other wording — the map. */
+    private suspend fun mapSearch(i: FastIntent.MapSearch): FastOutcome? {
+        if (i.appFirst) {
+            if (AppResolver.match(AppResolver.launchable(appContext), i.place, tolerant = false) is AppResolver.Match.One)
+                return openApp(i.place)
+            if (FastIntentClassifier.isPhoneThing(i.place)) return null   // "take me to my settings page": the agent's
+        }
+        return runTool("open_intent", org.json.JSONObject().put("template", "maps_search").put("query", i.place), action = true)
+    }
+
+    private fun recentScreenRead(): Boolean =
+        screenReadAt > 0L && SystemClock.elapsedRealtime() - screenReadAt <= 120_000L && !ScreenReadCursor.pending
+
+    private fun privateScreen(s: com.tekyerema.accessibility.UiSnapshot): Boolean =
+        com.tekyerema.policy.TargetSemantics.isCredentialScreen(s) || com.tekyerema.policy.TargetSemantics.isHumanCheckScreen(s) ||
+            com.tekyerema.policy.ScreenPrivacy.isDenied(s.appPackage)
+
+    /**
+     * "continue" once a screen has been read to the end of what was showing: scroll one page down and read only what
+     * is NEW (what stayed on screen was just heard). Nothing new → said so, never a silent no-op and never "Playing."
+     * Null (no controller, an empty tree, a scroll that could not be made) → the words keep their old meaning.
+     */
+    private suspend fun readMore(): FastOutcome? {
+        val c = controller() ?: return null
+        if (!c.ready) return null
+        val before = try { c.buildSnapshot() } catch (_: Throwable) { return null }
+        if (privateScreen(before)) return handled(FastIntent.ReadMore, com.tekyerema.tools.ReadScreenTool.PRIVATE)
+        val heard = ScreenReadout.items(before)
+        if (heard.isEmpty()) return null
+        val seen = heard.map { it.lowercase() }.toHashSet()
+        scroll(down = true) ?: return null
+        kotlinx.coroutines.delay(250); c.waitForSettle(1500)
+        val after = try { c.buildSnapshot() } catch (_: Throwable) { return null }
+        screenReadAt = SystemClock.elapsedRealtime()
+        if (privateScreen(after)) return handled(FastIntent.ReadMore, com.tekyerema.tools.ReadScreenTool.PRIVATE)
+        val fresh = ScreenReadout.items(after).filter { it.lowercase() !in seen }
+        if (fresh.isEmpty()) return handled(FastIntent.ReadMore, "That's everything on this screen.")
+        val parts = readingParts(fresh, com.tekyerema.voice.ReadingPace.partChars())
+        return handled(FastIntent.ReadMore, ScreenReadCursor.start(parts, ScreenReadCursor.keyOf(after)))
     }
 
     private suspend fun scroll(down: Boolean): FastOutcome? {
@@ -1467,6 +1567,9 @@ class LocalFastRouter(
 
     companion object {
         private const val TAG = "Tekyerema"
+        /** When "read this" / "read the screen" was last asked (elapsedRealtime; 0 = never). The reading itself is the
+         *  agent's; this only tells a later bare "continue" that a screen was being read. In memory only. */
+        @Volatile private var screenReadAt = 0L
         // A tool's advice to the PLANNER ("— tap the top result's Play button (read_state to find it)", "Ask the user which
         // one they mean, then call install_app …") was read out to the user by the fast path (A20e, 2026-09-29).
         private val PLANNER_TALK = Regex("\\b[a-z]+_[a-z_]+\\b|\\bthe user\\b|\\buse [a-z]+_[a-z]+", RegexOption.IGNORE_CASE)
@@ -1483,6 +1586,22 @@ class LocalFastRouter(
                 }
             }
             return kept.joinToString(" ").trim().ifEmpty { text }
+        }
+        /** Screen items → spoken parts of about [maxChars]; every part but the last ends with the "say continue" cue
+         *  (the same shape [ScreenReadout.compose] gives the first reading, so [ScreenReadCursor] carries on). Pure. */
+        internal fun readingParts(items: List<String>, maxChars: Int): List<String> {
+            val parts = ArrayList<String>()
+            var cur = StringBuilder()
+            for (raw in items) {
+                val item = raw.trim()
+                if (item.isEmpty()) continue
+                val s = if (item.last() in ".!?:;…") item else "$item."
+                if (cur.isNotEmpty() && cur.length + 1 + s.length > maxChars) { parts += cur.toString(); cur = StringBuilder() }
+                if (cur.isNotEmpty()) cur.append(' ')
+                cur.append(s)
+            }
+            if (cur.isNotEmpty()) parts += cur.toString()
+            return parts.mapIndexed { i, p -> if (i < parts.lastIndex) p + ScreenReadout.MORE else p }
         }
         /** Commands that must not become an undo group themselves (undoing an undo would flip-flop). */
         private val NOT_UNDOABLE: Set<FastIntent> = setOf(FastIntent.Undo, FastIntent.MemoryQuery, FastIntent.ListSchedules,

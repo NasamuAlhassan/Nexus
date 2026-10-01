@@ -71,6 +71,22 @@ object ActionSemantics {
             ?: screenHeading(before)?.takeIf { notApp(it) }
     }
 
+    /** What a bare verb button does, said once after "Tap “Delete” in Clock?". */
+    private val VERB_NOTES: List<Pair<Set<String>, String>> = listOf(
+        setOf("delete", "remove", "erase", "format", "reset", "uninstall") to "This may not be undone.",
+        setOf("shutter", "capture", "take", "record") to "This takes a photo or starts recording."
+    )
+
+    /** "1 selected" / "3 items selected" on a selection screen, so "Delete" says HOW MUCH it deletes. */
+    private fun selectionNote(s: UiSnapshot?): String? =
+        (s?.elements.orEmpty().mapNotNull { it.label?.trim() } + listOfNotNull(s?.screenTitle?.trim()))
+            .firstOrNull { it.length <= 30 && Regex("(?i)^\\d+ (?:\\p{L}+ )?selected$").matches(it) }
+            ?.let { "$it." }
+
+    /** A caption as it should be spoken: a tile's "Wi-Fi,On.,Button" → "Wi-Fi On". */
+    private fun spokenCaption(label: String): String =
+        label.replace(Regex("[\\s,]+"), " ").trim().replace(Regex("(?i)\\s*button$"), "").replace(".", "").trim().take(60)
+
     /** A confirmation sentence, or null to fall back to the tool's own prompt. */
     fun confirmation(
         primitive: String, target: UiElement?, requestedLabel: String?, before: UiSnapshot?,
@@ -87,7 +103,12 @@ object ActionSemantics {
         val isTapSend = verb in SEND_VERBS
         if (isTapSend || isCommsType) {
             val msg = if (isCommsType) typedText?.trim()?.ifBlank { null } else composerText(before)
-            val who = recipient?.let { " to $it" } ?: ""
+            // A chat with a BOT or a channel is said to be one: "Richmond" was a public bot that shared the contact's first
+            // name, and the read-back gave no hint (A20e audit 2026-10-01, C10).
+            val notAPerson = before?.elements.orEmpty().mapNotNull { it.label?.trim()?.lowercase() }
+                .firstOrNull { it == "bot" || it == "channel" || Regex("^[\\d\\s,.]+ (?:subscribers?|members?)$").matches(it) }
+                ?.let { if (it == "bot") "a bot" else "a channel or group" }
+            val who = (recipient?.let { " to $it" } ?: "") + (notAPerson?.let { " — this chat is $it, not a person in your contacts" } ?: "")
             return when {
                 !msg.isNullOrBlank() -> "Send this message$who?\n“$msg”"
                 // nothing composed — don't claim "this message": name the control as it reads ("Send to 5554?")
@@ -117,13 +138,40 @@ object ActionSemantics {
             val ask = q?.trimEnd('?')?.let { "The phone is asking: “$it?” " } ?: "The phone is asking for a permission. "
             return ask + "Tap “${text.trim().take(40)}”?"
         }
+        // Name the app too ("… in Jiji.com.gh?"): "Continue with Google" or "Delete" means little without knowing WHERE.
+        val inApp = before?.appName?.takeIf { it.isNotBlank() && !text.contains(it, ignoreCase = true) }?.let { " in $it" }.orEmpty()
+        // Audit 2026-10-01: taps with no consequential word in their caption (see [TargetSemantics.TapEffect]).
+        if (primitive != "type") TargetSemantics.tapEffect(text, target, before)?.let { fx ->
+            val shown = "Tap “${spokenCaption(text)}”$inApp?"
+            val inShade = before?.appPackage == "com.android.systemui"
+            return when (fx) {
+                TargetSemantics.TapEffect.WIPE ->
+                    if (inShade) "Clear all your notifications? They can't be brought back."
+                    else "$shown This clears the whole list and can't be undone."
+                TargetSemantics.TapEffect.CLOSE_ALL -> "Close all your open apps? Anything unsaved in them may be lost."
+                TargetSemantics.TapEffect.JOIN ->
+                    "$shown This starts a chat with a bot, or joins or follows something. It is not a message to a person you know."
+                TargetSemantics.TapEffect.REVEAL_BALANCE -> "$shown This shows your balance on the screen."
+                TargetSemantics.TapEffect.CONNECTIVITY -> {
+                    val what = TargetSemantics.connectionNamed(text)?.let { if (it.startsWith("wi")) "Wi-Fi" else it } ?: "a connection"
+                    "Switch $what on or off? You may lose the connection you are using."
+                }
+            }
+        }
         if (verb != null && text.isNotBlank()) {
+            // 'Delete “Delete”?', 'Take picture “Take picture”?', 'Buy “Buy”?' (A20e audit 2026-10-01) repeat the caption and
+            // say nothing a listener can judge: name the button and the app, then what is selected and what it does.
+            if (text.trim().lowercase().startsWith(verb)) {
+                val notes = listOfNotNull(
+                    selectionNote(before),
+                    VERB_NOTES.firstOrNull { verb in it.first || it.first.any { v -> verb.startsWith(v) } }?.second,
+                    "This may charge you money.".takeIf { TargetSemantics.isSpendCaption(text, target) })
+                return "Tap “${text.take(60)}”$inApp?" + notes.joinToString("") { " $it" }
+            }
             return "${verb.replaceFirstChar { it.uppercaseChar() }} “${text.take(60)}”?"
         }
         // Consent and money: someone who can't see the screen must hear what pressing it MEANS, not just its caption.
         if (text.isNotBlank()) {
-            // Name the app too ("… in Jiji.com.gh?"): "Continue with Google" means little without knowing WHERE.
-            val inApp = before?.appName?.takeIf { it.isNotBlank() && !text.contains(it, ignoreCase = true) }?.let { " in $it" }.orEmpty()
             val shown = "Tap “${text.take(60)}”$inApp?"
             when (TargetSemantics.consentKind(text, target, anchoredOk = target == null || (target.clickable && !target.editable))) {
                 TargetSemantics.Consent.ACCOUNT -> return "$shown This signs you in, makes an account, or shares your account with this app."

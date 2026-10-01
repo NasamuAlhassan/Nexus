@@ -58,6 +58,11 @@
          card if not granted. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
+    <!-- Close the notification shade below Android 12 (StatusBarManager.collapsePanels): without it that call is
+         refused and the shade stayed open over the screen after a Quick Settings change (A20e audit 2026-10-01). A
+         normal, install-time permission; it cannot open or read the shade's contents. -->
+    <uses-permission android:name="android.permission.EXPAND_STATUS_BAR" />
+
     <!-- Needed to resolve/launch other apps and read foreground package on Android 11+.
          Sideload/dev only; a production build would use a scoped <queries> list instead. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"

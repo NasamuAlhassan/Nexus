@@ -45,7 +45,9 @@ sealed interface Heard {
     data object TooShort : Heard
     data object Cancelled : Heard
     data class Unavailable(val cause: Cause, val detail: String) : Heard
-    enum class Cause { NO_RECOGNIZER, PERMISSION, OFFLINE, BUSY, AUDIO, LANGUAGE, NOT_ALLOWED_HERE, OTHER }
+    /** [LOW_MEMORY]: the on-device recogniser wasn't loaded because the phone has no room for it right now — [detail]
+     *  is then the sentence for the user ([com.tekyerema.voice.AsrMemory.SPOKEN]). */
+    enum class Cause { NO_RECOGNIZER, PERMISSION, OFFLINE, BUSY, AUDIO, LANGUAGE, NOT_ALLOWED_HERE, OTHER, LOW_MEMORY }
 }
 
 /** What happens while listening. UI + cues only: nothing here is ever acted on as the user's words. */

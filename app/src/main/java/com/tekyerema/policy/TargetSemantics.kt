@@ -82,18 +82,109 @@ object TargetSemantics {
     /**
      * True when the CURRENT SCREEN is a credential-entry surface (MoMo PIN, password, OTP, passcode) —
      * the trigger for Secure Input Mode, where Tɛkyerɛma must go blind and NEVER hand the screen to the
-     * LLM / OCR / logs. Reuses the same [credentialField] vocabulary as the never-type guard, keyed on
-     * structure only (no app names). Conservative-but-specific: a FLAG_SECURE window, an actual password
-     * field, or an editable field on a screen whose visible text names a credential.
+     * LLM / OCR / logs. Reuses the same [credentialField] vocabulary as the never-type guard. A FLAG_SECURE window or
+     * a masked field always counts. Beyond that it is the FIELD or its PROMPT that must name the credential — never
+     * the content of the screen: a Telegram chat whose old message said "…PIN stage… enter their PIN" was taken for a
+     * MoMo PIN prompt and the agent went blind in it (A20e audit 2026-10-01, E2E2 / E2E3).
+     *  - the field's own hint or resource id names one ("Enter PIN", `otp_input`) — in any app;
+     *  - the network's dialog (USSD / dialer / SIM toolkit): any wording that names one, as before;
+     *  - a lone input with a Send/OK + Cancel pair outside chat/web apps: likewise;
+     *  - any other app: the window title, a short static label ("Enter your PIN"), or a sentence that ASKS for one;
+     *  - a chat, mail or web app ([chatPackages], [browserPackages]), a screen with a message composer, or one whose
+     *    only inputs are search boxes: text alone never counts — those words are someone else's.
      */
     fun isCredentialScreen(screen: UiSnapshot): Boolean {
         if (screen.secureWindow) return true                       // FLAG_SECURE (system PIN/lock/keyguard-like)
         if (screen.elements.any { it.password }) return true       // a masked password/PIN field
-        val hasInput = screen.elements.any { it.editable }
-        if (!hasInput) return false
-        val texts = screen.elements.mapNotNull { it.label } + listOfNotNull(screen.screenTitle)
-        if (texts.any { credentialField.containsMatchIn(it) }) return true   // e.g. "Enter MoMo PIN", "OTP", "password"
+        val inputs = screen.elements.filter { it.editable }
+        if (inputs.isEmpty()) return false
+        val pkg = screen.appPackage.orEmpty()
+        val chat = isChatPackage(pkg)
+        if (inputs.any { fieldNamesCredential(it, chat) }) return true
+        if (promptNamesCredential(screen, inputs, pkg)) return true
         return isUssdMoneyConfirmation(screen)
+    }
+
+    /** Apps whose screens are mostly OTHER PEOPLE'S words. `policy.secureInput.chatPackages` replaces the list. */
+    private val DEFAULT_CHAT_PACKAGES = listOf(
+        "com.whatsapp", "com.whatsapp.w4b", "org.telegram.messenger", "org.thunderdog.challegram", "com.facebook.orca",
+        "com.facebook.mlite", "com.facebook.katana", "com.facebook.lite", "com.instagram.android", "com.instagram.lite",
+        "com.twitter.android", "com.snapchat.android", "org.thoughtcrime.securesms", "com.viber.voip", "com.discord",
+        "com.Slack", "com.linkedin.android", "com.zhiliaoapp.musically", "com.google.android.youtube",
+        "com.samsung.android.messaging", "com.google.android.apps.messaging", "com.android.mms", "com.android.messaging",
+        "com.google.android.gm", "com.samsung.android.email.provider", "com.microsoft.office.outlook"
+    )
+    /** Browsers and search apps: the page is the web's words. `policy.secureInput.browserPackages` replaces the list. */
+    private val DEFAULT_BROWSER_PACKAGES = listOf(
+        "com.android.chrome", "com.chrome.beta", "com.sec.android.app.sbrowser", "org.mozilla.firefox", "com.opera.browser",
+        "com.opera.mini.native", "com.microsoft.emmx", "com.brave.browser", "com.duckduckgo.mobile.android",
+        "com.transsion.phoenix", "com.google.android.googlequicksearchbox"
+    )
+    fun chatPackages(): List<String> =
+        com.tekyerema.core.config.AppConfig.stringList("policy.secureInput.chatPackages", DEFAULT_CHAT_PACKAGES)
+    fun browserPackages(): List<String> =
+        com.tekyerema.core.config.AppConfig.stringList("policy.secureInput.browserPackages", DEFAULT_BROWSER_PACKAGES)
+
+    private fun inPackages(pkg: String?, list: List<String>): Boolean =
+        !pkg.isNullOrBlank() && list.any { p -> p.isNotBlank() && (pkg.equals(p, ignoreCase = true) || pkg.startsWith("$p.", ignoreCase = true)) }
+    fun isChatPackage(pkg: String?): Boolean = inPackages(pkg, chatPackages())
+    /** A chat, mail, social, browser or search app — where on-screen text is content, not a prompt. */
+    fun isContentPackage(pkg: String?): Boolean = isChatPackage(pkg) || inPackages(pkg, browserPackages())
+
+    /** A resource id as words: `com.bank:id/otpInput` → "otp input", `pin_entry` → "pin entry" (never "spinner" → pin). */
+    private fun idWords(viewId: String?): String = viewId.orEmpty().substringAfter(":id/")
+        .replace(Regex("([a-z0-9])([A-Z])"), "$1 $2").replace(Regex("[^A-Za-z0-9]+"), " ").trim().lowercase()
+
+    /** The box a message is written in, by its hint or resource id ("Message", "Reply", `comment_input`). */
+    fun isComposer(e: UiElement): Boolean {
+        if (!e.editable || isQueryBox(e)) return false
+        return (e.hint != null && communicationField.containsMatchIn(e.hint)) || communicationField.containsMatchIn(idWords(e.viewId))
+    }
+
+    /**
+     * The input ITSELF says it takes a credential: its placeholder hint or its resource id. Its label counts only as its
+     * name — when it has no hint, is short, and this is not a chat app or a composer (there, a label is what was typed:
+     * "my pin?" in a message box is a message).
+     */
+    private fun fieldNamesCredential(e: UiElement, chatApp: Boolean): Boolean {
+        if (isQueryBox(e)) return false                                    // "Search passwords" is a search
+        val hint = e.hint?.trim().orEmpty()
+        if (hint.isNotEmpty() && credentialField.containsMatchIn(hint) && !communicationField.containsMatchIn(hint)) return true
+        if (credentialField.containsMatchIn(idWords(e.viewId))) return true
+        val label = e.label?.trim().orEmpty()
+        if (label.isEmpty() || hint.isNotEmpty() || chatApp || isComposer(e)) return false
+        return label.length <= 30 && label.split(Regex("\\s+")).size <= 4 && credentialField.containsMatchIn(label)
+    }
+
+    /** A prompt is short; a message, an article or a notification is not. */
+    private const val PROMPT_MAX = 60
+    /** A sentence that ASKS for a credential ("Enter the OTP we sent to 055…", "Type your PIN to continue"). */
+    private val credentialAsk = Regex(
+        "\\b(?:enter|type|input|provide|key in|put in|insert|confirm|re-?enter)\\b[^\\n.?!]{0,50}" +
+            "\\b(?:pin|otp|password|passcode|passphrase|cvv|verification code|one[- ]time|security code)\\b|\\benter mm\\b",
+        RegexOption.IGNORE_CASE
+    )
+
+    /** The words AROUND the input name a credential — judged by where the screen is (see [isCredentialScreen]). */
+    private fun promptNamesCredential(screen: UiSnapshot, inputs: List<UiElement>, pkg: String): Boolean {
+        fun names(s: String?) = s != null && credentialField.containsMatchIn(s)
+        val others = screen.elements.filter { !it.editable }
+        fun anyText() = names(screen.screenTitle) || others.any { names(it.label) }
+        // The network's own dialog: whatever it says (USSD prompts are one long text; fail closed).
+        if (ussdPackage.containsMatchIn(pkg)) return anyText()
+        // Someone else's words (a chat, mail, a web page), a message being written, or nothing to type a credential into.
+        if (isContentPackage(pkg) || inputs.any { isComposer(it) } || inputs.all { isQueryBox(it) }) return false
+        // A lone input with Send/OK + Cancel is a prompt dialog whatever app shows it.
+        val buttons = others.filter { it.clickable }.mapNotNull { it.label?.trim()?.lowercase() }
+        if (inputs.size == 1 && buttons.any { it in USSD_SUBMIT } && buttons.any { it == "cancel" }) return anyText()
+        if (screen.screenTitle?.trim()?.let { it.length <= PROMPT_MAX && names(it) } == true) return true
+        // A prompt: a short static label ("Enter your PIN"), a caption-sized one even if it is tappable ("MoMo PIN"), or a
+        // sentence that asks for the credential. A tappable row of text ("Kofi: your OTP is…") is content.
+        return others.any { e ->
+            val l = e.label?.trim() ?: return@any false
+            names(l) && ((l.length <= PROMPT_MAX && (!e.clickable || l.split(Regex("\\s+")).size <= 4)) ||
+                (l.length <= 200 && credentialAsk.containsMatchIn(l)))
+        }
     }
 
     /**
@@ -134,9 +225,11 @@ object TargetSemantics {
     )
 
     fun isHumanCheckScreen(screen: UiSnapshot): Boolean {
+        // A check's own wording is short ("I'm not a robot"); a long message or article that mentions a captcha is content.
         val texts = screen.elements.mapNotNull { it.label } + listOfNotNull(screen.screenTitle)
-        return texts.any { humanCheck.containsMatchIn(it) }
+        return texts.any { it.length <= HUMAN_CHECK_MAX && humanCheck.containsMatchIn(it) }
     }
+    private const val HUMAN_CHECK_MAX = 120
 
     /**
      * G-13: what the user is being asked to do on a hand-off screen, from structure and wording only — so the spoken
@@ -233,6 +326,12 @@ object TargetSemantics {
         if (lower != null && isSpendCaption(label!!, target))
             return Classification(RiskTier.TIER3, null, "target '$label' spends money")
 
+        // Audit 2026-10-01: a tap that wipes a list, closes everything, starts a bot / joins a group, shows a balance or
+        // switches a connection — none of them carries a consequential WORD, so each went through unasked.
+        tapEffect(label, target, screen)?.takeIf { it != TapEffect.CONNECTIVITY || primitive == "tap" }?.let { fx ->
+            return Classification(RiskTier.TIER2, null, "target '$label' ${effectReason(fx)}")
+        }
+
         if (lower != null && consequential.containsMatchIn(lower) && looksLikeControlCaption(label!!)) {
             return Classification(RiskTier.TIER2, null, "target '$label' is a consequential control")
         }
@@ -241,6 +340,64 @@ object TargetSemantics {
             return Classification(RiskTier.TIER2, null, "target '$label' gives consent (${k.name.lowercase()})")
         }
         return Classification.NONE
+    }
+
+    /**
+     * What a tap does that its caption has no consequential word for (A20e audit, 2026-10-01):
+     *  WIPE — "Clear" / "Clear all" emptied the whole notification shade when the user said "close notifications" (S23);
+     *  CLOSE_ALL — "Close all" in Recents closed every app when the user said "close this app" (S20);
+     *  JOIN — "Start Bot" started a chat with a stranger's bot (C10); joining a group or following a channel is the same kind;
+     *  REVEAL_BALANCE — "Show MoMo balance" was tapped with no question (F04);
+     *  CONNECTIVITY — the Wi-Fi tile was tapped unasked (F04): the user can lose the connection they are using.
+     * Exact captions only, so "Clear search field", "Close" and "Start typing" stay ordinary taps.
+     */
+    enum class TapEffect { WIPE, CLOSE_ALL, JOIN, REVEAL_BALANCE, CONNECTIVITY }
+
+    private val wipeCaption = Regex("^(?:clear all(?: notifications| history)?|clear notifications|" +
+        "clear (?:history|chat|chats|conversation|recents|call log)|dismiss all|delete all|remove all|" +
+        "empty (?:trash|bin|recycle bin))$")
+    private val closeAllCaption = Regex("^close all(?: apps| tabs| windows)?$")
+    private val joinAnywhere = Regex("^(?:start bot|restart bot|join (?:group|channel|chat|community))$")
+    private val joinInChatApp = Regex("^(?:start|restart|join|follow)$")
+    private val revealBalanceCaption = Regex("^(?:show|view|reveal|unhide|see|check|display) (?:my |your |the )?(?:[a-z]+ ){0,2}balances?$")
+    private const val CONNECTIONS = "(?:wi-?fi|mobile data|flight mode|airplane mode|aeroplane mode|mobile hotspot|hotspot)"
+    private val connectivityName = Regex("^$CONNECTIONS\\b")
+    /** The control's name alone, or a tile's "name[ network] on|off" — not a notification that mentions Wi-Fi. */
+    private val connectivityCaption = Regex("^$CONNECTIONS$|^$CONNECTIONS\\b.{0,60} (?:on|off)$")
+    private const val SYSTEM_UI = "com.android.systemui"
+
+    /** A caption as plain words: a tile reads "Wi-Fi,On.,Button"; trailing punctuation and the word "button" are dropped. */
+    internal fun captionWords(label: String): String =
+        label.replace(Regex("[\\s,]+"), " ").trim().lowercase().removeSuffix(" button").trimEnd('.', '!', '?', '…').trim()
+
+    /** The connection a [TapEffect.CONNECTIVITY] control switches ("wi-fi", "mobile data"), for the read-back. */
+    internal fun connectionNamed(label: String): String? = connectivityName.find(captionWords(label))?.value
+
+    fun tapEffect(label: String?, target: UiElement?, screen: UiSnapshot?): TapEffect? {
+        val t = captionWords(label ?: return null)
+        if (t.isEmpty() || t.length > 80) return null      // a caption (a tile may carry a long network name), not a sentence
+        if (wipeCaption.matches(t)) return TapEffect.WIPE
+        if (t == "clear") {
+            // A bare "Clear" next to a field being edited empties that field, and on a keypad it is the C key: both harmless.
+            val editing = screen?.elements?.any { it.editable && (it.focused || (!it.label.isNullOrBlank() && !it.label.equals(it.hint, true))) } == true
+            val keypad = (screen?.elements?.count { it.clickable && it.label?.trim()?.matches(singleDigit) == true } ?: 0) >= 8
+            return if (editing || keypad) null else TapEffect.WIPE
+        }
+        if (closeAllCaption.matches(t)) return TapEffect.CLOSE_ALL
+        if (joinAnywhere.matches(t) || (joinInChatApp.matches(t) && isChatPackage(screen?.appPackage))) return TapEffect.JOIN
+        if (revealBalanceCaption.matches(t)) return TapEffect.REVEAL_BALANCE
+        // A Quick Settings tile, or a real switch in Settings (a "Wi-Fi" ROW only opens the Wi-Fi page).
+        if (connectivityCaption.matches(t) && (screen?.appPackage == SYSTEM_UI || target?.checkable == true)) return TapEffect.CONNECTIVITY
+        return null
+    }
+
+    /** (No "send" / "dial" / "call" here: [com.tekyerema.operator.Capabilities] reads those words in a reason.) */
+    private fun effectReason(fx: TapEffect): String = when (fx) {
+        TapEffect.WIPE -> "clears a whole list and can't be undone"
+        TapEffect.CLOSE_ALL -> "closes every open app"
+        TapEffect.JOIN -> "starts a bot or joins a group in a chat app"
+        TapEffect.REVEAL_BALANCE -> "shows a balance on the screen"
+        TapEffect.CONNECTIVITY -> "switches a connection on or off"
     }
 
     /**

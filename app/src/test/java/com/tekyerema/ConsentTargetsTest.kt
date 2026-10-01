@@ -105,8 +105,8 @@ class ConsentTargetsTest {
             appName = "Jiji.com.gh")
         val google = ActionSemantics.confirmation("tap", btn(1, "Continue with Google"), null, jiji)!!
         assertTrue(google, google.startsWith("Tap “Continue with Google” in Jiji.com.gh?"))
-        // Existing read-backs are unchanged.
-        assertEquals("Allow “Allow”?", ActionSemantics.confirmation("tap", btn(1, "Allow"), null, screen))
+        // A caption that IS the verb is named once, not doubled ('Allow “Allow”?', 'Delete “Delete”?' — A20e audit 2026-10-01).
+        assertEquals("Tap “Allow”?", ActionSemantics.confirmation("tap", btn(1, "Allow"), null, screen))
     }
 
     @Test fun an_app_defined_consent_action_is_confirmed() {

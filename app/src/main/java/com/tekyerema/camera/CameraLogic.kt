@@ -430,3 +430,12 @@ class CurrencyAnnouncer(
         fun isMoney(cls: String): Boolean = cls != NOT_MONEY
     }
 }
+
+/** Timing for lines the camera screen hands to another voice (its own engine failed). Pure. */
+object CameraSpeech {
+    /**
+     * How long [line] needs to be heard at a normal speaking pace before the screen may close: about 70 ms a
+     * character, never under 1.5 s (a short line still needs the voice to start) and never over 8 s.
+     */
+    fun hearingMs(line: String): Long = (line.trim().length * 70L).coerceIn(1_500L, 8_000L)
+}

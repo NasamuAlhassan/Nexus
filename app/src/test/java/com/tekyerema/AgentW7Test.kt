@@ -17,10 +17,14 @@ class AgentW7Test {
 
     @Test fun knowledge_questions_skip_the_screen_but_phone_questions_do_not() {
         for (q in listOf("What is the capital of Ghana?", "Who wrote Things Fall Apart", "How many pesewas are in a cedi?",
-                "Explain inflation", "Why is the sky blue?", "Tell me a joke"))
+                "Explain inflation", "Why is the sky blue?", "Tell me a joke", "Who is the president of Ghana?",
+                // audit 2026-10-01 (R04): a price comparison is research even when it names data bundles
+                "Compare MTN and Telecel data bundle prices and tell me which is cheaper"))
             assertTrue(q, DirectAnswer.isKnowledgeQuestion(q))
         for (q in listOf("What is my balance?", "Who called me?", "What's on my screen?", "Open WhatsApp",
-                "What is this?", "How do I turn on WiFi", "Is my phone locked?", "Send Ama a text"))
+                "What is this?", "How do I turn on WiFi", "Is my phone locked?", "Send Ama a text",
+                "Can you start the journey to legon Hall", "Can you navigate to Accra Mall",
+                "Where is the route to Kumasi", "Can you show me directions to the airport"))
             assertFalse(q, DirectAnswer.isKnowledgeQuestion(q))
     }
 

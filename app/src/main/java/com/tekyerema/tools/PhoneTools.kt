@@ -197,13 +197,13 @@ object SmsFilter {
 object SendSmsTool : Tool {
     override val name = "send_sms"
     override val description =
-        "Send a text to a contact name or phone number by SMS, or WhatsApp with via=whatsapp. Sends it and checks it went."
+        "Send a text to a contact name or phone number by SMS, or WhatsApp with via=whatsapp."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER2
     override val isAccelerator = true
     override val verifiesOutcome = true
     override val params = listOf(
-        ToolParam("contact", "string", "Contact name to text.", required = false),
+        ToolParam("contact", "string", "Contact name, or 'last sender' to reply.", required = false),
         ToolParam("number", "string", "Phone number to text (digits).", required = false),
         ToolParam("message", "string", "The text to send, exactly as the user wants it."),
         ToolParam("via", "string", "Default sms.", required = false, enumValues = listOf("sms", "whatsapp"))
@@ -244,20 +244,39 @@ object SendSmsTool : Tool {
         }
         if (contact == null)
             return Recipient.Problem(ToolResult(false, "Who should I text? I need a contact name or a phone number."))
+        // "reply to the last message": whoever texted last — never a contact called "the last message" (audit C17).
+        if (ReplyTarget.meansLastSender(contact)) return lastSender(ctx)
         if (!ctx.appContext.granted(Manifest.permission.READ_CONTACTS))
             return Recipient.Problem(ToolResult(false, "I can't look up $contact without contacts access — allow it for Tɛkyerɛma in Settings, or tell me the number.", recoverable = false))
-        val matches = ContactResolver.resolve(ctx.appContext, contact)
+        // One person saved twice is one match; "Ama ending 456" (an option we offered) picks that entry.
+        val matches = ContactChoice.resolve(ctx.appContext, contact)
         return when {
+            com.tekyerema.android.ContactResolver.isPronoun(contact) -> Recipient.Problem(ToolResult(false,
+                "I don't know who “$contact” is — no one was named. Ask the user who the message is for (ask_user)."))
             matches.isEmpty() -> Recipient.Problem(ToolResult(false, "I couldn't find $contact in your contacts."))
-            matches.size > 1 -> {
-                // Same name on two numbers → say the numbers too, or "Ama, Ama" is no help to choose.
-                val options = matches.joinToString(", ") { m ->
-                    if (matches.count { it.name == m.name } > 1) "${m.name} on ${CallLogFormat.spokenNumber(m.number)}" else m.name
-                }
-                Recipient.Problem(ToolResult(false, "More than one contact matches $contact: $options. Which one?", needsDisambiguation = true))
-            }
+            // A short question a listener can answer (≤ 3 options, most recently contacted first; same names told apart
+            // by their last digits) instead of every match in one sentence.
+            matches.size > 1 -> Recipient.Problem(ContactChoice.result(ctx.appContext, ContactChoice.narrow(contact).first, matches))
             else -> Recipient.Ok(matches[0].number.filter { it.isDigit() || it == '+' }, matches[0].name)
         }
+    }
+
+    /** The sender of the newest text in the inbox, as a recipient — or the honest reason a reply can't go to them. */
+    private fun lastSender(ctx: ToolContext): Recipient {
+        val app = ctx.appContext
+        if (!app.granted(Manifest.permission.READ_SMS))
+            return Recipient.Problem(ToolResult(false, "I can't see who texted last without SMS access — allow it for Tɛkyerɛma in Settings, or tell me who to text.", recoverable = false))
+        val address = try {
+            app.contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, arrayOf(Telephony.TextBasedSmsColumns.ADDRESS), null, null,
+                "${Telephony.TextBasedSmsColumns.DATE} DESC")?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+        } catch (_: Throwable) { null }
+        if (address.isNullOrBlank())
+            return Recipient.Problem(ToolResult(false, "There is no text message to reply to. Ask the user who to text.", recoverable = false))
+        if (ReplyTarget.isServiceSender(address))
+            return Recipient.Problem(ToolResult(false, ReplyTarget.cannotReplyLine(address), recoverable = false))
+        val name = if (app.granted(Manifest.permission.READ_CONTACTS))
+            try { ContactResolver.lookupByNumber(app, address).firstOrNull()?.name } catch (_: Throwable) { null } else null
+        return Recipient.Ok(address.filter { it.isDigit() || it == '+' }, name)
     }
 
     /** Runs BEFORE the confirmation: a blind user is never asked to approve a text that can't go, or would go to the
@@ -272,6 +291,12 @@ object SendSmsTool : Tool {
             is Recipient.Ok -> {
                 // Trust (2026-09-29): the helper is never brought in at a PIN (agent/helper/TrustFast.toolRefusal).
                 com.tekyerema.agent.helper.TrustFast.toolRefusal(ctx, r.name, r.number)?.let { return it }
+                // "last sender" is pinned to the number resolved NOW: the text that goes out after the yes must go to
+                // the person just read back, even if another message arrives in between.
+                if (ReplyTarget.meansLastSender(args.str("contact"))) {
+                    args.put("number", r.number)
+                    if (r.name != null) args.put("contact", r.name) else args.remove("contact")
+                }
                 // The confirmation reads back the RESOLVED person and number, not just the name as heard.
                 args.put(ARG_TO, recipientWords(r.name, r.number))
                 null
@@ -499,8 +524,11 @@ object SendSmsTool : Tool {
             failure != null && ok == 0 && pending == 0 -> ToolResult(
                 false, "The text to $who was not sent — ${reason(failure)}.",
                 data = base.put("sent", false), channel = "native",
-                // No signal / radio off is the environment, not a path the UI could route around.
-                recoverable = failure != SmsManager.RESULT_ERROR_RADIO_OFF && failure != SmsManager.RESULT_ERROR_NO_SERVICE
+                // The NETWORK refused it (no signal, radio off, no airtime…): the Messages app sends through the same
+                // network, so there is no path the UI could route around. It used to be "recoverable" for a generic
+                // refusal, and the planner then drove Samsung Messages by hand for 7 cloud calls to re-send what the
+                // network had just rejected (A20e audit 2026-10-01, C01 / C02 — the SIM had 6 pesewas).
+                recoverable = false
             )
             failure != null -> ToolResult(
                 false, "Only $ok of $n parts of the text to $who went out — ${reason(failure)}. Check Messages before sending it again.",
@@ -521,6 +549,8 @@ object SendSmsTool : Tool {
         SmsManager.RESULT_ERROR_SHORT_CODE_NOT_ALLOWED, SmsManager.RESULT_ERROR_SHORT_CODE_NEVER_ALLOWED ->
             "Android blocked sending to that short code"
         SmsManager.RESULT_ERROR_NULL_PDU -> "the message couldn't be encoded"
+        // A generic refusal on a phone with signal is most often an empty airtime balance; say so, as a possibility.
+        SmsManager.RESULT_ERROR_GENERIC_FAILURE -> "the network didn't accept it; the SIM may be out of airtime"
         else -> "the network didn't accept it (error $code)"
     }
 

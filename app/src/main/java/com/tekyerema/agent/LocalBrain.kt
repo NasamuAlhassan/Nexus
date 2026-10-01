@@ -77,6 +77,18 @@ class LocalBrain : AgentBrain {
         // --- N-09 send a text: SMS goes over the mobile network, no internet needed. Before the network gate and the
         //     compound check, because the message itself may say "weather" or "and". send_sms is confirmed (TIER2) with
         //     the resolved person and number read back, so a mis-heard split is caught before anything is sent. ---
+        // "reply to the last message saying okay thanks" names NOBODY (A20e audit 2026-10-01, C17: it became a text to a
+        // contact called "the last message"). The LAST text's sender is asked for by its own name — "last sender", which
+        // send_sms resolves from the inbox and reads back (or says a service sender can't be replied to). A reply to
+        // "it" / "him" / nothing at all needs the conversation: the planner's.
+        RE_REPLY_LAST.find(raw.trim().trimEnd('.', '!'))?.let { m ->
+            val msg = m.groupValues[1].trim().trim('"', '\'', '“', '”').trim()
+            if (msg.isNotEmpty() && !hasFollowOnCommand(msg)) {
+                pendingResultSpeak = true
+                return call("send_sms", JSONObject().put("contact", LAST_SENDER).put("message", msg), "reply to the last sender")
+            }
+        }
+        if (RE_REPLY_UNNAMED.containsMatchIn(g)) return defer("a reply that names nobody — the planner finds the message first")
         smsDecision(raw)?.let { return it }
 
         // --- N-09 "what did Kwame say?", "any messages from Ama?" — answered from the notifications on the phone
@@ -90,7 +102,21 @@ class LocalBrain : AgentBrain {
             }
         }
 
-        if (OfflineCapability.needsInternet(raw)) return network(raw)
+        // --- balances asked in so many words. Question-shaped, so BEFORE the network gate — neither needs the internet:
+        //     airtime → the network's own balance code; Mobile Money → the guided menu walk that stops at the PIN.
+        //     (A20e audit 2026-10-01: "what is my airtime balance" took two cloud calls; "check my mobile money
+        //     balance" and Twi "me credit aka sɛn" had no route and the planner free-drove the myMTN app.) ---
+        if (!RE_COMPOUND_EN.containsMatchIn(g) && RE_USSD_CODE.find(raw) == null) {
+            if (isAirtimeBalanceAsk(g)) {
+                pendingResultSpeak = true
+                return call("run_ussd", JSONObject().put("code", airtimeBalanceCode()), "airtime balance")
+            }
+            if (isMomoBalanceAsk(g)) return momoBalanceDecision()
+        }
+
+        // "the nearest pharmacy", "a chop bar near me": a PLACE to find — live data, never a search of the contacts
+        // (audit R05). The router refuses honestly offline and hands it to the planner online.
+        if (OfflineCapability.needsInternet(raw) || RE_NEARBY.containsMatchIn(g)) return network(raw)
 
         // --- compound / multi-step requests: run them here clause by clause when EVERY clause is a local intent
         //     ("open WhatsApp and read my messages" — offline too); otherwise the cloud operator plans them. ---
@@ -105,6 +131,9 @@ class LocalBrain : AgentBrain {
         // --- read notifications / messages (§6.1). Checked BEFORE screen-read so "Kenkan me nkra" (read my
         //     messages) routes to notifications, not a launcher read (§6.6). "read my WhatsApp messages" reads only
         //     WhatsApp's (the tool filters by app, sender or text). ---
+        // "close / clear / turn off notifications" is NOT a request to hear them (audit S23: it was read, then the planner
+        // cleared every notification) — the fast path closes the shade; anything else is the planner's.
+        if (RE_NOTIF_MANAGE.containsMatchIn(g)) return defer("notifications to close or change, not to read")
         if (RE_READ_NOTIFS.containsMatchIn(g)) {
             pendingResultSpeak = true
             val args = JSONObject()
@@ -115,6 +144,10 @@ class LocalBrain : AgentBrain {
         // --- find a contact (§6.1) — the search_contacts accelerator; its RESULT is spoken at step 2. ---
         RE_FIND_CONTACT.find(raw)?.let { m ->
             val who = m.groupValues.last().trim().trimEnd('.', '!', '?')
+            // "find" is not always a person: "find a restaurant", "look up the meaning of …", "find my phone" are the
+            // planner's (audit R05: "find the nearest pharmacy to me" searched the CONTACTS). A contact is named in so
+            // many words ("… in my contacts") or is a short name.
+            if (who.isNotEmpty() && !looksLikeContact(g, who)) return defer("\"$who\" is not a contact's name")
             if (who.isNotEmpty()) { pendingResultSpeak = true; return call("search_contacts", JSONObject().put("query", who), "find contact") }
         }
 
@@ -138,9 +171,16 @@ class LocalBrain : AgentBrain {
         volumeDecision(g)?.let { return it }
 
         // --- alarm / timer --- (§6.7 gate also on Twi timer words so Twi durations reach timerDecision)
-        if (g.contains("alarm")) alarmDecision(raw)?.let { return it }
-        if (g.contains("timer") || g.contains("simma") || g.contains("sima") || (twi && g.contains("bere")))
+        // The VERB decides, not the noun: "delete the 6:30 alarm" / "cancel the 5 minute timer" / "what alarms do I have"
+        // must never SET one (audit S32: a delete request began by setting the alarm again) — those go to the planner.
+        if (g.contains("alarm")) {
+            if (RE_ALARM_MANAGE.containsMatchIn(g)) return defer("an alarm to change, remove or ask about — not a new one")
+            alarmDecision(raw)?.let { return it }
+        }
+        if (g.contains("timer") || g.contains("simma") || g.contains("sima") || (twi && g.contains("bere"))) {
+            if (RE_TIMER_MANAGE.containsMatchIn(g)) return defer("a timer to stop, change or ask about — not a new one")
             timerDecision(raw)?.let { return it }
+        }
 
         // --- an explicit dialed code ANYWHERE in the words wins ("check my airtime with *124#"): run_ussd runs it and
         //     its reply is spoken. It used to fall to the airtime branch below, which read the code's digits as a
@@ -153,6 +193,8 @@ class LocalBrain : AgentBrain {
         // --- §A.2 Mobile Money: buy airtime / send money → open the network menu, user does amount + PIN.
         //     A QUESTION about airtime ("check my airtime", "how much credit do I have") is a balance code, never a buy. ---
         if (g.contains("airtime") || g.contains("top up") || g.contains("top-up") || g.contains("recharge")) {
+            // "compare airtime prices", "which network has cheaper airtime": research, never a purchase (audit R04's class).
+            if (RE_PRICE_ASK.containsMatchIn(g)) return network(raw)
             if (RE_BALANCE_ASK.containsMatchIn(g)) {
                 pendingResultSpeak = true
                 return call("run_ussd", JSONObject().put("code",
@@ -161,8 +203,11 @@ class LocalBrain : AgentBrain {
             buyAirtimeDecision(raw)?.let { return it }
         }
         if ((g.contains("send") || g.contains("transfer") || g.contains("fa")) &&
-            (g.contains("money") || g.contains("cash") || g.contains("cedi") || g.contains("pesewa") || g.contains("momo") || g.contains("mobile money") || g.contains("sika")))
+            (g.contains("money") || g.contains("cash") || g.contains("cedi") || g.contains("pesewa") || g.contains("momo") || g.contains("mobile money") || g.contains("sika"))) {
+            // "compare the cheapest way to send 50 cedis to …" asks ABOUT sending — it is never read back as a send.
+            if (RE_COMPARE.containsMatchIn(g)) return network(raw)
             sendMoneyDecision(raw)?.let { return it }
+        }
 
         // --- §A.2 play music (generic/local); §P2.4 also a named track against the local library. A track on
         //     a SPECIFIC app ("play X on YouTube") defers to the cloud planner (it needs app UI drive). ---
@@ -467,6 +512,25 @@ class LocalBrain : AgentBrain {
         return call("mobile_money", args, "buy airtime")
     }
 
+    private fun airtimeBalanceCode(): String =
+        com.tekyerema.core.config.AppConfig.string("connectors.telco.airtimeBalanceCode", "*124#")
+
+    /**
+     * "Check my Mobile Money balance" — ONE read-back, then the navigator walks the network's own menu by meaning
+     * (My Wallet → Check Balance) and stops at the PIN, which is the user's alone. With the navigator switched off the
+     * menu is only opened (mobile_money, kind check_balance) and the user finishes it.
+     */
+    private fun momoBalanceDecision(): AgentDecision {
+        if (com.tekyerema.core.config.AppConfig.bool("money.navigator.enabled", true)) {
+            pendingResultSpeak = true   // the walk's own line: the PIN hand-off, or the honest failure
+            return call(com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
+                JSONObject().put(com.tekyerema.money.ussd.UssdNavigatorTool.ARG_INTENT, com.tekyerema.money.ussd.UssdNavigatorTool.CHECK_BALANCE),
+                "mobile money balance (navigator)")
+        }
+        doneLine = if (twi) "Mabue Mobile Money." else "Opened Mobile Money."
+        return call("mobile_money", JSONObject().put("_kind", com.tekyerema.tools.MobileMoneyTool.KIND_BALANCE), "mobile money balance")
+    }
+
     /** §A.2 — send money: needs an amount AND a recipient (after "to"/Twi "ma"); opens the menu, user does PIN. */
     private fun sendMoneyDecision(raw: String): AgentDecision? {
         val canon = Normalizer.normalize(raw, if (twi) Lang.TWI else Lang.GH_EN)
@@ -630,6 +694,10 @@ class LocalBrain : AgentBrain {
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
             val msg = m.groupValues[2].trim().trim('"', '\'', '“', '”').replaceFirst(Regex("^(?i)that\\s+"), "").trim()
             if (who.isEmpty() || msg.isEmpty() || who.split(' ').size > 4) return null
+            // "the last message" / "the sender" is whoever texted last (send_sms resolves "last sender"); "it", "him",
+            // "that message" are not people at all — the planner works out who is meant (audit C17).
+            if (RE_LAST_SENDER.matches(who.lowercase())) return Sms(LAST_SENDER, null, msg, false)
+            if (RE_NOT_A_RECIPIENT.matches(who.lowercase())) return null
             val digits = who.filter { it.isDigit() }
             val isNumber = digits.length >= 7 && who.all { it.isDigit() || it == ' ' || it == '-' || it == '+' }
             return Sms(if (isNumber) null else who, if (isNumber) (if (who.trim().startsWith("+")) "+$digits" else digits) else null, msg, whatsApp)
@@ -755,6 +823,91 @@ class LocalBrain : AgentBrain {
             "play store|playstore|messages)$", RegexOption.IGNORE_CASE)
         /** Airtime asked ABOUT, not bought: check / balance / how much / left. */
         private val RE_BALANCE_ASK = Regex("\\bcheck\\b|\\bbalance\\b|how much|\\bleft\\b|\\bremaining\\b|do i have")
+
+        // ---- verb-aware guards (A20e audit 2026-10-01): the on-phone rules used to route on the NOUN alone ----
+        /** "and / then / ;" — a compound request (English only: Twi "na" also sits inside one question). */
+        private val RE_COMPOUND_EN = Regex("\\b(?:and|then|after that)\\b|;")
+        /** A question about prices or a comparison — research, never a purchase, a send or a balance code. */
+        private val RE_PRICE_ASK = Regex("\\b(?:compare|comparison|versus|vs|cheaper|cheapest|prices?|costs?|fees?|charges?|tariffs?|rates?)\\b|" +
+            "how much (?:is|are|does|do|for|will|would)\\b(?!.*\\b(?:left|remaining|balance|have|my)\\b)")
+        private val RE_COMPARE = Regex("\\b(?:compare|comparison|versus|vs|cheaper|cheapest)\\b")
+        // Word edges are spelled out (W0 … W1) rather than \b wherever a Twi word ends in ɛ/ɔ: \b is ASCII-only on
+        // newer JVMs (the unit tests) and Unicode-aware on the phone, and the two must agree.
+        private const val W0 = "(?<![\\p{L}\\p{N}])"
+        private const val W1 = "(?![\\p{L}\\p{N}])"
+        /** Buying, sending or loading — not asking what is left. Twi: tɔ = buy, fa … ma / mena = send, kyɛ = share. */
+        private val RE_MONEY_VERB = Regex("$W0(?:buy|buying|purchase|send|sending|transfer|share|gift|borrow|lend|pay|withdraw|cash ?out|" +
+            "top ?up|recharge|load|tɔ|to|fa|mena|kyɛ)$W1")
+        private val RE_AIRTIME_WORD = Regex("\\b(?:airtime|credit)\\b(?!\\s+(?:card|score|union|transfer|note|bureau))")
+        private val RE_MOMO_WORD = Regex("\\b(?:momo|mo mo|mobile[ -]money|wallet)\\b")
+        private val RE_AIRTIME_BALANCE = Regex("\\bbalance\\b|\\bcheck\\b|\\bleft\\b|\\bremaining\\b|\\bdo i have\\b|\\bhave i got\\b|" +
+            "\\bhow much (?:is|are) my\\b|${W0}hwɛ$W1|\\baka\\b|\\b(?:sɛn|sen|ahe)\\b")
+        private val RE_MOMO_BALANCE = Regex("\\bbalance\\b|\\bhow much\\b.*\\b(?:do i have|have i got|is (?:in|on|left)|left|remaining)\\b|" +
+            "\\b(?:sika|money)\\b.*\\b(?:sɛn|sen|ahe|aka)\\b|\\b(?:sɛn|sen|ahe)\\b.*\\b(?:sika|money)\\b|${W0}hwɛ$W1.*\\b(?:sika|balance)\\b")
+
+        /** "What is my airtime balance", "how much credit do I have", Twi "me credit aka sɛn" — and not a purchase, a
+         *  price question or Mobile Money. [g] is the lower-cased request. Pure. */
+        internal fun isAirtimeBalanceAsk(g: String): Boolean =
+            RE_AIRTIME_WORD.containsMatchIn(g) && !RE_MOMO_WORD.containsMatchIn(g) && !RE_PRICE_ASK.containsMatchIn(g) &&
+                !moneyVerb(g) && RE_AIRTIME_BALANCE.containsMatchIn(g)
+
+        /** "Check my mobile money balance", "what's my momo balance", "how much money do I have on momo", Twi "me momo
+         *  sika yɛ sɛn" — never a send, a spending-limit command or a question about fees. Pure. */
+        internal fun isMomoBalanceAsk(g: String): Boolean =
+            RE_MOMO_WORD.containsMatchIn(g) && !RE_PRICE_ASK.containsMatchIn(g) && !moneyVerb(g) &&
+                !Regex("\\blimits?\\b").containsMatchIn(g) && RE_MOMO_BALANCE.containsMatchIn(g)
+
+        /** A money VERB in the request. English "to" is only Twi "tɔ" as the keyboard writes it when the words around
+         *  it are Twi ("me pɛ sɛ me to credit") — in an English sentence "to" is just "to". */
+        private fun moneyVerb(g: String): Boolean = RE_MONEY_VERB.findAll(g).any { m ->
+            m.value != "to" || Regex("\\b(?:me|mepɛ|pɛ|sɛ)\\s+to\\b").containsMatchIn(g)
+        }
+
+        /** A place to find, not a person: "the nearest pharmacy", "a chop bar near me". */
+        private val RE_NEARBY = Regex("\\b(?:nearest|closest|nearby|near me|near here|near my (?:location|house|home|place)|" +
+            "around me|around here|close to me|close by)\\b")
+        /** Verbs that manage notifications rather than read them, and the notification settings. */
+        private val RE_NOTIF_MANAGE = Regex("\\b(?:close|hide|dismiss|clear|remove|delete|swipe away|shut|collapse|turn off|switch off|" +
+            "disable|mute|silence|stop|block|snooze|turn on|switch on|enable|allow|unmute|manage)\\b[^.?!]*\\bnotifications?\\b|" +
+            "\\bnotifications?\\b[^.?!]*\\b(?:settings?|sounds?|ringtone|tone|away)\\b")
+        /** An alarm that already exists is meant (remove / change / ask), or the request is a question about alarms. */
+        private val RE_ALARM_MANAGE = Regex("\\b(?:delete|cancel|remove|clear|turn off|switch off|disable|stop|dismiss|snooze|change|edit|" +
+            "move|reschedule|rename|update|skip|turn on|switch on|enable|list|show|check|yi|gyae)\\b[^.?!]*\\balarms?\\b|" +
+            "^\\s*(?:is|are|do|does|did|have|what|when|which|how many|any)\\b[^.?!]*\\balarms?\\b")
+        private val RE_TIMER_MANAGE = Regex("\\b(?:delete|cancel|remove|clear|turn off|switch off|stop|dismiss|pause|resume|reset|restart|" +
+            "change|extend|check|gyae)\\b[^.?!]*\\btimers?\\b|^\\s*(?:is|are|do|does|what|when|how (?:long|much))\\b[^.?!]*\\btimers?\\b")
+        /** The contact value send_sms takes to mean "whoever texted last" (tools/PhoneTools: ReplyTarget). */
+        const val LAST_SENDER = "last sender"
+        private const val LAST_WORD = "(?:last|latest|previous|most recent|newest)"
+        /** "the last message", "my latest text", "the sender", "last sender" — as a recipient. */
+        private val RE_LAST_SENDER = Regex("^(?:(?:the|my)\\s+)?(?:$LAST_WORD\\s+(?:message|text|sms|sender|one)|sender)$")
+        /** "reply to the last message saying …" (any reply verb). Group 1 = the words to send. */
+        private val RE_REPLY_LAST = Regex("^\\s*$LEADIN(?:reply back|reply|respond|answer|write back|text back)\\s+(?:to\\s+)?" +
+            "(?:(?:the|my)\\s+)?$LAST_WORD\\s+(?:message|text|sms|sender|one)\\s*(?:\\s(?:saying|that says|to say|with)\\s|:)\\s*(.+)$",
+            RegexOption.IGNORE_CASE)
+        /** "reply / respond / answer" aimed at a MESSAGE or a pronoun (or at nothing) — nobody is named. */
+        private val RE_REPLY_UNNAMED = Regex("^\\s*$LEADIN(?:reply back|reply|respond|answer|write back|text back|message back)\\b" +
+            "(?:\\s+to)?\\s+(?:(?:(?:the|my|that|this)\\s+)?(?:(?:last|latest|previous|recent|new|newest|same|first)\\s+)?" +
+            "(?:message|text|sms|one|chat|email|notification|sender|person)\\b|(?:it|him|her|them|that|this)\\b|" +
+            "(?:saying|that|with|and say)\\b)", RegexOption.IGNORE_CASE)
+        /** A "recipient" that is a message or a pronoun, not a person or a number. */
+        private val RE_NOT_A_RECIPIENT = Regex("^(?:(?:the|my|that|this)\\s+)?(?:(?:last|latest|previous|recent|new|newest|same|first)\\s+)?" +
+            "(?:message|text|sms|one|chat|conversation|email|notification|sender|person)(?:\\s+.*)?$|" +
+            "^(?:it|him|her|them|that|this|someone|somebody|anyone|anybody)$")
+        /** Things "find …" can mean that are not people. */
+        private val RE_NOT_A_CONTACT = Regex("^(?:an?|some|any|my|me|our|the|this|that|out|where|how|what|when|why|who|information|info|" +
+            "directions?|details?)\\b|\\b(?:restaurants?|hotels?|pharmac(?:y|ies)|hospitals?|clinics?|banks?|atms?|shops?|stores?|" +
+            "stations?|schools?|church(?:es)?|mosques?|markets?|prices?|meaning|recipes?|news|songs?|videos?|photos?|pictures?|files?|" +
+            "apps?|phone|keys|way|route|location|address|jobs?|flights?|bus(?:es)?|taxi|uber|bolt|food|places?|map|maps|website|" +
+            "settings?|messages?|emails?)\\b")
+
+        /** Is [who] (what followed "find / look up …") a contact to search for? "… in my contacts" says so outright;
+         *  otherwise a short name that isn't a thing or a place. [g] is the lower-cased request. Pure. */
+        internal fun looksLikeContact(g: String, who: String): Boolean {
+            if (Regex("\\bcontacts?\\b|\\bphone ?book\\b").containsMatchIn(g)) return true
+            val w = who.trim().lowercase()
+            return w.split(Regex("\\s+")).size <= 3 && !RE_NOT_A_CONTACT.containsMatchIn(w)
+        }
         // §6.1/§6.6 — read notifications / messages. Requires a read/check verb + messages/nkra, OR the word
         // "notifications", OR a bare "nkra" — so "send prince a message" (a send, not a read) does NOT match.
         private val RE_READ_NOTIFS = Regex("\\bnotifications?\\b|\\b(read|check|show|any|new|hwɛ|kenkan)\\b[^.?!]*\\b(messages?|nkra)\\b|^\\s*nkra\\b", RegexOption.IGNORE_CASE)

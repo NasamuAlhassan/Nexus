@@ -20,7 +20,9 @@ class RoutingTts(
     /** A Ghanaian-accented English voice, used for English replies when online; the phone's own engine has no
      *  Ghanaian voice. Null ⇒ system engine only. */
     private val ghEnglish: TtsProvider? = null,
-    private val isOnline: () -> Boolean = { true }
+    private val isOnline: () -> Boolean = { true },
+    /** Tracks whether the Twi voice works, and decides when the user is told it doesn't (once per session). */
+    private val twiStatus: TwiVoiceStatus = TwiVoiceStatus.shared
 ) : TtsProvider {
     override val name = "routing(en=${english.name}; ghEn=${ghEnglish?.name ?: "-"}; twi=${twi.name})"
     override suspend fun speak(rawText: String, language: String): Boolean {
@@ -42,9 +44,19 @@ class RoutingTts(
                 catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
             // X-06: the Twi voice gets the standard spelling (look-alike ɛ/ɔ mapped, tone marks dropped).
             val twiText = com.tekyerema.language.TwiText.canonical(localized ?: plain)
-            if (twi.speak(twiText, language)) { Log.i("Tekyerema", "[TTS] spoke Twi via ${twi.name}"); return true }
-            Log.w("Tekyerema", "[TTS] Twi voice (${twi.name}) unavailable → English system-engine fallback (${english.name}) (§28)")
-            return english.speak(text, Lang.GH_EN)   // fallback: ORIGINAL English text, English voice — never silent
+            if (twi.speak(twiText, language)) { twiStatus.onSpoke(); Log.i("Tekyerema", "[TTS] spoke Twi via ${twi.name}"); return true }
+            // Never silent, and never unexplained (audit 2026-10-01, L16): the first time a Twi reply has to be read by
+            // the English voice the user is told so, once per session; then the reply itself.
+            val why = (twi as? VoiceAvailability)?.whyUnavailable()
+            val tell = twiStatus.onUnavailable(why)
+            Log.w("Tekyerema", "[TTS] Twi voice (${twi.name}) unavailable${why?.let { " — $it" } ?: ""} → English system-engine fallback (${english.name}) (§28)")
+            if (tell) {
+                val told = english.speak(TwiVoiceStatus.NOTICE, Lang.GH_EN)
+                Log.i("Tekyerema", "[TTS] Twi-voice notice spoken=$told (once per session; ${twiStatus.status()})")
+            }
+            val ok = english.speak(text, Lang.GH_EN)   // fallback: the ORIGINAL text, English voice — never silent
+            Log.i("Tekyerema", "[TTS] spoke the Twi reply with the English voice (${english.name}) ok=$ok")
+            return ok
         }
         // English: prefer a Ghanaian-accented voice when online; fall back to the system engine (offline, no
         // provider, or a failure) so we're never silent and never stall offline.

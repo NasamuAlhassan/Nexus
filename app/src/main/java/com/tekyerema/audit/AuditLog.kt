@@ -338,6 +338,7 @@ object ActionWords {
             "create_contact" -> "saved a contact" + (a("name")?.let { " for $it" } ?: "")
             "calendar" -> if (a("action") == "add") "added a calendar event" else "checked your calendar"
             "share_text" -> "shared some text"
+            "share_screenshot" -> "captured the screen and opened it for sharing"
             "clipboard" -> "used the clipboard"
             "notification_action" -> "pressed a notification button"
             "call_control" -> if (a("action") == "end") "ended the call" else "answered the call"
@@ -376,6 +377,7 @@ object ActionWords {
             "create_contact" -> "save a contact"
             "calendar" -> if (a("action") == "add") "add a calendar event" else "check your calendar"
             "share_text" -> "share some text"
+            "share_screenshot" -> "capture the screen and open it for sharing"
             "notification_action" -> "press a notification button"
             "call_control" -> if (a("action") == "end") "end the call" else "answer the call"
             "tap" -> "tap " + (element?.let { "“${it.take(40)}”" } ?: a("label")?.let { "“${it.take(40)}”" } ?: "the screen")
@@ -400,6 +402,7 @@ object ActionWords {
             "run_ussd" -> "the USSD request"
             "create_contact" -> "the new contact"
             "share_text" -> "what I shared"
+            "share_screenshot" -> "the picture I opened for sharing"
             else -> "what I did with ${tool.replace('_', ' ')}"
         }
     }

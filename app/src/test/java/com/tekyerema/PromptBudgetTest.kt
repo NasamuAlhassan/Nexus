@@ -31,7 +31,10 @@ class PromptBudgetTest {
         // Workstream D (2026-09-29): + read_shared (text shared / selected into Tɛkyerɛma), which loads only with the
         // "shared" tool-search group; the per-step subset guard below is unchanged.
         // Integration A+E+B+D (2026-09-29): measured 28,577 (B's plan arg + E's open_url + D's read_shared) — cap = that + ~120.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 28_700)
+        // Audit fixes (2026-10-01): measured 29,109 — + share_screenshot (the screen as a picture handed to a chat app; loads
+        // only with the "comms" group), the Mobile Money balance kind / navigator intent, and reply-to-last-sender on
+        // send_sms. The 'open chrome' per-step subset moved 8,382 → 8,409 (guard below, 9k, unchanged). Cap = that + ~140.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 29_250)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
     }
 

@@ -75,6 +75,21 @@ object GhanaMobileMoney {
         val m = Regex("[+]?\\d[\\d\\s-]{6,}").find(digits)?.value?.filter { it.isDigit() || it == '+' }
         return m?.takeIf { it.filter { c -> c.isDigit() }.length >= 7 }
     }
+
+    /**
+     * The amount as the read-back WRITES it: "5 cedis", "0.1 cedis", and "1 cedi" — never "1 cedis" (A20e audit
+     * 2026-10-01, F03). The voice layer says it in words afterwards (Verbalize: "0.1 cedis" → "ten pesewas",
+     * "1 cedi" → "one cedi"), so the figure stays a figure here.
+     */
+    fun cedisPhrase(amount: String): String {
+        val a = amount.trim()
+        val one = a.toBigDecimalOrNull()?.let { it.compareTo(java.math.BigDecimal.ONE) == 0 } ?: false
+        return if (one) "1 cedi" else "$a cedis"
+    }
+
+    /** ", reference “school fees”" for a read-back when the user gave one (audit F09: it was parsed but never said). */
+    fun referencePhrase(reference: String?): String =
+        reference?.trim()?.trim('"', '\'', '“', '”')?.trim()?.takeIf { it.isNotEmpty() }?.let { ", reference “$it”" }.orEmpty()
 }
 
 /**
@@ -91,19 +106,23 @@ object GhanaMobileMoney {
  */
 object MobileMoneyTool : Tool {
     override val name = "mobile_money"
-    override val description = "Open the network's Mobile Money menu to send money or buy airtime. Reads the recipient and amount back for ONE confirmation, then opens the menu so you can navigate it (choose send-money, enter the number, amount and reference). The user always enters the PIN."
+    override val description = "Open the network's Mobile Money menu to send money, buy airtime or check the Mobile Money balance. Reads the recipient and amount back for ONE confirmation, then opens the menu so you can navigate it (choose send-money, enter the number, amount and reference; or My Wallet › Check Balance). The user always enters the PIN."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER3
     override val isAccelerator = true
     override val params = listOf(
-        ToolParam("_kind", "string", "send_money | buy_airtime"),
+        ToolParam("_kind", "string", "send_money | buy_airtime | check_balance"),
         ToolParam("_amount", "string", "Cedi amount.", required = false),
         ToolParam("_recipient", "string", "Recipient name (for send_money).", required = false),
         ToolParam("_number", "string", "Recipient number (for send_money).", required = false)
     )
 
-    /** A send (not airtime): the guided send-money menu. */
-    private fun isSend(args: JSONObject) = args.str("_kind") != "buy_airtime"
+    /** "Check my Mobile Money balance": the menu is opened and walked to the PIN — nothing is sent or bought. */
+    const val KIND_BALANCE = "check_balance"
+    const val BALANCE_PROMPT = "Check your Mobile Money balance? I'll go through the menu; you'll enter your PIN."
+
+    /** A send (not airtime, not a balance check): the guided send-money menu. */
+    private fun isSend(args: JSONObject) = args.str("_kind").let { it != "buy_airtime" && it != KIND_BALANCE }
 
     /**
      * Money safety round 2 (2026-09-29), the guided send the same as momo_send: the user's spending limit is checked before
@@ -151,9 +170,11 @@ object MobileMoneyTool : Tool {
             ctx.appContext.startActivity(intent)
             val what = when (kind) {
                 "buy_airtime" -> "Opened Mobile Money ($root); the menu is on screen. Continue through it to buy airtime" +
-                    (amount?.let { " of $it cedis" } ?: "") + ", then stop for the user to enter the PIN — never type the PIN."
+                    (amount?.let { " of ${GhanaMobileMoney.cedisPhrase(it)}" } ?: "") + ", then stop for the user to enter the PIN — never type the PIN."
+                KIND_BALANCE -> "Opened Mobile Money ($root); the menu is on screen. Continue through it to the balance " +
+                    "(My Wallet, then Check Balance), then stop for the user to enter the PIN — never type the PIN, and never choose anything that sends or buys."
                 else -> "Opened Mobile Money ($root); the menu is on screen. Continue through it: send" +
-                    (amount?.let { " $it cedis" } ?: " money") + (recipient?.let { " to $it" } ?: "") +
+                    (amount?.let { " ${GhanaMobileMoney.cedisPhrase(it)}" } ?: " money") + (recipient?.let { " to $it" } ?: "") +
                     ", enter the reference when the menu asks, then stop for the user to enter the PIN — never type the PIN."
             }
             ToolResult(true, what, channel = "native")
@@ -165,7 +186,8 @@ object MobileMoneyTool : Tool {
     // The engine renders the confirmation from confirmSpecFor(); this is the fallback text (§P2.1 — the
     // wording matches reality: we OPEN Mobile Money, the user finishes the amount and PIN).
     override fun confirmationPrompt(args: JSONObject): String {
-        val amt = args.str("_amount")?.let { "$it cedis" } ?: "money"
+        if (args.str("_kind") == KIND_BALANCE) return BALANCE_PROMPT
+        val amt = args.str("_amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"
         // No amount said: never "Buy money of airtime" (A20e 2026-09-29, offline) — the user picks the amount in the menu.
         if (args.str("_kind") == "buy_airtime")
             return if (args.str("_amount") == null) "Open Mobile Money to buy airtime? You'll choose the amount in the menu and enter your PIN."

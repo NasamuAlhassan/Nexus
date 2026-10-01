@@ -9,8 +9,10 @@ import android.util.Log
  */
 
 /** Try TTS providers in order; the first that speaks wins. Degrades to the system engine (never silent). */
-class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider {
+class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider, VoiceAvailability {
     override val name = "fallback(" + chain.joinToString(",") { it.name } + ")"
+    /** The first reason any voice in the chain gives for being unusable (the network voice's: key, quota, link). */
+    override fun whyUnavailable(): String? = chain.firstNotNullOfOrNull { (it as? VoiceAvailability)?.whyUnavailable() }
     override suspend fun speak(text: String, language: String): Boolean {
         for (p in chain) if (p.speak(text, language)) return true
         return false

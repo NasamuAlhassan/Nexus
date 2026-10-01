@@ -79,6 +79,7 @@ object PhoneProbe {
                 app.packageManager.queryIntentServices(Intent(android.speech.tts.TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE), 0).isNotEmpty()
             },
             speakAloud = safe(true) { s.speakAloud },
+            twiVoiceProblem = safe<String?>(null) { com.tekyerema.voice.TwiVoiceStatus.shared.problem() },
             batteryPct = battery.first,
             charging = battery.second
         )

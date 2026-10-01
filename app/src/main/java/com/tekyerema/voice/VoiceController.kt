@@ -277,7 +277,7 @@ class VoiceController(
                     captured = { interjectionHeard = true; cues.captured() }))
                 val text = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical.orEmpty()
                 if (text.isBlank()) return@launch
-                val line = applyInterjection(text, lang == Lang.TWI)
+                val line = sideAnswer(text, lang) ?: applyInterjection(text, lang == Lang.TWI)
                 try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
             } finally {
                 // speechDetected used to stay true for the rest of the task after an interjection (the voice screen then
@@ -305,6 +305,33 @@ class VoiceController(
             leaving.forEach { it.join() }
             block()
         }
+    }
+
+    /**
+     * A question the phone answers by itself — the time, the battery, a sum — asked WHILE a task runs: is it one? Pure.
+     * It used to be folded into the running task as a "correction", which then searched the web for the time and lost
+     * its own thread (A20e audit 2026-10-01, I03). Only look-ups: nothing that presses a key or changes a setting.
+     */
+    internal fun isSideQuestion(text: String): Boolean {
+        if (ControlVerbs.classify(text) != ControlVerbs.Verb.STEER) return false
+        val intent = try { com.tekyerema.agent.FastIntentClassifier.classify(text, routines = false) } catch (_: Throwable) { null }
+        return when (intent) {
+            com.tekyerema.agent.FastIntent.Time, com.tekyerema.agent.FastIntent.Date, com.tekyerema.agent.FastIntent.Day,
+            com.tekyerema.agent.FastIntent.Battery, com.tekyerema.agent.FastIntent.Storage, com.tekyerema.agent.FastIntent.DeviceInfo,
+            com.tekyerema.agent.FastIntent.VolumeQuery, com.tekyerema.agent.FastIntent.FlashlightQuery,
+            com.tekyerema.agent.FastIntent.WifiQuery, com.tekyerema.agent.FastIntent.BluetoothQuery -> true
+            is com.tekyerema.agent.FastIntent.Calculate, is com.tekyerema.agent.FastIntent.DateAnswer,
+            is com.tekyerema.agent.FastIntent.Convert, is com.tekyerema.agent.FastIntent.Spell,
+            is com.tekyerema.agent.FastIntent.WorldTime -> true
+            else -> false
+        }
+    }
+
+    /** The answer to a side question, said without touching the running task; null = not one (handle it as before). */
+    private suspend fun sideAnswer(text: String, language: String): String? {
+        if (agent.state.value.status == AgentStatus.WAITING_CONFIRMATION || !isSideQuestion(text)) return null
+        return try { fastRouter?.tryHandle(text, language)?.spoken?.takeIf { it.isNotBlank() } }
+            catch (c: CancellationException) { throw c } catch (_: Throwable) { null }
     }
 
     /** C-12: act on words said (or typed) while a task runs, and return the line that tells the user what happened. */
@@ -560,6 +587,16 @@ class VoiceController(
                 // doing?", or a correction the running task folds in (C-19). A voice interjection still listening is superseded.
                 interjectJob?.cancel()
                 cues.captured()
+                // "what time is it" typed while a task works is answered on the spot; the task carries on untouched.
+                if (agent.state.value.status != AgentStatus.WAITING_CONFIRMATION && isSideQuestion(t)) {
+                    interjectionHeard = true
+                    interjectJob = observerScope.launch {
+                        val answer = sideAnswer(t, language) ?: return@launch
+                        Log.i("Tekyerema", "[VOICE] side question answered while the task runs (${answer.length} chars)")
+                        if (speakAloud()) try { tts.speak(Verbalize.apply(answer), language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                    }
+                    return TypedResult(route, accepted = true, notice = "One moment…")
+                }
                 val line = applyInterjection(t, language == Lang.TWI)
                 interjectionHeard = true   // a prompt arriving now lets this line finish before it asks
                 if (speakAloud()) interjectJob = observerScope.launch {
@@ -662,7 +699,7 @@ class VoiceController(
     /** voice/io: listening can't work at all right now — a second try won't either. */
     private val UNRECOVERABLE = setOf(com.tekyerema.voice.io.Heard.Cause.OFFLINE, com.tekyerema.voice.io.Heard.Cause.NO_RECOGNIZER,
         com.tekyerema.voice.io.Heard.Cause.PERMISSION, com.tekyerema.voice.io.Heard.Cause.LANGUAGE,
-        com.tekyerema.voice.io.Heard.Cause.NOT_ALLOWED_HERE)
+        com.tekyerema.voice.io.Heard.Cause.NOT_ALLOWED_HERE, com.tekyerema.voice.io.Heard.Cause.LOW_MEMORY)
     private val CANT_LISTEN_CONFIRM = "I can't hear answers right now. Tap Yes or No when you're ready."
     private val SECURE_TAP_DONE = "When you've finished, tap Done, or type done."
 
@@ -853,6 +890,8 @@ class VoiceController(
         com.tekyerema.voice.io.Heard.Cause.BUSY -> "The phone's speech service is busy. Tap and try again in a moment."
         com.tekyerema.voice.io.Heard.Cause.PERMISSION -> "I need microphone permission to hear you."
         com.tekyerema.voice.io.Heard.Cause.LANGUAGE -> "The phone's speech service doesn't have this language. You can type your request."
+        // The offline recogniser was refused for lack of memory rather than letting Android kill the app (audit V01).
+        com.tekyerema.voice.io.Heard.Cause.LOW_MEMORY -> AsrMemory.SPOKEN
         else -> "Sorry, I couldn't understand that. Try again, a little closer to the phone."
     }
 
@@ -1021,7 +1060,11 @@ class VoiceController(
      * confirmation gate), then the spoken outcome. [source] is logged so a trace can tell the two
      * apart; it changes nothing about what the agent receives.
      */
-    private suspend fun runTurn(tr: Transcript, source: InputSource) {
+    private suspend fun runTurn(heard: Transcript, source: InputSource) {
+        // A PIN / password / one-time code said inside a request is removed here, at the one door every request comes
+        // through — before the log line, the screen, the fast path and the agent (audit 2026-10-01, SEC02).
+        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw),
+            canonical = com.tekyerema.core.Privacy.maskCredentials(heard.canonical))
         try {
             hideAsking()   // a new turn (e.g. the answer to a question) clears any "asking" card
             // Session language context (§11): adopt the LID-resolved language (low-signal already

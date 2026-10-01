@@ -40,6 +40,27 @@ object Privacy {
         else -> "(${text.length} chars)"
     }
 
+    /**
+     * A PIN, password or one-time code SAID INSIDE a request ("my mobile money PIN is 4821, remember it") is removed
+     * before the words go anywhere — the log, the trace file, the conversation memory, the cloud model (audit 2026-10-01,
+     * SEC02: all three received the digits). The words around it stay, so the request is still understood and refused.
+     * Only a credential word followed by its value is touched: a phone number, an amount or "the middle is 4 5 6" is not.
+     * Pure → unit-tested. A hard rule in code, not config.
+     */
+    fun maskCredentials(text: String): String {
+        var t = CRED_DIGITS.replace(text) { m -> m.groupValues[1] + MASK }
+        t = CRED_WORD.replace(t) { m -> m.groupValues[1] + MASK }
+        return t
+    }
+
+    const val MASK = "[hidden]"
+    private const val CRED = "(?:pin(?: ?code| number)?|pass ?code|password|pass ?word|otp|one[- ]time (?:pin|code|password)|" +
+        "verification code|secret code|security code|cvv)"
+    /** "PIN is 4821", "pin: 4 8 2 1", "OTP 493021", "my password number is 1234" — the digit run (3–10 digits) goes. */
+    private val CRED_DIGITS = Regex("(?i)(\\b$CRED\\b(?:\\s+(?:is|was|=|:|to|as|of|number|code))*\\s*[:=]?\\s*)\\d(?:[\\s-]?\\d){2,9}(?!\\d)")
+    /** "password is hunter2" — the next word goes (only after "is"/":"/"=", so "password field" is untouched). */
+    private val CRED_WORD = Regex("(?i)(\\b(?:pass ?word|pass ?code)\\b\\s*(?:is|was|=|:)\\s*)(?!\\[hidden])\\S{3,40}")
+
     /** Redact trace files? Release builds always; debug builds when config asks (default: keep detail for development). */
     fun redactTraces(): Boolean = !com.tekyerema.BuildConfig.DEBUG || AppConfig.bool("privacy.retention.redactTraces", false)
 

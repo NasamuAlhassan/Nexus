@@ -87,16 +87,32 @@ object Expects {
     fun isVacuous(e: Expectation?): Boolean = e == null || e is Expectation.ScreenChanged || e is Expectation.Unparsed
 }
 
-/** Result of checking a claim against a fresh observation. */
-data class VerificationResult(val verified: Boolean, val detail: String)
+/**
+ * Result of checking a claim against a fresh observation.
+ *
+ * [stillInField]: the tool SAW the words it typed / was sending still sitting in a text box and nowhere else — the
+ * submit or the Send press did not take. A claim that is "met" only by that box is then not met (A20e 2026-10-01,
+ * Telegram: `element_present: hello…` matched the composer and the task said "I sent it").
+ * [authoritative]: this particular result is an observed OUTCOME even though the tool's results are normally a weak
+ * signal (a tap on Send whose message is now a bubble in the chat) — it counts like an outcome tool's own check.
+ */
+data class VerificationResult(
+    val verified: Boolean,
+    val detail: String,
+    val stillInField: Boolean = false,
+    val authoritative: Boolean = false
+)
 
 object OutcomeVerifier {
     private fun norm(s: String) = s.lowercase().replace(Regex("\\s+"), " ").trim()
 
-    private fun labelsContaining(snap: UiSnapshot?, text: String): List<String> {
+    private fun elementsContaining(snap: UiSnapshot?, text: String): List<com.tekyerema.accessibility.UiElement> {
         val t = norm(text)
-        return snap?.elements?.mapNotNull { it.label }?.filter { norm(it).contains(t) }.orEmpty()
+        return snap?.elements?.filter { e -> e.label?.let { norm(it).contains(t) } == true }.orEmpty()
     }
+
+    private fun labelsContaining(snap: UiSnapshot?, text: String): List<String> =
+        elementsContaining(snap, text).mapNotNull { it.label }
 
     /** A single short phrase with no sentence punctuation is most likely a placeholder/hint, not content. */
     private fun looksLikeHint(label: String?): Boolean =
@@ -117,6 +133,8 @@ object OutcomeVerifier {
     ): VerificationResult {
         if (!actionSucceeded) return VerificationResult(false, "action failed; nothing to verify")
         val changed = Verify.screenChanged(before, after)
+        // A normally-weak tool can still have OBSERVED this action's outcome (a Send tap → the bubble in the chat).
+        val outcomeTyped = toolVerifiesOutcome || toolDefault.authoritative
         if (Expects.isVacuous(expectation)) {
             val why = when (expectation) {
                 null -> "no expectation given"
@@ -124,17 +142,21 @@ object OutcomeVerifier {
                 is Expectation.Unparsed -> "expectation '${expectation.raw.take(60)}' not understood"
                 else -> ""
             }
-            return if (toolVerifiesOutcome)
-                VerificationResult(toolDefault.verified, "${toolDefault.detail} ($why; tool's own outcome check used)")
+            return if (outcomeTyped)
+                toolDefault.copy(detail = "${toolDefault.detail} ($why; tool's own outcome check used)")
             else
                 VerificationResult(false, "$why; screen changed=$changed is only a weak signal — state a concrete expectation " +
                     "(element_present/new_element/element_absent/field_empty/field_contains/foreground_is/range_value)")
         }
         val generic = when (val e = expectation!!) {
             is Expectation.ElementPresent -> {
-                val hits = labelsContaining(after, e.label)
-                if (hits.isNotEmpty()) VerificationResult(true, "found '${hits.first().take(60)}'")
-                else VerificationResult(false, "expected an element containing '${e.label}'; none found on ${after?.appPackage ?: "unknown"} (screen changed=$changed)")
+                val hits = elementsContaining(after, e.label)
+                when {
+                    hits.isEmpty() -> VerificationResult(false, "expected an element containing '${e.label}'; none found on ${after?.appPackage ?: "unknown"} (screen changed=$changed)")
+                    // The only place the words are is the text box the tool says they are still stuck in: not sent.
+                    toolDefault.stillInField && hits.all { it.editable } -> stillInBox(toolDefault)
+                    else -> VerificationResult(true, "found '${(hits.firstOrNull { !it.editable } ?: hits.first()).label!!.take(60)}'")
+                }
             }
             is Expectation.ElementAbsent -> {
                 val hits = labelsContaining(after, e.label)
@@ -142,11 +164,20 @@ object OutcomeVerifier {
                 else VerificationResult(false, "expected '${e.label}' to be gone but found '${hits.first().take(60)}'")
             }
             is Expectation.NewElement -> {
-                val now = labelsContaining(after, e.label)
-                val prior = labelsContaining(before, e.label)
+                val nowEls = elementsContaining(after, e.label)
+                val priorEls = elementsContaining(before, e.label)
+                val now = nowEls.mapNotNull { it.label }
+                val prior = priorEls.mapNotNull { it.label }
+                // A sent message MOVES from the box to a bubble: the count is the same (1 → 1) but a non-editable copy is
+                // new — that is the new element. The reverse (only the box holds it) is never "new content".
+                val nowShown = nowEls.count { !it.editable }
+                val priorShown = priorEls.count { !it.editable }
                 when {
                     now.isEmpty() -> VerificationResult(false, "expected a NEW element containing '${e.label}'; none found now (screen changed=$changed)")
+                    toolDefault.stillInField && nowShown == 0 -> stillInBox(toolDefault)
                     now.size > prior.size -> VerificationResult(true, "new element '${now.first().take(60)}' appeared (${prior.size} before, ${now.size} now)")
+                    nowShown > priorShown -> VerificationResult(true,
+                        "new element '${nowEls.first { !it.editable }.label!!.take(60)}' appeared (it left the text box and now shows on the page)")
                     else -> VerificationResult(false, "'${e.label}' was already present before the action (${prior.size} before, ${now.size} now) — not new; possible duplicate or no-op")
                 }
             }
@@ -214,8 +245,11 @@ object OutcomeVerifier {
         // (a range_value with no slider visible), the tool's own CONFIRMED outcome still counts. This
         // never WEAKENS verification: a passing generic check is returned as-is, and this only ADDS an
         // already-confirmed authoritative outcome as an accepted path. Non-outcome tools are unaffected.
-        if (toolVerifiesOutcome && toolDefault.verified && !generic.verified)
+        if (outcomeTyped && toolDefault.verified && !generic.verified)
             return VerificationResult(true, "${toolDefault.detail} (tool's own outcome check; on-screen expectation not observable for this action)")
         return generic
     }
+
+    /** The claim was "met" only by the text box the words are still sitting in. */
+    private fun stillInBox(toolDefault: VerificationResult) = VerificationResult(false, toolDefault.detail, stillInField = true)
 }

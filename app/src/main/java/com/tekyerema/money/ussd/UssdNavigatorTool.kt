@@ -35,22 +35,41 @@ object UssdNavigatorTool : Tool {
 
     override val name = NAME
     override val description =
-        "Send money via the network's USSD menu: navigates silently by meaning, reads the network's confirmation (registered name) and stops at the PIN. Needs number + amount."
+        "Send money via the network's USSD menu, or check the Mobile Money balance: navigates silently by meaning, reads the network's confirmation (registered name) and stops at the PIN. A send needs number + amount."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER3
     override val isAccelerator = true
     /** The on-phone brain routes sends here deterministically; the cloud planner keeps momo_send — no schema growth,
      *  and no model ever drives the navigator directly (§19: the LLM is never the execution authority). */
     override val hiddenFromModel = true
+
+    /** What the walk is for: a send (the default, number + amount) or a balance check (no slots at all). */
+    const val ARG_INTENT = "intent"
+    const val SEND_MONEY = "send_money"
+    const val CHECK_BALANCE = "check_balance"
+    const val BALANCE_PROMPT = "Check your Mobile Money balance? I'll go through the menu; you'll enter your PIN."
+
+    // number + amount are checked in [preflight] for a send (a missing one is asked for again there); a balance check
+    // carries neither — so they are not "required" at the argument check.
     override val params = listOf(
-        com.tekyerema.tools.ToolParam("number", "string", "Recipient phone number (digits)."),
-        com.tekyerema.tools.ToolParam("amount", "string", "Cedi amount."),
-        com.tekyerema.tools.ToolParam("reference", "string", "Payment reference.", required = false)
+        com.tekyerema.tools.ToolParam("number", "string", "Recipient phone number (digits) — needed for a send.", required = false),
+        com.tekyerema.tools.ToolParam("amount", "string", "Cedi amount — needed for a send.", required = false),
+        com.tekyerema.tools.ToolParam("reference", "string", "Payment reference.", required = false),
+        com.tekyerema.tools.ToolParam(ARG_INTENT, "string", "send_money (default) | check_balance", required = false,
+            enumValues = listOf(SEND_MONEY, CHECK_BALANCE))
     )
+
+    /** A balance check: the menu is walked to the PIN, nothing is sent — no limits, no recipient, no receipt window. */
+    internal fun isBalance(args: JSONObject): Boolean = args.str(ARG_INTENT) == CHECK_BALANCE
 
     /** The same money preflights as the fixed driver: limits first, a malformed number asked again, the SIM's
      *  network detected (never assumed), first-time-number and on-call warnings for the read-back. */
     override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        if (isBalance(args)) {
+            if (Provider.current(ctx.appContext).provider == null)
+                return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't guess a Mobile Money code.", recoverable = true)
+            return null
+        }
         com.tekyerema.money.MoneyLimits.preflight(args.str("amount"))?.let { (line, final) -> return ToolResult(false, line, recoverable = !final) }
         MoMoSendTool.numberProblem(args.str("number"))?.let { return ToolResult(false, it, recoverable = true) }
         args.put("number", com.tekyerema.agent.NumberSpeech.normalize(args.str("number")))
@@ -73,7 +92,9 @@ object UssdNavigatorTool : Tool {
         val root = Provider.momoRoot(ctx.appContext)
             ?: return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't guess a code.", recoverable = true)
         val sim = Provider.current(ctx.appContext)
-        val tx = TxContext(
+        val balance = isBalance(args)
+        val tx = if (balance) TxContext(intent = TxIntent.CHECK_BALANCE, provider = sim.provider, confirmedUpFront = true)
+        else TxContext(
             intent = TxIntent.SEND_MONEY,
             provider = sim.provider,
             recipient = args.str("number")?.filter { it.isDigit() },
@@ -87,9 +108,10 @@ object UssdNavigatorTool : Tool {
             return ToolResult(false, "Couldn't open Mobile Money: ${t.message}", recoverable = true)
         }
         Log.i(TAG, "[NAV] opened $root (${sim.provider}${if (sim.dualSim) ", dual-SIM: default voice slot ${sim.slot}" else ""}) intent=${tx.intent}")
-        com.tekyerema.money.MoMoRetry.clear()
+        if (!balance) com.tekyerema.money.MoMoRetry.clear()   // a balance check doesn't cancel a send waiting to be retried
         val first = UssdDialog.awaitNext(ctrl, "", 25_000L)
-            ?: return timedOut(args, "The menu didn't open in time. Nothing was sent.")
+            ?: return if (balance) ToolResult(false, "The Mobile Money menu didn't open in time. Nothing was changed.", recoverable = false)
+                else timedOut(args, "The menu didn't open in time. Nothing was sent.")
         val embedder: ((String) -> FloatArray)? =
             com.tekyerema.agent.IntentMatcher.get(ctx.appContext)?.let { m -> { s: String -> m.embed(s) } }
         val online = OnlineFallback(try { com.tekyerema.settings.Settings(ctx.appContext).groqApiKeys } catch (_: Throwable) { emptyList() })
@@ -97,9 +119,12 @@ object UssdNavigatorTool : Tool {
         return when (val out = nav.run(first)) {
             is Navigator.Outcome.Boundary -> {
                 // The walk reached the authorization: today's total, the number as known, the receipt window.
-                com.tekyerema.money.MoneyLimits.parseAmount(tx.amount)?.let { com.tekyerema.money.MoneyLimits.recordSend(it) }
-                tx.recipient?.let { com.tekyerema.money.KnownRecipients.add(it) }
-                com.tekyerema.money.MoMoAfterCare.handedOff(sim.provider, com.tekyerema.money.MoneyLimits.parseAmount(tx.amount))
+                // (A balance check sends nothing: no total, no recipient, no receipt to wait for.)
+                if (!balance) {
+                    com.tekyerema.money.MoneyLimits.parseAmount(tx.amount)?.let { com.tekyerema.money.MoneyLimits.recordSend(it) }
+                    tx.recipient?.let { com.tekyerema.money.KnownRecipients.add(it) }
+                    com.tekyerema.money.MoMoAfterCare.handedOff(sim.provider, com.tekyerema.money.MoneyLimits.parseAmount(tx.amount))
+                }
                 ToolResult(true, out.line, data = JSONObject().put("boundary", true), channel = "native")
             }
             is Navigator.Outcome.Final -> ToolResult(true, out.line, data = JSONObject().put("final", true), channel = "native")
@@ -129,14 +154,17 @@ object UssdNavigatorTool : Tool {
             if (result.success) "the network's screens were read and matched" else "the walk stopped honestly")
 
     override fun confirmationPrompt(args: JSONObject): String {
-        val amt = args.str("amount")?.let { "$it cedis" } ?: "money"
+        if (isBalance(args)) return BALANCE_PROMPT
+        val amt = args.str("amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"
+        // The reference goes out with the money, so it is read back with it (A20e audit 2026-10-01, F09).
+        val ref = GhanaMobileMoney.referencePhrase(args.str("reference"))
         val raw = args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
-            ?: return "Send $amt with Mobile Money? I'll go through the menu and stop at the PIN for you to enter."
+            ?: return "Send $amt with Mobile Money$ref? I'll go through the menu and stop at the PIN for you to enter."
         val (to, netWarn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(MoMoSendTool.ARG_SIM))
         val warn = listOfNotNull(netWarn, MoMoSendTool.firstTimeWarning(args),
             com.tekyerema.tools.MoneyPrivacy.callWarning(args.optBoolean(MoMoSendTool.ARG_ON_CALL)))
             .joinToString(" ").ifEmpty { null }
-        return "Send $amt to $to, with Mobile Money?\n" + (warn?.let { "$it " } ?: "") +
+        return "Send $amt to $to, with Mobile Money$ref?\n" + (warn?.let { "$it " } ?: "") +
             "I'll go through the menu quietly and stop at the PIN for you to enter."
     }
 }

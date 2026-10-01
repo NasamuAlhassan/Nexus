@@ -237,6 +237,28 @@ class FastIntentClassifierTest {
             assertEquals(s, FastIntent.LastSms, c(s))
         assertTrue(c("Read the text on the screen") != FastIntent.LastSms)
         for (s in listOf("Where am I?", "What's my current location")) assertEquals(s, FastIntent.WhereAmI, c(s))
+        for (s in listOf("show me locations to the Accra mall", "navigate to Accra Mall", "directions to Kumasi",
+            "can you start the journey to legon Hall", "take me to the airport", "show me where legon Hall is",
+            "how do I get to Makola Market"))
+            assertTrue(s, c(s) is FastIntent.MapSearch)
+        assertEquals("Accra Mall", (c("navigate to Accra Mall") as FastIntent.MapSearch).place)
+        assertEquals("legon Hall", (c("can you start the journey to legon Hall") as FastIntent.MapSearch).place)
+        assertEquals("the airport", (c("show me directions to the airport please") as FastIntent.MapSearch).place)
+        // "take me to X" may name an app: the router opens X when it is exactly an installed app, else searches the map.
+        assertTrue((c("take me to the airport") as FastIntent.MapSearch).appFirst)
+        assertEquals(FastIntent.MapSearch("WhatsApp", appFirst = true), c("take me to WhatsApp"))
+        assertTrue(!(c("navigate to Accra Mall") as FastIntent.MapSearch).appFirst)
+        // Not places (2026-10-01 review of the first rule): the user's own things, parts of the phone, a bare "where is"
+        // question (the answer is spoken, Maps isn't opened), and "go to X" (an app or a screen).
+        for (s in listOf("where is my phone", "find my last message", "where is the settings", "how do I get to the settings",
+            "show me where my messages are", "navigate to my notifications", "find my keys", "where is Kumasi",
+            "take me to the next page", "take me to my messages", "search for places near me"))
+            assertTrue("$s -> ${c(s)}", c(s) !is FastIntent.MapSearch)
+        assertEquals(FastIntent.OpenApp("settings"), c("go to settings"))
+        assertEquals(FastIntent.OpenApp("whatsapp"), c("go to WhatsApp"))
+        assertEquals(FastIntent.Home, c("take me to the home screen"))
+        assertTrue(FastIntentClassifier.isPhoneThing("my Settings page"))
+        assertTrue(!FastIntentClassifier.isPhoneThing("Makola Market"))
         for (s in listOf("Am I online?", "Do I have internet", "Am I on WiFi")) assertEquals(s, FastIntent.Connectivity, c(s))
         assertEquals(FastIntent.NowPlaying, c("What's playing?"))
         assertEquals(FastIntent.CalendarToday, c("What's on my calendar today?"))
@@ -348,5 +370,67 @@ class FastIntentClassifierTest {
             assertNull(s, c(s))
         assertEquals(FastIntent.OpenApp("calculator"), c("open the calculator"))
         assertEquals(FastIntent.Battery, c("how much battery is left"))
+    }
+
+    // ---- Black-box audit, A20e 2026-10-01 ----
+
+    /** S23: "close notifications" went to the agent, which tapped Clear and wiped every notification. */
+    @Test fun close_notifications_closes_the_shade_and_never_clears() {
+        for (s in listOf("close notifications", "Close the notifications.", "close my notifications", "close the notification panel",
+            "close the notification shade", "hide notifications", "close the panel", "can you close the notifications please"))
+            assertEquals(s, FastIntent.CloseShade, c(s))
+        // Clearing is a different thing (and the agent's, behind a confirmation) — never this rule.
+        for (s in listOf("clear notifications", "clear all notifications", "clear my notifications", "dismiss notifications",
+            "delete my notifications", "close all notifications", "remove the notifications"))
+            assertNotEquals(s, FastIntent.CloseShade, c(s))
+        assertEquals("opening is still opening", FastIntent.Notifications, c("open the notification panel"))
+    }
+
+    /** S20: "close this app" went to the agent, which pressed Recents' "Close all". */
+    @Test fun close_this_app_is_a_fast_command() {
+        for (s in listOf("close this app", "Close the app.", "exit this app", "leave this app", "quit the application", "close app",
+            "please close this app for me"))
+            assertEquals(s, FastIntent.CloseApp(null), c(s))
+        assertEquals(FastIntent.CloseApp("WhatsApp"), c("close WhatsApp"))      // the router checks it is an installed app
+        assertEquals(FastIntent.CloseApp("calculator"), c("Close the calculator app"))
+        // Things people close that are not apps, and anything about ALL apps, stay with the agent.
+        for (s in listOf("close the door", "close all apps", "close this", "close it", "close the tab", "close the keyboard",
+            "close my eyes", "leave the group", "close everything"))
+            assertTrue("$s -> ${c(s)}", c(s) !is FastIntent.CloseApp)
+        assertNull("compound → agent", c("close whatsapp and open telegram"))
+    }
+
+    /** L10, L11, L04: "on the torch" took 7 s, "off the light" 13 s and Twi "sɔ kanea no" 30 s through the cloud model. */
+    @Test fun ghanaian_english_switches_without_a_verb() {
+        for (s in listOf("on the torch", "On the flashlight.", "on the light", "put on the torch", "put on the light",
+            "abeg on the torch", "chale on the light for me", "turn on the light", "light on", "open the light",
+            "sɔ kanea no", "sɔ kanea", "so kanea no"))
+            assertEquals(s, FastIntent.FlashlightOn, c(s))
+        for (s in listOf("off the light", "off the torch", "off the flashlight", "put off the light", "put off the torch",
+            "switch off the light", "light off", "close the light", "close the torch", "dum kanea no", "dum kanea"))
+            assertEquals(s, FastIntent.FlashlightOff, c(s))
+        assertEquals(FastIntent.BluetoothOn, c("on the bluetooth"))
+        assertEquals(FastIntent.BluetoothOff, c("off the bluetooth"))
+        assertEquals(FastIntent.BluetoothOn, c("put on bluetooth"))
+        assertEquals(FastIntent.WifiOn, c("on the wifi"))
+        assertEquals(FastIntent.WifiOff, c("off the wi-fi"))
+        // "light" is the torch ONLY as an on/off command: the camera's question and ordinary sentences are untouched.
+        assertEquals(FastIntent.Camera("color"), c("is the light on"))
+        for (s in listOf("the light is too bright", "light a candle", "what is light", "on the way", "off the record"))
+            assertTrue("$s -> ${c(s)}", c(s) != FastIntent.FlashlightOn && c(s) != FastIntent.FlashlightOff)
+    }
+
+    /** SEC03: "read my last four text messages" read one. */
+    @Test fun a_count_of_texts_is_kept() {
+        assertEquals(FastIntent.LastSmsN(4), c("read my last four text messages"))
+        assertEquals(FastIntent.LastSmsN(3), c("Read my last 3 texts"))
+        assertEquals(FastIntent.LastSmsN(2), c("read my two latest texts"))
+        assertEquals(FastIntent.LastSmsN(5), c("check my last five sms"))
+        assertEquals(FastIntent.LastSmsN(3), c("read my last few texts"))
+        assertEquals("never more than ten", FastIntent.LastSmsN(10), c("read my last 25 text messages"))
+        for (s in listOf("Read my last text", "read my last 1 text message", "any new texts"))
+            assertEquals(s, FastIntent.LastSms, c(s))
+        assertNull("a time window is not a count", FastIntentClassifier.smsCount("check my texts from the last 2 days"))
+        assertEquals(4, FastIntentClassifier.smsCount("read 4 text messages"))
     }
 }

@@ -243,9 +243,25 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
      *  the wake word fired with the shade open used to leave the panel invisible (owner 2026-09-30). */
     fun collapseShade() {
         try {
-            if (Build.VERSION.SDK_INT >= 31) performGlobalAction(15 /* GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE */)
-            else @Suppress("DEPRECATION") sendBroadcast(android.content.Intent(android.content.Intent.ACTION_CLOSE_SYSTEM_DIALOGS))
+            if (Build.VERSION.SDK_INT >= 31) {
+                performGlobalAction(15 /* GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE */)
+            } else {
+                @Suppress("WrongConstant")
+                val sb = getSystemService("statusbar")
+                sb?.javaClass?.getMethod("collapsePanels")?.invoke(sb)
+            }
         } catch (_: Throwable) {}
+    }
+
+    /** The whole shade, verified closed. The system's own dismiss first (a real action on API 31+; below that the
+     *  status-bar call needs a permission an app is rarely given, so it is only a best effort), then Back while
+     *  System UI still holds the focus — see [AccessibilityController.closeShade]. */
+    override suspend fun closeShade(): Boolean {
+        if (activeWindowPackage() != AccessibilityController.SYSTEM_UI) return true
+        collapseShade()
+        kotlinx.coroutines.delay(300)
+        if (activeWindowPackage() != AccessibilityController.SYSTEM_UI) return true
+        return super<AccessibilityController>.closeShade()
     }
 
     private fun restoreVolume(code: Int, steps: Int) {
@@ -636,16 +652,20 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override suspend fun clickElement(id: Int): Boolean {
         val node = nodeMap[id] ?: return false
-        // A node whose window has gone must not be tapped by its OLD position — that lands on whatever replaced it
-        // (audit 2026-09-30, half 2: taps on stale bounds). refresh() false = the element no longer exists.
-        if (!(try { node.refresh() } catch (_: Throwable) { false })) return false
-        val target = if (node.isClickable) node else ancestorWhere(node, 6) { it.isClickable } ?: node
-        val clicked = try { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) } catch (t: Throwable) { false }
-        if (clicked) return true
-        // Fallback for unlabeled/custom-drawn controls with no clickable ancestor: gesture-tap the
-        // element's own bounds center.
+        val refreshed = try { node.refresh() } catch (_: Throwable) { false }
+        if (refreshed) {
+            val target = if (node.isClickable) node else ancestorWhere(node, 6) { it.isClickable } ?: node
+            val clicked = try { target.performAction(AccessibilityNodeInfo.ACTION_CLICK) } catch (t: Throwable) { false }
+            if (clicked) return true
+        }
+        // Coordinate fallback: safe when the same app is still in front (the element is likely still
+        // at the same position even though the node was recycled — e.g. Telegram's RecyclerView).
+        // Blocked when the app switched: stale bounds from a DIFFERENT app would land on whatever replaced it.
         val b = boundsMap[id] ?: return false
         if (b.isEmpty()) return false
+        val snappedPkg = node.packageName?.toString()
+        val livePkg = foregroundPackage()
+        if (snappedPkg != null && livePkg != null && snappedPkg != livePkg) return false
         return tap(b.centerX, b.centerY)
     }
 

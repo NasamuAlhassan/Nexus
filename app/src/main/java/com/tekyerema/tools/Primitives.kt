@@ -85,8 +85,22 @@ object TapTool : Tool {
         }
     }
 
-    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult) =
-        weakVerify(before, after, result)
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        // A tap on a chat's Send button has a checkable outcome whatever the model claimed: the draft that was in the
+        // box is now a bubble (sent), or it is still in the box (not sent). Anything else stays the weak screen-diff.
+        if (result.success) sendTapVerdict(ctx.resolvedTarget?.element, args.str("label"), before, after)?.let { return it }
+        return weakVerify(before, after, result)
+    }
+
+    /** Pure (SentCheckTest): the verdict for a tap on a Send control while [before]'s message box held a draft, else null. */
+    internal fun sendTapVerdict(tapped: com.tekyerema.accessibility.UiElement?, label: String?, before: UiSnapshot?, after: UiSnapshot?): VerificationResult? {
+        val isSend = tapped?.let { ComposerSend.isSendControl(it) } ?: (label?.let { SEND_TAP.matches(it.trim()) } == true)
+        if (!isSend) return null
+        val draft = com.tekyerema.agent.journal.EffectKeys.composerText(before) ?: return null
+        return com.tekyerema.verifier.SentCheck.verdict(before, after, draft)
+    }
+
+    private val SEND_TAP = Regex("(?i)^send(?:\\s+(?:message|sms|text|now))?$")
 
     override fun confirmationPrompt(args: JSONObject) =
         "Tap ${TargetResolver.parse(args)?.let { TargetResolver.describe(it) } ?: "this"}?"
@@ -353,7 +367,13 @@ object TypeTool : Tool {
         val changed = Verify.screenChanged(before, after)
         // Still sitting focused in the box with its text (e.g. a suggestion dropdown echoing it) = not submitted.
         val stillEditing = after?.elements?.any { e -> e.editable && e.focused && e.label?.lowercase()?.contains(t) == true } == true
-        return if (changed && inContent && !stillEditing) VerificationResult(true, "submitted — the text now appears in the page content")
+        if (changed && inContent && !stillEditing) return VerificationResult(true, "submitted — the text now appears in the page content")
+        // The words are ONLY in a text box: the keyboard's Enter did not send / search (Telegram and WhatsApp put a
+        // line break there). Said plainly and flagged, so a claim "met" by that box is not taken as sent (A20e
+        // 2026-10-01: "I sent the Telegram message" with the text still sitting unsent).
+        val onlyInBox = !inContent && after?.elements?.any { e -> e.editable && !e.password && e.label?.lowercase()?.contains(t) == true } == true
+        return if (onlyInBox) VerificationResult(false, "typed, but the words are still in the text box and nowhere else — nothing was " +
+            "sent or searched yet. Tap the app's own Send / Search button next to the box, then check the result shows", stillInField = true)
         else VerificationResult(false, "submitted; screen changed=$changed, text in page content=$inContent — the submit's effect isn't confirmed")
     }
 
@@ -410,16 +430,40 @@ object KeyEventTool : Tool {
             "volume_up", "volume_down", "volume_mute" -> ctrl.adjustVolume(key)
             else -> return ToolResult(false, "Unknown key '$key'.")
         }
+        // A screenshot leaves nothing on screen to look for; say where it went so the model doesn't take it again or go
+        // hunting through Quick Settings and the power menu for a "Screenshot" button (A20e 2026-10-01: seven of them).
+        if (ok && key == "screenshot") return ToolResult(true, SCREENSHOT_DONE, channel = "system")
         return ToolResult(ok, if (ok) "Pressed $key." else "$key failed.", channel = "system")
     }
 
-    // Authoritative for "home" (a checkable SYSTEM goal state). back/recents/volume keep the weak screen-diff
-    // signal (always unverified), so this never weakens anything — OutcomeVerifier only ADDS a confirmed outcome.
+    /** Is System UI's pull-down panel the window in front? The snapshot's own package first, then the live window. */
+    private fun panelOpen(ctrl: AccessibilityController?, after: UiSnapshot?): Pair<Boolean, String?> {
+        after?.appPackage?.takeIf { it.contains("systemui", ignoreCase = true) }?.let { return true to it }
+        val live = try { ctrl?.activeWindowPackage() } catch (_: Throwable) { null }
+        return (live?.contains("systemui", ignoreCase = true) == true) to live
+    }
+
+    internal const val SCREENSHOT_DONE = "Took a screenshot — it is saved in the Gallery's Screenshots album. Don't take it again. " +
+        "To send the screen to someone, use share_screenshot (it hands the picture to the chat app) rather than this saved file."
+
+    // Authoritative for "home" (a checkable SYSTEM goal state), for a screenshot (the system took it — nothing on screen
+    // shows that), and for quick_settings / notifications (System UI's panel is in front). back/recents/volume keep the
+    // weak screen-diff signal (always unverified), so this never weakens anything — OutcomeVerifier only ADDS a
+    // confirmed outcome.
     override val verifiesOutcome = true
 
     override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
         if (!result.success) return VerificationResult(false, "action failed")
-        if (args.str("key")?.lowercase() == "home") {
+        val key = args.str("key")?.lowercase()
+        if (key == "screenshot")
+            return VerificationResult(true, "the system took the screenshot (saved to the Screenshots album; nothing on screen shows it)")
+        if (key == "quick_settings" || key == "notifications") {
+            // The panel belongs to System UI; the event-tracked foreground stays on the app beneath, so read the window.
+            val (ok, fg) = panelOpen(ctx.controller, after)
+            return if (ok) VerificationResult(true, "the ${if (key == "notifications") "notification" else "Quick Settings"} panel is open ($fg)")
+            else weakVerify(before, after, result)
+        }
+        if (key == "home") {
             // GOAL-STATE check, not a screen-diff proxy: the device's default launcher is in front. Correct even when
             // the user was ALREADY on the home screen (nothing changes) — the old weak check read that as a failure
             // (found by the on-device eval: go_home → COMPLETED_UNVERIFIED).
@@ -557,7 +601,7 @@ object CannotDoTool : Tool {
     override val riskTier = RiskTier.TIER0
     override val params = listOf(
         ToolParam("reason_class", "string", "Why.", enumValues = CANNOT_DO_CLASSES),
-        ToolParam("detail", "string", "Specifically what was tried and what blocks it.")
+        ToolParam("detail", "string", "One sentence said TO the user, starting with I: what you can't do and why.")
     )
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult =

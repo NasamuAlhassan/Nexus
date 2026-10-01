@@ -90,6 +90,10 @@ object OpenAppTool : Tool {
         val pkg = result.data?.optString("package").orEmpty()
         if (pkg.isEmpty()) return VerificationResult(false, result.message)
         val prevFg = result.data?.optString("prevFg")?.ifBlank { null }
+        // The fresh observation already READ the window in front: when it is the app, that settles it — the
+        // event-tracked foreground can still say the launcher after a cold start (A20e 2026-10-01, Calculator: a working
+        // launch was reported "NOT verified", went to the cloud, and ended "unverified" 16 s later).
+        after?.appPackage?.takeIf { it.contains(pkg, ignoreCase = true) }?.let { return VerificationResult(true, "foreground is $it") }
         val (ok, fg) = Verify.pollLaunched(ctx.controller, pkg, prevFg = prevFg, attempts = 16, intervalMs = 300L)
         return VerificationResult(ok, if (ok) "foreground is $fg" else "foreground is $fg, expected $pkg")
     }

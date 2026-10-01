@@ -67,7 +67,7 @@ object VoiceDebug {
         val force = lang?.takeIf { it == Lang.GH_EN || it == Lang.TWI }
         scope.launch {
             val d = sherpa.diagnose(file.readBytes(), force)
-            if (d == null) { Log.w("Tekyerema", "[ASR-DIAG] diagnose returned null (model ready=${sherpa.ready})"); return@launch }
+            if (d == null) { Log.w("Tekyerema", "[ASR-DIAG] no result — the model can't run right now or wasn't loaded for lack of memory (model ready=${sherpa.ready})"); return@launch }
             val tr = LanguagePipeline.process(d.raw, settings.sessionLanguage, force, backend = sherpa.name)
             Log.i("Tekyerema", "[ASR-DIAG] ===== $name =====")
             Log.i("Tekyerema", "[ASR-DIAG] MODEL=${d.model} LANG(token)=${d.lang} RESOLVED=${tr.language}")
@@ -97,7 +97,12 @@ object VoiceDebug {
             var total = 0L
             for (f in files) {
                 val t0 = android.os.SystemClock.uptimeMillis()
-                val raw = sherpa.rawTranscript(f.readBytes(), force).orEmpty()
+                val raw = try { sherpa.rawTranscript(f.readBytes(), force).orEmpty() }
+                    catch (e: AsrLowMemoryException) {
+                        // The model wasn't loaded (it would have got the app killed): say so and stop, never crash.
+                        Log.w("Tekyerema", "[ASR-BATCH] stopped at ${f.name}: ${e.availMb} MB available, ${e.neededMb} MB needed to load the model")
+                        return@launch
+                    }
                 val ms = android.os.SystemClock.uptimeMillis() - t0
                 total += ms
                 val tr = LanguagePipeline.process(raw, settings.sessionLanguage, force, backend = sherpa.name)

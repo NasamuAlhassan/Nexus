@@ -58,11 +58,22 @@ object TelcoUssd {
     private val OTHER = Regex("(?i)other(?:s)?\\b|another|different number|someone")
     private val BALANCE = Regex("(?i)check.*balance|bundle balance|data balance|\\bbalance\\b")
 
+    /** The words of a question about bundles rather than a request for one (matched on the normalised, lower-case goal;
+     *  "how much data do I have left" is a balance and stays ours). */
+    private val ASKS_ABOUT = Regex("\\b(?:compare|comparison|versus|vs|cheaper|cheapest|prices?|costs?|difference|" +
+        "more expensive)\\b|\\bwhich (?:is|one|network|bundle|offer)\\b|\\bhow much (?:is|are|does|do)\\b(?! i )")
+    private val BUY_LEAD = Regex("^ (?:please |kindly |can you |could you |i want to |i'd like to |i would like to |help me )*" +
+        "(?:buy|purchase|get me|get) ")
+
     /** What [goal] asks of the network's own menu on the [network] SIM ("mtn" | "telecel" | "airteltigo"), or null. */
     fun parse(goal: String, network: String?): Request? {
         val g = " " + goal.lowercase().replace('’', '\'').replace(Regex("[^\\p{L}\\p{N}' ]"), " ").replace(Regex("\\s+"), " ").trim() + " "
         if (g.isBlank() || network == null) return null
         val net = nets().firstOrNull { it.key == network } ?: return null
+        // A question ABOUT bundles — a comparison, prices, which is cheaper — is research, never a walk into the
+        // network's purchase menu (A20e audit 2026-10-01, R04: "compare MTN and Telecel data bundle prices and tell me
+        // which is cheaper" was asked "Open MTN's menu for a data bundle?"). An outright "buy the cheapest…" still buys.
+        if (ASKS_ABOUT.containsMatchIn(g) && !BUY_LEAD.containsMatchIn(g)) return null
         val other = Regex("\\bfor (?:another|an ?other|someone|somebody|a different)\\b| for [0-9]| to [0-9]").containsMatchIn(g)
         // The request's own slots: a 10-digit Ghana number (folded from +233/233 forms) and a cedi amount.
         val number = Regex("(?:\\+?233|0)\\s?\\d[\\d\\s-]{7,}").find(goal)?.value?.filter { it.isDigit() }

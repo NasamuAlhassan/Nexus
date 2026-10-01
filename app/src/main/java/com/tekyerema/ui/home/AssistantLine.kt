@@ -157,7 +157,7 @@ private fun DrawScope.eraseUnrevealed(l: TextLayoutResult, shown: Float, edge: F
     if (n == 0) return
     val idx = shown.toInt().coerceIn(0, n - 1)
     val frac = (shown - idx).coerceIn(0f, 1f)
-    val line = l.getLineForOffset(idx)
+    val line = l.getLineForOffset(idx).coerceAtMost(l.lineCount - 1)
     val x0 = l.getHorizontalPosition(idx, true)
     val x1 = if (idx + 1 < n && l.getLineForOffset(idx + 1) == line) l.getHorizontalPosition(idx + 1, true) else l.getLineRight(line)
     val x = x0 + (x1 - x0) * frac

@@ -62,7 +62,14 @@ object ContactResolver {
         return (told + listOf(name.trim()) + cfg + DEFAULT_ALIASES[key].orEmpty()).distinctBy { it.lowercase() }
     }
 
+    /** Words that point at a person without naming one. A substring search for "him" found "Phimona", and a bare
+     *  "call him" was read back as a call to her (A20e 2026-10-01). Pure. */
+    fun isPronoun(name: String): Boolean = name.trim().lowercase().trimEnd('.', '?', '!') in PRONOUNS
+    private val PRONOUNS = setOf("him", "her", "them", "he", "she", "they", "it", "that", "this", "someone", "somebody",
+        "that person", "this person", "the person", "that number", "this number", "ɔno", "ono", "wɔn", "won")
+
     fun resolve(context: Context, name: String): List<Contact> {
+        if (isPronoun(name)) return emptyList()   // nobody is named: the caller asks who, never guesses
         Relations.ensureLoaded(context)
         // C-03: try the name as said, then its family aliases, before fuzzy matching.
         for (candidate in aliasesFor(name)) {

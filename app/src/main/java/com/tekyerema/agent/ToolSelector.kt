@@ -32,9 +32,9 @@ object ToolSelector {
         "comms" to Group(
             listOf("make_call", "reply_to_notification", "read_notifications", "search_contacts", "find_contact",
                 "search_messages", "send_sms", "call_control", "call_log", "read_sms", "notification_action",
-                "open_intent", "create_contact", "share_text"),
+                "open_intent", "create_contact", "share_text", "share_screenshot"),
             Regex("(?i)\\b(call|calls|called|phone|ring|dial|answer|hang ?up|text|sms|message|messages|reply|whatsapp|chat|" +
-                "notification|notifications|contact|contacts|number|send|tell|missed|inbox|frɛ|fre|nkra)\\b")
+                "notification|notifications|contact|contacts|number|send|tell|missed|inbox|telegram|share|screenshot|frɛ|fre|nkra)\\b")
         ),
         "money" to Group(
             listOf("mobile_money", "momo_send", "run_ussd"),

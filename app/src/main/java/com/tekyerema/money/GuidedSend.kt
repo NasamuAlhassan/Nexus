@@ -21,7 +21,7 @@ object GuidedSend {
     fun approved(goal: String, tool: String, args: JSONObject, now: Long = System.currentTimeMillis()) {
         if (tool != "mobile_money") return
         val kind = args.optString("_kind")
-        if (kind == "buy_airtime") return
+        if (kind == "buy_airtime" || kind == com.tekyerema.tools.MobileMoneyTool.KIND_BALANCE) return   // only a SEND counts
         approved = Approved(goal, args.optString("_amount").takeIf { it.isNotBlank() },
             args.optString("_number").takeIf { it.isNotBlank() }, args.optString(ARG_SIM).takeIf { it.isNotBlank() }, now)
     }

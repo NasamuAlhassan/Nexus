@@ -68,6 +68,9 @@ class CapturedAudioInput(
     override suspend fun transcribe(wav: ByteArray): Heard = try {
         Heard.Speech(asr.transcribe(wav, sessionLanguage(), forceLanguage()))
     } catch (c: CancellationException) { throw c
+    } catch (e: com.tekyerema.voice.AsrLowMemoryException) {
+        // The offline model was NOT loaded (loading it would have got the app killed): a typed, speakable outcome.
+        Heard.Unavailable(Heard.Cause.LOW_MEMORY, e.message ?: com.tekyerema.voice.AsrMemory.SPOKEN)
     } catch (e: Exception) { Heard.Unavailable(Heard.Cause.OTHER, e.message ?: "ASR failed") }
 }
 

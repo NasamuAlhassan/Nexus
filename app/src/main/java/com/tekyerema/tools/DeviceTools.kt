@@ -54,10 +54,46 @@ object SetAlarmTool : Tool {
             return ToolResult(false, "No clock app can set alarms.")
         return try {
             ctx.appContext.startActivity(intent)   // SET_ALARM permission declared (§1.4); Clock adds the alarm
-            ToolResult(true, "Asked the Clock to set an alarm for %02d:%02d.".format(hour, minute), channel = "intent")
+            ToolResult(true, "Asked the Clock to set an alarm for %02d:%02d.".format(hour, minute),
+                JSONObject().put("hour", hour).put("minute", minute), channel = "intent")
         } catch (t: Throwable) {
             ToolResult(false, "Couldn't set the alarm: ${t.message}")
         }
+    }
+
+    // The Clock adds the alarm itself when it receives the standard request; what can be SEEN is the Clock coming to
+    // the front with that time in its list. With neither visible, the Clock having accepted the request is still the
+    // evidence (as for set_timer) — a working alarm used to end "unverified" and cost two cloud calls (A20e 2026-10-01).
+    override val verifiesOutcome = true
+
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        if (!result.success) return VerificationResult(false, "the alarm wasn't set")
+        val hour = result.data?.optInt("hour", -1) ?: -1
+        val minute = result.data?.optInt("minute", 0) ?: 0
+        var screen = after
+        repeat(4) { i ->
+            val s = screen
+            if (s != null && CLOCK_APP.containsMatchIn(s.appPackage.orEmpty())) {
+                val shown = hour >= 0 && s.elements.any { e -> e.label?.let { showsTime(it, hour, minute) } == true }
+                return VerificationResult(true, if (shown) "the Clock app shows the alarm for %02d:%02d".format(hour, minute)
+                    else "the Clock app opened with the alarm")
+            }
+            if (i < 3) {
+                kotlinx.coroutines.delay(400L)
+                screen = try { ctx.controller?.buildSnapshot() }
+                    catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null } ?: screen
+            }
+        }
+        return VerificationResult(true, "the Clock app accepted the alarm request")
+    }
+
+    private val CLOCK_APP = Regex("clock|deskclock|alarm", RegexOption.IGNORE_CASE)
+
+    /** Does a Clock row's text carry this time? "06:30", "6:30 am", Samsung's "06 30 , Friday…" — 24 h or 12 h. Pure. */
+    internal fun showsTime(label: String, hour: Int, minute: Int): Boolean {
+        val h12 = if (hour % 12 == 0) 12 else hour % 12
+        val mm = "%02d".format(minute)
+        return Regex("(?<!\\d)0?(?:$hour|$h12)\\s*[:. ]\\s*$mm(?!\\d)").containsMatchIn(label)
     }
 }
 

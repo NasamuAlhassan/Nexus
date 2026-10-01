@@ -44,15 +44,40 @@ object Verify {
     ): Pair<Boolean, String?> {
         var fg: String? = null
         var sameOther = 0
-        repeat(attempts) {
+        repeat(attempts) { i ->
             fg = controller?.foregroundPackage()
             val f = fg
             if (f != null && f.contains(pkg, ignoreCase = true)) return true to f
             // Only with a KNOWN prior screen can "something else came to front" be evidence of our launch.
             if (f != null && prevFg != null && f != prevFg) { if (++sameOther >= stablePolls) return true to f } else sameOther = 0
+            // The event-tracked foreground can lag a cold start (A20e 2026-10-01: Calculator was in front, the tracker
+            // still said the launcher, and a working launch went to the cloud as "not opened"). Ask the window itself —
+            // sparingly, it is a blocking call into the app in front: from the half-way poll, every 4th, and at the end.
+            if ((i >= attempts / 2 && i % 4 == 0) || i == attempts - 1) liveWindowIs(controller, pkg)?.let { return true to it }
             delay(intervalMs)
         }
         return false to fg
+    }
+
+    /** The package of the window actually in front, when it is [pkg] (null otherwise or when it can't be read). */
+    private fun liveWindowIs(controller: AccessibilityController?, pkg: String): String? =
+        try { controller?.activeWindowPackage()?.takeIf { it.contains(pkg, ignoreCase = true) } } catch (_: Throwable) { null }
+
+    /**
+     * Did a plain navigation tap LAND somewhere? For a tap that carried no claim at all (the on-device planner's
+     * "tap <label>"): the screen is a different one — another app, another title, or mostly different words — not the
+     * same page with a ticking clock. Deliberately not used when the model made a claim (the claim is checked instead)
+     * and never for a consequential control. Pure.
+     */
+    fun navigationLanded(before: UiSnapshot?, after: UiSnapshot?): Boolean {
+        if (before == null || after == null || before.signature() == after.signature()) return false
+        if (before.appPackage != after.appPackage) return true
+        if (before.screenTitle?.trim().orEmpty() != after.screenTitle?.trim().orEmpty() && !after.screenTitle.isNullOrBlank()) return true
+        fun words(s: UiSnapshot) = s.elements.mapNotNullTo(HashSet()) { it.label?.trim()?.lowercase()?.takeIf { l -> l.isNotEmpty() } }
+        val b = words(before); val a = words(after)
+        if (a.isEmpty()) return false
+        val kept = a.count { it in b }
+        return kept.toDouble() / a.size < 0.5   // most of what is on screen now was not there before
     }
 
     fun screenChanged(before: UiSnapshot?, after: UiSnapshot?): Boolean {

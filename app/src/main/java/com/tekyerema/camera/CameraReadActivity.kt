@@ -230,6 +230,13 @@ class CameraReadActivity : ComponentActivity() {
                 else -> announce(phrase("modeDescribe", "Hold still, I'll describe what's in front of you."))
             }
         } else if (mode == MODE_CURRENCY) {
+            // No model in this build: say so at once, before the camera opens — not after a frame, and never by just
+            // closing (audit 2026-10-01, CAM04).
+            if (!CediClassifier.installed(this)) {
+                Log.w(TAG, "[CEDI] model not in this build (assets/cedi/cedi.onnx) — telling the user")
+                speakThenFinish(phrase("currencyNoModel", CediClassifier.NOT_INSTALLED))
+                return
+            }
             announce(phrase("modeCurrency", "Checking money. Hold the note flat, about a hand away."))
         } else if (mode == MODE_COLOR) {
             announce(phrase("modeColor", "Checking colour and light."))
@@ -392,8 +399,8 @@ class CameraReadActivity : ComponentActivity() {
         if (closing || mode != MODE_CURRENCY) return
         if (!cediTried) { cediTried = true; cedi = CediClassifier.create(this) }
         val model = cedi ?: run {
-            main.post { if (!closing) speakThenFinish(phrase("currencyNoModel",
-                "I can't read money on this phone yet — the money reader isn't installed.")) }
+            // The file is there but wouldn't load (corrupt, out of memory): the same honest line, then leave.
+            main.post { if (!closing) speakThenFinish(phrase("currencyNoModel", CediClassifier.NOT_INSTALLED)) }
             return
         }
         // It's dark: money is counted indoors and at night — put the light on before guessing at shadows.
@@ -578,7 +585,8 @@ class CameraReadActivity : ComponentActivity() {
 
     private fun utter(line: String, flush: Boolean, then: (() -> Unit)?) {
         val engine = tts
-        if (line.isBlank() || ttsFailed || engine == null) { then?.invoke(); return }
+        if (line.isBlank()) { then?.invoke(); return }
+        if (ttsFailed || engine == null) { sayWithAppVoice(line, then); return }
         if (!ttsReady) {
             if (flush) pending.clear()
             pending.add(Speech(line, flush, then))
@@ -586,12 +594,41 @@ class CameraReadActivity : ComponentActivity() {
         }
         val id = "cam-" + (++utteranceSeq)
         if (then != null) afterSpeech[id] = then
+        spokenLines[id] = line
         val rc = try {
             engine.speak(line, if (flush) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD, null, id)
         } catch (_: Throwable) {
             TextToSpeech.ERROR
         }
-        if (rc != TextToSpeech.SUCCESS) afterSpeech.remove(id)?.invoke()
+        if (rc != TextToSpeech.SUCCESS) {
+            // The engine took the line and refused it: the app's own voice says it instead — never nothing.
+            spokenLines.remove(id)
+            sayWithAppVoice(line, afterSpeech.remove(id))
+        }
+    }
+
+    /** id → the line being spoken, so its outcome can be logged ([logSpoke]). Main thread only. */
+    private val spokenLines = HashMap<String, String>()
+
+    /**
+     * One log line per camera utterance, in the agent's own format (`[ANNOUNCE] … spoke=`), so what the camera said
+     * can be checked from the log like every other reply (audit 2026-10-01: colour and money results were on screen
+     * but nothing in the log showed whether they were spoken). The words only where content logging is allowed.
+     */
+    private fun logSpoke(line: String, ok: Boolean) {
+        Log.i(TAG, "[ANNOUNCE] camera($mode) spoke=$ok ${com.tekyerema.core.Privacy.content(line)}")
+    }
+
+    /**
+     * The activity's own engine can't speak (init failed, or it refused the line): hand the line to the agent's voice
+     * rather than say nothing, and give it time to be heard before [then] (usually finish()) runs — a camera screen
+     * that closes in silence tells a blind user nothing.
+     */
+    private fun sayWithAppVoice(line: String, then: (() -> Unit)?) {
+        val handed = try { com.tekyerema.voice.VoiceEngine.announce(line); true } catch (_: Throwable) { false }
+        // "handed", not "spoke": the agent's voice logs its own `[ANNOUNCE] spoke=` when it has said the line.
+        Log.w(TAG, "[ANNOUNCE] camera($mode) own voice unavailable → handed to the app voice=$handed ${com.tekyerema.core.Privacy.content(line)}")
+        if (then != null) main.postDelayed({ then() }, CameraSpeech.hearingMs(line))
     }
 
     private fun isSpeaking(): Boolean = try { tts?.isSpeaking == true } catch (_: Throwable) { false }
@@ -599,11 +636,12 @@ class CameraReadActivity : ComponentActivity() {
     private fun onTtsInit(status: Int) {
         val engine = tts ?: return
         if (status != TextToSpeech.SUCCESS) {
-            Log.w(TAG, "[CAMERA] TTS engine init failed ($status)")
+            Log.w(TAG, "[CAMERA] TTS engine init failed ($status) — camera lines go to the app's voice")
             ttsFailed = true
             val waiting = pending.toList()
             pending.clear()
-            waiting.forEach { it.then?.invoke() }
+            // Flushed lines were superseded; what is left is said (by the app's voice), in order, then their follow-ups run.
+            waiting.forEach { utter(it.line, it.flush, it.then) }
             return
         }
         try {
@@ -616,11 +654,11 @@ class CameraReadActivity : ComponentActivity() {
         } catch (_: Throwable) {}
         engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) = finished(utteranceId)
+            override fun onDone(utteranceId: String?) = finished(utteranceId, true)
             @Deprecated("deprecated in API 21")
-            override fun onError(utteranceId: String?) = finished(utteranceId)
-            override fun onError(utteranceId: String?, errorCode: Int) = finished(utteranceId)
-            override fun onStop(utteranceId: String?, interrupted: Boolean) = finished(utteranceId)
+            override fun onError(utteranceId: String?) = finished(utteranceId, false)
+            override fun onError(utteranceId: String?, errorCode: Int) = finished(utteranceId, false)
+            override fun onStop(utteranceId: String?, interrupted: Boolean) = finished(utteranceId, false)
         })
         ttsReady = true
         val waiting = pending.toList()
@@ -628,10 +666,14 @@ class CameraReadActivity : ComponentActivity() {
         waiting.forEach { utter(it.line, it.flush, it.then) }
     }
 
-    /** TTS binder thread → main: run whatever was waiting on this utterance. */
-    private fun finished(utteranceId: String?) {
+    /** TTS binder thread → main: log the line's outcome, then run whatever was waiting on this utterance.
+     *  [spokenFully] is false when the line was cut off by a newer one, stopped, or failed. */
+    private fun finished(utteranceId: String?, spokenFully: Boolean) {
         if (utteranceId == null) return
-        main.post { afterSpeech.remove(utteranceId)?.invoke() }
+        main.post {
+            spokenLines.remove(utteranceId)?.let { logSpoke(it, spokenFully) }
+            afterSpeech.remove(utteranceId)?.invoke()
+        }
     }
 
     // ------------------------------------------------------------------------------------------------ layout

@@ -142,6 +142,21 @@ sealed class FastIntent(val name: String) {
     data class DeleteRoutine(val routine: String) : FastIntent("DELETE_ROUTINE")
     /** H-10: "where did I leave off?" */
     object Resume : FastIntent("RESUME")
+    /** "show me locations to X", "navigate to X", "directions to X" — opens Maps via open_intent(maps_search).
+     *  [appFirst]: "take me to X" can also name an app ("take me to WhatsApp") — the router opens that app when X is
+     *  exactly an installed one, and searches the map otherwise. */
+    data class MapSearch(val place: String, val appFirst: Boolean = false) : FastIntent("MAP_SEARCH")
+    /** "read my last four text messages" — [LastSms] with a count (2–10). The audit (2026-10-01) heard one message. */
+    data class LastSmsN(val count: Int) : FastIntent("LAST_SMS")
+    /** "close notifications" / "close the notification panel": the shade is CLOSED. Nothing is ever cleared — the
+     *  agent took "close notifications" for "clear" and wiped them all (audit 2026-10-01, S23). */
+    object CloseShade : FastIntent("CLOSE_SHADE")
+    /** "close this app" ([query] null) / "close WhatsApp" ([query] = the name as said; the router checks it is an
+     *  installed app). Leaves the app with Home — never the Recents "Close all" button (audit S20). */
+    data class CloseApp(val query: String?) : FastIntent("CLOSE_APP")
+    /** "continue" after a screen was read to its last part: read further down the same screen. Never classified —
+     *  only the router's name for that turn (audit AX03: it was taken for media Play). */
+    object ReadMore : FastIntent("READ_MORE")
     /** F-09: describe the picture / the screen in front, or answer [question] about it (online vision). */
     data class DescribeScreen(val question: String?, val picture: Boolean) : FastIntent("DESCRIBE_SCREEN")
     /** E-11: "open Bluetooth settings" → that settings screen, not the Settings app's front page. */
@@ -220,6 +235,11 @@ object FastIntentClassifier {
             // FIRST: an explicit "turn on/off / enable X" naming a Quick Settings tile — before the topic regexes,
             // or "enable battery saver" is read as a battery-LEVEL question.
             quickToggle(g) != null -> quickToggle(g)
+            // Close the notification panel — before every rule that mentions notifications (RE_NOTIFS would OPEN it for
+            // "close the notification panel"), and never a "clear".
+            RE_CLOSE_SHADE.matches(g) -> FastIntent.CloseShade
+            // Ghanaian-English switches without a verb ("on the torch", "off the light") and Twi "sɔ kanea no".
+            ghSwitch(g) != null -> ghSwitch(g)
             LocalMath.answer(g) != null -> FastIntent.Calculate(LocalMath.answer(g)!!)
             TwiPhrasebook.answer(g) != null -> FastIntent.TwiPhrase(TwiPhrasebook.answer(g)!!)
             // Questions with one right answer the phone can work out — before the time/day/date rules, which would
@@ -291,7 +311,7 @@ object FastIntentClassifier {
                 val app = when (m.groupValues[1]) { "telegram" -> "Telegram"; "messenger" -> "Messenger"; else -> "WhatsApp" }
                 FastIntent.ChatMessages(app, latestOnly = !m.groupValues[2].endsWith("s"), from = m.groupValues[3].trim().ifEmpty { null })
             }
-            RE_LAST_SMS.containsMatchIn(g) -> FastIntent.LastSms
+            RE_LAST_SMS.containsMatchIn(g) -> smsCount(g)?.let { FastIntent.LastSmsN(it) } ?: FastIntent.LastSms
             RE_WHERE_AM_I.containsMatchIn(g) -> FastIntent.WhereAmI
             RE_ONLINE.containsMatchIn(g) -> FastIntent.Connectivity
             RE_NOW_PLAYING.containsMatchIn(g) -> FastIntent.NowPlaying
@@ -310,6 +330,8 @@ object FastIntentClassifier {
             RE_SCROLL_DOWN.containsMatchIn(g) -> FastIntent.ScrollDown
             RE_HOME.containsMatchIn(g) -> FastIntent.Home
             RE_BACK.containsMatchIn(g) -> FastIntent.Back
+            closeApp(g, raw) != null -> closeApp(g, raw)
+            mapSearch(g, raw) != null -> mapSearch(g, raw)
 
             else -> openApp(g)
         }
@@ -526,7 +548,11 @@ object FastIntentClassifier {
         // What a blind user actually says when holding something (A20e 2026-10-01: "read this" read the SCREEN
         // and listed home-screen icons — useless with a letter in hand).
         "\\bread what(?:'s| is)? (?:in )?(?:my hand|in front of me|here)\\b|\\bread what i(?:'m| am) holding\\b|" +
-        "\\bread (?:this|it) (?:out )?(?:for me |aloud )?with (?:the )?camera\\b")
+        "\\bread (?:this|it) (?:out )?(?:for me |aloud )?with (?:the )?camera\\b|" +
+        // Audit CAM03: "read the text in front of the camera" went to the planner, which opened Samsung Camera instead.
+        "\\bread (?:the |this |that |any )?(?:text|writing|words) (?:that(?:'s| is) )?in front of (?:me|the camera|my camera)\\b|" +
+        "\\bread (?:what(?:'s| is) )?in front of (?:the|my) camera\\b|\\bwhat does (?:this|it|that) say (?:with|using) (?:the |my )?camera\\b|" +
+        "\\b(?:use|open) the camera (?:to|and) read\\b")
     /** The cedi reader: a note or coin held to the camera. "How much is this" alone is money too — nobody asks
      *  that of a chair (camera/CurrencyAnnouncer; first-of-its-kind for the cedi). */
     private val RE_CAMERA_MONEY = Regex("(?i)\\bwhat (?:note|bill|cedi|denomination) is (?:this|that|it)\\b|" +
@@ -594,6 +620,34 @@ object FastIntentClassifier {
         " (whatsapp|whats app|telegram|messenger) (messages?|chats?)(?: from (.+?))?(?: please)?$")
     private val RE_LAST_SMS = Regex("\\b(?:read|check|what(?:'s| is| was)|any)\\b.*\\b(?:text messages?|texts|sms|my (?:last |latest |new )?text)\\b|^(?:my )?(?:last|latest|new) (?:text|sms|text message)s?$")
     private val RE_WHERE_AM_I = Regex("\\b(?:where am i|where i am|what(?:'s| is) my (?:current )?location|my current location|what street am i on)\\b")
+    // A place on the map. Whole utterances, and only wordings that ASK FOR THE MAP: a bare "where is X" is a question
+    // (a blind user wants the answer spoken, not Maps opened) and "go to X" is an app or a screen ("go to settings") —
+    // both were swallowed by the first version of this rule (2026-10-01). Group 7 ("take me to X") may name an app.
+    private const val MAP_FIND = "(?:show me|find|search for|look up|locate|look for)"
+    private val RE_MAP_SEARCH = Regex(
+        "^(?:(?:please|can you|could you)\\s+)?(?:" +
+            "$MAP_FIND\\s+(?:the\\s+)?(?:location|locations|place|places|way|address|directions?|route)\\s+(?:to|of|for|near)\\s+(.+)" +
+            "|$MAP_FIND\\s+(.+?)\\s+on\\s+(?:the\\s+map|(?:google\\s+)?maps)" +
+            "|(?:navigate|directions?|route|journey|drive|walk)\\s+to\\s+(.+)" +
+            "|(?:how do i|how can i|how to)\\s+(?:get|go|drive|walk|travel)\\s+to\\s+(.+)" +
+            "|show\\s+(?:me\\s+)?where\\s+(.+?)\\s+(?:is|are)(?:\\s+located)?" +
+            "|start\\s+(?:the\\s+|a\\s+|my\\s+)?(?:journey|navigation|navigating|trip)\\s+to\\s+(.+)" +
+            "|(?:take|get|bring)\\s+me\\s+to\\s+(.+)" +
+            ")(?:\\s+please)?$"
+    )
+    /** The user's own things are not places ("show me where my messages are") — except where they live or work. */
+    private val RE_NOT_A_PLACE_LEAD = Regex("^(?:(?:my|your|his|her|our|their)\\b(?!\\s+(?:home|house|office|work|workplace|school|church|" +
+        "mosque|hostel|hall|place|hotel|village|hometown|shop|farm)\\b)|(?:this|that|these|those|it|him|them|me)\\b)")
+    /** Parts of the phone, never a place on the map ("how do I get to the settings", "navigate to my messages"). */
+    private val RE_PHONE_THING = Regex("\\b(?:phone|screen|home ?screen|settings?|menu|page|tab|button|keyboard|apps?|application|messages?|texts?|" +
+        "sms|notifications?|contacts?|chats?|inbox|emails?|photos?|pictures?|gallery|camera|files?|folder|downloads?|wi-?fi|bluetooth|" +
+        "battery|volume|alarms?|timer|password|pin|account|balance|airtime|bundle|internet|songs?|music|videos?|whatsapp|telegram|youtube)\\b")
+    /** A piece of a screen: not a place, and not an app either. */
+    private val RE_SCREEN_PART = Regex("\\b(?:screen|home ?screen|menu|page|tab|button|keyboard|top|bottom)\\b")
+
+    /** True when [place] names a part of the phone rather than somewhere on the map (the router re-checks an
+     *  "take me to X" that turned out not to be an installed app). Pure. */
+    internal fun isPhoneThing(place: String): Boolean = RE_PHONE_THING.containsMatchIn(place.lowercase())
     private val RE_ONLINE = Regex("\\b(?:am i (?:online|connected)|(?:is|do i have) (?:the )?internet|internet connection|am i on (?:wi-?fi|data|mobile data)|what network am i on)\\b")
     private val RE_NOW_PLAYING = Regex("\\b(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|who (?:sings|is singing) this)\\b")
     private val RE_STOP_TIMER = Regex("^(?:please |can you )?(?:stop|cancel|dismiss|end|turn off|switch off) (?:the |my |that )?timer(?: please| now)?$")
@@ -713,4 +767,88 @@ object FastIntentClassifier {
         "(?:open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s+to|goto|bring\\s+up|pull\\s+up|put\\s+on|bue\\S*|bua\\S*)\\s+" +
         "(?!hours?\\b|times?\\b)(?:up\\s+)?(?:the\\s+|my\\s+)?(.+?)(?:\\s+app)?(?:\\s+(?:please|for me))?$")
     private val RE_APP_HAS_VERB = Regex("\\b(send|message|reply|forward|dial|text|call|find|search|tell|saying|then)\\b")
+
+    private fun mapSearch(g: String, raw: String): FastIntent.MapSearch? {
+        val m = RE_MAP_SEARCH.matchEntire(g) ?: return null
+        val gi = (1..7).firstOrNull { m.groupValues[it].isNotBlank() } ?: return null
+        val placeLower = m.groupValues[gi].trim().removeSuffix(" please").removeSuffix(" for me").trim()
+        if (placeLower.length < 2) return null
+        val appFirst = gi == 7
+        if (RE_NOT_A_PLACE_LEAD.containsMatchIn(placeLower)) return null
+        // "take me to WhatsApp" may be an app (the router decides); every other wording asked for the map outright.
+        if (if (appFirst) RE_SCREEN_PART.containsMatchIn(placeLower) else RE_PHONE_THING.containsMatchIn(placeLower)) return null
+        val idx = raw.lowercase().lastIndexOf(placeLower)
+        val place = if (idx >= 0 && idx + placeLower.length <= raw.length) raw.substring(idx, idx + placeLower.length).trim() else placeLower
+        return FastIntent.MapSearch(place, appFirst)
+    }
+
+    // ---- Audit 2026-10-01: close the shade (S23), leave the app (S20) — whole utterances only.
+    private const val POLITE = "(?:(?:please|kindly|abeg|i beg|can you|could you|would you)\\s+)*"
+    private const val POLITE_TAIL = "(?:\\s+(?:please|for me|now))*"
+    /** Close / hide — never "clear", "dismiss" or "remove" (those delete notifications: the agent's, behind a confirmation),
+     *  and never "all notifications". */
+    private val RE_CLOSE_SHADE = Regex("^$POLITE(?:close|hide|collapse|shut|put away)\\s+(?:the\\s+|my\\s+|this\\s+)?" +
+        "(?:notifications?(?:\\s+(?:shade|panel|drawer|bar|screen))?|(?:quick\\s+settings\\s+|status\\s+)?(?:panel|shade|bar)|quick\\s+settings)" +
+        "$POLITE_TAIL$")
+    private val RE_CLOSE_THIS_APP = Regex("^$POLITE(?:close|exit|quit|leave|shut|get out of|come out of)\\s+" +
+        "(?:(?:this|the|that|my|the current|this current)\\s+)?(?:app|application|program)$POLITE_TAIL$")
+    private val RE_CLOSE_NAMED_APP = Regex("^$POLITE(?:close|exit|quit)\\s+(?:the\\s+|my\\s+)?(.{2,30}?)(?:\\s+app)?$POLITE_TAIL$")
+    /** Things people close that are not apps — left to the agent, which sees the screen. */
+    private val RE_NOT_AN_APP = Regex("\\b(?:notifications?|panel|shade|door|gate|window|windows|tab|tabs|keyboard|menu|dialog|dialogue|pop-?up|" +
+        "all|everything|apps|applications|it|this|that|them|call|chat|group|message|page|screen|ad|advert|account|file|folder|eyes?)\\b")
+
+    private fun closeApp(g: String, raw: String): FastIntent.CloseApp? {
+        if (RE_CLOSE_THIS_APP.matches(g)) return FastIntent.CloseApp(null)
+        val name = RE_CLOSE_NAMED_APP.matchEntire(g)?.groupValues?.get(1)?.trim() ?: return null
+        if (name.length < 2 || name.split(' ').size > 3) return null
+        if (RE_NOT_AN_APP.containsMatchIn(name) || RE_APP_HAS_VERB.containsMatchIn(name)) return null
+        return FastIntent.CloseApp(watchName(raw, name))
+    }
+
+    // ---- Ghanaian English drops the verb: "on the torch", "off the light", "on the bluetooth" (audit 2026-10-01, L10/L11:
+    // 7–13 s through the cloud model against 0.2 s here). "light" is the torch ONLY in these on/off commands — "is the
+    // light on" stays the camera's question. Twi: "sɔ kanea (no)" = put the light on, "dum kanea (no)" = put it out (L04).
+    private const val GH_LEAD = "(?:(?:please|kindly|abeg|i beg|chale|charley|charlie|can you|could you)\\s+)*"
+    private const val GH_TAIL = "(?:\\s+(?:for me|please|now|wai|oo|o))*"
+    private val RE_GH_SWITCH = Regex("^$GH_LEAD(?:(?:put|turn|switch)\\s+)?(on|off)\\s+(?:the\\s+|my\\s+)?" +
+        "(torch\\s*light|torch|flash\\s*light|light|bluetooth|wi-?fi)$GH_TAIL$")
+    private val RE_GH_LIGHT_AFTER = Regex("^$GH_LEAD(?:(?:put|turn|switch)\\s+)?(?:the\\s+|my\\s+)?(?:torch\\s*light|light)\\s+(on|off)$GH_TAIL$")
+    private val RE_TWI_LIGHT = Regex("^(?:mesr[ɛe] wo\\s+|mepa wo ky[ɛe]w\\s+)?(s[ɔo]|dum)\\s+kanea(?:\\s+no)?(?:\\s+ma me)?$")
+    /** "close the light / the torch" = put it off, "open the light" = put it on (a light is opened and closed in Ghanaian
+     *  English). Named here so "close the torch" is never read as closing an app called Torch. */
+    private val RE_GH_OPEN_CLOSE_LIGHT = Regex("^$GH_LEAD(open|close|kill|quench)\\s+(?:the\\s+|my\\s+)?" +
+        "(?:torch\\s*light|torch|flash\\s*light|light)$GH_TAIL$")
+
+    private fun ghSwitch(g: String): FastIntent? {
+        RE_TWI_LIGHT.matchEntire(g)?.let { return if (it.groupValues[1] == "dum") FastIntent.FlashlightOff else FastIntent.FlashlightOn }
+        RE_GH_OPEN_CLOSE_LIGHT.matchEntire(g)?.let { return if (it.groupValues[1] == "open") FastIntent.FlashlightOn else FastIntent.FlashlightOff }
+        val m = RE_GH_SWITCH.matchEntire(g)
+        val on: Boolean
+        val what: String
+        if (m != null) { on = m.groupValues[1] == "on"; what = m.groupValues[2] }
+        else { val a = RE_GH_LIGHT_AFTER.matchEntire(g) ?: return null; on = a.groupValues[1] == "on"; what = "light" }
+        return when {
+            what.startsWith("bluetooth") -> if (on) FastIntent.BluetoothOn else FastIntent.BluetoothOff
+            what.startsWith("wi") -> if (on) FastIntent.WifiOn else FastIntent.WifiOff
+            else -> if (on) FastIntent.FlashlightOn else FastIntent.FlashlightOff
+        }
+    }
+
+    // ---- "read my last four text messages" (audit 2026-10-01: one was read). A number next to last/latest or next to
+    // the word for the messages; "the last 2 days" is a time window, not a count.
+    private const val COUNT = "(\\d{1,2}|two|three|four|five|six|seven|eight|nine|ten|few|couple)"
+    private val RE_SMS_COUNT = Regex(
+        "\\b(?:last|latest|recent|newest|past|previous)\\s+$COUNT\\b(?!\\s+(?:days?|hours?|weeks?|minutes?|months?|years?)\\b)" +
+            "|\\b$COUNT\\s+(?:of\\s+)?(?:my\\s+)?(?:last|latest|most recent|recent|newest|new|unread)\\b" +
+            "|\\b$COUNT\\s+(?:text messages?|texts|sms|messages)\\b")
+    private val COUNT_WORDS = mapOf("two" to 2, "three" to 3, "four" to 4, "five" to 5, "six" to 6, "seven" to 7, "eight" to 8,
+        "nine" to 9, "ten" to 10, "few" to 3, "couple" to 2)
+
+    /** How many texts were asked for (2–10), or null for one / no number. Pure. */
+    internal fun smsCount(g: String): Int? {
+        val m = RE_SMS_COUNT.find(g) ?: return null
+        val w = m.groupValues.drop(1).firstOrNull { it.isNotEmpty() } ?: return null
+        val n = w.toIntOrNull() ?: COUNT_WORDS[w] ?: return null
+        return n.coerceAtMost(10).takeIf { it >= 2 }
+    }
 }

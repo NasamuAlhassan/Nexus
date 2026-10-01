@@ -54,6 +54,23 @@ interface AccessibilityController {
      *  (systemui) OVER an activity. What a UiSnapshot reflects, so it's what the stale-screen check compares.
      *  May do a binder round-trip: call off the main thread. */
     fun activeWindowPackage(): String? = foregroundPackage()
+    /**
+     * Close the notification shade / Quick Settings COMPLETELY. One Back collapses only one level on some shells:
+     * Samsung One UI (A20e, API 30) went from Quick Settings to the notification list and stayed there, so every
+     * "set brightness" / "turn on do not disturb" left the user inside the shade (audit 2026-10-01: S10, S11, S25, S26).
+     * Back is pressed only while System UI holds the focused window — never once the app underneath is in front, where
+     * it would navigate back inside that app. True when no shade is in front any more.
+     */
+    suspend fun closeShade(): Boolean {
+        repeat(3) {
+            if (activeWindowPackage() != SYSTEM_UI) return true
+            if (!globalAction("back")) return false
+            kotlinx.coroutines.delay(300)
+            waitForSettle(700)
+        }
+        return activeWindowPackage() != SYSTEM_UI
+    }
+
     /** The last real app that owned the screen BEFORE Tɛkyerɛma's own UI came to front — so a handoff can
      *  return to the app the user was actually looking at (e.g. Messages) instead of slamming HOME. Null if
      *  we've only ever seen our own UI or the launcher. */
@@ -84,4 +101,9 @@ interface AccessibilityController {
      * so a dead tap costs [reactMs], not a fixed sleep. Default: the plain quiet wait.
      */
     suspend fun waitForChange(sinceUptime: Long, reactMs: Long, timeoutMs: Long) = waitForSettle(timeoutMs)
+
+    companion object {
+        /** The package that owns the notification shade, Quick Settings and the other system panels. */
+        const val SYSTEM_UI = "com.android.systemui"
+    }
 }

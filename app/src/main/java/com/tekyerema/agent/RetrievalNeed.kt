@@ -41,10 +41,34 @@ object RetrievalNeed {
         return ref
     }
 
+    /**
+     * Offices and titles whose HOLDER changes: who holds one now is a fresh fact, never the model's memory. (A20e audit
+     * 2026-10-01, R01: "who is the president of Ghana" was answered by the small direct-answer model with a name that
+     * belongs to nobody, while "who is the vice president" happened to be searched and was right.)
+     */
+    private const val OFFICE = "(?:vice[- ]?president|president|veep|prime minister|deputy minister|minister|" +
+        "member of parliament|mp|governor|mayor|chief executive|ceo|managing director|chair(?:man|woman|person)?|" +
+        "chief justice|chief of staff|attorney[- ]general|inspector[- ]general|igp|speaker|head coach|coach|manager|captain|" +
+        "champions?|winners?|leader|head of state|head|king|queen|asantehene|pope|secretary[- ]general|director[- ]general|" +
+        "vice[- ]chancellor|chancellor|ambassador|high commissioner|commissioner|first lady|owner|" +
+        "richest (?:man|woman|person)|record holder|title holder)"
+    private val HOLDER = listOf(
+        // "who is / who's (now) the (current) (Ghana) president", "what is the name of the education minister"
+        Regex("\\b(?:who(?:'s| is| are)|(?:what(?:'s| is) )?the name of|name(?= (?:the|our) )) (?:now |currently )?(?:the |our |a |an )?" +
+            "(?:[\\p{L}'.-]+ ){0,3}?$OFFICE\\b"),
+        // "the president of Ghana" inside any present-tense question ("how old is the president of Ghana")
+        Regex("\\b(?:the |our )(?:current |new |sitting |present )?$OFFICE of\\b"),
+        Regex("\\bwho (?:currently |now )?(?:leads|runs|heads|governs|rules|coaches|captains|manages|owns|chairs)\\b")
+    )
+    /** History, not the present: "who WAS the first president", "the president in 1960" stay with what the model knows. */
+    private val PAST = Regex("\\b(?:was|were|did|had|used to|first(?! lady)|founding|late)\\b|\\bin (?:1\\d{3}|20[01]\\d)\\b")
+
     private val FRESH = listOf(
-        Regex("\\b(today|tonight|tomorrow|yesterday|(this|last|past) (week|month|year|morning|evening)|right now|currently|at the moment|latest|recent|current|live|so far)\\b"),
+        Regex("\\b(today|tonight|tomorrow|yesterday|(this|last|past) (week|month|year|morning|evening)|right now|currently|at the moment|latest|recent|current|live|so far|these days|nowadays|at present|presently|as of now)\\b"),
+        Regex("\\bnow\\s*\\??$"),
         Regex("\\b(news|headlines|weather|forecast|temperature|rain)\\b"),
         Regex("\\b(price|prices|rate|rates|exchange rate|cost|costs|fare|fares|fee|fees|tariff)\\b"),
+        Regex("\\bhow much (?:is|are|does|do) (?:a|an|the|one)\\b"),
         Regex("\\b(score|scores|result|results|who won|fixtures?|kick-?off|standings|table)\\b"),
         Regex("\\b(open now|opening hours|closing time|is .* open)\\b"),
         Regex("\\b(nnɛ|nne|ɔkyena|okyena|nsɛm|nsem)\\b")
@@ -58,10 +82,13 @@ object RetrievalNeed {
     fun classify(question: String): Need {
         val q = question.trim().lowercase()
         if (q.isEmpty()) return Need.NONE
-        val fresh = FRESH.any { it.containsMatchIn(q) }
+        val fresh = FRESH.any { it.containsMatchIn(q) } || holdsOffice(q)
         if (!fresh) return Need.NONE
         return if (MULTI.any { it.containsMatchIn(q) }) Need.MULTI else Need.SINGLE
     }
+
+    /** Does [q] (lower-case) ask who holds an office or a title NOW? Pure. */
+    internal fun holdsOffice(q: String): Boolean = !PAST.containsMatchIn(q) && HOLDER.any { it.containsMatchIn(q) }
 
     /** The one-line hint the engine puts in the first step's history, or null for NONE. */
     fun hint(need: Need): String? = when (need) {

@@ -16,7 +16,35 @@ object References {
     /** E-23: the last phone number found in something read out (a message, a notification). */
     @Volatile var lastNumber: String? = null; private set
 
-    fun notePerson(name: String?) { name?.trim()?.takeIf { it.length in 2..60 && !it.all { c -> c.isDigit() || c == '+' } }?.let { lastPerson = it } }
+    /** When [lastPerson] was noted (wall clock). "Him" is whoever was just talked about — not a recipient from an hour ago. */
+    @Volatile private var lastPersonAt: Long = 0L
+
+    /** How long a remembered person stays the answer to "him"/"her" (A20e audit 2026-10-01: a recipient from an earlier,
+     *  unrelated request was substituted for "him" long after, and across a conversation reset). */
+    internal fun personTtlMs(): Long = try {
+        com.tekyerema.core.config.AppConfig.int("references.personTtlSeconds", 300) * 1000L
+    } catch (_: Throwable) { 300_000L }
+
+    /** The remembered person, only while still recent. */
+    fun recentPerson(now: Long = System.currentTimeMillis()): String? =
+        lastPerson?.takeIf { now - lastPersonAt in 0..personTtlMs() }
+
+    fun notePerson(name: String?) {
+        name?.trim()?.takeIf { it.length in 2..60 && !it.all { c -> c.isDigit() || c == '+' } }
+            ?.let { lastPerson = it; lastPersonAt = System.currentTimeMillis() }
+    }
+
+    /** One contact came back from a look-up ("Matches for 'x': Richmond's Dad — 0246168805"): that is who "him" means next.
+     *  Several matches are options, not a person. Pure parse; returns the name noted, or null. */
+    fun noteLookup(toolMessage: String): String? {
+        val body = toolMessage.substringAfter(": ", "").trim()
+        if (body.isEmpty() || ';' in body) return null
+        val name = body.substringBefore(" — ").substringBefore(" - ").trim().trimEnd('.')
+        if (name.length !in 2..60 || name.any { it == '\n' }) return null
+        notePerson(name)
+        body.substringAfter(" — ", "").takeIf { it.isNotBlank() }?.let { noteNumber(it) }
+        return name
+    }
     fun noteOptions(options: List<String>) { if (options.size >= 2) lastOptions = options.take(6) }
     fun noteNumber(number: String?) { number?.filter { it.isDigit() || it == '+' }?.takeIf { it.count(Char::isDigit) in 9..13 }?.let { lastNumber = it } }
 
@@ -30,7 +58,7 @@ object References {
         lastChannel = channel?.takeIf { it == "WhatsApp" || it == "SMS" }
     }
 
-    fun clear() { lastPerson = null; lastOptions = emptyList(); lastNumber = null; lastChannel = null }
+    fun clear() { lastPerson = null; lastPersonAt = 0L; lastOptions = emptyList(); lastNumber = null; lastChannel = null }
 
     /** H-12: "forget Ama" — drop her as the remembered person / option. */
     fun forget(who: String) {
@@ -49,12 +77,16 @@ object References {
     private val ORDINALS = mapOf("first" to 0, "1st" to 0, "second" to 1, "2nd" to 1, "third" to 2, "3rd" to 2,
         "fourth" to 3, "4th" to 3, "fifth" to 4, "5th" to 4)
     private val ORDINAL = Regex("\\bthe (first|1st|second|2nd|third|3rd|fourth|4th|fifth|5th|last) one\\b", RegexOption.IGNORE_CASE)
-    private val PRONOUN = Regex("\\b(call|ring|phone|text|message|sms|reply to|tell|answer|write to|send)\\s+(him|her|them)\\b", RegexOption.IGNORE_CASE)
+    // Only when the request OPENS with the verb and the pronoun ("call her back", "please text him I'm late"). A pronoun
+    // later in the sentence has its person in the sentence itself — "tell Prince I'll call him later", "find Richmond and
+    // send him the screenshot" — and swapping in whoever was remembered corrupted the goal (audit C07, E2E1).
+    private val PRONOUN = Regex("^(?:(?:please|kindly|just|now|ok(?:ay)?|can you|could you|will you|i want to|i'd like to)\\s+)*" +
+        "(call|ring|phone|text|message|sms|reply to|tell|answer|write to|send)\\s+(him|her|them)\\b", RegexOption.IGNORE_CASE)
     // "this number" is the one on the screen (LocalBrain reads it there); "that number" is the one just read out.
     private val THAT_NUMBER = Regex("\\b(?:call|ring|phone|dial|text|message|sms|save)\\s+(that number)\\b", RegexOption.IGNORE_CASE)
 
     /** The goal with its reference replaced, or null when there is nothing (resolvable) to replace. */
-    fun rewrite(goal: String, person: String? = lastPerson, options: List<String> = lastOptions, number: String? = lastNumber,
+    fun rewrite(goal: String, person: String? = recentPerson(), options: List<String> = lastOptions, number: String? = lastNumber,
                 channel: String? = lastChannel): String? {
         THAT_NUMBER.find(goal)?.let { m ->
             val n = number ?: return null
@@ -66,9 +98,9 @@ object References {
             val pick = options.getOrNull(idx) ?: return null
             return goal.replaceRange(m.range, pick)
         }
-        PRONOUN.find(goal)?.let { m ->
+        PRONOUN.find(goal.trim())?.let { m ->
             val who = person ?: return null
-            return goal.replaceRange(m.groups[2]!!.range, who)
+            return goal.trim().replaceRange(m.groups[2]!!.range, who)
         }
         // Demo journey (A20e 2026-09-30): "read my last WhatsApp message" → "reply saying I'm on my way". The words are
         // read back with the person and the number before anything is sent (LocalBrain.parseSms → send_sms, TIER2).

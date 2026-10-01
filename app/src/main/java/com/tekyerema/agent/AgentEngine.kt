@@ -88,6 +88,8 @@ object AgentEngine {
     // Bounded, not unlimited: the single tuning knob for recovery room (plan §12). Raised from 20
     // on round-5 evidence; adjusted only by evidence.
     private const val MAX_STEPS = 30
+    /** Tools whose "several contacts match" preflight the engine settles itself, with the tool's own short question. */
+    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call")
     private const val TAG = "Tekyerema"
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
@@ -126,7 +128,9 @@ object AgentEngine {
     }
 
     /** Wipe conversation memory — call when starting a genuinely new session/topic ("forget that", a new session). */
-    fun resetConversation() { synchronized(conversation) { conversation.clear() }; saveConversation() }
+    /** A fresh conversation also forgets who "him"/"her" was and the options last offered (audit K02: after a reset a bare
+     *  "call him" still went to a recipient from before it). */
+    fun resetConversation() { synchronized(conversation) { conversation.clear() }; References.clear(); saveConversation() }
 
     // H-10 (owner-approved persistent memory): the conversation survives the process being killed mid-session
     // (Samsung reclaims memory on a 2.8 GB phone), in app-private storage only, encrypted (J-15), dropped once stale.
@@ -216,6 +220,9 @@ object AgentEngine {
     @Synchronized
     fun submitGoal(goal: String, unattended: Boolean = false, origin: String? = null) {
         if (!initialized) return
+        // A PIN / password / one-time code said inside the request never enters the run: not the log, the trace, the
+        // conversation memory or a model prompt (audit SEC02). The voice layer masks it too; this covers every other door.
+        @Suppress("NAME_SHADOWING") val goal = com.tekyerema.core.Privacy.maskCredentials(goal)
         // WS-A resume: "carry on" / "continue" with a paused or interrupted task on file resumes THAT task — decided here
         // from the words and the journal (no model call), only on the user's word (never an unattended trigger).
         if (currentJob?.isActive != true) resumeFor(goal, unattended, origin)?.let { rec -> launchResume(rec, goal.trim()); return }
@@ -525,6 +532,7 @@ object AgentEngine {
         // Decisions the engine already knows, taken before asking the brain again (I-03 web-first; G-11 queued sub-steps).
         // Each one still goes through the whole pipeline below — policy gate, confirmation, execution, verification.
         val planned = ArrayDeque<AgentDecision>()
+        var contactAsks = 0                       // "which Prince?" asked by the engine itself — at most twice a task
         // Money safety (2026-09-29): numbers the user corrected during a confirmation ("the middle is 4 5 6") — they said
         // it, so the read-back must not call it "a number you didn't say" (ActionSemantics.recipientNotice).
         var saidNumbers = ""
@@ -855,7 +863,10 @@ object AgentEngine {
                 }
                 val t0 = SystemClock.uptimeMillis()
                 val decision = planned.removeFirstOrNull() ?: chainStep ?: brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo,
-                    progress = (retrievalHint?.let { "$it\n" } ?: "") + taskMemory.render(), effort = effort, simple = directStep))
+                    progress = (retrievalHint?.let { "$it\n" } ?: "") + taskMemory.render(), effort = effort,
+                    // A question that needs a fresh fact is never answered from the small model's memory ("the president of
+                    // Ghana is Nana Addo Samuel Kufuor", audit R01): it goes to the capable model, which is told to search.
+                    simple = directStep && retrievalNeed == RetrievalNeed.Need.NONE))
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
                 com.tekyerema.core.telemetry.Telemetry.mark("first_decision")   // Q-01 (only the first is kept)
 
@@ -951,7 +962,9 @@ object AgentEngine {
                         }
                         // RESULT is what gets SPOKEN — the reason class is for developers, not the user's ears.
                         // (merge A+B: a run with no journal record can't be resumed — B's "I've paused this" becomes "I stopped".)
-                        val detail = com.tekyerema.agent.routing.ModelRouting.notResumable(decision.detail)
+                        // Said TO the user: a planner note about "the user" is never read out (CannotDoSpeech).
+                        val detail = CannotDoSpeech.forUser(decision.reasonClass,
+                            com.tekyerema.agent.routing.ModelRouting.notResumable(decision.detail), goal)
                         log(LogEntry.Kind.INFO, "CANNOT DO [${decision.reasonClass}]")
                         log(LogEntry.Kind.RESULT, detail)
                         // A dropped connection is about THAT moment. Remembered word for word ("the internet isn't
@@ -1174,6 +1187,36 @@ object AgentEngine {
                         val pre = try { tool.preflight(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = before)) }
                             catch (t: Throwable) { null }
                         if (pre != null) {
+                            // Several contacts match the name: ask the short question the tool built (three options, twins
+                            // told apart by their last digits) and run the SAME call again with the pick — on the phone, no
+                            // model call. The planner used to turn 14 names into a truncated, doubled question (audit C15/F07).
+                            val ask = pre.data?.optString("ask")?.takeIf { it.isNotBlank() && pre.needsDisambiguation }
+                            val choices = if (ask != null) com.tekyerema.tools.ContactChoice.optionsOf(pre.data) else emptyList()
+                            if (ask != null && choices.size >= 2 && !unattended && contactAsks < 2 && decision.name in CONTACT_ASK_TOOLS) {
+                                contactAsks++
+                                References.noteOptions(choices)
+                                log(LogEntry.Kind.ACTION, "${decision.name} → preflight: ${pre.message}")
+                                val ans = askUser(ask, ask)
+                                if (ans == null) {
+                                    log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
+                                    finish(AgentStatus.CANNOT_DO, stats); return
+                                }
+                                if (com.tekyerema.voice.ControlVerbs.classify(ans) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
+                                    log(LogEntry.Kind.RESULT, "Okay, I've left it.")
+                                    pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
+                                    finish(AgentStatus.STOPPED, stats); return
+                                }
+                                val idx = (com.tekyerema.agent.research.OptionAnswer.parse(ans, choices) as?
+                                    com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index
+                                val args2 = org.json.JSONObject(decision.args.toString())
+                                val applied = idx != null && com.tekyerema.tools.ContactChoice.apply(args2, pre.data, choices[idx])
+                                // Another name ("Prince Melanin"): the same tool resolves it, and asks again if it must.
+                                if (!applied) { args2.put("contact", ans.trim()); args2.remove("number") }
+                                history.add("${decision.name}(${shortArgs(decision.args)}) → several contacts matched; the user was asked " +
+                                    "\"${ask.take(120)}\" and answered \"$ans\" — the call is being proposed again for that contact.")
+                                planned.addFirst(decision.copy(args = args2, rationale = "the user chose the contact"))
+                                continue
+                            }
                             if (pre.needsDisambiguation) References.noteOptions(References.optionsFrom(pre.message))   // C-22
                             log(LogEntry.Kind.ACTION, "${decision.name} → preflight: ${pre.message}")
                             taskMemory.noteFailure("${decision.name} can't proceed: ${pre.message.take(70)}")
@@ -1273,8 +1316,19 @@ object AgentEngine {
                                 continue
                             }
                             PolicyOutcome.CONFIRM -> {
+                              // The user already said yes to exactly this message in THIS task and it then visibly did not
+                              // send (the words stayed in the box — audit C10): the real Send button is not asked about twice.
+                              // Only the step that FINISHES what was approved: the approval was for typing-and-submitting, the
+                              // words stayed in the box, and this is the tap on Send moments later. A Send tap that itself
+                              // failed (a "couldn't connect" dialog) is asked again as before.
+                              val carried = if (effectLine == null && effectSpec != null && decision.name == "tap")
+                                  effects.approvedButNotDone(effectSpec)?.takeIf { it.tool == "type" && System.currentTimeMillis() - it.at < 120_000L }
+                                  else null
                               // (WS-A: a step the ledger has on record is always asked — the Mobile-Money pass never skips it.)
-                              if (effectLine == null && moneyOpApproved && isDialerNavigation(before) &&
+                              if (carried != null) {
+                                log(LogEntry.Kind.POLICY, "Already approved in this task and it had not sent — pressing Send without asking again.")
+                                stepAudit?.approved(null, "same message approved earlier in this task; it had not sent")   // WS-C
+                              } else if (effectLine == null && moneyOpApproved && isDialerNavigation(before) &&
                                   moneyApproval.covers(decision.name, decision.args, resolved?.element?.label ?: requestedLabel)) {
                                 // The transfer (recipient + amount) was already approved once; the user chose guided
                                 // navigation, so don't re-ask at every USSD menu step (it would time out). The PIN is
@@ -1340,7 +1394,11 @@ object AgentEngine {
                                 // number, not just the (possibly mis-heard) requested string.
                                 // Never "element 4" in a sentence a blind user hears: name the item, or describe it.
                                 // (an editable's label is its CONTENT, not its name — so a text field is "the text box")
-                                val itemName = if (resolved?.element?.editable == true) "the text box"
+                                // …named by its hint and its app when it has them: "the “Recipient” box in Messages" (audit C01:
+                                // "Type 0552093690 into the text box and submit?" said neither which box nor where).
+                                val itemName = if (resolved?.element?.editable == true)
+                                        (resolved?.element?.hint?.trim()?.takeIf { it.length in 2..30 }?.let { "the “$it” box" } ?: "the text box") +
+                                            (before.appName?.takeIf { it.isNotBlank() }?.let { " in $it" } ?: "")
                                     else resolved?.element?.label?.takeIf { it.isNotBlank() }?.let { "“${it.take(40)}”" } ?: "the selected item"
                                 val plainPrompt = enrichCallConfirmation(decision.name, decision.args, basePrompt, ctxApp)
                                     .replace(Regex("\\belement \\d+\\b"), itemName)
@@ -1395,6 +1453,20 @@ object AgentEngine {
                                         // action again — through the whole gate, read back in full (requeueNumberFix).
                                         val fixedNumber = requeueNumberFix(decision, reply.text, prompt, history, planned)
                                         if (fixedNumber != null) { saidNumbers += " $fixedNumber"; setStatus(AgentStatus.THINKING); continue }
+                                        // One changed detail — the person, the amount, the words, the app — is applied to the
+                                        // pending action exactly, from the user's words, and proposed again through the whole
+                                        // gate (audit 2026-10-01: the correction went to the on-device rules, which read this
+                                        // note aloud or claimed "Opened Mobile Money"; nothing was re-proposed).
+                                        // (A "try again" repeats a send exactly — a change there ends it, MoMoRetry's rule.)
+                                        val revised = if (decision.rationale == com.tekyerema.money.MoMoRetry.RATIONALE) null
+                                            else ReviseTurn.patch(decision.name, decision.args, reply.text)
+                                        if (revised != null) {
+                                            log(LogEntry.Kind.POLICY, "Correction applied (${revised.what}) — reading it back again.")
+                                            history.add("You proposed: \"$prompt\". The user corrected ${revised.what}; it is being proposed " +
+                                                "again with that change and will be confirmed again.")
+                                            planned.addFirst(decision.copy(args = revised.args, rationale = "the user corrected ${revised.what}"))
+                                            setStatus(AgentStatus.THINKING); continue
+                                        }
                                         history.add(
                                             "You proposed: \"$prompt\". The user did NOT approve it — they said: \"${reply.text}\". " +
                                             "Treat that as a correction or replacement of that pending action: change the recipient, app, " +
@@ -1535,6 +1607,9 @@ object AgentEngine {
                         if (result.success) when (decision.name) {
                             "make_call", "send_sms" -> References.notePerson(decision.args.optString("contact").ifBlank { null })
                             "reply_to_notification" -> References.notePerson(decision.args.optString("sender").ifBlank { null })
+                            // "find Richmond's Dad" → "send him …": the one contact a look-up returned is who "him" means next
+                            // (audit K01: "him" went to the recipient of an older request instead).
+                            "search_contacts" -> References.noteLookup(result.message)
                         }
                         if (result.needsDisambiguation) References.noteOptions(References.optionsFrom(result.message))
                         stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, result.channel))
@@ -1914,6 +1989,13 @@ object AgentEngine {
                         "${if (extraScrolls > 1) "s" else ""} toward '${sought?.take(50)}'" +
                         when { v.verified -> " — found it"; listEnded -> " — reached the end of the list"; else -> "" })
                 }
+                // A plain "tap <label>" that carried no claim and visibly opened a different screen DID work ("tap on
+                // connections" ended "unverified", audit AX05). Never for a consequential control or a credential screen.
+                if (!v.verified && expectation == null && decision.name == "tap" && result.success &&
+                    !TargetSemantics.isCredentialScreen(after) &&
+                    TargetSemantics.classify(decision.name, resolved?.element, null, false, before).tier == null &&
+                    com.tekyerema.verifier.Verify.navigationLanded(before, after))
+                    v = v.copy(verified = true, detail = "the tap opened a different screen")
                 afterSig = after.signature()   // REL-P2 stall: capture the post-action screen signature
                 if (!TargetSemantics.isCredentialScreen(after)) afterSnap = after
                 vr = if (TargetSemantics.isCredentialScreen(after))
@@ -2163,8 +2245,10 @@ object AgentEngine {
     private fun enrichCallConfirmation(name: String, args: JSONObject, base: String, ctxApp: Context): String {
         if (name != "make_call") return base
         val number = args.str("number")?.filter { it.isDigit() || it == '+' }
-        if (!number.isNullOrBlank()) return "Call ${spokenDigits(number)}?"
         val contact = args.str("contact")?.trim().orEmpty()
+        // The name is said with the number when both are known (after "which Prince?" the read-back gave digits only).
+        if (!number.isNullOrBlank()) return if (contact.isNotEmpty() && !contact.any { it.isDigit() })
+            "Call $contact on ${spokenDigits(number)}?" else "Call ${spokenDigits(number)}?"
         if (contact.isEmpty()) return base
         val matches = try { ContactResolver.resolve(ctxApp, contact) } catch (t: Throwable) { emptyList() }
         return if (matches.size == 1) "Call ${matches[0].name} on ${spokenDigits(matches[0].number)}?" else base

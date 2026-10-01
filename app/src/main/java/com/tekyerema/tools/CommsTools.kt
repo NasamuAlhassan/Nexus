@@ -33,11 +33,17 @@ object MakeCallTool : Tool {
         // Trust (2026-09-29): the helper is never brought in at a PIN (agent/helper/TrustFast.toolRefusal).
         if (!number.isNullOrBlank()) return com.tekyerema.agent.helper.TrustFast.toolRefusal(ctx, contact, number)
         if (contact.isNullOrBlank()) return null
-        val matches = ContactResolver.resolve(ctx.appContext, contact)
+        // One person saved twice is one match; "Prince Alhassan ending 323" (an option we offered) picks that entry.
+        val matches = ContactChoice.resolve(ctx.appContext, contact)
         return when {
-            matches.isEmpty() -> ToolResult(false, "I couldn't find $contact in your contacts.")
-            matches.size > 1 -> ToolResult(false, "More than one contact matches $contact: " +
-                matches.joinToString(", ") { it.name } + ". Which one?", needsDisambiguation = true)
+            // "call him" with nobody remembered: no one is named — the question is WHO, not a number (audit K02 retest).
+            com.tekyerema.android.ContactResolver.isPronoun(contact) -> ToolResult(false,
+                "I don't know who “$contact” is — no one was named. Ask the user who they want to call (ask_user).", recoverable = false)
+            // Definite: the phone book has nobody by that name. A CALL needs a number — ask for it; a chat app can't supply one.
+            matches.isEmpty() -> ToolResult(false, "I couldn't find $contact in your contacts. Ask the user for the number (ask_user) — " +
+                "don't search other apps for a number to call.", recoverable = false)
+            // A short question a listener can answer (≤ 3, most recently contacted first), not every name in one breath.
+            matches.size > 1 -> ContactChoice.result(ctx.appContext, ContactChoice.narrow(contact).first, matches)
             else -> com.tekyerema.agent.helper.TrustFast.toolRefusal(ctx, matches[0].name, matches[0].number)
         }
     }
@@ -47,14 +53,11 @@ object MakeCallTool : Tool {
         val contact = args.str("contact")
         var name = contact
         if (number.isNullOrBlank() && !contact.isNullOrBlank()) {
-            val matches = ContactResolver.resolve(ctx.appContext, contact)
+            val matches = ContactChoice.resolve(ctx.appContext, contact)   // as preflight resolved it
             when {
                 matches.isEmpty() ->
-                    return ToolResult(false, "No contact found matching '$contact'. Ask the user for the number.")
-                matches.size > 1 -> {
-                    val options = matches.joinToString("; ") { "${it.name} (${it.number})" }
-                    return ToolResult(false, "Multiple contacts match '$contact': $options. Ask which one.", needsDisambiguation = true)
-                }
+                    return ToolResult(false, "No contact found matching '$contact'. Ask the user for the number.", recoverable = false)
+                matches.size > 1 -> return ContactChoice.result(ctx.appContext, ContactChoice.narrow(contact).first, matches)
                 else -> { number = matches[0].number; name = matches[0].name }
             }
         }

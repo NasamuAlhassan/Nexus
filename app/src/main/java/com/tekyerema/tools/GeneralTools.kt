@@ -35,7 +35,11 @@ object SearchContactsTool : Tool {
         // back to the General Operator — e.g. the target app's own in-UI search — instead of concluding
         // the contact is unreachable (hybrid architecture §3, Scenario 4).
         return if (matches.isEmpty())
-            ToolResult(false, "No contact in the phone's address book matches '$query'. They may still exist inside a specific app (WhatsApp/Telegram/etc.) under a different name — this shortcut just can't see that.", channel = "native", recoverable = true)
+            // For a CALL or an SMS only the address book can supply a number, so the user is asked for it; the person is
+            // looked for inside a chat app only when the user named that app (A20e audit 2026-10-01, C16: a missing
+            // contact for a phone call sent the planner into WhatsApp's Meta AI search).
+            ToolResult(false, "No contact in the phone's address book matches '$query'. For a call or a text, ask the user for the number (ask_user). " +
+                "Only if the user named a chat app (WhatsApp, Telegram…) look for the person in that app's own chat list.", channel = "native", recoverable = true)
         else ToolResult(true, "Matches for '$query': " + matches.joinToString("; ") { "${it.name} — ${it.number}" }, channel = "native")
     }
 }
@@ -89,5 +93,14 @@ object RunUssdTool : Tool {
         com.tekyerema.verifier.VerificationResult(result.success,
             if (result.success) "the network replied" else "the network didn't reply")
 
-    override fun confirmationPrompt(args: JSONObject) = "Run USSD code ${args.str("code")}?"
+    /** Said in the user's terms, with the code spoken key by key — "Run USSD code *124#?" asked a blind user to approve
+     *  a code they never said (audit F01). */
+    override fun confirmationPrompt(args: JSONObject): String {
+        val code = args.str("code")?.trim().orEmpty()
+        val keys = code.map { c -> when (c) { '*' -> "star"; '#' -> "hash"; else -> c.toString() } }.joinToString(" ")
+        return when (code) {
+            "*124#" -> "Check your airtime balance? I'll dial $keys — it's free."
+            else -> "Dial the short code $keys?"
+        }
+    }
 }

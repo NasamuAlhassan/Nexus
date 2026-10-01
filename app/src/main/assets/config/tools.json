@@ -330,6 +330,12 @@
     "local"
    ]
   },
+  "share_screenshot": {
+   "feature": "E-20",
+   "callers": [
+    "planner"
+   ]
+  },
   "open_intent": {
    "feature": "D-14"
   },

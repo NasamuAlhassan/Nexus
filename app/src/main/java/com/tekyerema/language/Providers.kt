@@ -71,6 +71,22 @@ enum class FailureKind {
     UNAVAILABLE
 }
 
+/**
+ * Why a network voice can't be used right now, in plain words for the user and the phone check (never a secret, never
+ * a URL). Null = usable as far as we know. Pure.
+ */
+internal fun unavailableReason(cloudAllowed: Boolean, resting: Boolean, lastFailure: FailureKind?, quotaSpent: Boolean): String? = when {
+    !cloudAllowed -> "the cloud is switched off"
+    resting -> when (lastFailure) {
+        FailureKind.AUTH -> "key rejected"
+        FailureKind.QUOTA -> "quota used up"
+        FailureKind.TRANSIENT -> "service not reachable"
+        else -> "service error"
+    }
+    quotaSpent -> "quota used up"
+    else -> null
+}
+
 /** [window]: "day" / "week" when the API said that quota window is spent (the [QuotaLedger] then stops asking). */
 class ProviderFailure(val kind: FailureKind, message: String, val retryAfterMs: Long? = null, val window: String? = null) : Exception(message)
 

@@ -44,7 +44,7 @@ data class Transcript(
 }
 
 /** Distinguishes an ASR-layer failure so the controller can label the failed stage honestly (§29). */
-class AsrException(message: String) : Exception(message)
+open class AsrException(message: String) : Exception(message)
 
 /** Transcribe captured audio to a canonical goal: the on-device model, or an online provider (the UG HCI Lab API). */
 interface AsrProvider {

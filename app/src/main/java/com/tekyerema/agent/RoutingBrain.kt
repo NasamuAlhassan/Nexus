@@ -74,6 +74,20 @@ class RoutingBrain(
         }
 
         /**
+         * The user answered a read-back with a change the engine could not apply itself (ReviseTurn), and nothing has run
+         * since: only a planner can re-plan it. The on-device rules must not be asked — with no step of their own to
+         * report they ended the task by reading the engine's note aloud ("You proposed: … The user did NOT approve it …",
+         * A20e audit 2026-10-01, C09/K01) or with a routine "Opened Mobile Money" (F08). Pure.
+         */
+        fun pendingRevision(history: List<String>): Boolean {
+            val i = history.indexOfLast { it.startsWith("You proposed:") && !it.contains("it is being proposed again") }
+            return i >= 0 && history.drop(i + 1).none { STEP_LINE.containsMatchIn(it) }
+        }
+
+        /** Said when a correction can't be re-planned because no planner is reachable. Nothing ran. */
+        const val REVISION_NEEDS_PLANNER = "I couldn't make that change just now. Nothing was done — please say the whole request again."
+
+        /**
          * SECURE BOUNDARY: momo_send stopped at the Mobile Money PIN — the task is OVER. Its own words ("enter your PIN
          * to send …") are the reply; no brain plans another step. A20e 2026-09-29: after a live 0.1-cedi send reached
          * MTN's PIN prompt ("… Enter MM # for next", no word "PIN" in it, so the credential-screen guard didn't fire),
@@ -169,6 +183,17 @@ class RoutingBrain(
             stickyCloud = true
             if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
             return fromCloud(ctx, cloud.decide(cloudCtx(ctx)))
+        }
+
+        // A correction at a read-back that the engine couldn't apply itself goes to the planner — never to the rules.
+        if (pendingRevision(ctx.history)) {
+            if (cloud != null && isOnline()) {
+                android.util.Log.i("Tekyerema", "[ROUTE] the user corrected a proposal → the cloud brain re-plans it")
+                stickyCloud = true
+                if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
+                return fromCloud(ctx, cloud.decide(cloudCtx(ctx)))
+            }
+            return AgentDecision.CannotDo(OFFLINE_UNKNOWN, REVISION_NEEDS_PLANNER)
         }
 
         val d = local.decide(ctx)

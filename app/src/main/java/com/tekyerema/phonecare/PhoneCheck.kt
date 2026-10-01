@@ -70,6 +70,8 @@ object PhoneCheck {
         /** A text-to-speech engine is installed; null = unknown. */
         val speechOut: Boolean? = true,
         val speakAloud: Boolean = true,
+        /** The Twi voice was tried and isn't available — the sentence to say (voice/TwiVoiceStatus.problem); null = fine or unused. */
+        val twiVoiceProblem: String? = null,
         val batteryPct: Int? = null,
         val charging: Boolean = false
     )
@@ -98,6 +100,8 @@ object PhoneCheck {
         }
         if (f.speechOut == false) add("speech_out", 86, "Your phone has no text-to-speech voice, so I can't talk to you.",
             "To fix it: install Speech Services by Google from the Play Store.")
+        // Audit 2026-10-01: the lab's Twi voice rejected its key and Twi replies went silent / English with no word to the user.
+        f.twiVoiceProblem?.takeIf { it.isNotBlank() }?.let { add("twi_voice", 60, it, null) }
 
         // ---- screen control (the 2026-09-29 reinstall left it unbound)
         if (!f.screenControlOn) add("screen_control", 95, "Screen control is off, so I can't open apps or tap for you.",

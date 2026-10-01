@@ -66,7 +66,8 @@ class HttpAsrProvider(
         val reply = try {
             guard.run {
                 val r = transport.send(HttpSpeech.asrRequest(spec, secrets(), wav, code), spec.connectMs, spec.callMs)
-                if (r.code !in 500..599) ledger.record(spec.id, spec.limits, units)   // it reached the gateway's counter
+                // It reached the gateway's counter — except a rejected key (401), which is refused before any counting.
+                if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
                 HttpSpeech.failureOf(spec, r)?.let { throw it }
                 val text = HttpSpeech.parseText(spec, r)
                 text to HttpSpeech.parseLanguage(spec, r)
@@ -118,11 +119,25 @@ class HttpTtsProvider(
     private val guard: ProviderGuard,
     private val sink: AudioSink,
     private val ledger: QuotaLedger = QuotaLedger()
-) : TtsProvider, HealthAware {
+) : TtsProvider, HealthAware, com.tekyerema.voice.VoiceAvailability {
     override val name = "http:${spec.id}"
     override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available() &&   // WS-C
         ledger.refusal(spec.id, spec.limits, QuotaLedger.Units(chars = 1)) == null
     private val cache: MutableMap<String, ByteArray> = lru(spec.cacheEntries.coerceIn(0, 256))
+
+    /** Why this voice can't be used right now, in words for the user and the phone check; null when it can. */
+    override fun whyUnavailable(): String? = unavailableReason(
+        cloudAllowed = com.tekyerema.operator.OperatorPolicy.cloudAllowed,
+        resting = !guard.health.available(), lastFailure = guard.health.lastFailure,
+        quotaSpent = ledger.refusal(spec.id, spec.limits, QuotaLedger.Units(chars = 1)) != null)
+
+    init {
+        // Synthesized clips are the one thing here worth megabytes: give them back when the offline recogniser needs
+        // room to load (voice/AsrMemory). They are fetched again on next use. The hook holds only the map (not this
+        // provider), and the registry holds this provider weakly.
+        val clips = cache
+        com.tekyerema.voice.AsrMemory.onRelease(this) { clips.clear() }
+    }
 
     override suspend fun speak(text: String, language: String): Boolean {
         val code = HttpSpeech.languageCode(spec, language) ?: return false
@@ -146,7 +161,8 @@ class HttpTtsProvider(
                 try {
                     guard.run {
                         val r = transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs)
-                        if (r.code !in 500..599) ledger.record(spec.id, spec.limits, units)
+                        // A rejected key (401) never reached the plan's counter: don't spend the small day on it.
+                        if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
                         HttpSpeech.failureOf(spec, r)?.let { throw it }
                         HttpSpeech.parseAudio(spec, r)
                     }.also { if (spec.cacheEntries > 0) cache[key] = it }

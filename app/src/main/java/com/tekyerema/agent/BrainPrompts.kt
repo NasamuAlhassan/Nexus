@@ -84,6 +84,7 @@ object BrainPrompts {
             val convo = conversationForPrompt(ctx.conversation)
             if (convo.isNotEmpty()) append("CONVERSATION SO FAR (recent turns, oldest first):\n").append(convo.joinToString("\n") { "- $it" }).append("\n\n")
             append("USER GOAL (the newest thing the user said — trusted): ").append(ctx.goal).append("\n\n")
+            commsRules(ctx.goal)?.let { append(it).append("\n\n") }
             append("ACTIONS SO FAR THIS GOAL (most recent last):\n").append(historyText).append("\n\n")
             if (ctx.progress.isNotBlank())
                 append("PROGRESS SO FAR (what you already know this task — don't re-derive it):\n").append(ctx.progress).append("\n\n")
@@ -100,6 +101,7 @@ object BrainPrompts {
                 append(convo.joinToString("\n") { "- $it" }).append("\n\n")
             }
             append("USER GOAL (the newest thing the user said — trusted): ").append(ctx.goal).append("\n\n")
+            commsRules(ctx.goal)?.let { append(it).append("\n\n") }
             append("ACTIONS SO FAR THIS GOAL (most recent last):\n").append(historyText).append("\n\n")
             if (ctx.progress.isNotBlank())
                 append("PROGRESS SO FAR (what you already know this task — don't re-derive it):\n").append(ctx.progress).append("\n\n")
@@ -107,6 +109,23 @@ object BrainPrompts {
             append("Decide the next single step: call one tool with an `expects` claim, call cannot_do, or — when the goal is fully done and verified, or it is simply a question you can answer — reply with a short spoken summary/answer.")
         }
     }
+
+    // ---------------------------------------------------------------- messaging rules (only when the goal is about one)
+    // Kept OUT of SYSTEM (capped, and paid on every step of every task): these lines ride right after the goal — fixed
+    // for the whole task, so they sit inside the cached prefix — and only when the request is about a message or a call.
+    // A20e audit 2026-10-01: a public bot named "Richmond" was opened from Telegram's global search instead of the
+    // contact, "Start Bot" was tapped unasked, the text stayed unsent in the box and the reply was "I sent it" (C10);
+    // after the network refused an SMS / a contact wasn't found, another app was driven by hand (C01, C02, C16).
+    private val COMMS_GOAL = Regex("(?i)\\b(send|message|messages|text|sms|whatsapp|telegram|messenger|signal|tell(?!\\s+me\\b)|reply|chat|dm|forward|share|call|ring|dial)\\b")
+
+    internal const val COMMS_RULES =
+        "MESSAGING RULES: open the person from the chat list or Contacts; a row marked bot, channel, subscribers or @name, or a " +
+        "global-search hit, is a stranger — never open it or tap Start/Join. Two people fit → ask_user. Name the exact chat title when " +
+        "asking to send. SENT means the box is empty and the words show in the chat; if still in the box, tap Send. If a send/call " +
+        "tool reports a definite failure, tell the user; don't redo it by hand in another app."
+
+    /** [COMMS_RULES] when [goal] is about sending a message or calling, else null. Pure. */
+    internal fun commsRules(goal: String): String? = if (COMMS_GOAL.containsMatchIn(goal)) COMMS_RULES else null
 
     // ---------------------------------------------------------------- context compaction
     // Each request is stateless (system + tools + one message), so only the step record carries memory between steps.

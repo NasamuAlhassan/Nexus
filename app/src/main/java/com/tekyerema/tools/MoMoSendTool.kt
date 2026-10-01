@@ -317,16 +317,18 @@ object MoMoSendTool : Tool {
     private fun String?.ifBlankOrNull(default: String) = this?.takeIf { it.isNotBlank() } ?: default
 
     override fun confirmationPrompt(args: JSONObject): String {
-        val amt = args.str("amount")?.let { "$it cedis" } ?: "money"
+        val amt = args.str("amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"
+        // The reference is part of what is sent, so it is part of what is read back (A20e audit 2026-10-01, F09).
+        val ref = GhanaMobileMoney.referencePhrase(args.str("reference"))
         // Read the recipient number in the groups people check it in ("0 5 5, 3 2 3, 8 0 1 1") with its network, so a
         // blind user can catch a wrong-number or units (pesewa/cedi) mistake BEFORE the send is driven — and hear when the
         // number isn't on a network we know, or is on another network than the SIM (money safety, 2026-09-29).
         val raw = args.str("number")?.takeIf { n -> n.any { it.isDigit() } }
-            ?: return "Send $amt with Mobile Money? I'll go through the menu and stop at the PIN for you to enter."
+            ?: return "Send $amt with Mobile Money$ref? I'll go through the menu and stop at the PIN for you to enter."
         val (to, netWarn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(ARG_SIM))
         val warn = listOfNotNull(netWarn, firstTimeWarning(args), MoneyPrivacy.callWarning(args.optBoolean(ARG_ON_CALL)))
             .joinToString(" ").ifEmpty { null }
-        return "Send $amt to $to, with Mobile Money?\n" + (warn?.let { "$it " } ?: "") +
+        return "Send $amt to $to, with Mobile Money$ref?\n" + (warn?.let { "$it " } ?: "") +
             "I'll go through the menu and stop at the PIN for you to enter."
     }
 
