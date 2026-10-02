@@ -402,7 +402,9 @@
   },
   "resultLimits": {
    "read_shared": 1500,
-   "momo_send": 400
+   "momo_send": 400,
+   "ussd_navigate": 600,
+   "money_status": 600
   },
   "search": {
    "groups": {
@@ -448,6 +450,17 @@
    "callers": [
     "planner"
    ],
+   "untrusted_output": true
+  },
+  "money_status": {
+   "feature": "M-05",
+   "permissions": [
+    "android.permission.READ_SMS"
+   ],
+   "callers": [
+    "planner"
+   ],
+   "idempotent": true,
    "untrusted_output": true
   }
  }

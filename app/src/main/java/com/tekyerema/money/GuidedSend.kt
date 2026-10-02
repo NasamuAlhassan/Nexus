@@ -13,7 +13,8 @@ import org.json.JSONObject
 object GuidedSend {
     const val WINDOW_MS = 10 * 60_000L
 
-    private data class Approved(val goal: String, val amount: String?, val number: String?, val network: String?, val at: Long)
+    private data class Approved(val goal: String, val amount: String?, val number: String?, val network: String?, val at: Long,
+                                val name: String? = null)
 
     @Volatile private var approved: Approved? = null
 
@@ -23,7 +24,9 @@ object GuidedSend {
         val kind = args.optString("_kind")
         if (kind == "buy_airtime" || kind == com.tekyerema.tools.MobileMoneyTool.KIND_BALANCE) return   // only a SEND counts
         approved = Approved(goal, args.optString("_amount").takeIf { it.isNotBlank() },
-            args.optString("_number").takeIf { it.isNotBlank() }, args.optString(ARG_SIM).takeIf { it.isNotBlank() }, now)
+            args.optString("_number").takeIf { it.isNotBlank() }, args.optString(ARG_SIM).takeIf { it.isNotBlank() }, now,
+            // A recipient given by name (never a number in the name slot).
+            args.optString("_recipient").takeIf { r -> r.isNotBlank() && r.count(Char::isDigit) < 7 })
     }
 
     /**
@@ -31,14 +34,13 @@ object GuidedSend {
      * in this task, it counts as handed off: today's total, the number as known, the receipt window. Returns whether it
      * counted (once per approval).
      */
-    fun atPin(goal: String, reason: String, now: Long = System.currentTimeMillis()): Boolean {
+    fun atPin(goal: String, reason: String, now: Long = System.currentTimeMillis(), app: android.content.Context? = null): Boolean {
         val a = approved ?: return false
         if (reason != "momo_pin" || a.goal != goal || now - a.at !in 0..WINDOW_MS) return false
         approved = null
-        val amount = MoneyLimits.parseAmount(a.amount)
-        amount?.let { MoneyLimits.recordSend(it, now) }
-        a.number?.let { KnownRecipients.add(it) }
-        MoMoAfterCare.handedOff(a.network, amount, now)
+        // Finance audit (2026-10-01): the hand-off goes into the ledger — the number becomes "one you have paid" only when
+        // the network confirms the send, not here (money/TxLedger).
+        MoneyStatus.handedOff(app, TxLedger.What.SEND, MoneyLimits.parseAmount(a.amount), a.number, a.name, a.network, now)
         return true
     }
 

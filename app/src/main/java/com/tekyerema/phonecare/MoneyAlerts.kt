@@ -39,9 +39,13 @@ object MoneyAlerts {
     /** Not an outgoing payment's receipt ("your payment of GHS 20.00 has been received"). */
     private const val NOT_OUTGOING = "(?<!payment of )(?<!sent )(?<!paid )(?<!request of )(?<!transfer of )(?<!purchase of )"
 
+    /** "Airtime recharge received for GHS 5.00 from 0241234567. Thank you" comes from the MobileMoney sender itself and
+     *  is airtime, not cash (real shape, A20e inbox 2026-10-01 — it was announced as "You've received 5 cedis"). */
+    private const val NOT_A_RECHARGE = "(?<!recharge\\s)(?<!airtime\\s)(?<!bundle\\s)(?<!data\\s)"
+
     private val DEFAULT_PATTERNS = listOf(
         // MTN: "Payment received for GHS 50.00 from KOFI MENSAH 0244123456 Current Balance: GHS 123.45 …"; "Cash In received for …"
-        "(?:payment|cash\\s?in|transfer|money|funds?|deposit)?\\s*received\\s+(?:for|of)\\s+$CUR\\s*$AMT$NOT_CASH(?:\\s+from\\s+$NAME$NAME_END)?",
+        "(?:payment|cash\\s?in|transfer|money|funds?|deposit)?\\s*${NOT_A_RECHARGE}received\\s+(?:for|of)\\s+$CUR\\s*$AMT$NOT_CASH(?:\\s+from\\s+$NAME$NAME_END)?",
         // "You have received GHS 50.00 from KOFI MENSAH (0244123456)." / "You've received …" / "You received GH₵20.00 …"
         "you(?:['’]ve|\\s+have)?\\s+(?:just\\s+)?received\\s+(?:an?\\s+)?(?:amount\\s+of\\s+|payment\\s+of\\s+|transfer\\s+of\\s+)?$CUR\\s*$AMT$NOT_CASH(?:\\s+from\\s+$NAME$NAME_END)?",
         // "You've received 50.00 GHS from …" / "You received 20 cedis from …"
@@ -113,9 +117,15 @@ object MoneyAlerts {
         val claim = amount != null || (!trusted && CLAIM_TO_YOU.containsMatchIn(t))
         if (claim && MONEY_CUE.containsMatchIn(t) && mistake(trusted).any { it.containsMatchIn(t) }) return Event.MistakeClaim
         if (amount == null) return null
+        // A login code / OTP is never a credit and never becomes a spoken line, whatever else the message says.
+        if (com.tekyerema.money.MoMoOutcome.isSecret(t)) return null
         if (!trusted) return if (fromNumber) Event.UntrustedCredit else null
-        return Event.Received(amount, payer?.let { cleanName(it) }, balanceOf(t))
+        // MTN's own ledger labels in the payer's place ("from Credit.Inv") are not a person: the amount, and no name.
+        return Event.Received(amount, payer?.takeUnless { SERVICE_LABEL.matches(it.trim()) }?.let { cleanName(it) }, balanceOf(t))
     }
+
+    /** "Credit.Inv" / "Debit. Inv1" / "Bills.INV" — what MTN writes where a payer's name would be (real shapes, 2026-10-01). */
+    private val SERVICE_LABEL = Regex("(?i)^(?:credit|debit|bills?)\\s*\\.\\s*inv\\w*\\.?$")
 
     /** The balance figure in [text], or null. */
     fun balanceOf(text: String): String? = BALANCE.find(text)?.groupValues?.get(1)

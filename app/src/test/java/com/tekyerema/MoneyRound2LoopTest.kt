@@ -96,6 +96,9 @@ class MoneyRound2LoopTest {
         UiElement(13, "android.widget.Button", "Send", Box(540, 1240, 1000, 1340), clickable = true)), 1L, appName = "Phone")
 
     @Test fun a_send_over_the_limit_is_refused_before_any_read_back() = runTest {
+        // The planner's momo_send route (the navigator switched off, a Twi request): with the on-phone money flow on, this
+        // goal is the navigator's, whose own preflight refuses the same way (UssdNavigatorTool.preflight → MoneyPlan.navigatorEnd).
+        loadAppConfig("{\"money\":{\"flow\":{\"enabled\":false}}}")
         install(MoMoSendTool)
         MoneyLimits.set(MoneyLimits.Kind.PER_SEND, BigDecimal("200"))
         val brain = ScriptedBrain({ tool("momo_send", JSONObject().put("number", "0553238011").put("amount", "500")) })

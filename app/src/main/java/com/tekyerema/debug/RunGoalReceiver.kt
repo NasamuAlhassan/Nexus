@@ -64,6 +64,34 @@ class RunGoalReceiver : BroadcastReceiver() {
             reg.installed.forEach { t -> Log.i("Tekyerema", "[TOOLS] ${t.name}: ${com.tekyerema.tools.ToolManifest.blocker(t) ?: "available"} tier=${com.tekyerema.policy.PolicyConfig.effectiveTier(t)}") }
             return
         }
+        // Finance audit (2026-10-01): the payment-outcome path without touching a money menu — a SIMULATED hand-off and a
+        // SIMULATED network message go through the real ledger, follow-up and speech. Nothing is dialled; no number is
+        // kept (the simulated hand-off carries a name only, so the "numbers you've paid" list is untouched).
+        //   adb ... --es money_sim "handoff|5|Kofi Mensah"      (airtime: "handoff|5|airtime")
+        //   adb ... --es money_sim "sms|Payment made for GHS 5.00 to KOFI MENSAH. Current Balance: GHS 1.00. ..."
+        //   adb ... --es money_sim ledger | clear
+        intent.getStringExtra("money_sim")?.let { what ->
+            val app = context.applicationContext
+            val parts = what.split('|')
+            when (parts[0]) {
+                "handoff" -> {
+                    val airtime = parts.getOrNull(2) == "airtime"
+                    val tx = com.tekyerema.money.MoneyStatus.handedOff(app,
+                        if (airtime) com.tekyerema.money.TxLedger.What.AIRTIME else com.tekyerema.money.TxLedger.What.SEND,
+                        parts.getOrNull(1)?.toBigDecimalOrNull(), null, parts.getOrNull(2)?.takeIf { !airtime }, "mtn")
+                    Log.i("Tekyerema", "[MONEY_SIM] hand-off recorded (simulated) state=${tx.state}")
+                }
+                "sms" -> {
+                    val line = com.tekyerema.phonecare.PhoneAlerts.simulatedOutcome(app, what.substringAfter('|'))
+                    Log.i("Tekyerema", "[MONEY_SIM] network message (simulated) → ${line ?: "settled nothing"}")
+                }
+                "clear" -> { com.tekyerema.money.TxLedger.clear(); Log.i("Tekyerema", "[MONEY_SIM] ledger cleared") }
+                else -> com.tekyerema.money.TxLedger.all().forEach {
+                    Log.i("Tekyerema", "[MONEY_SIM] ${it.what} ${it.amount} ${it.state} told=${it.told} ${(System.currentTimeMillis() - it.at) / 1000}s ago")
+                }
+            }
+            return
+        }
         intent.getStringExtra("ping")?.let {
             AgentEngine.refreshReadiness()
             val s = AgentEngine.state.value

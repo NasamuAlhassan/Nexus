@@ -84,5 +84,8 @@ fun defaultTools(): List<Tool> = listOf(
     // confirms the payment and enters the PIN). Hidden from every model (no schema entry): only the guide calls it.
     com.tekyerema.money.BankUssdTool,
     com.tekyerema.money.TelcoUssdTool,
-    com.tekyerema.money.ussd.UssdNavigatorTool
+    com.tekyerema.money.ussd.UssdNavigatorTool,
+    // Finance audit (2026-10-01): "did that payment go through?" / last transaction / received today — from the ledger and
+    // the network's own messages. Hidden from every model: only the on-phone money flow calls it.
+    com.tekyerema.money.MoneyStatusTool
 )

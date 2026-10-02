@@ -89,7 +89,7 @@ object AgentEngine {
     // on round-5 evidence; adjusted only by evidence.
     private const val MAX_STEPS = 30
     /** Tools whose "several contacts match" preflight the engine settles itself, with the tool's own short question. */
-    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call")
+    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME)
     private const val TAG = "Tekyerema"
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
@@ -778,7 +778,7 @@ object AgentEngine {
                     chain.clear()   // G-11: nothing queued before the secret was entered runs after it
                     // Deliberately log a SAFE label only — never the screen text.
                     log(LogEntry.Kind.POLICY, "SENSITIVE_INPUT_DETECTED ($reason) — Secure Input Mode: pausing observation, brain and logging until you finish.")
-                    com.tekyerema.money.GuidedSend.atPin(goal, reason)   // money safety round 2: a guided send reached its PIN
+                    com.tekyerema.money.GuidedSend.atPin(goal, reason, app = ctxApp)   // money safety round 2: a guided send reached its PIN
                     val resumed = awaitSecureInput(reason)
                     if (!resumed) { finish(AgentStatus.STOPPED, stats); return }
                     continue   // re-observe a FRESH screen; the boundary re-checks it before any brain call

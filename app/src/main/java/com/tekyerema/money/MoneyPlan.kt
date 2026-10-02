@@ -18,6 +18,8 @@ object MoneyPlan {
     fun decide(goal: String, history: List<String>): AgentDecision? =
         MoMoRetry.decide(goal, history) ?: MoMoAfterCare.decide(goal, history) ?: BankGuide.decide(goal, history)
             ?: TelcoGuide.decide(goal, history)
+            // Finance audit (2026-10-01): a spoken send / airtime / balance / "did it go through" is planned on the phone.
+            ?: MoneyFlow.decide(goal, history)
 
     fun end(history: List<String>): Pair<AgentStatus, String>? {
         BankGuide.end(history)?.let { return it }
@@ -31,6 +33,8 @@ object MoneyPlan {
     fun navigatorEnd(history: List<String>): Pair<AgentStatus, String>? {
         val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
         if (!last.startsWith("${com.tekyerema.money.ussd.UssdNavigatorTool.NAME}(")) return null
+        // "Which Prince?" was asked and the same call is queued again with the pick — not an end (the engine's note).
+        if (last.contains("→ several contacts matched")) return null
         val msg = LocalBrain.resultMessage(last)
         if (!last.contains("→ success")) return AgentStatus.CANNOT_DO to
             msg.ifBlank { "The Mobile Money walk didn't finish. Nothing was sent." }

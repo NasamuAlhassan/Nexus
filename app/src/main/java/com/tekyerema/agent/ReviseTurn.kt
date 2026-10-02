@@ -22,10 +22,13 @@ object ReviseTurn {
     /** tool → (name key, number key): tools that take a contact name or a number. */
     private val CONTACT_TOOLS = mapOf(
         "send_sms" to ("contact" to "number"), "make_call" to ("contact" to "number"),
-        "mobile_money" to ("_recipient" to "_number")
+        "mobile_money" to ("_recipient" to "_number"),
+        // The navigator resolves a contact's name in its own preflight (finance audit 2026-10-01), so a changed person is
+        // re-proposed here like a changed number — and read back again with the number it resolved to.
+        "ussd_navigate" to ("contact" to "number")
     )
     /** tool → number key: tools that take a number only (a name there needs resolving — the planner's job). */
-    private val NUMBER_ONLY = mapOf("momo_send" to "number", "ussd_navigate" to "number")
+    private val NUMBER_ONLY = mapOf("momo_send" to "number")
     private val AMOUNT_KEYS = listOf("_amount", "amount")
 
     private val STOP = Regex("(?i)\\b(?:don'?t|do not|cancel|stop|never ?mind|forget it|leave it|abort)\\b")

@@ -12,7 +12,9 @@ import java.security.SecureRandom
  *
  * Privacy: the numbers themselves are never kept — only a salted SHA-256 of the normalised number (0XXXXXXXXX; +233 folds
  * to 0), with a random salt made once on this phone, so the list can't be read back or matched against a table of
- * numbers. Bounded ([MAX], oldest dropped). A number is added after a send reached the PIN hand-off. Emptied by "delete
+ * numbers. Bounded ([MAX], oldest dropped). A number is added when the NETWORK'S own message confirms a send to it
+ * (money/TxLedger, finance audit 2026-10-01 — it used to be added at the PIN hand-off, so a send the user cancelled at the
+ * PIN silenced the first-time warning for that number the next time). Emptied by "delete
  * everything" (then every number is new again — the safe direction). Stored in the operator's store (unit tests: a map).
  */
 object KnownRecipients {
@@ -63,6 +65,21 @@ object KnownRecipients {
     /** Remember [number] (the newest last; the oldest dropped past [MAX]). */
     @Synchronized fun add(number: String?) {
         val h = hash(saltNow(), number) ?: return
+        hashes.remove(h); hashes.add(h)
+        while (hashes.size > MAX) hashes.remove(hashes.first())
+        try { store?.put(K_KNOWN, hashes.joinToString(",")) } catch (_: Throwable) {}
+    }
+
+    /** The salted hash of [number] for another money store to keep instead of the number (money/TxLedger): with
+     *  [create] false it is null until a salt exists (nothing was ever hashed, so nothing can match). */
+    @Synchronized fun keyOf(number: String?, create: Boolean = true): String? {
+        val s = if (create) saltNow() else salt ?: return null
+        return hash(s, number)
+    }
+
+    /** Remember a number by the hash [keyOf] gave for it — the network confirmed a send to it (money/TxLedger). */
+    @Synchronized fun addKey(key: String?) {
+        val h = key?.takeIf { it.length == 64 } ?: return
         hashes.remove(h); hashes.add(h)
         while (hashes.size > MAX) hashes.remove(hashes.first())
         try { store?.put(K_KNOWN, hashes.joinToString(",")) } catch (_: Throwable) {}

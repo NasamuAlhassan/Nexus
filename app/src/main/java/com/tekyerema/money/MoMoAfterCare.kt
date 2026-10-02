@@ -18,6 +18,10 @@ import java.math.BigDecimal
  *      phrased as "as a guide", not as law). It offers to call 100, and a "yes" becomes "call 100" — a new request that
  *      goes through the normal call confirmation ("Call 1 0 0?"). Never dialled by itself.
  * Pure except the small in-memory state (the hand-off time, the pending offer).
+ *
+ * Finance audit (2026-10-01): the receipt that is actually SPOKEN is now [TxLedger]'s (PhoneAlerts.outcome) — it knows a
+ * failure from a success, is not tied to the "money alerts" switch, survives a restart, and parses MTN's real wordings
+ * ([MoMoOutcome]). [receiptFor] / [parseSent] stay for their callers and tests; (b) and [careNumber] are unchanged.
  */
 object MoMoAfterCare {
     fun receiptWindowMs(): Long = AppConfig.long("money.afterCare.receiptWindowMs", 5 * 60_000L)

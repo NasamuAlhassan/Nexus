@@ -19,12 +19,14 @@ class Navigator(
     private val ctrl: AccessibilityController,
     private val tx: TxContext,
     private val embed: ((String) -> FloatArray)? = null,
-    private val online: OnlineFallback? = null
+    private val online: OnlineFallback? = null,
+    /** The loudspeaker PIN tip for this phone right now (tools/MoneyPrivacy), said after the hand-off line. */
+    private val pinTip: String? = null
 ) {
     sealed class Outcome {
         /** The consolidated line was spoken-worthy and the PIN/confirmation is the user's: the walk SUCCEEDED up to
          *  the boundary. [handedOff] = it reached the authorization (limits/receipt bookkeeping applies). */
-        data class Boundary(val line: String, val handedOff: Boolean) : Outcome()
+        data class Boundary(val line: String, val handedOff: Boolean, val registeredName: String? = null) : Outcome()
         data class Final(val line: String) : Outcome()                  // the network's last word (a balance, a receipt)
         data class NeedUser(val ask: String) : Outcome()                // guided from here — the user chooses
         data class Failed(val line: String) : Outcome()                 // honest, nothing moved
@@ -46,7 +48,7 @@ class Navigator(
             val m = MenuModel.read(screen.text, screen.hasInput, screen.masked)
             t("READ", "${m.kind} ${m.text.take(80)}")
             when (m.kind) {
-                MenuModel.Kind.PIN, MenuModel.Kind.CONFIRM -> return boundary(m)
+                MenuModel.Kind.PIN, MenuModel.Kind.CONFIRM -> return boundary(m, screen)
                 MenuModel.Kind.ERROR -> return Outcome.Failed(honestError(m.text))
                 MenuModel.Kind.FINAL -> return Outcome.Final(UssdSpeech.forEar(m.text))
                 MenuModel.Kind.INPUT -> {
@@ -92,33 +94,36 @@ class Navigator(
         else -> "Nothing was bought."
     }
 
-    /** §9/§10 — the ONE consolidated line at the authorization, with everything the user needs to recognise it:
-     *  the network's own shown NAME when there is one, the amount cross-checked against what the user asked. */
-    private fun boundary(m: MenuModel.Screen): Outcome {
-        // A shown amount that isn't the user's amount is a hard stop — cancel wording, nothing handed over.
-        val askedAmount = tx.amount?.toBigDecimalOrNull()
-        val shownAmount = m.shownAmount?.toBigDecimalOrNull()
-        if (askedAmount != null && shownAmount != null && askedAmount.compareTo(shownAmount) != 0) {
-            t("MISMATCH", "amount shown=$shownAmount asked=$askedAmount")
-            return Outcome.Failed("The network's screen shows ${m.shownAmount} cedis, but you asked for ${tx.amount}. " +
-                "I've stopped — press Cancel on the screen; nothing is sent without your PIN.")
+    /** §9/§10 — the ONE consolidated line at the authorization ([Boundary]: the network's own shown name, fee and total;
+     *  the amount and any shown number cross-checked against what the user confirmed). A screen that doesn't match is
+     *  cancelled HERE — a blind user is not told to go and find the Cancel button. */
+    private suspend fun boundary(m: MenuModel.Screen, screen: UssdDialog.Screen): Outcome =
+        when (val v = Boundary.decide(tx, m, pinTip)) {
+            is Boundary.Verdict.Stop -> {
+                t("MISMATCH", v.why)
+                val pressed = cancel(screen)
+                Outcome.Failed(com.tekyerema.tools.MtnConfirm.cancelledLine(v.why, pressed))
+            }
+            is Boundary.Verdict.HandOff -> {
+                t("BOUNDARY", "pin=${m.kind == MenuModel.Kind.PIN} name=${v.registeredName != null}")
+                com.tekyerema.voice.SecureStep.begin()
+                com.tekyerema.agent.helper.HelperGate.atPin()
+                Outcome.Boundary(v.line, handedOff = true, registeredName = v.registeredName)
+            }
         }
-        val who = m.shownName ?: tx.recipientName
-        val what = when (tx.intent) {
-            TxIntent.SEND_MONEY -> "send ${tx.amount ?: "money"} cedis" +
-                (who?.let { " to $it" } ?: tx.recipient?.let { " to ${com.tekyerema.agent.NumberSpeech.spoken(it)}" } ?: "")
-            TxIntent.BUY_AIRTIME, TxIntent.SEND_AIRTIME -> "buy ${tx.amount?.plus(" cedis of ") ?: ""}airtime" +
-                (who?.let { " for $it" } ?: "")
-            TxIntent.BUY_DATA, TxIntent.SEND_DATA -> "buy ${tx.product ?: "the bundle"}" + (who?.let { " for $it" } ?: "")
-            else -> tx.intent.spoken
+
+    /** Press the dialog's Cancel (Back when it has none) and check the dialog went. Cancelling a USSD session never
+     *  moves money. True when it is gone. */
+    private suspend fun cancel(screen: UssdDialog.Screen): Boolean {
+        try { screen.cancelId?.let { ctrl.clickElement(it) } ?: ctrl.globalAction("back") } catch (_: Throwable) {}
+        kotlinx.coroutines.delay(900)
+        var now = UssdDialog.read(ctrl)
+        if (now != null && now.text == screen.text) {
+            try { ctrl.globalAction("back") } catch (_: Throwable) {}
+            kotlinx.coroutines.delay(900)
+            now = UssdDialog.read(ctrl)
         }
-        t("BOUNDARY", "pin=${m.kind == MenuModel.Kind.PIN} name=${who != null}")
-        com.tekyerema.voice.SecureStep.begin()
-        com.tekyerema.agent.helper.HelperGate.atPin()
-        val line = "You're about to $what." +
-            (if (m.kind == MenuModel.Kind.PIN) " Enter your PIN to continue — I never see or type it."
-             else " The screen says: “${UssdSpeech.forEar(m.text, intro = "")}”. Confirm it there and enter your PIN yourself.")
-        return Outcome.Boundary(line, handedOff = true)
+        return now == null || now.text != screen.text
     }
 
     private fun honestError(text: String) = "The network said: “${text.take(140)}”. ${nothing()}"

@@ -150,7 +150,7 @@ object MoMoSendTool : Tool {
             // SAFETY: never type into a PIN/credential screen. If it shows (early or on cue), MTN's confirmation is
             // checked against what the user confirmed before the PIN is handed over (atConfirmation).
             if (isPinScreen(dlg)) return atConfirmation(ctrl, dlg, amount, number, pinScreen = isPinPrompt(dlg), tip = pinTip(ctx))
-                .also { if (it.success) handedOff(ctx, amount, number) }
+                .also { if (it.success) handedOff(ctx, amount, number, it.data?.optString("registeredName")) }
             respond(ctrl, dlg, value, label)
             delay(900)
         }
@@ -160,7 +160,7 @@ object MoMoSendTool : Tool {
             ?: return timedOut(number, amount, args.str("reference"), com.tekyerema.money.MoMoRetry.CONFIRM_TIMEOUT)
         Log.i(TAG, "[MOMO] final screen: ${com.tekyerema.core.Privacy.content(final.text.take(160).replace("\n", " | "))}")
         return atConfirmation(ctrl, final, amount, number, pinScreen = isPinPrompt(final), tip = pinTip(ctx))
-            .also { if (it.success) handedOff(ctx, amount, number) }   // round 2: limits, known number, receipt
+            .also { if (it.success) handedOff(ctx, amount, number, it.data?.optString("registeredName")) }   // round 2: limits, ledger, receipt
     }
 
     /** The walk timed out (the menu or MTN's confirmation never came): nothing was sent, and "try again" can re-propose
@@ -172,12 +172,14 @@ object MoMoSendTool : Tool {
 
     /** Round 2: the send reached the PIN hand-off — it counts toward today's limit, the number is now one the user has paid,
      *  and MTN's "You have sent …" message in the next minutes is read as a receipt (money/). */
-    private fun handedOff(ctx: ToolContext?, amount: String, number: String) {
-        val amt = com.tekyerema.money.MoneyLimits.parseAmount(amount)
-        amt?.let { com.tekyerema.money.MoneyLimits.recordSend(it) }
-        com.tekyerema.money.KnownRecipients.add(number)
-        com.tekyerema.money.MoMoAfterCare.handedOff(ctx?.let { GhanaMobileMoney.network(operatorOf(it)) } ?: "mtn", amt)
-        com.tekyerema.money.MoMoRetry.clear()
+    private fun handedOff(ctx: ToolContext?, amount: String, number: String, registeredName: String? = null) {
+        // Finance audit (2026-10-01): one place for a hand-off (money/MoneyStatus) — today's total, the ledger entry whose
+        // outcome the network's own message settles, and the follow-up look. The number is "one you have paid" only then.
+        com.tekyerema.money.MoneyStatus.handedOff(ctx?.appContext, com.tekyerema.money.TxLedger.What.SEND,
+            com.tekyerema.money.MoneyLimits.parseAmount(amount), number,
+            registeredName?.takeIf { it.isNotBlank() }?.let { MtnConfirm.speakName(it) },
+            ctx?.let { GhanaMobileMoney.network(operatorOf(it)) } ?: "mtn",
+            registered = registeredName?.takeIf { it.isNotBlank() })
     }
 
     /**

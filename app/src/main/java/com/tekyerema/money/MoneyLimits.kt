@@ -170,6 +170,15 @@ object MoneyLimits {
         put(K_SPENT, JSONObject().put("day", spentDay).put("total", spent.toPlainString()).toString())
     }
 
+    /** The network said the send handed off at [at] FAILED (money/TxLedger): it no longer counts toward that day's total. */
+    @Synchronized fun releaseSend(amount: BigDecimal, at: Long, now: Long = System.currentTimeMillis()) {
+        if (amount.signum() <= 0) return
+        rollOver(now)
+        if (OperatorPolicy.dayOf(at) != spentDay) return
+        spent = (spent - amount).max(BigDecimal.ZERO)
+        put(K_SPENT, JSONObject().put("day", spentDay).put("total", spent.toPlainString()).toString())
+    }
+
     private val FIGURE = Regex("\\d+(?:\\.\\d+)?")
 
     /** "5", "0.10", "1,250.00", "GHS 5", "5 cedis" → the amount in cedis ("50 pesewas" → 0.50); null when there isn't

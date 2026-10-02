@@ -189,9 +189,21 @@ object MobileMoneyTool : Tool {
         if (args.str("_kind") == KIND_BALANCE) return BALANCE_PROMPT
         val amt = args.str("_amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"
         // No amount said: never "Buy money of airtime" (A20e 2026-09-29, offline) — the user picks the amount in the menu.
-        if (args.str("_kind") == "buy_airtime")
-            return if (args.str("_amount") == null) "Open Mobile Money to buy airtime? You'll choose the amount in the menu and enter your PIN."
-            else "Buy $amt of airtime with Mobile Money? I'll go through the menu; you'll enter your PIN."
+        if (args.str("_kind") == "buy_airtime") {
+            // Airtime for someone else says who (sweep 2026-10-01: "buy 5 cedis credit for 0552093690" was read back as
+            // plain "Buy 5 cedis of airtime" — the other person's number was in the arguments and never said).
+            val whoName = args.str("_recipient")?.trim()?.takeIf { it.isNotEmpty() }
+            val whoNumber = args.str("_number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
+                ?.let { com.tekyerema.agent.NumberSpeech.moneyReadBack(it).first }
+            val forWhom = when {
+                whoName != null && whoNumber != null -> " for $whoName on $whoNumber,"
+                whoNumber != null -> " for $whoNumber,"
+                whoName != null -> " for $whoName"
+                else -> ""
+            }
+            return if (args.str("_amount") == null) "Open Mobile Money to buy airtime$forWhom? You'll choose the amount in the menu and enter your PIN."
+            else "Buy $amt of airtime$forWhom with Mobile Money? I'll go through the menu; you'll enter your PIN."
+        }
         // Money safety (2026-09-29): a number is read in groups with its network ("0 5 5, 3 2 3, 8 0 1 1, an MTN number"),
         // and an unknown prefix is said so the user checks it.
         val name = args.str("_recipient")?.trim()?.takeIf { it.isNotEmpty() }

@@ -273,7 +273,10 @@ class MoneySafetyRound2Test {
         assertTrue(GuidedSend.atPin("send 20 cedis to 0553238011", "momo_pin", t0 + min))
         assertFalse("once", GuidedSend.atPin("send 20 cedis to 0553238011", "momo_pin", t0 + min))
         assertEquals(0, bd("20").compareTo(MoneyLimits.spentToday(t0 + min)))
-        assertTrue(KnownRecipients.isKnown("0553238011"))
+        // Finance audit (2026-10-01): reaching the PIN is not a payment — the number is "one you've paid" only once the
+        // network's own message confirms the send (TxLedgerTest covers the confirmation).
+        assertFalse(KnownRecipients.isKnown("0553238011"))
+        assertEquals(com.tekyerema.money.TxLedger.State.AT_PIN, com.tekyerema.money.TxLedger.latest(t0 + min)!!.state)
         GuidedSend.approved("buy airtime", "mobile_money", JSONObject().put("_kind", "buy_airtime").put("_amount", "5"), t0)
         assertFalse(GuidedSend.atPin("buy airtime", "momo_pin", t0 + min))
     }
@@ -527,7 +530,9 @@ class MoneySafetyRound2Test {
         assertTrue(MoneyPlan.decide("send money from my Stanbic account", emptyList()) is AgentDecision.CallTool)
         assertTrue(MoneyPlan.decide("I sent money to the wrong number", emptyList()) is AgentDecision.Done)
         assertNull(MoneyPlan.decide("open whatsapp", emptyList()))
-        assertNull(MoneyPlan.decide("send 5 cedis to 0553238011", emptyList()))
+        // Finance audit (2026-10-01): a plain send is planned on the phone now (money/MoneyFlow) — it used to fall through
+        // to whichever brain was in charge.
+        assertEquals("ussd_navigate", (MoneyPlan.decide("send 5 cedis to 0553238011", emptyList()) as AgentDecision.CallTool).name)
         assertNull(MoneyPlan.decide("try again", emptyList()))
         assertNull(MoneyPlan.rewrite("try again"))
     }

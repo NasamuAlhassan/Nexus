@@ -43,6 +43,13 @@ object PhoneAlerts {
     const val MONEY = "money"
     const val MISSED_CALL = "missed_call"
     const val BATTERY = "battery"
+    /** The outcome of a payment the user took to the PIN through Tɛkyerɛma (money/TxLedger, finance audit 2026-10-01):
+     *  "MTN confirms 5 cedis sent to Kofi Mensah." / "MTN says … failed." / "I haven't seen MTN's message…". Not one of
+     *  the opt-in alert types — it is the end of something the user just did — so it does not wait for "money alerts"
+     *  to be switched on (they are off by default, and until now so was every receipt). It still follows the rest:
+     *  never over a task or a call, never in quiet hours, hidden on the loudspeaker when the user wants alerts private,
+     *  and silenced by the user's "Message alerts" switch. Config `money.outcome.speak=false` turns it off. */
+    const val OUTCOME = "money_outcome"
     /** Catalog-style ids for the flags (config `flags.PC-0n.enabled`); PC-01 is "check my phone". */
     const val FEATURE_CHECK = "PC-01"
     const val FEATURE_MONEY = "PC-02"
@@ -100,10 +107,72 @@ object PhoneAlerts {
     private fun handle(app: Context, rec: NotificationRecord, whenMs: Long) {
         if (rec.packageName == app.packageName) return                       // never our own notifications
         val s = Settings(app)
+        // The network's word on a payment the user just took to the PIN: tracked whatever the alert switches say.
+        outcome(app, rec, s).takeIf { it.isNotEmpty() }?.let { found -> found.forEach { deliver(app, it) }; return }
         if (!s.alertMoney && !s.alertMissedCalls) return
         if (!com.tekyerema.operator.OperatorPolicy.messageAlertsEnabled) return   // WS-C: the user's switch for message-driven alerts
         if (s.alertMoney && FeatureFlags.isEnabled(FEATURE_MONEY, true)) money(app, rec)?.let { deliver(app, it); return }
         if (s.alertMissedCalls && FeatureFlags.isEnabled(FEATURE_MISSED_CALL, true)) missedCall(app, rec, whenMs)?.let { deliver(app, it) }
+    }
+
+    /** A Mobile Money message from the network's TRUSTED sender that settles a hand-off waiting in the ledger — the
+     *  receipt, or the failure. Null for anything else (the ordinary money alerts then look at it). */
+    private fun outcome(app: Context, rec: NotificationRecord, s: Settings): List<Alert> {
+        if (com.tekyerema.money.TxLedger.unsettled().isEmpty()) return emptyList()
+        val pkg = rec.packageName
+        val now = System.currentTimeMillis()
+        val settled = if (MoneyAlerts.isMoneyApp(pkg)) {
+            // The Mobile Money app's own notification: the package is the proof of who is speaking.
+            val body = listOfNotNull(rec.title, rec.text).joinToString(". ")
+            if (body.isBlank() || com.tekyerema.money.MoMoOutcome.isSecret(body)) return emptyList()
+            listOfNotNull(com.tekyerema.money.MoMoOutcome.parse(body)?.let { com.tekyerema.money.TxLedger.settle(it, now, s.alertMoneyBalance, now) })
+        } else if (pkg in MoneyAlerts.smsApps()) {
+            // A text: neither the notification's words nor the name it shows is trusted for this (a contact saved as
+            // "MobileMoney" would pass, and the listener may have altered the text) — the INBOX is read, where the real
+            // sender address is. Without SMS access nothing is settled from a text; the hand-off stays "not known".
+            com.tekyerema.money.MoneyStatus.checkInbox(app, s.alertMoneyBalance, now)
+        } else return emptyList()
+        return settled.map {
+            Log.i(TAG, "[MONEY] outcome ${it.tx.state.name.lowercase()} for the hand-off ${(now - it.tx.at) / 1000}s ago")
+            Alert(OUTCOME, it.line, "o|${it.tx.at}", canBePrivate = true)
+        }
+    }
+
+    /**
+     * After a hand-off at the PIN (money/MoneyStatus.handedOff): look once more when the network should have answered
+     * (config `money.outcome.followUpMs`, 150 s — a PIN typed with a screen reader, then the network's message). The
+     * inbox is read directly (READ_SMS), so a notification that was never seen still settles it; when nothing has come,
+     * the user is told exactly that — once — instead of silence. Nothing is ever retried or dialled from here.
+     */
+    fun followUp(ctx: Context, handOffAt: Long) {
+        val app = ctx.applicationContext
+        val wait = AppConfig.long("money.outcome.followUpMs", 150_000L)
+        if (wait <= 0L) return
+        main.postDelayed({ worker.execute { try { followUpNow(app, handOffAt) } catch (t: Throwable) { Log.w(TAG, "[MONEY] follow-up: ${t.message}") } } }, wait)
+    }
+
+    /** Debug builds only (debug/RunGoalReceiver `money_sim`): [body] treated as a message from the network's trusted
+     *  sender, through the same parse → settle → speak path. Returns the line it queued, or null. */
+    fun simulatedOutcome(app: Context, body: String): String? {
+        if (!com.tekyerema.BuildConfig.DEBUG) return null
+        if (com.tekyerema.money.MoMoOutcome.isSecret(body)) return null
+        val msg = com.tekyerema.money.MoMoOutcome.parse(body) ?: return null
+        val at = System.currentTimeMillis()
+        val settled = com.tekyerema.money.TxLedger.settle(msg, at, Settings(app).alertMoneyBalance, at) ?: return null
+        worker.execute { try { deliver(app, Alert(OUTCOME, settled.line, "o|${settled.tx.at}", canBePrivate = true)) } catch (_: Throwable) {} }
+        return settled.line
+    }
+
+    internal fun followUpNow(app: Context, handOffAt: Long) {
+        val s = Settings(app)
+        com.tekyerema.money.MoneyStatus.checkInbox(app, s.alertMoneyBalance).forEach {
+            Log.i(TAG, "[MONEY] outcome ${it.tx.state.name.lowercase()} found in the inbox")
+            deliver(app, Alert(OUTCOME, it.line, "o|${it.tx.at}", canBePrivate = true))
+        }
+        val tx = com.tekyerema.money.TxLedger.waiting().firstOrNull { it.at == handOffAt && !it.told } ?: return
+        com.tekyerema.money.TxLedger.markTold(tx)
+        Log.i(TAG, "[MONEY] no word from the network ${(System.currentTimeMillis() - tx.at) / 1000}s after the hand-off")
+        deliver(app, Alert(OUTCOME, com.tekyerema.money.TxLedger.silentLine(tx), "o|silent|${tx.at}", canBePrivate = true))
     }
 
     private fun money(app: Context, rec: NotificationRecord): Alert? {
@@ -120,11 +189,7 @@ object PhoneAlerts {
         val trusted = fromApp || MoneyAlerts.isTrustedSender(senderId)
         val now = System.currentTimeMillis()
         val sig = "m|" + body.lowercase().filter { it.isLetterOrDigit() }.hashCode()
-        // Money safety round 2 (money/MoMoAfterCare): MTN's own "You have sent GHS 5.00 to KOFI MENSAH" within minutes of a
-        // hand-off at the PIN → "MTN confirms 5 cedis sent to Kofi Mensah." Only from a trusted sender; the balance only
-        // when the user switched balances on.
-        if (trusted) com.tekyerema.money.MoMoAfterCare.receiptFor(body, Settings(app).alertMoneyBalance, now)
-            ?.let { return Alert(MONEY, it, sig, canBePrivate = true) }
+        // (The receipt for a send the user just made is [outcome]'s — money/TxLedger — and comes before this.)
         val event = MoneyAlerts.classify(body, trusted, fromNumber = !fromApp && MoneyAlerts.looksLikeNumber(senderId)) ?: return null
         return when (event) {
             is MoneyAlerts.Event.Received -> {
@@ -238,6 +303,7 @@ object PhoneAlerts {
         MONEY -> s.alertMoney && com.tekyerema.operator.OperatorPolicy.messageAlertsEnabled
         MISSED_CALL -> s.alertMissedCalls && com.tekyerema.operator.OperatorPolicy.messageAlertsEnabled
         BATTERY -> s.alertBattery
+        OUTCOME -> AppConfig.bool("money.outcome.speak", true) && com.tekyerema.operator.OperatorPolicy.messageAlertsEnabled
         else -> false
     }
 
@@ -250,7 +316,10 @@ object PhoneAlerts {
         val s = Settings(app)
         if (!enabled(a.type, s)) return                                  // switched off while it waited
         val now = System.currentTimeMillis()
-        if (QuietHours.isQuiet(now)) { hold(a, now, "quiet hours"); return }
+        // A payment's outcome is not held for the morning: it only exists within minutes of a hand-off the user made
+        // themselves, so they are awake and waiting for it (phone re-check, 2 Oct 00:11: the receipt was held as
+        // "quiet hours" and the user would have heard nothing).
+        if (a.type != OUTCOME && QuietHours.isQuiet(now)) { hold(a, now, "quiet hours"); return }
         if (TriggerGate.userBusy(app) ||
             !gate.mayAnnounce(a.type, now, AppConfig.long("alerts.minGapMs", 30_000L), AppConfig.int("alerts.maxPerHour", 12))) {
             if (attempt < AppConfig.int("alerts.busyRetries", 12)) {
@@ -326,6 +395,7 @@ object AlertPrivacy {
 
     fun privateLine(type: String): String = when (type) {
         PhoneAlerts.MONEY -> AppConfig.phrase("alerts.phrases.privateMoney", "You have a money alert. Say “read it” to hear it.")
+        PhoneAlerts.OUTCOME -> AppConfig.phrase("alerts.phrases.privateOutcome", "There is news about your payment. Say “read it” to hear it.")
         PhoneAlerts.MISSED_CALL -> AppConfig.phrase("alerts.phrases.privateMissedCall", "You have a missed call alert. Say “read it” to hear it.")
         else -> AppConfig.phrase("alerts.phrases.privateAlert", "You have an alert. Say “read it” to hear it.")
     }

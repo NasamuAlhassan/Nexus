@@ -88,6 +88,7 @@ object DataControl {
                 .forEach { com.tekyerema.agent.triggers.NotificationTriggers.removeRule(app, it.id) }
         }
         step("keyboard") { com.tekyerema.ime.LearnedWordStore.clear(app) }
+        step("payment outcomes") { com.tekyerema.money.TxLedger.clear() }   // finance audit: the ledger of hand-offs and their outcomes
         step("paid numbers") { com.tekyerema.money.KnownRecipients.clear() }   // round 2: every number is "new" again (the safe way)
         step("history") { com.tekyerema.history.HistoryStore.clear() }
         step("undo") { com.tekyerema.audit.UndoLog.clear() }

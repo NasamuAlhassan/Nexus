@@ -61,7 +61,7 @@ class AuditEngineFixesTest {
         assertNull("could be the words or the person", ReviseTurn.patch("send_sms", sms(), "change that to Prince Melanin"))
         assertNull("not a recipient", ReviseTurn.patch("send_sms", sms(), "no, that's wrong"))
         assertNull("a stop is not a correction", ReviseTurn.patch("send_sms", sms(), "cancel it"))
-        assertNull("a name for a number-only tool", ReviseTurn.patch("ussd_navigate", JSONObject().put("number", "055").put("amount", "1"), "send it to Kofi instead"))
+        assertNull("a name for a number-only tool", ReviseTurn.patch("momo_send", JSONObject().put("number", "055").put("amount", "1"), "send it to Kofi instead"))
         assertNull("an app this tool can't use", ReviseTurn.patch("send_sms", sms(), "send it on Telegram instead"))
         assertNull("a whole new request", ReviseTurn.patch("send_sms", sms(), "send it to Ama saying I am late and then call Kofi"))
         assertNull("no amount on a message", ReviseTurn.patch("send_sms", sms(), "make it 2 cedis"))

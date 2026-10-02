@@ -19,6 +19,17 @@ object Redact {
     // sentence-ending full stop after the code is fine.
     private val CODE = Regex("(?<!\\d)(?<!\\d[.,])\\d{4,8}(?!\\d)(?![.,]\\d)|(?<!\\d)\\d{3}[- ]\\d{3}(?!\\d)")
 
+    // Finance audit (2026-10-01) — two REAL code messages on the test phone that the rule above let through:
+    //  - MoMoApp: "This confidential code gives access to your MoMo account:<44 base64 characters>== Do not share it with
+    //    anyone." — no digit run at all, so nothing was hidden and the message could be read aloud or sent to the model;
+    //  - MTN ID: "do not share your code with any MTN employee or anyone. Your code is : <9+ digits>" — longer than 8.
+    private val ACCESS_CONTEXT = Regex("(?i)\\b(?:confidential|secret|access|activation|login)\\s+code\\b|\\bcode gives access\\b|" +
+        "\\bdo not share (?:it|this|your code|the code|this code)\\b|\\bnever share (?:it|this|your code|the code|this code)\\b")
+    /** An opaque token: 20+ letters/digits/+// with at least one digit and one letter (a key, not a word or a number). */
+    private val TOKEN = Regex("(?<![A-Za-z0-9+/=_-])(?=[A-Za-z0-9+/_-]*\\d)(?=[A-Za-z0-9+/_-]*[A-Za-z])[A-Za-z0-9+/_-]{20,}={0,2}")
+    /** "code is : 123456789" / "Code:1234" — the digits right after the word, up to 12 of them, on the next line too. */
+    private val LABELLED = Regex("((?i:\\bcode(?:\\s+is)?)\\s*[:=-]?\\s*)(\\d{4,20}(?!\\d)|(?=[A-Z0-9]*\\d)(?=[A-Z0-9]*[A-Z])[A-Z0-9]{5,20}\\b)")
+
     private val DEFAULT_DENY_PACKAGES = setOf(
         "com.google.android.apps.authenticator2",
         "com.azure.authenticator",
@@ -37,12 +48,18 @@ object Redact {
             packageName in com.tekyerema.policy.PolicyConfig.denyApps()
     }
 
-    fun looksSecret(text: String?): Boolean =
-        text != null && SECRET_CONTEXT.containsMatchIn(text) && CODE.containsMatchIn(text)
+    fun looksSecret(text: String?): Boolean {
+        if (text == null) return false
+        if (SECRET_CONTEXT.containsMatchIn(text) && (CODE.containsMatchIn(text) || LABELLED.containsMatchIn(text))) return true
+        return ACCESS_CONTEXT.containsMatchIn(text) && (TOKEN.containsMatchIn(text) || CODE.containsMatchIn(text) || LABELLED.containsMatchIn(text))
+    }
 
     /** [text] with every code hidden when it reads as a secret-carrying message; unchanged otherwise. */
     fun secrets(text: String?): String? {
         if (text == null || !looksSecret(text)) return text
-        return CODE.replace(text, HIDDEN)
+        var t = LABELLED.replace(text) { m -> m.groupValues[1] + HIDDEN }
+        t = CODE.replace(t, HIDDEN)
+        if (ACCESS_CONTEXT.containsMatchIn(text)) t = TOKEN.replace(t, HIDDEN)
+        return t
     }
 }

@@ -315,6 +315,7 @@ object OperatorPolicy {
         // Money safety round 2: the user's Mobile Money limits and paid-numbers list live in the same store (money/).
         com.tekyerema.money.MoneyLimits.init(s)
         com.tekyerema.money.KnownRecipients.init(s)
+        com.tekyerema.money.TxLedger.init(s)
         _changes.value = _changes.value + 1
     }
 
@@ -327,6 +328,7 @@ object OperatorPolicy {
         usage.clear(); usageDay = Long.MIN_VALUE; lastModel = null
         zoneOffset = { java.util.TimeZone.getDefault().getOffset(it) }
         com.tekyerema.money.MoneyLimits.resetForTest(); com.tekyerema.money.KnownRecipients.resetForTest()   // round 2 (money/)
+        com.tekyerema.money.TxLedger.resetForTest()
         if (s != null) init(s)
     }
 

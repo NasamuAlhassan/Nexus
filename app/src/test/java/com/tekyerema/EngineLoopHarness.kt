@@ -181,7 +181,7 @@ object Screens {
 }
 
 /** The real config files (tool manifest, policy tiers, flags), as the app loads them. */
-fun loadAppConfig() {
+fun loadAppConfig(overrides: String? = null) {
     val dir = listOf(File("src/main/assets/config"), File("app/src/main/assets/config")).first { it.isDirectory }
-    AppConfig.loadFrom(dir.listFiles { f -> f.name.endsWith(".json") }!!.sortedBy { it.name }.map { "config/${it.name}" to it.readText() })
+    AppConfig.loadFrom(dir.listFiles { f -> f.name.endsWith(".json") }!!.sortedBy { it.name }.map { "config/${it.name}" to it.readText() }, overrides)
 }

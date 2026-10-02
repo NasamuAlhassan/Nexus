@@ -8,6 +8,18 @@
   "money": {
     "_note": "Money safety round 2 (2026-09-29, money/). Raising or removing a Mobile Money limit waits coolingOffMs (lowering is immediate) so a caller can't talk the user into lifting it and sending at once; MTN's 'You have sent' message within receiptWindowMs of a PIN hand-off is read as a receipt.",
     "limits": {"coolingOffMs": 1800000},
-    "afterCare": {"receiptWindowMs": 300000}
+    "afterCare": {"receiptWindowMs": 300000},
+    "flow": {
+      "_note": "Finance audit (2026-10-01, money/MoneyFlow): a spoken send / airtime / balance / 'did it go through' is planned on the phone, before any model. enabled=false restores the older on-phone rules; airtime=false keeps airtime on the older mobile_money route (the menu is opened and the planner walks it).",
+      "enabled": true,
+      "airtime": true
+    },
+    "outcome": {
+      "_note": "money/TxLedger: a hand-off at the PIN is settled by the network's own message within windowMs (else it is 'not known'); the same amount to the same number inside repeatMs is flagged in the read-back; followUpMs after the hand-off the inbox is looked at once more and silence is said; speak=false keeps the outcome for 'did my payment go through' only.",
+      "windowMs": 600000,
+      "repeatMs": 900000,
+      "followUpMs": 150000,
+      "speak": true
+    }
   }
 }
