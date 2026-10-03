@@ -51,3 +51,28 @@ momo_dryrun.log
 
 # ---- kaggle / task scratch ----
 **/tasks/*.output
+
+# ---- audit raw evidence (3 October 2026): per-run logs, screenshots, audio and records stay on disk; the reports,
+#      drivers and batch scripts are committed (audit/<run>/REPORT.md, DEFECTS.md, *.py, *.sh) ----
+audit/**/evidence/
+audit/**/retest/
+audit/**/wav/
+audit/**/*.wav
+audit/**/*.png
+audit/**/*.jsonl
+audit/**/*.out
+audit/**/*.log
+audit/**/*.json
+audit/**/*.txt
+audit/**/.wifi
+audit/emu/
+audit/hcilab/
+
+# ---- regenerable training data / tool output ----
+phase2/graphemefix/data/
+phase2/graphemefix/out/
+phase2/wakeword/candidate_heads/
+phase2/wakeword/*.log
+.kotlin/
+.tmp_hf/
+.claude/worktrees/
