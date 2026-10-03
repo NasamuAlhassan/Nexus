@@ -233,6 +233,12 @@ object ReadNotificationsTool : Tool {
         ToolParam("filter", "string", "Optional app name or sender to filter by.", required = false)
     )
 
+    /** The notifications worth reading: not ongoing ones (a call in progress, "Checking for new messages…"), not a
+     *  "never touch" app's, and not Tɛkyerɛma's own — those are its spoken lines re-posted, never "my messages"
+     *  ("• Tɛkyerɛma: Okay, I've left it." was read first; QA R5_X08, A20e, 3 October 2026). Pure. */
+    internal fun readable(all: List<com.tekyerema.notifications.NotificationRecord>, ownPackage: String) =
+        all.filterNot { it.ongoing || it.packageName == ownPackage || com.tekyerema.core.Redact.deniedPackage(it.packageName) }
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         // §1.1: never report absence-of-capability as absence-of-data. If the listener is off we CANNOT
         // see notifications — hard-fail honestly instead of speaking a false "you have no notifications".
@@ -241,7 +247,7 @@ object ReadNotificationsTool : Tool {
         val filter = args.str("filter")?.trim()
         // Ongoing notifications (a call in progress, "Checking for new messages…") are state, not messages; a
         // "never touch" app's are not read either (audit half 2 #9).
-        val all = ctx.notifications.recent(12).filterNot { it.ongoing || com.tekyerema.core.Redact.deniedPackage(it.packageName) }
+        val all = readable(ctx.notifications.recent(12), ctx.appContext.packageName)
         val filtered = if (filter.isNullOrBlank()) all else all.filter {
             it.title?.contains(filter, true) == true ||
                 it.sender?.contains(filter, true) == true ||

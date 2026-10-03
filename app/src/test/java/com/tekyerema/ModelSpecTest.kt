@@ -31,6 +31,14 @@ class ModelSpecTest {
         assertEquals("nemo_ctc", s.label)
     }
 
+    @Test fun the_omnilingual_twi_ctc_model_parses() {
+        val s = ModelSpec.parse("""{"type":"omnilingual_ctc","model":"twi-omni-ctc.int8.onnx","tokens":"twi-omni-tokens.txt",
+            "label":"omni300m-ctc-twi","threads":2}""")!!
+        assertEquals(ModelSpec.OMNILINGUAL_CTC, s.type)
+        assertEquals(listOf("twi-omni-ctc.int8.onnx", "twi-omni-tokens.txt"), s.required())
+        assertEquals(2, s.threads)
+    }
+
     @Test fun an_unknown_type_or_a_missing_file_is_no_model() {
         assertNull(ModelSpec.parse("""{"type":"mystery","model":"m.onnx"}"""))
         assertNull("a transducer without its joiner", ModelSpec.parse("""{"type":"nemo_transducer","encoder":"e.onnx","decoder":"d.onnx"}"""))

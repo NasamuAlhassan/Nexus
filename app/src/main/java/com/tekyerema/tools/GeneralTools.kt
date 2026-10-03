@@ -29,7 +29,9 @@ object SearchContactsTool : Tool {
         if (query.isEmpty()) return ToolResult(false, "No search query provided.")
         if (ctx.appContext.checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED)
             return ToolResult(false, "Contacts permission not granted. Ask the user to grant it.")
-        val matches = ContactResolver.search(ctx.appContext, query)
+        // The same person saved twice (once with the 0, once without) is one match — the A20e listed "0552093690" and
+        // "552093690" as two choices for Prince Alhassan (3 October 2026).
+        val matches = ContactChoice.distinct(ContactResolver.search(ctx.appContext, query))
         // A miss here is an ACCELERATOR miss, NOT proof the person doesn't exist: the phone address book
         // is only one source. Report it as an unsuccessful (but recoverable) shortcut so the planner falls
         // back to the General Operator — e.g. the target app's own in-UI search — instead of concluding
@@ -80,7 +82,10 @@ object RunUssdTool : Tool {
             }
         }
         // Paced and in words (money/UssdSpeech): the carrier's run-on blob was unfollowable read raw (owner, 2026-09-30).
-        return if (response != null) ToolResult(true, com.tekyerema.money.UssdSpeech.forEar(response), channel = "native")
+        // The network's checked balance code gets the short answer (airtime first, then data); any other code is read in full.
+        val balance = code.replace(Regex("\\s"), "") in com.tekyerema.policy.PolicyConfig.freeReadOnlyCodes()
+        return if (response != null) ToolResult(true, (if (balance) com.tekyerema.money.UssdSpeech.airtimeBalance(response) else null)
+            ?: com.tekyerema.money.UssdSpeech.forEar(response), channel = "native")
         else ToolResult(false, "USSD $code did not return a response (network refused, timed out, or SIM/carrier not supported).")
     }
 

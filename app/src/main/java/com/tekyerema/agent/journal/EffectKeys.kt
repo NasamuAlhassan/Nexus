@@ -77,6 +77,15 @@ object EffectKeys {
             // Money safety round 2: a guided bank-menu step is navigation, like a keypad digit — the transfer is the user's own
             // final step with their PIN, never ours (money/BankUssdTool), so two "1"s on two screens are not "the same thing".
             "bank_ussd" -> null
+            // The Mobile Money walk stops at the user's PIN: "done" here would only mean "the menu was walked", and a
+            // failure means nothing moved — yet a walk whose menu never opened ("Connection problem or invalid MMI code",
+            // said as "Nothing was sent") came back on the next try as "I may already have done this at 15:19 — I
+            // couldn't confirm it went" (A20e, 2 October 2026). What really happened to a payment is the money ledger's
+            // to say, from the network's own messages: its repeat warning rides in the read-back (TxLedger.repeatOf).
+            com.tekyerema.money.ussd.UssdNavigatorTool.NAME -> null
+            // The guided network menu likewise: opening *138# is not a purchase (the user's PIN is), and a walk that ended
+            // at "insufficient balance" came back as "I already did this at 16:53 — do it again?" (A20e, 2 October 2026).
+            com.tekyerema.money.TelcoUssdTool.NAME -> null
             "install_app" -> {
                 val what = a(args, "package") ?: a(args, "app") ?: a(args, "name") ?: return null
                 Spec(EffectKind.INSTALL, what, a(args, "app") ?: what, "")

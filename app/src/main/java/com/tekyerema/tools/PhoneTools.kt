@@ -382,7 +382,16 @@ object SendSmsTool : Tool {
             data = JSONObject().put("sent", false), channel = "intent")
         val ctrl = ctx.controller ?: return drafted
         if (driveRefusal(pkg, ctx.emergency) != null) return drafted
-        return pressSendInComposer(ctrl, setOf(pkg), message, who, appName = "WhatsApp", preLaunch = preLaunch) ?: drafted
+        pressSendInComposer(ctrl, setOf(pkg), message, who, appName = "WhatsApp", preLaunch = preLaunch)?.let { return it }
+        // The chat never opened with the words in its box (WhatsApp looks the number up online; with the connection
+        // stalling it lands on its contact picker or "Connecting…") — that is a final failure, not a draft: the planner
+        // used to carry on in whatever WhatsApp showed and once proposed "Send this message to Susan" (QA X06, A20e,
+        // 3 October 2026). Only a chat that IS open with the text ready is left for a Send press.
+        val now = try { ctrl.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null }
+        if (now == null || ComposerSend.composerWith(now, message) == null)
+            return ToolResult(false, "WhatsApp didn't open the chat with $who — it may have no connection just now. Nothing was sent. " +
+                "Say it again when the internet is back.", data = JSONObject().put("sent", false), channel = "intent", recoverable = false)
+        return drafted
     }
 
     /**

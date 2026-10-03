@@ -105,15 +105,24 @@ class TrustedHelperTest {
         assertFalse(HelperGate.pinPending(11 * 60_000L))
     }
 
-    @Test fun the_tools_refuse_the_helper_at_a_pin_by_name_whatever_the_words() {
+    @Test fun the_tools_refuse_the_helper_at_a_pin_by_name_whatever_the_words() = runBlocking {
         Relations.set("helper", "Kofi Mensah")
         val dir = kotlin.io.path.createTempDirectory("tky-helper").toFile()
         try {
+            // No controller: the screen can't be seen, so the hold stays for the whole PIN window.
             val ctx = ToolContext(FakeContext(dir), null, NotificationStore)
             assertNull(TrustFast.toolRefusal(ctx, "Kofi Mensah", "0244123456"))
             HelperGate.atPin()
             assertEquals(HelperGate.PIN_LINE, TrustFast.toolRefusal(ctx, "Kofi Mensah", "0244123456")?.message)
             assertNull("anyone else is not the helper", TrustFast.toolRefusal(ctx, "Ama", "0551234567"))
+            // A credential screen in front: still refused. The PIN screen gone (a chat list is in front): the helper can
+            // be reached again, and the hold ends (QA TW03, 3 October 2026 — a text to the helper refused minutes after
+            // a send had stopped at MTN's PIN and been cancelled).
+            val atBank = ToolContext(FakeContext(dir), FakeController(Screens.signIn()), NotificationStore)
+            assertEquals(HelperGate.PIN_LINE, TrustFast.toolRefusal(atBank, "Kofi Mensah", "0244123456")?.message)
+            val elsewhere = ToolContext(FakeContext(dir), FakeController(Screens.chatList()), NotificationStore)
+            assertNull(TrustFast.toolRefusal(elsewhere, "Kofi Mensah", "0244123456"))
+            assertFalse(HelperGate.pinPending())
         } finally { dir.deleteRecursively() }
     }
 

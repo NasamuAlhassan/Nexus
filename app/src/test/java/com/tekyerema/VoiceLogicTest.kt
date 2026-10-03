@@ -98,13 +98,16 @@ class VoiceLogicTest {
             com.tekyerema.voice.ConfirmTemplates.Spec.Kind.CALL, name = "Kwabɛna Owusu-Ansah", number = "0244000011")
         val q = com.tekyerema.voice.ConfirmTemplates.twi(spec)
         assertTrue("name must pass through verbatim", q.contains("Kwabɛna Owusu-Ansah"))
-        // …in the 3-3-4 groups people check numbers in (money safety pass, 2026-09-29)
-        assertTrue("every digit must survive", q.contains("zero mmienu anan, anan zero zero, zero zero baako baako"))
+        // …in the 3-3-4 groups people check numbers in (money safety pass, 2026-09-29) — IN ENGLISH since 2 October 2026
+        // (owner: numbers and amounts are spoken in English, by the English voice inside the Twi line).
+        assertTrue("every digit must survive: $q", q.contains("0 2 4, 4 0 0, 0 0 1 1") || q.contains("0 2 4 4"))
+        // since 3 October 2026 the name and number are ONE English stretch after a fixed Twi frame (recorded lab clips)
+        assertTrue(q, q.startsWith("Wopɛ sɛ mefrɛ ⟦en:Kwabɛna Owusu-Ansah, 0 2 4"))
         assertTrue("must be a Twi question", q.contains("Wopɛ sɛ mefrɛ") && q.contains("aane anaa daabi"))
-        // send money: amount digit-by-digit, recipient verbatim
+        // send money: the amount in English, recipient verbatim
         val money = com.tekyerema.voice.ConfirmTemplates.twi(com.tekyerema.voice.ConfirmTemplates.Spec(
             com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY, name = "Adwoa", amount = "50"))
-        assertTrue(money.contains("Adwoa") && money.contains("anum zero"))   // 5,0
+        assertTrue(money, money.contains("⟦en:50 Ghana cedis to Adwoa?⟧"))
     }
 
     /** A20e 2026-09-29, offline "buy airtime for me" (no amount) was asked "Buy money of airtime with Mobile Money?". */
@@ -118,9 +121,9 @@ class VoiceLogicTest {
         val tw = t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.BUY_AIRTIME))
         assertFalse(tw, tw.contains("cedi"))
         assertTrue(tw, tw.startsWith("Menbue Mobile Money sɛ wobɛtɔ airtime?"))
-        assertTrue(t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.BUY_AIRTIME, amount = "5")).contains("airtime cedi anum?"))
+        assertTrue(t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.BUY_AIRTIME, amount = "5")).contains("airtime ⟦en:5 Ghana cedis?⟧"))
         val send = t.twi(com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY, name = "Adwoa"))
-        assertTrue(send, send.contains("wode sika bɛkɔma Adwoa"))
+        assertTrue(send, send.contains("wode sika ⟦en:to Adwoa?⟧"))
     }
 
     // ---------------------------------------------------------------- Verbalize (§23)

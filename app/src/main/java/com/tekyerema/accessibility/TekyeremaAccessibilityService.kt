@@ -211,7 +211,15 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     } catch (t: Throwable) { Log.w("Tekyerema", "[MAGNIFY] unavailable: ${t.message}"); null }
 
     // ---------------------------------------------------------------- A-01 / A-04 / J-14 activation + kill switch
-    private val keyPattern = KeyPattern()
+    /** While Tɛkyerɛma is talking, asking or working the second press may come a little later: the user is reacting to
+     *  what they hear, not adjusting the volume (`activation.keys.busyWindowMs`, 700 ms; 450 ms when idle). */
+    private val keyPattern = KeyPattern(windowMs = {
+        val busy = com.tekyerema.voice.VoiceEngine.isRunning || AgentEngine.isBusy
+        if (busy) com.tekyerema.core.config.AppConfig.long("activation.keys.busyWindowMs", 700L)
+        else com.tekyerema.core.config.AppConfig.long("activation.keys.windowMs", 450L)
+    })
+    /** When the gesture last opened the microphone for a waiting prompt — a repeat right after is not a "stop". */
+    @Volatile private var answeredNowAt = 0L
     /** Owner 2026-09-30: volume-UP twice = say the last reply again — the physical twin of "say that again". */
     private val repeatPattern = KeyPattern(keyCode = { KeyPattern.keyFor(
         com.tekyerema.core.config.AppConfig.string("activation.keys.repeatKey", "volume_up")) })
@@ -220,9 +228,16 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
      *  gesture to interrupt and take over). Volume-up twice → repeat the last reply. The keys are never swallowed. */
     override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
         val e = event ?: return false
+        // On the network's PIN screen the volume keys are the PIN pad (money/PinPad): consumed, both down and up, so
+        // the volume doesn't move and no other gesture reads them.
+        if (com.tekyerema.money.PinPad.onKey(this, e.keyCode, e.action, e.eventTime)) return true
         if (e.action != android.view.KeyEvent.ACTION_UP) return false
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-01", true) ||
             !com.tekyerema.core.config.AppConfig.bool("activation.keys.enabled", true)) return false
+        // Debug builds: one line per volume key-up, so "the buttons don't work" can be told apart from "they did the
+        // wrong thing" (no content — a key name only).
+        if (com.tekyerema.BuildConfig.DEBUG && (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP))
+            Log.i("Tekyerema", "[KEYS] ${if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) "volume_down" else "volume_up"} up")
         if (keyPattern.onKeyUp(e.keyCode, e.eventTime)) {
             restoreVolume(e.keyCode, steps = 2)   // the gesture's two presses moved the volume; put it back
             talkOrStop("keys")
@@ -284,6 +299,21 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
      *  opens the voice screen (in front, so the microphone is allowed) and listens. Never during the PIN (SecureStep). */
     private fun talkOrStop(source: String) {
         if (com.tekyerema.voice.SecureStep.active()) { Log.i("Tekyerema", "[TRIGGER] $source ignored — secure step"); return }
+        // A read-back or a question is waiting on the user: the gesture means "let me answer" — the reading is cut and
+        // the microphone opens for the reply. It used to cancel the whole task (owner, 2 October 2026: "we should use
+        // the volume buttons to interrupt it when you want something done but it's not working").
+        val status = AgentEngine.state.value.status
+        if (status == com.tekyerema.agent.AgentStatus.ASKING || status == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (com.tekyerema.voice.VoiceEngine.readingPrompt || com.tekyerema.voice.VoiceEngine.canRespond) {
+                Log.i("Tekyerema", "[TRIGGER] $source → answer now")
+                answeredNowAt = now
+                android.os.Handler(mainLooper).post { com.tekyerema.voice.VoiceEngine.respond() }
+                return
+            }
+            // Already listening for the reply. Pressed again straight away = the same wish, not a stop.
+            if (now - answeredNowAt < 2_500L) { Log.i("Tekyerema", "[TRIGGER] $source ignored — already listening for the answer"); return }
+        }
         val listening = com.tekyerema.voice.VoiceEngine.state.value.state == com.tekyerema.voice.VoiceState.LISTENING
         val busy = com.tekyerema.voice.VoiceEngine.isRunning || AgentEngine.isBusy
         Log.i("Tekyerema", "[TRIGGER] $source → ${if (listening) "stop listening" else if (busy) "STOP, then listen" else "talk"}")

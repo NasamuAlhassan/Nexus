@@ -34,12 +34,17 @@ object Confirmation {
         "yes", "yeah", "yep", "yup", "ya", "yah", "sure", "ok", "okay", "alright", "fine", "correct", "right",
         "confirm", "confirmed", "proceed", "continue", "affirmative", "definitely", "absolutely",
         "go ahead", "go on", "do it", "do that", "send it", "call him", "call her", "yes please", "of course",
-        "aane", "ane", "yoo", "yo", "kɔ so", "ko so", "yɛ", "ɛyɛ", "eye", "yɛ no", "ye no"
+        "aane", "ane", "yoo", "yo", "kɔ so", "ko so", "yɛ", "ɛyɛ", "eye", "yɛ no", "ye no",
+        // "aane" as the phone's English recogniser writes it (a Twi yes/no is heard there — LanguageRoutedInput)
+        // [owner: verify on the A20e]
+        "anne", "annie", "ani", "aani", "aane aane"
     )
     private val NO = setOf(
         "no", "nope", "nah", "don't", "dont", "do not", "stop", "cancel", "never mind", "nevermind", "not now",
         "negative", "leave it", "forget it", "abort", "no thanks", "not yet",
-        "daabi", "dabi", "gyae", "mma", "ɛnyɛ", "enye", "twa mu", "nnyɛ"
+        "daabi", "dabi", "gyae", "mma", "ɛnyɛ", "enye", "twa mu", "nnyɛ",
+        // "daabi" as the phone's English recogniser writes it [owner: verify on the A20e]
+        "darby", "dabby", "daby", "dabbie", "derby"
     )
 
     // B-09: a reply that is ONLY a request for time. Twi: twɛn (kakra) = wait (a little).
@@ -57,8 +62,12 @@ object Confirmation {
     // "do not"/"don't" decline is NOT caught here (no bare " not ").
     private val REDIRECT = listOf(
         "instead", "rather", "actually", "i meant", "i mean", "make it", "change it", "change that",
-        "different", "wrong number", "wrong person", "wrong one", "not him", "not her", "not that"
+        "different", "wrong number", "wrong person", "wrong one", "not him", "not her", "not that",
+        "mmom"   // Twi: rather / instead
     )
+    private val AMOUNT_AFTER_NO = Regex("^(?:no|nope|nah|daabi|dabi)\\b.*\\b(?:\\d+(?:[.,]\\d+)?|one|two|three|four|five|six|seven|eight|nine|" +
+        "ten|twenty|thirty|forty|fifty|hundred)\\s*(?:cedis?|pesewas?|ghs|ghc)\\b")
+    private val STOPPING = Regex("\\b(?:cancel|stop|never mind|nevermind|forget it|leave it|gyae)\\b")
 
     /**
      * A spoken reply during confirmation that is neither a clean yes/no nor mere noise, but a coherent
@@ -80,6 +89,9 @@ object Confirmation {
         // after a "no" or a "yes" — the corrected action is proposed again and confirmed again, never run on this reply
         // (agent/NumberCorrection). A "no" that stops ("no, cancel") stays a decline.
         if (com.tekyerema.agent.NumberCorrection.looksLikeFix(text)) return true
+        // "No, 20 pesewas" / "no, 2 cedis": a new amount after the no is a change of plan, re-proposed and confirmed
+        // again — not a decline (QA TR10, 3 October 2026, where the Twi form of it was taken as a plain no).
+        if (ans == Answer.NO && AMOUNT_AFTER_NO.containsMatchIn(norm) && !STOPPING.containsMatchIn(norm)) return true
         // A plain decline with no redirect stays a decline; a clean yes stays a yes.
         if (ans != Answer.UNCLEAR) return false
         // Otherwise: reroute only a coherent phrase (≥3 words), never a one-word filler.

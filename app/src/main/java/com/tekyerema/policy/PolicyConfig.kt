@@ -46,6 +46,25 @@ object PolicyConfig {
     }
 
     /**
+     * A balance check the user asked for: read-only, free, and — for Mobile Money — still stopped at the user's own PIN.
+     * The policy engine allows it without a "shall I?" (owner, 2 October 2026: "it should only interrupt when genuinely
+     * necessary"; "what's my airtime balance" used to be answered with "Check your airtime balance?"). Narrow on
+     * purpose: the network's checked airtime-balance code, the navigator's balance walk, the guided data-balance menu —
+     * nothing that buys, sends or types a value. The tools' coded tiers are untouched, so every other layer (provenance,
+     * the operator's switches, a computer's request) treats them as before.
+     */
+    fun readOnlyCheck(tool: Tool, args: org.json.JSONObject): Boolean = when (tool.name) {
+        "run_ussd" -> args.optString("code").replace(Regex("\\s"), "") in freeReadOnlyCodes()
+        com.tekyerema.money.ussd.UssdNavigatorTool.NAME -> com.tekyerema.money.ussd.UssdNavigatorTool.isBalance(args)
+        else -> false
+    }
+
+    /** Codes that only read something back and cost nothing: the airtime-balance code, plus `policy.freeUssdCodes`. */
+    fun freeReadOnlyCodes(): Set<String> =
+        (listOf(AppConfig.string("connectors.telco.airtimeBalanceCode", "*124#")) + AppConfig.stringList("policy.freeUssdCodes", emptyList()))
+            .map { it.replace(Regex("\\s"), "") }.filter { it.isNotEmpty() }.toSet()
+
+    /**
      * J-11: packages the agent must never operate — nor read (ScreenPrivacy). The app's own list PLUS the apps the user
      * said "never touch" ([com.tekyerema.operator.OperatorPolicy.appRules], D8): a user can add to it, never take a
      * config entry away. Read at every decision, so a change applies to the next task.

@@ -15,11 +15,16 @@ import com.tekyerema.agent.LocalBrain
  *    and "yes" to "Should I call MTN on 100?" → "call 100".
  */
 object MoneyPlan {
-    fun decide(goal: String, history: List<String>): AgentDecision? =
-        MoMoRetry.decide(goal, history) ?: MoMoAfterCare.decide(goal, history) ?: BankGuide.decide(goal, history)
+    fun decide(goal: String, history: List<String>): AgentDecision? {
+        // Untranslated Twi (the phone's own Twi commands didn't take it) is for the translator and the planner, not these
+        // English parsers: "Mesrɛ wo, tɔ data bundle a ne bo yɛ sidi mmiɛnsa ma me" matched the telco walk on the words
+        // "data bundle" and lost the 3 cedis (QA TW05, 3 October 2026). Quoted message words may be Twi on purpose.
+        if (history.isEmpty() && com.tekyerema.language.TwiText.hasAkanLetters(goal.replace(Regex("“[^”]*”"), ""))) return null
+        return MoMoRetry.decide(goal, history) ?: MoMoAfterCare.decide(goal, history) ?: BankGuide.decide(goal, history)
             ?: TelcoGuide.decide(goal, history)
             // Finance audit (2026-10-01): a spoken send / airtime / balance / "did it go through" is planned on the phone.
             ?: MoneyFlow.decide(goal, history)
+    }
 
     fun end(history: List<String>): Pair<AgentStatus, String>? {
         BankGuide.end(history)?.let { return it }
@@ -35,7 +40,7 @@ object MoneyPlan {
         if (!last.startsWith("${com.tekyerema.money.ussd.UssdNavigatorTool.NAME}(")) return null
         // "Which Prince?" was asked and the same call is queued again with the pick — not an end (the engine's note).
         if (last.contains("→ several contacts matched")) return null
-        val msg = LocalBrain.resultMessage(last)
+        val msg = spokenPart(LocalBrain.resultMessage(last))
         if (!last.contains("→ success")) return AgentStatus.CANNOT_DO to
             msg.ifBlank { "The Mobile Money walk didn't finish. Nothing was sent." }
         if (msg.trim().endsWith("?")) return null   // the hand-over question: the guide takes it from here
@@ -50,7 +55,14 @@ object MoneyPlan {
         return if (MoneyLimits.isRefusal(msg)) AgentStatus.CANNOT_DO to msg else null
     }
 
-    fun rewrite(goal: String): String? = MoMoRetry.rewrite(goal) ?: MoMoAfterCare.rewrite(goal)
+    /** A step's message without the recovery hint the engine appends for the PLANNER ("— this route is a genuine
+     *  dead-end…"): on 2 October 2026 that hint was read aloud to the user after a failed walk. */
+    internal fun spokenPart(message: String): String = RECOVERY_HINT.split(message, 2)[0].trim()
+
+    private val RECOVERY_HINT = Regex(" — (?:this route|re-observe|only the user|the '[^']*' accelerator)")
+
+    fun rewrite(goal: String): String? =
+        TelcoUssd.withSpokenCodes(goal) ?: MoMoRetry.rewrite(goal) ?: MoMoAfterCare.rewrite(goal)
 
     private val STEP_LINE = Regex("^[a-z_]+\\(")
 }

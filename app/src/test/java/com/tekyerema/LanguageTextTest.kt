@@ -25,19 +25,23 @@ class LanguageTextTest {
     private fun localizer(mt: FakeMt, on: Boolean = true) = ReplyLocalizer(mt, enabled = { on }, maxChars = { 400 })
 
     // Fake translator outputs are tagged placeholders, not Twi: nothing here pretends to be a translation.
+    // Since 2 October 2026 names, app names, amounts and numbers reach the translator as TAGS ([P1], [A1]) and come back
+    // verbatim (language/EntityTags): a translator that keeps the tag keeps the name; one that drops it is not used.
     @Test fun localizer_translates_plain_english_replies_and_keeps_names() = runTest {
-        val mt = FakeMt { "[tw] WhatsApp" }
+        val mt = FakeMt { "[tw] " + Regex("\\[(?:P|A|N)\\d+\\]").findAll(it).joinToString(" ") { m -> m.value } }
         assertEquals("[tw] WhatsApp", localizer(mt).toTwi("I have opened WhatsApp for you"))
         val mangled = FakeMt { "[tw] wasap" }
-        assertNull("the app name was lost → speak the original", localizer(mangled).toTwi("I have opened WhatsApp for you"))
-        val names = FakeMt { "[tw] Ama" }
-        assertNull(localizer(names).toTwi("I will call Kwabena now"))
+        assertNull("the app name's tag was lost → speak the original", localizer(mangled).toTwi("I have opened WhatsApp for you"))
+        val wrongName = FakeMt { "[tw] Ama" }
+        assertNull(localizer(wrongName).toTwi("I will call Kwabena now"))
+        // An amount travels as a tag too, and comes back in English for the English voice.
+        assertEquals("[tw] ⟦en:20 Ghana cedis⟧ Ama", localizer(mt).toTwi("Sent GH₵ 20 to Ama"))
     }
 
     @Test fun localizer_never_translates_quantities_twi_or_when_disabled() = runTest {
         val mt = FakeMt { "anything" }
+        // A quantity that isn't an amount or a phone number (a count, a code) still keeps the line in English.
         assertNull(localizer(mt).toTwi("You have five new messages"))
-        assertNull(localizer(mt).toTwi("Sent GH₵ 20 to Ama"))
         assertNull(localizer(mt).toTwi("Dial star one seven zero hash"))
         assertNull("the app's own Twi", localizer(mt).toTwi("Mabue WhatsApp no."))
         assertNull("short Twi lines without ɛ/ɔ are not English either", localizer(mt).toTwi("Mante. San ka bio."))

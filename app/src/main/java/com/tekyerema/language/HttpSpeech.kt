@@ -71,7 +71,12 @@ data class HttpSpeechSpec(
     /** TTS: the most characters one request may carry (the HCI Lab gateway: 250); 0 = no limit. */
     val maxChars: Int = 0,
     /** TTS: a reply needing more than this many requests is left to the phone's own voice (saves a small quota). */
-    val maxParts: Int = 1
+    val maxParts: Int = 1,
+    /** "rest" (one request, one answer) | "gradio" — a Gradio Space's two-step API: POST `/gradio_api/call/<api>` with
+     *  `{"data":[…]}` → an event id, then GET `/gradio_api/call/<api>/<id>` → the answer as a server-sent event. */
+    val dialect: String = "rest",
+    /** Gradio: the endpoint's api_name (`translate`). */
+    val api: String = "translate"
 ) {
     enum class Kind { ASR, TTS, MT }
 
@@ -119,7 +124,9 @@ data class HttpSpeechSpec(
                 cacheEntries = o.optInt("cacheEntries", if (kind == Kind.ASR) 0 else 48),
                 limits = QuotaLedger.Limits.parse(o.optJSONObject("limits")),
                 maxChars = req.optInt("maxChars", 0).coerceAtLeast(0),
-                maxParts = req.optInt("maxParts", 1).coerceAtLeast(1)
+                maxParts = req.optInt("maxParts", 1).coerceAtLeast(1),
+                dialect = o.optString("dialect", "rest").trim().lowercase().ifBlank { "rest" },
+                api = req.optString("api", "translate").trim().ifBlank { "translate" }
             )
         }
 
@@ -236,6 +243,60 @@ object HttpSpeech {
             rb.header(spec.authHeader, spec.authPrefix + (resolve(spec.authKey, secrets) ?: error("${spec.id}: key not configured")))
         for ((k, v) in spec.headers) rb.header(k, resolve(v, secrets) ?: error("${spec.id}: header $k not configured"))
         return rb.build()
+    }
+
+    // ---- Gradio Spaces (dialect "gradio"): our own language Space, PrinceAlhassanNasamu/tekyerema-lang (2 October 2026)
+
+    /** Step 1: `POST <endpoint>/gradio_api/call/<api>` with `{"data": [text, from, to]}` → `{"event_id": …}`. */
+    fun gradioCallRequest(spec: HttpSpeechSpec, secrets: Map<String, String>, data: JSONArray): Request {
+        val base = (resolve(spec.endpoint, secrets) ?: error("${spec.id}: endpoint not configured")).trimEnd('/')
+        val url = ("$base/gradio_api/call/${spec.api}").toHttpUrlOrNull() ?: error("${spec.id}: endpoint is not a URL")
+        return authorised(spec, secrets, Request.Builder().url(url).post(JSONObject().put("data", data).toString().toRequestBody(JSON)))
+    }
+
+    /** Step 2: `GET <endpoint>/gradio_api/call/<api>/<event id>` → the answer as a server-sent event stream. */
+    fun gradioResultRequest(spec: HttpSpeechSpec, secrets: Map<String, String>, eventId: String): Request {
+        val base = (resolve(spec.endpoint, secrets) ?: error("${spec.id}: endpoint not configured")).trimEnd('/')
+        val url = ("$base/gradio_api/call/${spec.api}/$eventId").toHttpUrlOrNull() ?: error("${spec.id}: bad event id")
+        return authorised(spec, secrets, Request.Builder().url(url).get())
+    }
+
+    private fun authorised(spec: HttpSpeechSpec, secrets: Map<String, String>, rb: Request.Builder): Request {
+        if (spec.authHeader != null && spec.authKey != null)
+            rb.header(spec.authHeader, spec.authPrefix + (resolve(spec.authKey, secrets) ?: error("${spec.id}: key not configured")))
+        for ((k, v) in spec.headers) rb.header(k, resolve(v, secrets) ?: error("${spec.id}: header $k not configured"))
+        return rb.build()
+    }
+
+    /** The event id from step 1. Throws [ProviderFailure] BAD_RESPONSE when there is none. */
+    fun gradioEventId(spec: HttpSpeechSpec, reply: HttpReply): String =
+        try { JSONObject(reply.text()).optString("event_id") } catch (_: Exception) { "" }
+            .ifBlank { throw bad(spec, "no event_id") }
+
+    /**
+     * The text answer from step 2's event stream ("event: complete" then "data: [<output>]"). Our Space returns its JSON as
+     * a STRING output (`"{\"translation\": …, \"covered\": true}"`): parsed, [HttpSpeechSpec.responsePath] picks the text,
+     * and `"covered": false` (the Space passed the text through untranslated) is null — never a fake translation.
+     */
+    fun parseGradio(spec: HttpSpeechSpec, stream: String): String? {
+        var event = ""
+        for (line in stream.lineSequence()) {
+            val l = line.trimEnd('\r')
+            if (l.startsWith("event:")) event = l.removePrefix("event:").trim()
+            else if (l.startsWith("data:") && event == "complete") {
+                val arr = try { JSONArray(l.removePrefix("data:").trim()) } catch (e: Exception) { throw bad(spec, "complete event is not a list") }
+                val first = arr.opt(0) ?: return null
+                val obj = when (first) {
+                    is JSONObject -> first
+                    is String -> if (first.trimStart().startsWith("{")) try { JSONObject(first) } catch (_: Exception) { null } else return first.trim().ifBlank { null }
+                    else -> null
+                } ?: return null
+                if (!obj.optBoolean("covered", true)) return null
+                for (path in spec.responsePath.split('|').map { it.trim() }) (at(obj, path) as? String)?.let { return it.trim().ifBlank { null } }
+                return null
+            } else if (l.startsWith("data:") && event == "error") throw bad(spec, "the Space reported an error")
+        }
+        throw bad(spec, "no complete event")
     }
 
     private fun putFields(o: JSONObject, spec: HttpSpeechSpec, secrets: Map<String, String>) {

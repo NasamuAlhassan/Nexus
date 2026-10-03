@@ -123,7 +123,7 @@ object OverlayConfirm {
                 }
                 contentDescription = when (kind) {
                     PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
-                    PromptSurface.Kind.QUESTION -> "Tɛkyerɛma is asking. $prompt. Say your answer, or double-tap Answer."
+                    PromptSurface.Kind.QUESTION -> "Tɛkyerɛma is asking. $prompt. Say your answer, or double-tap Answer. Say stop to cancel."
                     PromptSurface.Kind.SECURE -> "Secure step. $prompt. When you've finished, say done or double-tap Done."
                 }
             }
@@ -205,6 +205,13 @@ object OverlayConfirm {
                 PromptSurface.Kind.SECURE -> btn(right, "Done — I've finished the secure step", filled = true, hides = true, haptic = TkHaptic.CONFIRM) { AgentEngine.secureInputDone() }
             }
             buttons.addView(leftBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
+            // Type: the answer by keyboard, on the panel itself (owner, 2 October 2026: "when it needs feedback, you
+            // can't type" — the only text box was on Tɛkyerɛma's own screen, which is not in front while a task runs).
+            // Never at the secure step: a box there could be mistaken for where the PIN goes.
+            var startTyping: () -> Unit = {}
+            if (PromptSurface.canType(kind)) buttons.addView(
+                btn("Type", "Type your answer instead of saying it", filled = false, hides = false) { startTyping() },
+                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply { marginStart = dp(2); marginEnd = dp(2) })
             buttons.addView(rightBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginStart = dp(6) })
             card.addView(buttons)
 
@@ -243,6 +250,66 @@ object OverlayConfirm {
                 card.scaleX = 0.9f; card.scaleY = 0.9f
                 if (secure) card.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotY = 0f }
             }
+            startTyping = typing@{
+                if (view !== wrapper) return@typing
+                VoiceEngine.quietForTyping()     // stop reading, close the answer microphone; the prompt stays waiting
+                buttons.visibility = View.GONE
+                val field = android.widget.EditText(host).apply {
+                    hint = if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer"
+                    contentDescription = hint
+                    setTextColor(Color.parseColor(TEXT)); setHintTextColor(Color.parseColor(TEXT2))
+                    textSize = 17f
+                    isSingleLine = true
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+                    minHeight = dp(48); minimumHeight = dp(48)
+                    setPadding(dp(14), 0, dp(14), 0)
+                    background = GradientDrawable().apply { cornerRadius = dp(24).toFloat(); setColor(Color.TRANSPARENT); setStroke(dp(1), Color.parseColor(INK3)) }
+                }
+                val imm = host.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                fun submit() {
+                    val text = field.text?.toString().orEmpty().trim()
+                    if (text.isEmpty()) return
+                    val r = VoiceEngine.submitTyped(text)
+                    if (r.accepted) {
+                        try { imm?.hideSoftInputFromWindow(field.windowToken, 0) } catch (_: Throwable) {}
+                        field.isEnabled = false
+                        if (r.notice.isNotBlank()) setCaption(r.notice)
+                    } else {
+                        // Not an answer this prompt can take ("Type yes or no — or use the buttons"): say why, keep the box.
+                        setCaption(r.notice.ifBlank { "I couldn't use that — try again" })
+                        wrapper.announceForAccessibility(r.notice.ifBlank { "I couldn't use that — try again" })
+                    }
+                }
+                field.setOnEditorActionListener { _, action, _ ->
+                    if (action == android.view.inputmethod.EditorInfo.IME_ACTION_SEND || action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) { submit(); true } else false
+                }
+                val send = btn("Send", "Send what you typed", filled = true, hides = false, haptic = TkHaptic.CONFIRM) { submit() }
+                val typeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, 0) }
+                typeRow.addView(field, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
+                typeRow.addView(send, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+                card.addView(typeRow)
+                // Back closes the box and brings the buttons back (the panel is focusable only while it is typed into).
+                field.setOnKeyListener { _, code, ev ->
+                    if (code == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP) {
+                        try { imm?.hideSoftInputFromWindow(field.windowToken, 0) } catch (_: Throwable) {}
+                        card.removeView(typeRow); buttons.visibility = View.VISIBLE
+                        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        lp.gravity = Gravity.CENTER; lp.y = 0
+                        try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
+                        true
+                    } else false
+                }
+                // Focusable now (so the keyboard can attach), and at the TOP: a centred card sits under the keyboard on a
+                // small screen.
+                lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                lp.gravity = Gravity.TOP; lp.y = dp(36)
+                try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
+                setCaption(if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer")
+                field.requestFocus()
+                field.postDelayed({ try { imm?.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) } catch (_: Throwable) {} }, 120L)
+            }
             try {
                 wm.addView(wrapper, lp); view = wrapper; wmUsed = wm; presence = mini; caption = cap
                 card.animate().alpha(1f).scaleX(1f).scaleY(1f)
@@ -258,7 +325,9 @@ object OverlayConfirm {
 
     private fun captionFor(kind: PromptSurface.Kind, listening: Boolean): String = when (kind) {
         PromptSurface.Kind.CONFIRM -> Confirmation.LISTEN_HINT
-        PromptSurface.Kind.QUESTION -> if (listening) "Listening for your answer…" else "Tap Answer, or say “Hey Tɛkyerɛma”"
+        // The way out is taught where it's needed (Abena study, 3 October 2026: "say … bye bye" in its dialogs) — both
+        // words work in either language (voice/ControlVerbs).
+        PromptSurface.Kind.QUESTION -> if (listening) "Listening… say “stop” or “gyae” to cancel" else "Tap Answer, or say “Hey Tɛkyerɛma”"
         PromptSurface.Kind.SECURE -> "Say “done”, or tap Done, when you've finished"
     }
 

@@ -117,6 +117,10 @@ object PhoneAlerts {
 
     /** A Mobile Money message from the network's TRUSTED sender that settles a hand-off waiting in the ledger — the
      *  receipt, or the failure. Null for anything else (the ordinary money alerts then look at it). */
+    /** A balance goes into a spoken payment outcome only when the user switched balances on AND it would not be read to
+     *  the room: with "private alerts" on, only over earphones or Bluetooth. */
+    private fun balanceAloud(app: Context, s: Settings): Boolean = s.alertMoneyBalance && (!s.alertsPrivate || privateAudio(app))
+
     private fun outcome(app: Context, rec: NotificationRecord, s: Settings): List<Alert> {
         if (com.tekyerema.money.TxLedger.unsettled().isEmpty()) return emptyList()
         val pkg = rec.packageName
@@ -125,16 +129,20 @@ object PhoneAlerts {
             // The Mobile Money app's own notification: the package is the proof of who is speaking.
             val body = listOfNotNull(rec.title, rec.text).joinToString(". ")
             if (body.isBlank() || com.tekyerema.money.MoMoOutcome.isSecret(body)) return emptyList()
-            listOfNotNull(com.tekyerema.money.MoMoOutcome.parse(body)?.let { com.tekyerema.money.TxLedger.settle(it, now, s.alertMoneyBalance, now) })
+            listOfNotNull(com.tekyerema.money.MoMoOutcome.parse(body)?.let { com.tekyerema.money.TxLedger.settle(it, now, balanceAloud(app, s), now) })
         } else if (pkg in MoneyAlerts.smsApps()) {
             // A text: neither the notification's words nor the name it shows is trusted for this (a contact saved as
             // "MobileMoney" would pass, and the listener may have altered the text) — the INBOX is read, where the real
             // sender address is. Without SMS access nothing is settled from a text; the hand-off stays "not known".
-            com.tekyerema.money.MoneyStatus.checkInbox(app, s.alertMoneyBalance, now)
+            com.tekyerema.money.MoneyStatus.checkInbox(app, balanceAloud(app, s), now)
         } else return emptyList()
         return settled.map {
             Log.i(TAG, "[MONEY] outcome ${it.tx.state.name.lowercase()} for the hand-off ${(now - it.tx.at) / 1000}s ago")
-            Alert(OUTCOME, it.line, "o|${it.tx.at}", canBePrivate = true)
+            // Said in full: the amount and the name were read aloud at the PIN hand-off seconds ago, so "There is news
+            // about your payment — say read it" hid nothing and left the user without the one thing they were waiting
+            // for (first live send, 2 October 2026). The BALANCE is the private part, and it is only in the line when
+            // the user switched balances on.
+            Alert(OUTCOME, it.line, "o|${it.tx.at}", canBePrivate = false)
         }
     }
 
@@ -158,21 +166,21 @@ object PhoneAlerts {
         if (com.tekyerema.money.MoMoOutcome.isSecret(body)) return null
         val msg = com.tekyerema.money.MoMoOutcome.parse(body) ?: return null
         val at = System.currentTimeMillis()
-        val settled = com.tekyerema.money.TxLedger.settle(msg, at, Settings(app).alertMoneyBalance, at) ?: return null
-        worker.execute { try { deliver(app, Alert(OUTCOME, settled.line, "o|${settled.tx.at}", canBePrivate = true)) } catch (_: Throwable) {} }
+        val settled = com.tekyerema.money.TxLedger.settle(msg, at, balanceAloud(app, Settings(app)), at) ?: return null
+        worker.execute { try { deliver(app, Alert(OUTCOME, settled.line, "o|${settled.tx.at}", canBePrivate = false)) } catch (_: Throwable) {} }
         return settled.line
     }
 
     internal fun followUpNow(app: Context, handOffAt: Long) {
         val s = Settings(app)
-        com.tekyerema.money.MoneyStatus.checkInbox(app, s.alertMoneyBalance).forEach {
+        com.tekyerema.money.MoneyStatus.checkInbox(app, balanceAloud(app, s)).forEach {
             Log.i(TAG, "[MONEY] outcome ${it.tx.state.name.lowercase()} found in the inbox")
-            deliver(app, Alert(OUTCOME, it.line, "o|${it.tx.at}", canBePrivate = true))
+            deliver(app, Alert(OUTCOME, it.line, "o|${it.tx.at}", canBePrivate = false))
         }
         val tx = com.tekyerema.money.TxLedger.waiting().firstOrNull { it.at == handOffAt && !it.told } ?: return
         com.tekyerema.money.TxLedger.markTold(tx)
         Log.i(TAG, "[MONEY] no word from the network ${(System.currentTimeMillis() - tx.at) / 1000}s after the hand-off")
-        deliver(app, Alert(OUTCOME, com.tekyerema.money.TxLedger.silentLine(tx), "o|silent|${tx.at}", canBePrivate = true))
+        deliver(app, Alert(OUTCOME, com.tekyerema.money.TxLedger.silentLine(tx), "o|silent|${tx.at}", canBePrivate = false))
     }
 
     private fun money(app: Context, rec: NotificationRecord): Alert? {

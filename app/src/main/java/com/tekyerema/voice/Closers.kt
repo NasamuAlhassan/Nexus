@@ -53,7 +53,9 @@ object Closers {
  */
 object RepeatIntent {
     private val RE = Regex("^(?:please )?(?:say (?:that|it) again|repeat(?: (?:that|it))?|what did you (?:just )?say|" +
-        "come again|pardon(?: me)?|i (?:didn'?t|did not) (?:hear|catch|get) (?:that|it|you))(?: please)?$")
+        "come again|pardon(?: me)?|i (?:didn'?t|did not) (?:hear|catch|get) (?:that|it|you)|" +
+        // Twi: "ka bio" / "san ka bio" / "ka no bio" (say it again), "mante" (I didn't hear) [owner: verify]
+        "(?:san )?ka(?: no)? bio|san ka|mante(?: ase)?)(?: please)?$")
 
     fun matches(text: String): Boolean =
         RE.matches(text.lowercase().trim().trimEnd('.', '!', '?', ',').replace(Regex("\\s+"), " "))

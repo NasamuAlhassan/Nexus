@@ -93,7 +93,12 @@ object TargetSemantics {
      *  - a chat, mail or web app ([chatPackages], [browserPackages]), a screen with a message composer, or one whose
      *    only inputs are search boxes: text alone never counts — those words are someone else's.
      */
-    fun isCredentialScreen(screen: UiSnapshot): Boolean {
+    /**
+     * @param confirmationAsked Tɛkyerɛma has just asked the user, by voice, whether to press a USSD payment confirmation's
+     * own confirm key ("Reply 1 to confirm" — money/ussd/MenuBrain, 2 October 2026): that screen asks for no secret, and
+     * going blind on it swallowed the user's answer. Every screen that asks for a PIN or password still counts.
+     */
+    fun isCredentialScreen(screen: UiSnapshot, confirmationAsked: Boolean = false): Boolean {
         if (screen.secureWindow) return true                       // FLAG_SECURE (system PIN/lock/keyguard-like)
         if (screen.elements.any { it.password }) return true       // a masked password/PIN field
         val inputs = screen.elements.filter { it.editable }
@@ -102,7 +107,7 @@ object TargetSemantics {
         val chat = isChatPackage(pkg)
         if (inputs.any { fieldNamesCredential(it, chat) }) return true
         if (promptNamesCredential(screen, inputs, pkg)) return true
-        return isUssdMoneyConfirmation(screen)
+        return !confirmationAsked && isUssdMoneyConfirmation(screen)
     }
 
     /** Apps whose screens are mostly OTHER PEOPLE'S words. `policy.secureInput.chatPackages` replaces the list. */

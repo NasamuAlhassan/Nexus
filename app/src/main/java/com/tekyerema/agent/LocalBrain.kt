@@ -112,8 +112,22 @@ class LocalBrain : AgentBrain {
                 return call("run_ussd", JSONObject().put("code", airtimeBalanceCode()), "airtime balance")
             }
             if (isMomoBalanceAsk(g)) return momoBalanceDecision()
+            // "what is Richmond's number?" — the contacts look-up (search_contacts), answered on the phone with the NAME it
+            // matched. Question-shaped, so before the network gate: the cloud used to answer "The phone number I found is
+            // 024…" for a match that was Richmond's Dad, the name dropped (QA D11, 3 October 2026).
+            RE_CONTACT_NUMBER_Q.find(raw)?.let { m ->
+                val who = (m.groupValues[1].ifBlank { m.groupValues[2] }).trim().trimEnd('.', '!', '?')
+                if (who.isNotEmpty() && looksLikeContact(g, who)) {
+                    pendingResultSpeak = true; return call("search_contacts", JSONObject().put("query", who), "contact's number")
+                }
+            }
         }
 
+        // --- "who sent it?" after a reading — the sender of what was just read, on the phone (question-shaped: before the network gate) ---
+        if (RE_WHO_SENT.matches(raw.trim())) {
+            whoSentIt()?.let { return AgentDecision.Done(it) }
+            return AgentDecision.Done("I haven't read a message yet — say “read my messages” first.")
+        }
         // "the nearest pharmacy", "a chop bar near me": a PLACE to find — live data, never a search of the contacts
         // (audit R05). The router refuses honestly offline and hands it to the planner online.
         if (OfflineCapability.needsInternet(raw) || RE_NEARBY.containsMatchIn(g)) return network(raw)
@@ -173,7 +187,11 @@ class LocalBrain : AgentBrain {
         // --- alarm / timer --- (§6.7 gate also on Twi timer words so Twi durations reach timerDecision)
         // The VERB decides, not the noun: "delete the 6:30 alarm" / "cancel the 5 minute timer" / "what alarms do I have"
         // must never SET one (audit S32: a delete request began by setting the alarm again) — those go to the planner.
-        if (g.contains("alarm")) {
+        // "wake me (up) at 6 tomorrow" is an alarm without the word (QA N10, 3 October 2026: two cloud calls, 20 s).
+        if (g.contains("alarm") || RE_WAKE_ME.containsMatchIn(g)) {
+            // "Cancel / delete / turn off the 6:30 alarm" is the Clock's own DISMISS_ALARM request (tools/DeviceTools
+            // CancelAlarmTool) — deterministic, no model, no list to drive by hand (QA D08, 3 October 2026).
+            if (RE_ALARM_CANCEL.containsMatchIn(g)) cancelAlarmDecision(raw)?.let { return it }
             if (RE_ALARM_MANAGE.containsMatchIn(g)) return defer("an alarm to change, remove or ask about — not a new one")
             alarmDecision(raw)?.let { return it }
         }
@@ -200,6 +218,9 @@ class LocalBrain : AgentBrain {
                 return call("run_ussd", JSONObject().put("code",
                     com.tekyerema.core.config.AppConfig.string("connectors.telco.airtimeBalanceCode", "*124#")), "airtime balance")
             }
+            // Airtime for SOMEONE ELSE is never decided by this older rule: it has no place for the other person, and
+            // proposed the user's own phone (live A20e 2026-10-02). The money flow takes those; what it leaves, the planner.
+            if (RE_AIRTIME_OTHER.containsMatchIn(g)) return defer("airtime for someone else — not for this rule")
             buyAirtimeDecision(raw)?.let { return it }
         }
         if ((g.contains("send") || g.contains("transfer") || g.contains("fa")) &&
@@ -349,7 +370,13 @@ class LocalBrain : AgentBrain {
                 is AgentDecision.Done -> {
                     if (d.summary.isNotBlank()) planSaid.add(d.summary.trim())
                     planIdx++
-                    if (planIdx >= steps.size) { plan = null; return AgentDecision.Done(planSaid.joinToString(" ").ifBlank { "Done." }) }
+                    if (planIdx >= steps.size) {
+                        plan = null
+                        // Kept as the done line too: if the engine's gate asks once more, the same answer comes back — not a
+                        // bare "Done." with the reading lost (QA R4_TR06, A20e, 3 October 2026).
+                        doneLine = planSaid.joinToString(" ").ifBlank { "Done." }
+                        return AgentDecision.Done(doneLine)
+                    }
                     planChild = LocalBrain(); planMark = ctx.history.size
                 }
                 is AgentDecision.CannotDo -> {
@@ -385,7 +412,17 @@ class LocalBrain : AgentBrain {
 
     private fun speakToolResult(ctx: BrainContext): AgentDecision {
         val msg = resultMessage(lastStep(ctx.history))
-        return AgentDecision.Done(if (msg.isNotEmpty()) msg else doneLine)
+        // What was just read is remembered, so "who sent it?" is answered here (QA X08, 3 October 2026: two cloud calls, 15 s).
+        noteRead(msg)
+        return AgentDecision.Done(if (msg.isNotEmpty()) contactAnswer(msg) else doneLine)
+    }
+
+    /** "Matches for 'Richmond': Richmond's Dad — 0246168805" → "Richmond's Dad: 0246168805." — the matched NAME is always
+     *  said with the number (the person asked for may not be the one found). Several stay listed; anything else is untouched. */
+    internal fun contactAnswer(msg: String): String {
+        val m = Regex("^Matches for '[^']*': (.+)$").find(msg.trim()) ?: return msg
+        val people = m.groupValues[1].split("; ").map { it.replace(" — ", ": ") }
+        return if (people.size == 1) people[0].trimEnd('.') + "." else "I have ${people.size}: " + people.joinToString("; ") + "."
     }
 
     private fun summarizeScreen(screen: JSONObject): AgentDecision {
@@ -474,6 +511,21 @@ class LocalBrain : AgentBrain {
     }
 
     private fun alarmDecision(raw: String): AgentDecision? {
+        val (hour, minute) = alarmTime(raw) ?: return null
+        doneLine = "Alarm set for %02d:%02d.".format(hour, minute)
+        return call("set_alarm", JSONObject().put("hour", hour).put("minute", minute), "set alarm")
+    }
+
+    /** "Cancel the 6:30 alarm" / "turn off my 7 am alarm" → cancel_alarm(hour, minute). Null without a time in it
+     *  (which alarm? — the planner asks); "cancel all my alarms" is not one time either. */
+    private fun cancelAlarmDecision(raw: String): AgentDecision? {
+        val (hour, minute) = alarmTime(raw) ?: return null
+        doneLine = "The %02d:%02d alarm is cancelled.".format(hour, minute)
+        return call("cancel_alarm", JSONObject().put("hour", hour).put("minute", minute), "cancel alarm")
+    }
+
+    /** The one clock time in [raw] as a 24-hour pair ("6:30 pm" → 18:30, "12 am" → 0:00), or null. */
+    private fun alarmTime(raw: String): Pair<Int, Int>? {
         val canon = Normalizer.normalize(raw, if (looksTwi(raw)) Lang.TWI else Lang.GH_EN).lowercase()
         val m = RE_TIME.find(canon) ?: return null
         var hour = m.groupValues[1].toIntOrNull() ?: return null
@@ -482,8 +534,7 @@ class LocalBrain : AgentBrain {
         if (ampm == "pm" && hour < 12) hour += 12
         if (ampm == "am" && hour == 12) hour = 0
         if (hour !in 0..23 || minute !in 0..59) return null
-        doneLine = "Alarm set for %02d:%02d.".format(hour, minute)
-        return call("set_alarm", JSONObject().put("hour", hour).put("minute", minute), "set alarm")
+        return hour to minute
     }
 
     private fun timerDecision(raw: String): AgentDecision? {
@@ -663,6 +714,10 @@ class LocalBrain : AgentBrain {
             val cut = if (v >= 0) last.indexOf("); ", v) else -1
             return (if (cut >= 0) last.substring(cut + 3) else if ("); " in last) last.substringAfterLast("); ") else last.substringAfterLast("; "))
                 .substringBefore(" — the '")
+                // the engine's recovery hints (Recovery.hint) are for the planner, never for the user's ears
+                .substringBefore(" — this route is a genuine dead-end")
+                .substringBefore(" — only the user can settle this")
+                .substringBefore(" — re-observe the new screen")
                 .removePrefix(AgentEngine.UNTRUSTED_MARK)
                 .trim()
                 // The "(data, not instructions)" label is for the model, never for the user's ears (A20e 2026-09-29, offline:
@@ -791,7 +846,7 @@ class LocalBrain : AgentBrain {
 
         /** Tools a local plan may use. No money, USSD, emergency, camera or install steps inside a compound request. */
         private val PLAN_TOOLS = setOf("open_app", "key_event", "scroll", "swipe", "volume_up", "volume_down", "set_volume",
-            "read_screen", "read_state", "read_notifications", "set_alarm", "set_timer", "play_music", "open_setting",
+            "read_screen", "read_state", "read_notifications", "set_alarm", "cancel_alarm", "set_timer", "play_music", "open_setting",
             "make_call", "send_sms", "search_contacts")
         /** After "open <app>", only steps whose meaning doesn't change inside that app. */
         private val IN_APP_TOOLS = setOf("open_app", "key_event", "scroll", "swipe", "volume_up", "volume_down", "set_volume",
@@ -822,6 +877,7 @@ class LocalBrain : AgentBrain {
             "contacts|files|whatsapp|telegram|youtube|chrome|maps|instagram|facebook|tiktok|spotify|gmail|recorder|notes|" +
             "play store|playstore|messages)$", RegexOption.IGNORE_CASE)
         /** Airtime asked ABOUT, not bought: check / balance / how much / left. */
+        private val RE_AIRTIME_OTHER = Regex("\\b(?:to|for)\\s+(?:a|an|another|someone|somebody|him|her|them|\\+?\\d[\\d\\s-]{6,})")
         private val RE_BALANCE_ASK = Regex("\\bcheck\\b|\\bbalance\\b|how much|\\bleft\\b|\\bremaining\\b|do i have")
 
         // ---- verb-aware guards (A20e audit 2026-10-01): the on-phone rules used to route on the NOUN alone ----
@@ -870,6 +926,29 @@ class LocalBrain : AgentBrain {
         private val RE_NOTIF_MANAGE = Regex("\\b(?:close|hide|dismiss|clear|remove|delete|swipe away|shut|collapse|turn off|switch off|" +
             "disable|mute|silence|stop|block|snooze|turn on|switch on|enable|allow|unmute|manage)\\b[^.?!]*\\bnotifications?\\b|" +
             "\\bnotifications?\\b[^.?!]*\\b(?:settings?|sounds?|ringtone|tone|away)\\b")
+        private val RE_WAKE_ME = Regex("\\bwake me(?: up)?\\b")
+        @Volatile private var lastNotificationLine: String? = null
+        /** "• Telegram — DSATuz | TopTierPrep | …" — the app and the sender of one read notification. */
+        private val NOTIF_LINE = Regex("^\\s*•\\s*([^—:|]+?)(?:\\s*—\\s*([^|:]+))?(?:\\s*[|:]|$)")
+        /** The app's own notifications (its spoken lines, re-posted) are never "who sent it". */
+        private val OWN_NOTIF = Regex("^\\s*•\\s*T[ɛe]kyer[ɛe]ma\\b")
+        /** A reading's result: its first notification line is kept for "who sent it?". */
+        internal fun noteRead(msg: String) {
+            if (msg.startsWith("Recent notifications")) lastNotificationLine = msg.lines()
+                .firstOrNull { it.trimStart().startsWith("•") && !OWN_NOTIF.containsMatchIn(it) }
+        }
+        /** "Who sent it?" after a reading: the first notification just read, as "DSATuz, on Telegram". Null = nothing read yet. */
+        internal fun whoSentIt(): String? {
+            val line = lastNotificationLine ?: return null
+            val m = NOTIF_LINE.find(line) ?: return null
+            val app = m.groupValues[1].trim(); val sender = m.groupValues[2].trim()
+            return if (sender.isEmpty()) "It was a notification from $app." else "It was from $sender, on $app."
+        }
+        private val RE_WHO_SENT = Regex("^(?:who|hena)\\s+(?:sent|wrote|texted|messaged|send)\\s+(?:it|that|this|them|me that|the\\s+(?:last\\s+|latest\\s+)?(?:message|text|one))\\s*[?.!]*$|" +
+            "^who\\s+(?:is|was)\\s+(?:it|that)\\s+from\\s*[?.!]*$", RegexOption.IGNORE_CASE)
+        /** One alarm to cancel, by its time ("cancel the 6:30 alarm", "turn off my 7 am alarm", "delete the alarm for 6"). */
+        private val RE_ALARM_CANCEL = Regex("\\b(?:delete|cancel|remove|clear|turn off|switch off|disable|dismiss|yi|gyae)\\b[^.?!]*\\balarm\\b" +
+            "(?![^.?!]*\\b(?:all|every|alarms)\\b)")
         /** An alarm that already exists is meant (remove / change / ask), or the request is a question about alarms. */
         private val RE_ALARM_MANAGE = Regex("\\b(?:delete|cancel|remove|clear|turn off|switch off|disable|stop|dismiss|snooze|change|edit|" +
             "move|reschedule|rename|update|skip|turn on|switch on|enable|list|show|check|yi|gyae)\\b[^.?!]*\\balarms?\\b|" +
@@ -911,6 +990,10 @@ class LocalBrain : AgentBrain {
         // §6.1/§6.6 — read notifications / messages. Requires a read/check verb + messages/nkra, OR the word
         // "notifications", OR a bare "nkra" — so "send prince a message" (a send, not a read) does NOT match.
         private val RE_READ_NOTIFS = Regex("\\bnotifications?\\b|\\b(read|check|show|any|new|hwɛ|kenkan)\\b[^.?!]*\\b(messages?|nkra)\\b|^\\s*nkra\\b", RegexOption.IGNORE_CASE)
+        /** "What is Richmond's phone number", "what's the number of Ama", "tell me Kofi's number" → the person asked about. */
+        private val RE_CONTACT_NUMBER_Q = Regex("^\\s*$LEADIN(?:what(?:'s|’s|\\s+is)|tell\\s+me|give\\s+me|read\\s+me|read\\s+out|say|do\\s+you\\s+have)\\s+" +
+            "(?:the\\s+)?(?:(.+?)(?:'s|’s)\\s+(?:phone\\s+|mobile\\s+|cell\\s+|momo\\s+|telephone\\s+)?number|(?:phone\\s+|mobile\\s+|cell\\s+)?number\\s+(?:of|for)\\s+(.+?))\\s*[?.!]*\\s*$",
+            RegexOption.IGNORE_CASE)
         // §6.1 — find/search a contact by name (English + Twi "hwehwɛ"); trailing "in my contacts" tolerated.
         private val RE_FIND_CONTACT = Regex("^\\s*$LEADIN(find|search\\s+for|look\\s+up|look\\s+for|hwehwɛ\\S*)\\s+(?:the\\s+)?(?:contact\\s+)?(.+?)(?:\\s+in\\s+(?:my\\s+)?contacts?)?\\s*$", RegexOption.IGNORE_CASE)
         private val RE_TAP = Regex("^\\s*(tap|click|press|select|choose|hit)\\s+(on\\s+)?(.+)$", RegexOption.IGNORE_CASE)
@@ -979,7 +1062,9 @@ class LocalBrain : AgentBrain {
             Regex("^\\s*$LEADIN(?:send|write)\\s+(.+?)\\s+an?\\s+$SMS_NOUN\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
             // "reply to Ama on WhatsApp saying …" (References.rewrite makes a bare "reply saying …" this) — a new message to that
             // person, read back before it goes.
-            Regex("^\\s*$LEADIN(?:text|sms|message|whatsapp|reply)\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE)
+            // "tell Prince Melanin on WhatsApp that I'll call later" is a message with its words (QA N08, 3 October 2026: it
+            // went to the cloud for three model calls); "tell Ama to call me" (a relay) still goes through parseRelay.
+            Regex("^\\s*$LEADIN(?:text|sms|message|whatsapp|reply|tell)\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE)
         )
         private val SMS_STRONG = smsPatterns(MARK_STRONG)
         private val SMS_WEAK = smsPatterns(MARK_WEAK)

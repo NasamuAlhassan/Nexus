@@ -24,7 +24,11 @@ data class ModelSpec(
     val hotwords: Boolean = false,
     /** Read straight from the APK's assets (uncompressed): no second copy on the phone's storage — for big models (the
      *  660 MB Parakeet on a phone with ~2 GB free). */
-    val fromAssets: Boolean = false
+    val fromAssets: Boolean = false,
+    /** Whisper: the language token to decode with ("" = let the model detect it). Null = the app's default for the
+     *  language (Swahili as Twi's proxy — what the old tiny-twi was trained through). The clean whisper-base Twi model
+     *  (tekyerema-asr-twi) was trained and scored with auto-detect, so its model.json says "". */
+    val language: String? = null
 ) {
     /** Every file this model needs. */
     fun required(): List<String> = files.values + tokens + listOfNotNull(bpeVocab.takeIf { hotwords })
@@ -34,10 +38,14 @@ data class ModelSpec(
         const val WHISPER = "whisper"
         const val NEMO_TRANSDUCER = "nemo_transducer"
         const val NEMO_CTC = "nemo_ctc"
+        /** A wav2vec2-style CTC model on raw samples — the omniASR-300M Twi fine-tune (EXP-101), run by sherpa's
+         *  omnilingual runner; its tokens.txt names the blank `<blk>` and uses `|` between words. */
+        const val OMNILINGUAL_CTC = "omnilingual_ctc"
         private val ROLES = mapOf(
             WHISPER to listOf("encoder", "decoder"),
             NEMO_TRANSDUCER to listOf("encoder", "decoder", "joiner"),
-            NEMO_CTC to listOf("model")
+            NEMO_CTC to listOf("model"),
+            OMNILINGUAL_CTC to listOf("model")
         )
 
         val LEGACY_WHISPER = ModelSpec(WHISPER, mapOf("encoder" to "tiny-encoder.onnx", "decoder" to "tiny-decoder.int8.onnx"),
@@ -56,7 +64,8 @@ data class ModelSpec(
                 bpeVocab = o.optString("bpeVocab").trim().ifEmpty { null },
                 threads = if (o.has("threads")) o.optInt("threads") else null,
                 hotwords = o.optBoolean("hotwords", false),
-                fromAssets = o.optBoolean("fromAssets", false))
+                fromAssets = o.optBoolean("fromAssets", false),
+                language = if (o.has("language")) o.optString("language").trim() else null)
         }
 
         /**

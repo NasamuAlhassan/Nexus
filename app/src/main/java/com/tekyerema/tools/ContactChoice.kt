@@ -25,7 +25,10 @@ import org.json.JSONObject
 object ContactChoice {
     data class Option(val label: String, val name: String, val number: String)
 
-    data class Choice(val question: String, val message: String, val options: List<Option>, val more: Int)
+    /** [twiQuestion]: the same question for a Twi conversation, made here — no translator. The translator never took it
+     *  (a line of names doesn't "look English"), so in Twi mode the A20e showed it in English and read it with the Twi
+     *  voice (3 October 2026). The Twi frame is said by the Twi voice; the names and digits by the English voice. */
+    data class Choice(val question: String, val message: String, val options: List<Option>, val more: Int, val twiQuestion: String = "")
 
     const val MAX_OPTIONS = 3
 
@@ -57,11 +60,18 @@ object ContactChoice {
             else -> labels.dropLast(1).joinToString(", ") + ", or " + labels.last()
         }
         val who = said.trim().ifEmpty { "one" }
-        val question = "Which $who: $list?" + if (more > 0) " Or someone else?" else ""
+        // "Which my brother: …?" is not English — a "my …" is asked as "Which one is your brother: …?" (QA R4_TR13, 3 October 2026).
+        val question = (if (who.lowercase().startsWith("my ")) "Which one is your ${who.substring(3).trim()}: $list?" else "Which $who: $list?") +
+            if (more > 0) " Or someone else?" else ""
         // The planner-facing line keeps the shape References.optionsFrom reads ("…: A, B, C. Which one?").
         val message = "More than one contact matches $who: ${labels.joinToString(", ")}" +
             (if (more > 0) " (and $more more)" else "") + ". Which one?"
-        return Choice(question, message, options, more)
+        // "Hena na wopɛ?" (who do you want?) — a FIXED frame, recorded once in the lab's voice (voice/LabClips); the names
+        // are the English voice's. [owner: verify the Twi]
+        val frame = "Hena na wopɛ?"
+        val twi = if (labels.isEmpty()) "" else frame + " " + com.tekyerema.language.EntityTags.EN_OPEN + list + "." +
+            com.tekyerema.language.EntityTags.EN_CLOSE + (if (more > 0) " Anaa obi foforɔ?" else "")
+        return Choice(question, message, options, more, twi)
     }
 
     private val ENDING = Regex("(?i)^(.+?)\\s+(?:ending(?:\\s+in)?|on)\\s+([+\\d][\\d\\s]{1,16})$")
@@ -94,7 +104,7 @@ object ContactChoice {
         val c = build(said, matches, recency(context, matches))
         val choices = JSONArray()
         c.options.forEach { choices.put(JSONObject().put("label", it.label).put("name", it.name).put("number", it.number)) }
-        return ToolResult(false, c.message, data = JSONObject().put("ask", c.question)
+        return ToolResult(false, c.message, data = JSONObject().put("ask", c.question).put("askTwi", c.twiQuestion)
             .put("options", JSONArray(c.options.map { it.label })).put("choices", choices).put("more", c.more),
             needsDisambiguation = true)
     }

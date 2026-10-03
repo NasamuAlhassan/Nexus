@@ -156,6 +156,10 @@ class AgentW7bTest {
         assertTrue(RoutingBrain.deviated(listOf("tap({}) → rejected; element 9 is not listed")))
         assertFalse(RoutingBrain.deviated(listOf("open_app({}) → success [native]; verified=true (foreground)")))
         assertFalse(RoutingBrain.deviated(emptyList()))
+        // QA D10 (3 October 2026): a READ that ran is its own result — "verified=false (no expectation given…)" on it sent
+        // "read my last message" to the cloud after the local read_notifications had already answered.
+        assertFalse(RoutingBrain.deviated(listOf("read_notifications({}) → success [none]; verified=false (no expectation given; screen changed=false is only a weak signal)")))
+        assertTrue(RoutingBrain.deviated(listOf("read_notifications({}) → fail [none]; no notification access")))
         assertTrue(NetworkMonitor.isWeakLink(150, 400))
         assertFalse(NetworkMonitor.isWeakLink(5000, 400))
         assertFalse("no estimate is not weak", NetworkMonitor.isWeakLink(0, 400))

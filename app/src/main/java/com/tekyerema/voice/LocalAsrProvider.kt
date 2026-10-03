@@ -14,6 +14,11 @@ interface SpeechToRaw {
     val name: String
     /** True only when a real model is loaded (assets present + runtime initialised). */
     val ready: Boolean
+
+    /** A model for [lang] the app may fall back to when the online recogniser can't answer (quota, outage, offline):
+     *  one with its own model.json — the clean whisper-base Twi model of 2 October 2026 — never the legacy tiny-twi
+     *  layout, which was trained on the GOLD clips. */
+    fun trustedFor(lang: String): Boolean = false
 }
 
 /**
@@ -92,8 +97,10 @@ class HybridAsr(
                 if (isTwi) {
                     try { return twiOnline.transcribe(wav, sessionLanguage, Lang.TWI).copy(fallbackUsed = false) }
                     catch (e: AsrException) {
-                        // §10.3 — on-device Twi is disqualified; an online-Twi failure fails honestly, not to garbage.
-                        throw AsrException("The Twi voice service is unavailable right now, and there isn't a trusted offline Twi model yet.")
+                        // §10.3 — only a TRUSTED on-device Twi model (its own model.json; never the GOLD-trained tiny-twi)
+                        // takes over; otherwise an online-Twi failure fails honestly, not to garbage.
+                        if (onDevice.trustedFor("twi")) return local.transcribe(wav, sessionLanguage, Lang.TWI).copy(fallbackUsed = true)
+                        throw AsrException(TWI_SERVICE_DOWN)
                     }
                 }
                 // Not Twi: prefer a configured Gh-EN endpoint, else the on-device text we already have.
@@ -121,23 +128,34 @@ class HybridAsr(
                 // §10.3 — for Twi, the on-device model is DISQUALIFIED (contaminated; Phase 9.1 pending), so a
                 // an online 403/429/quota failure must NOT silently degrade to it and speak confident garbage.
                 // Surface the outage honestly instead.
+                if (lang == Lang.TWI && onDevice.trustedFor("twi")) {
+                    // The clean on-device Twi model (2 October 2026) answers when the HCI Lab can't — quota spent, outage.
+                    Log.w("Tekyerema", "[ASR] Twi online provider failed → the trusted on-device Twi model: ${e.message}")
+                    return local.transcribe(wav, sessionLanguage, forceLanguage).copy(fallbackUsed = true)
+                }
                 if (lang == Lang.TWI) {
-                    Log.w("Tekyerema", "[ASR] Twi online provider failed and on-device Twi is disqualified — failing honestly: ${e.message}")
-                    throw AsrException("The Twi voice service is unavailable right now, and there isn't a trusted offline Twi model yet.")
+                    Log.w("Tekyerema", "[ASR] Twi online provider failed and offline Twi is off — failing honestly: ${e.message}")
+                    throw AsrException(TWI_SERVICE_DOWN)
                 }
                 Log.w("Tekyerema", "[ASR] online failed → on-device fallback: ${e.message}")
                 if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage).copy(fallbackUsed = true)
                 throw e
             }
         }
+        // Twi is heard online only for now (owner, 3 October 2026 — SherpaAsr.offlineTwi): say what to do instead.
+        if (lang == Lang.TWI && !onDevice.trustedFor("twi")) throw AsrException(TWI_NEEDS_INTERNET)
         if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage)   // offline / no endpoint
         // Nothing available: fail FAST and honestly (never a silent hang), steering the user to the fix.
         throw AsrException(
-            if (lang == Lang.TWI) "The on-device Twi voice model isn't available."
+            if (lang == Lang.TWI) TWI_NEEDS_INTERNET
             else "You're offline and the on-device voice model isn't available."
         )
     }
 }
+
+/** What the user hears when Twi can't be heard. */
+const val TWI_SERVICE_DOWN = "The Twi voice service isn't answering right now. Say it in English, or try again in a moment."
+const val TWI_NEEDS_INTERNET = "Twi needs the internet for now. Say it in English, or try again when you're connected."
 
 /** Honest placeholder: no model bundled yet. Never fakes a transcript, never calls the network. */
 object NotIntegratedSpeechToRaw : SpeechToRaw {

@@ -23,14 +23,23 @@ class AndroidTts(context: Context) : TtsProvider {
     override val name = "android-system-tts (English; Twi=gap)"
 
     companion object {
-        /** Ghana's words as they are SAID: "cedi" is SEE-dee (the voices said "seh-di"), "pesewa" is peh-SEH-wah,
-         *  and the app's own name — Twi "ky" is "ch", "ɛ" is "eh". */
+        /**
+         * Ghana's words spelled so that THIS voice (Google's Nigerian English, en-ng-x-tfn — the engine cannot be given
+         * sounds, only letters) says them the way they are said here. Chosen BY EAR by the owner on the A20e, 2 October
+         * 2026, from numbered options played in the voice itself, after measuring his own recordings and radio clips:
+         *  - cedis is short, "SI-dis" (which is why recognisers write "cities") — "sidis" was among the ones he passed;
+         *  - pesewas is two syllables: "the pesewas is pronounced like peswes" — of five spellings of that, "pesswess";
+         *    every three-syllable form was rejected ("pessaywahs" was the old one);
+         *  - the app's name is three beats, "tekyerrma" in his words — of six spellings of that, "Tetcherrma" (the old
+         *    "techeremah" came out with a hard k and four syllables).
+         * The singular forms follow the plurals and were not played to him.
+         */
         private val RESPELL: List<Pair<Regex, String>> = listOf(
-            Regex("(?i)\\bcedis\\b") to "seedees",
-            Regex("(?i)\\bcedi\\b") to "seedee",
-            Regex("(?i)\\bpesewas\\b") to "pessaywahs",
-            Regex("(?i)\\bpesewa\\b") to "pessaywah",
-            Regex("(?i)\\btɛkyerɛma\\b|\\btekyerema\\b") to "techeremah"
+            Regex("(?i)\\bcedis\\b") to "sidis",
+            Regex("(?i)\\bcedi\\b") to "sidi",
+            Regex("(?i)\\bpesewas\\b") to "pesswess",
+            Regex("(?i)\\bpesewa\\b") to "pessweh",
+            Regex("(?i)\\btɛkyerɛma\\b|\\btekyerema\\b") to "Tetcherrma"
         )
     }
 
@@ -100,7 +109,9 @@ class AndroidTts(context: Context) : TtsProvider {
         val extra = try { com.tekyerema.core.config.AppConfig.obj("speech.tts.respell") } catch (_: Throwable) { null }
         if (extra != null) for (k in extra.keys()) {
             val v = extra.optString(k)
-            if (v.isNotBlank()) t = Regex("(?i)\b" + Regex.escape(k) + "\b").replace(t, v)
+            // "\\b", not "\b": in a Kotlin string "\b" is a BACKSPACE character, so no pair from the config ever matched
+            // (found 2026-10-02 while fixing how "MTN" is said).
+            if (v.isNotBlank()) t = Regex("(?i)\\b" + Regex.escape(k) + "\\b").replace(t, Regex.escapeReplacement(v))
         }
         return t
     }

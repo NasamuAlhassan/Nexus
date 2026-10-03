@@ -156,6 +156,9 @@ class VoiceController(
     /** Set when the stop was already acknowledged aloud (a spoken "no", a "stop" interjection), so the turn's closing
      *  "Stopped." isn't said twice. Reset for every new task: it used to linger and silence a later, real "Stopped.". */
     @Volatile private var stopAlreadySaid = false
+    /** A read-back or a question is being READ right now (the microphone opens only after it) — [answerNow] cuts it. */
+    @Volatile private var promptSpeaking = false
+    val readingPrompt: Boolean get() = promptSpeaking
     /** Consecutive auto follow-up listens in the current exchange, capped so mic noise can't loop forever.
      *  Reset whenever the user deliberately starts a turn (mic tap / typed). */
     private var followUpChain = 0
@@ -233,7 +236,7 @@ class VoiceController(
                         val q = st.pendingQuestion
                         if (q != null && q != lastQuestion && askJob?.isActive != true) {
                             lastQuestion = q
-                            askJob = launchOnAnswerMic { askByVoice(q) }
+                            askJob = launchOnAnswerMic { askByVoice(q, said = st.pendingQuestionTwi ?: awaitTwiWording(q)) }
                         }
                     }
                     else -> {
@@ -354,16 +357,26 @@ class VoiceController(
      * question stays open on the prompt panel until the engine's own timeout, and "Hey Tɛkyerɛma", the panel's
      * Answer button or opening Tɛkyerɛma listens again ([respond]).
      */
-    private suspend fun askByVoice(question: String) {
+    /** @param said the question as SPOKEN in a Twi conversation (the Twi line, amounts / names marked for the English
+     *  voice) — the A20e read the English question with the Twi voice (3 October 2026). [question] stays the English. */
+    private suspend fun askByVoice(question: String, skipSpeech: Boolean = false, said: String? = null) {
         val lang = forceLanguage() ?: sessionLanguage()
         try {
             fillers?.stop()
-            if (speakAloud()) try { tts.speak(Verbalize.apply(question), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            if (!skipSpeech && speakAloud()) {
+                promptSpeaking = true
+                try { tts.speak(said?.takeIf { lang == Lang.TWI && it.isNotBlank() } ?: Verbalize.apply(question), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                finally { promptSpeaking = false }
+            }
             if (!hasMicPermission()) return   // typed answers still work (submitText)
             repeat(2) { attempt ->
                 _state.update { it.copy(state = VoiceState.CONFIRMATION_REQUIRED, partialHint = question) }
                 val onSpeech = { _state.update { it.copy(speechDetected = true) } }
-                val heard = listen(com.tekyerema.voice.io.ListenPurpose.ANSWER, events(ready = { listenCue() }, speech = onSpeech, captured = { cues.captured() }))
+                // A question that wants a phone number or an amount is answered in digits — heard by the recogniser that
+                // is good at them (voice/io LanguageRoutedInput; owner's Twi test, 2 October 2026).
+                val digits = DIGITS_ASKED.containsMatchIn(question)
+                val heard = voiceIn.listen(com.tekyerema.voice.io.ListenSpec(com.tekyerema.voice.io.ListenPurpose.ANSWER, digits = digits),
+                    events(ready = { listenCue() }, speech = onSpeech, captured = { cues.captured() }))
                 if (heard is com.tekyerema.voice.io.Heard.Cancelled) return
                 var text = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical.orEmpty()
                 // voice/io: a recognizer that ends the turn on its own short pause can't be patient — an answer cut off
@@ -373,7 +386,7 @@ class VoiceController(
                     (more as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical?.takeIf { it.isNotBlank() }
                         ?.let { text = text.trimEnd(',', ' ') + " " + it }
                 }
-                if (text.isNotBlank()) { agent.answer(text); return }
+                if (text.isNotBlank()) { agent.answer(englishReply(text)); return }
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) {}
             }
@@ -388,14 +401,55 @@ class VoiceController(
     /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer, "Hey Tɛkyerɛma", opening
      *  Tɛkyerɛma). A confirmation still needs an explicit yes — silence or an unclear answer declines, as before. */
     fun respond() {
+        if (answerNow()) return
         val st = agent.state.value
         when (st.status) {
-            AgentStatus.ASKING -> st.pendingQuestion?.let { q -> if (askJob?.isActive != true) askJob = launchOnAnswerMic { askByVoice(q) } }
+            AgentStatus.ASKING -> st.pendingQuestion?.let { q -> if (askJob?.isActive != true) askJob = launchOnAnswerMic { askByVoice(q, said = st.pendingQuestionTwi) } }
             AgentStatus.WAITING_CONFIRMATION -> if (confirmJob?.isActive != true) st.pendingConfirmation?.let { p ->
                 confirmJob = launchOnAnswerMic { confirmByVoice(p, st.pendingConfirmationTwi, st.confirmationSeq) } }
             AgentStatus.SECURE_INPUT -> if (secureJob?.isActive != true) secureJob = launchOnAnswerMic { secureInputByVoice() }
             else -> {}
         }
+    }
+
+    /**
+     * The user wants to answer the waiting prompt NOW: the read-back or the question is cut short and the microphone
+     * opens for the reply at once — volume-down twice, the panel's Answer, "Hey Tɛkyerɛma" or opening Tɛkyerɛma while it
+     * is still being read. Owner, 2 October 2026: "you've seen the options and want to answer immediately but you
+     * can't" (a menu of seven options was being read and nothing could stop it short of cancelling the task). Nothing
+     * is answered FOR the user: a confirmation still needs its yes. False = nothing was being read.
+     */
+    fun answerNow(): Boolean {
+        if (!promptSpeaking) return false
+        val st = agent.state.value
+        return when (st.status) {
+            AgentStatus.ASKING -> {
+                val q = st.pendingQuestion ?: return false
+                Log.i("Tekyerema", "[VOICE] the question was cut short — listening for the answer")
+                askJob?.cancel(); tts.stop()
+                askJob = launchOnAnswerMic { askByVoice(q, skipSpeech = true, said = st.pendingQuestionTwi) }
+                true
+            }
+            AgentStatus.WAITING_CONFIRMATION -> {
+                val p = st.pendingConfirmation ?: return false
+                Log.i("Tekyerema", "[VOICE] the read-back was cut short — listening for yes or no")
+                confirmJob?.cancel(); tts.stop()
+                val twi = st.pendingConfirmationTwi
+                val seq = st.confirmationSeq
+                confirmJob = launchOnAnswerMic { confirmByVoice(p, twi, seq, skipSpeech = true) }
+                true
+            }
+            else -> false
+        }
+    }
+
+    /** The prompt panel's Type box was opened: stop reading and close the answer microphone (our own voice, the
+     *  keyboard's clicks or TalkBack must never be taken as the reply). The prompt stays waiting — for what is typed. */
+    fun quietForTyping() {
+        if (agent.state.value.status !in PROMPTS) return
+        tts.stop()
+        askJob?.cancel(); confirmJob?.cancel()
+        _state.update { it.copy(confirmPhase = ConfirmPhase.NONE, speechDetected = false) }
     }
 
     /**
@@ -638,10 +692,10 @@ class VoiceController(
         val route = NewRequest.Route.ANSWER
         val seq = agent.state.value.confirmationSeq   // J-02: a typed yes/no answers the confirmation on screen NOW
         return when (agent.state.value.status) {
-            AgentStatus.ASKING -> { askJob?.cancel(); hideAsking(); cues.captured(); agent.answer(t); TypedResult(route, accepted = true) }
+            AgentStatus.ASKING -> { askJob?.cancel(); hideAsking(); cues.captured(); agent.answer(englishReply(t)); TypedResult(route, accepted = true) }
             AgentStatus.WAITING_CONFIRMATION -> when {
-                Confirmation.looksLikeRevision(t) -> { confirmJob?.cancel(); cues.captured(); agent.revise(t); TypedResult(route, accepted = true) }
-                else -> when (Confirmation.interpret(t)) {
+                Confirmation.looksLikeRevision(englishReply(t)) -> { confirmJob?.cancel(); cues.captured(); agent.revise(englishReply(t)); TypedResult(route, accepted = true) }
+                else -> when (Confirmation.interpret(englishReply(t))) {
                     Confirmation.Answer.YES -> if (t.split(Regex("\\s+")).size > 2)
                         TypedResult(route, accepted = false, notice = "Something is waiting for your OK. Type yes or no — or use the buttons")
                     else { confirmJob?.cancel(); cues.captured(); agent.confirmFor(seq, true); TypedResult(route, accepted = true) }
@@ -701,6 +755,39 @@ class VoiceController(
         com.tekyerema.voice.io.Heard.Cause.PERMISSION, com.tekyerema.voice.io.Heard.Cause.LANGUAGE,
         com.tekyerema.voice.io.Heard.Cause.NOT_ALLOWED_HERE, com.tekyerema.voice.io.Heard.Cause.LOW_MEMORY)
     private val CANT_LISTEN_CONFIRM = "I can't hear answers right now. Tap Yes or No when you're ready."
+    /** A question whose answer is a phone number or an amount. */
+    private val DIGITS_ASKED = Regex("(?i)\\b(?:phone number|number|digits|how much|amount|how many cedis)\\b")
+
+    /** A reply given in Twi, as the English the answer / revise paths read ("daabi, soma pesewa aduonu" → "no, 20 pesewas";
+     *  "pesewa du" → "10 pesewas"); anything else unchanged (language/TwiReply — QA TR10 / TR12, 3 October 2026). */
+    private fun englishReply(t: String): String {
+        if ((forceLanguage() ?: sessionLanguage()) != Lang.TWI) return t
+        val out = com.tekyerema.language.TwiReply.toEnglish(t) { said ->
+            val key = PhoneticKey.compact(said)
+            SpeechVocabulary.current().entries.any { it.kind == EntityCorrector.Kind.CONTACT && it.compact == key }
+        }
+        if (out != t) Log.i("Tekyerema", "[TWI] reply understood on the phone → '${com.tekyerema.core.Privacy.content(out)}'")
+        return out
+    }
+
+    /** The question's Twi wording when the engine is still fetching it (a bounded translator call) — waited for a
+     *  moment, then the English is read. The ASKING state is already set, so an answer meanwhile is taken as the answer. */
+    private suspend fun awaitTwiWording(question: String): String? {
+        if (!agent.state.value.questionTwiPending) return null
+        val deadline = android.os.SystemClock.uptimeMillis() + TWI_WORDING_WAIT_MS
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val s = agent.state.value
+            if (s.pendingQuestion != question || s.status != AgentStatus.ASKING) return null
+            if (!s.questionTwiPending) return s.pendingQuestionTwi
+            kotlinx.coroutines.delay(100)
+        }
+        return agent.state.value.takeIf { it.pendingQuestion == question }?.pendingQuestionTwi
+    }
+    private val TWI_WORDING_WAIT_MS = 4_000L
+
+    /** Offline in Twi: what the phone CAN do, said in English (there is no Twi voice offline). */
+    private val OFFLINE_TWI_LIMIT = "Offline, I understand simple Twi requests — sending money, airtime, calls, your " +
+        "balance, the time, volume and music. For anything else, say it in English, or connect to the internet."
     private val SECURE_TAP_DONE = "When you've finished, tap Done, or type done."
 
     /**
@@ -708,10 +795,11 @@ class VoiceController(
      * One repeat on an unclear answer; then a safe decline. Buttons remain a parallel path — if
      * the agent moves on for any reason the observer cancels this job.
      */
-    private suspend fun confirmByVoice(prompt: String, promptTwi: String? = null, seq: Long = 0L) {
+    private suspend fun confirmByVoice(prompt: String, promptTwi: String? = null, seq: Long = 0L, skipSpeech: Boolean = false) {
         if (!voiceConfirmation() || !speakAloud()) return
         stopAlreadySaid = false
-        cues.needsOk()
+        if (!skipSpeech) cues.needsOk()
+        var quiet = skipSpeech            // [answerNow]: the user cut the reading — listen straight away, once
         val lang = forceLanguage() ?: sessionLanguage()
         // §A.1 — in a Twi session, ask the confirmation in TWI when we have a structured Twi rendering
         // (name verbatim, number digit-by-digit); otherwise fall back to the English question. The Twi text
@@ -729,7 +817,12 @@ class VoiceController(
                 _state.update { it.copy(confirmPhase = ConfirmPhase.ASKING, speechDetected = false) }
                 // English confirmations are spoken in English; a Twi session with a structured Twi line is
                 // spoken in Twi (§A.1). The ANSWER may be in either language.
-                try { tts.speak(spokenQuestion, askLang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                if (quiet) quiet = false
+                else {
+                    promptSpeaking = true
+                    try { tts.speak(spokenQuestion, askLang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                    finally { promptSpeaking = false }
+                }
                 if (!hasMicPermission()) { _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }; return }
 
                 _state.update { it.copy(confirmPhase = ConfirmPhase.LISTENING, partialHint = prompt) }
@@ -743,7 +836,8 @@ class VoiceController(
                 val answer = when (result) {
                     is com.tekyerema.voice.io.Heard.Speech, is com.tekyerema.voice.io.Heard.Unavailable -> {
                         val tr = (result as? com.tekyerema.voice.io.Heard.Speech)?.transcript
-                        val heard = tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() }
+                        // A Twi reply ("daabi, soma pesewa aduonu") in the English the revise path reads (language/TwiReply).
+                        val heard = englishReply(tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() })
                         // voice/io: a recognizer that can't run here at all (offline, no service) won't answer on a second
                         // try either — say the buttons still work and leave the question waiting for them (never a yes).
                         if (result is com.tekyerema.voice.io.Heard.Unavailable && result.cause in UNRECOVERABLE) {
@@ -1063,8 +1157,22 @@ class VoiceController(
     private suspend fun runTurn(heard: Transcript, source: InputSource) {
         // A PIN / password / one-time code said inside a request is removed here, at the one door every request comes
         // through — before the log line, the screen, the fast path and the agent (audit 2026-10-01, SEC02).
-        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw),
-            canonical = com.tekyerema.core.Privacy.maskCredentials(heard.canonical))
+        // (…and "10 pesos" becomes "10 pesewas" in the request that is acted on — money/MoneyAsk.heard; the words as
+        // heard are kept for the screen.)
+        // Only what a recogniser wrote is repaired: typed words are the user's own (a typed "2 cities" means cities).
+        val masked = com.tekyerema.core.Privacy.maskCredentials(heard.canonical)
+        val repaired = if (source == InputSource.ASR) com.tekyerema.money.MoneyAsk.heard(masked) else masked
+        // A core Twi request (send money, airtime, data, call, open, the time, the light…) is understood HERE, on the phone,
+        // as the English command the rest of the app runs — online or offline, never through a translator that turns
+        // "Frɛ Kofi" into "get some coffee" (language/TwiCommands; owner's Twi test, 2 October 2026).
+        if (heard.language == Lang.TWI) VoiceEngine.warmTranslator()   // a Twi turn may need the translator in a moment
+        val glossed = if (heard.language == Lang.TWI) com.tekyerema.language.TwiCommands.gloss(repaired) { said ->
+            val key = PhoneticKey.compact(said)
+            SpeechVocabulary.current().entries.any { it.kind == EntityCorrector.Kind.CONTACT && it.compact == key }
+        }?.also {
+            Log.i("Tekyerema", "[TWI] understood on the phone → '${com.tekyerema.core.Privacy.content(it)}'")
+        } else null
+        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = glossed ?: repaired)
         try {
             hideAsking()   // a new turn (e.g. the answer to a question) clears any "asking" card
             // Session language context (§11): adopt the LID-resolved language (low-signal already
@@ -1138,6 +1246,19 @@ class VoiceController(
             }
 
             tel.mark("route")
+            // Offline, a Twi request the phone's own Twi commands didn't understand can't be translated — say so plainly,
+            // with what DOES work, instead of a vague failure (Abena study, 3 October 2026: its honest "Twi recognition is
+            // limited… you can type"). [owner: verify the wording]
+            if (tr.language == Lang.TWI && glossed == null && !com.tekyerema.core.NetworkMonitor.isOnline()) {
+                val line = OFFLINE_TWI_LIMIT
+                Log.i("Tekyerema", "[TWI] offline and not one of the phone's Twi commands — said so")
+                set(VoiceState.SPEAKING, line)
+                cues.error()
+                try { if (speakAloud()) tts.speak(line, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                tel.endTurn("failed", byVoice = source == InputSource.ASR)
+                _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
+                return
+            }
             // Offline, words the meaning matcher mapped to a command only the LocalBrain runs ("read the screen") go as that command.
             val agentT0 = android.os.SystemClock.uptimeMillis()
             var outcome = runAgent(fastRouter?.agentGoal(tr.canonical) ?: tr.canonical) ?: return   // null: already set fail/cancel

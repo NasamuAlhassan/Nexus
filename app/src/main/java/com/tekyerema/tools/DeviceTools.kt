@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioManager
 import android.provider.AlarmClock
+import com.tekyerema.accessibility.UiElement
 import com.tekyerema.accessibility.UiSnapshot
 import com.tekyerema.policy.CapabilityScope
 import com.tekyerema.policy.RiskTier
@@ -93,8 +94,119 @@ object SetAlarmTool : Tool {
     internal fun showsTime(label: String, hour: Int, minute: Int): Boolean {
         val h12 = if (hour % 12 == 0) 12 else hour % 12
         val mm = "%02d".format(minute)
-        return Regex("(?<!\\d)0?(?:$hour|$h12)\\s*[:. ]\\s*$mm(?!\\d)").containsMatchIn(label)
+        if (Regex("(?<!\\d)0?(?:$hour|$h12)\\s*[:. ]\\s*$mm(?!\\d)").containsMatchIn(label)) return true
+        // Samsung's alarm list drops the minutes of a full hour: "06 , Sunday, 4 October, On" (A20e, 3 October 2026) — the
+        // 06:00 row was missed, the tool tapped the "06:00" text instead and opened the editor (QA-39).
+        return minute == 0 && Regex("(?<!\\d)0?(?:$hour|$h12)\\s*,").containsMatchIn(label)
     }
+}
+
+/**
+ * Cancel (dismiss) an alarm at a given time through the standard [AlarmClock.ACTION_DISMISS_ALARM] request, which the
+ * Clock apps answer themselves (Samsung Clock's AlarmCTSHandleActivity declares it — checked on the A20e, 3 October
+ * 2026). Before this, "cancel the 6:30 alarm" had no path of its own: the cloud brain drove Samsung Clock's list by hand,
+ * where tapping the row toggles the alarm, and switched it on and off five times in 76 s over 11 model calls (QA D08).
+ */
+object CancelAlarmTool : Tool {
+    override val name = "cancel_alarm"
+    override val description = "Cancel (dismiss) the alarm set for a given hour and minute (24-hour clock)."
+    override val scope = CapabilityScope.DEVICE_CONTROL
+    override val riskTier = RiskTier.TIER1
+    override val isAccelerator = true
+    override val params = listOf(
+        ToolParam("hour", "integer", "Hour of day, 0-23."),
+        ToolParam("minute", "integer", "Minute, 0-59.", required = false)
+    )
+
+    override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+        val hour = args.intOrNull("hour") ?: return ToolResult(false, "No hour provided.")
+        val minute = args.intOrNull("minute") ?: 0
+        if (hour !in 0..23 || minute !in 0..59) return ToolResult(false, "Invalid time $hour:$minute.")
+        val intent = Intent(AlarmClock.ACTION_DISMISS_ALARM)
+            .putExtra(AlarmClock.EXTRA_ALARM_SEARCH_MODE, AlarmClock.ALARM_SEARCH_MODE_TIME)
+            .putExtra(AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (intent.resolveActivity(ctx.appContext.packageManager) == null)
+            return ToolResult(false, "This phone's Clock app can't cancel alarms on request.", recoverable = true)
+        try { ctx.appContext.startActivity(intent) } catch (t: Throwable) { return ToolResult(false, "Couldn't cancel the alarm: ${t.message}") }
+        // Samsung Clock answers the request by opening its alarm list with the alarm still ON (A20e, 3 October 2026): the
+        // row's own switch is then flipped here — one tap on the element the list exposes, no model, nothing else touched.
+        kotlinx.coroutines.delay(1_200L)
+        val ctrl = ctx.controller
+        val s = try { ctrl?.takeIf { it.ready }?.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null }
+        val data = JSONObject().put("hour", hour).put("minute", minute)
+        if (ctrl != null && s != null && CLOCK_APP.containsMatchIn(s.appPackage.orEmpty()) && listShowing(s)) {
+            // Every switch at that time that is ON (two "6 am" alarms are both "the 6 am alarm" to the user) — one tap each,
+            // on the switch itself: tapping the row opens the editor (A20e, 3 October 2026, QA-39).
+            val on = switchesFor(s, hour, minute).filter { it.checked }
+            if (on.isNotEmpty()) {
+                for (sw in on) {
+                    try { ctrl.clickElement(sw.id) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) {}
+                    kotlinx.coroutines.delay(700L)
+                }
+                val said = if (on.size == 1) "Switched off the %02d:%02d alarm in the Clock.".format(hour, minute)
+                    else "Switched off both %02d:%02d alarms in the Clock.".format(hour, minute).let { if (on.size > 2) it.replace("both", "all ${on.size}") else it }
+                return ToolResult(true, said, data.put("switched", on.size), channel = "node")
+            }
+        }
+        return ToolResult(true, "Asked the Clock to cancel the alarm for %02d:%02d.".format(hour, minute), data, channel = "intent")
+    }
+
+    internal enum class AlarmState { ON, OFF, GONE }
+
+    /** The alarm's state on the Clock's list: ON if any switch carrying the time is checked (or its row says "On" — Samsung:
+     *  "06 45 , Sunday, 4 October, On, Double tap to edit."), OFF when every one is off; GONE when no element carries the time. Pure. */
+    internal fun alarmState(s: UiSnapshot, hour: Int, minute: Int): AlarmState {
+        val rows = s.elements.filter { e -> e.label?.let { SetAlarmTool.showsTime(it, hour, minute) } == true }
+        if (rows.isEmpty()) return AlarmState.GONE
+        val switches = rows.filter { it.checkable }
+        if (switches.isNotEmpty()) return if (switches.any { it.checked }) AlarmState.ON else AlarmState.OFF
+        val worded = rows.filter { Regex("(?i)\\b(?:on|off)\\b").containsMatchIn(it.label.orEmpty()) }
+        return when {
+            worded.isEmpty() -> AlarmState.ON
+            worded.all { Regex("(?i)\\boff\\b").containsMatchIn(it.label.orEmpty()) } -> AlarmState.OFF
+            else -> AlarmState.ON
+        }
+    }
+
+    /** The switches (checkable elements) carrying the time — never the row or a text, which open the editor. Pure. */
+    internal fun switchesFor(s: UiSnapshot, hour: Int, minute: Int): List<UiElement> =
+        s.elements.filter { e -> e.checkable && e.label?.let { SetAlarmTool.showsTime(it, hour, minute) } == true }
+
+    /** The first switch at that time, or null (kept for callers and tests). */
+    internal fun switchFor(s: UiSnapshot, hour: Int, minute: Int): UiElement? = switchesFor(s, hour, minute).firstOrNull()
+
+    /** The Clock's alarm LIST is what's showing (rows with switches / "Add alarm"), not its editor or another tab. Pure. */
+    internal fun listShowing(s: UiSnapshot): Boolean = s.elements.any { e ->
+        e.checkable || e.label?.contains("Double tap to edit", ignoreCase = true) == true || e.label.equals("Add alarm", ignoreCase = true)
+    }
+
+    override val verifiesOutcome = true
+
+    /** If the Clock's list is in front, the alarm's row must be off or gone; otherwise the Clock having accepted the
+     *  request is the evidence, as for set_alarm. */
+    override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
+        if (!result.success) return VerificationResult(false, "the alarm wasn't cancelled")
+        val hour = result.data?.optInt("hour", -1) ?: -1
+        val minute = result.data?.optInt("minute", 0) ?: 0
+        kotlinx.coroutines.delay(600L)
+        val s = try { ctx.controller?.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null } ?: after
+        if (s != null && CLOCK_APP.containsMatchIn(s.appPackage.orEmpty()) && hour >= 0) {
+            // Only the alarm LIST is evidence: the editor (which a tap on the row opens) shows no "06:00" row either, and
+            // that was read as "no longer lists an alarm" while the alarm stayed on (A20e, 3 October 2026, QA-39).
+            if (!listShowing(s)) return VerificationResult(false, "the Clock isn't showing its alarm list, so the %02d:%02d alarm may still be on".format(hour, minute))
+            return when (alarmState(s, hour, minute)) {
+                AlarmState.GONE -> VerificationResult(true, "the Clock no longer lists an alarm for %02d:%02d".format(hour, minute))
+                AlarmState.OFF -> VerificationResult(true, "the Clock shows the %02d:%02d alarm off".format(hour, minute))
+                AlarmState.ON -> VerificationResult(false, "the Clock still shows the %02d:%02d alarm on".format(hour, minute))
+            }
+        }
+        return VerificationResult(true, "the Clock app accepted the cancel request")
+    }
+
+    private val CLOCK_APP = Regex("clock|deskclock|alarm", RegexOption.IGNORE_CASE)
 }
 
 object SetTimerTool : Tool {

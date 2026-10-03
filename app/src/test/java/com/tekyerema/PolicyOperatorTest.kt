@@ -116,7 +116,9 @@ class PolicyOperatorTest {
         assertEquals(PolicyOutcome.BLOCK, eval(v, "mobile_money").outcome)
         assertEquals(PolicyOutcome.BLOCK, eval(v, "run_ussd", JSONObject().put("code", "*170#")).outcome)
         assertEquals(PolicyOutcome.BLOCK, eval(v, "tap", targetTier = RiskTier.TIER3, reason = "target 'Pay GH₵ 50' spends money", label = "Pay GH₵ 50").outcome)
-        assertEquals(PolicyOutcome.CONFIRM, eval(v, "run_ussd", JSONObject().put("code", "*124#")).outcome)   // a balance check isn't money
+        // A balance check isn't money — and, being read-only and free, is no longer confirmed either (2 October 2026).
+        assertEquals(PolicyOutcome.ALLOW, eval(v, "run_ussd", JSONObject().put("code", "*124#")).outcome)
+        assertEquals("any other dialled code is still confirmed", PolicyOutcome.CONFIRM, eval(v, "run_ussd", JSONObject().put("code", "*123*4#")).outcome)
     }
 
     @Test fun switched_off_settings_block_settings_changes_but_not_reading_them() {

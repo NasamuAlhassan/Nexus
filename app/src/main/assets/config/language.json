@@ -114,6 +114,129 @@
           },
           "cacheEntries": 256
         },
+        "space_mt": {
+          "_note": "OUR language Space (PrinceAlhassanNasamu/tekyerema-lang, ZeroGPU Gradio) serving the owner's own NLLB fine-tune tekyerema-nllb600m-v1 — translation switched on there 2 October 2026 (it had shipped with TK_MT=0, so every request came back untranslated). Gradio's two-step API (dialect 'gradio', api 'translate', data [text, src, tgt]); a '\"covered\": false' answer counts as no translation. Off unless local.properties has SPEECH_SPACE_URL=https://princealhassannasamu-tekyerema-lang.hf.space (public; no key). ~2.7 s a call warm, ~11 s on a cold model.",
+          "kind": "mt",
+          "dialect": "gradio",
+          "enabled": true,
+          "quotaGroup": "space_mt",
+          "endpoint": "${SPEECH_SPACE_URL}",
+          "languages": {
+            "gh_en": "eng",
+            "twi": "twi"
+          },
+          "request": {
+            "api": "translate"
+          },
+          "response": {
+            "kind": "json",
+            "path": "translation"
+          },
+          "timeouts": {
+            "connectMs": 6000,
+            "callMs": 25000
+          },
+          "cacheEntries": 256
+        },
+        "nllb_mt": {
+          "_note": "Our own free translator: Meta's NLLB-200 on a Hugging Face Space (services/nllb-space; owner's pick, 2 October 2026 — Google needs billing). POST {text, source, target} with a Bearer token → {translation}. local.properties: SPEECH_NLLB_URL=https://<space>.hf.space/translate and SPEECH_NLLB_TOKEN=… (the Space's API_TOKEN secret; never committed). A free Space sleeps after ~2 days idle: the first call after that waits for it to wake (callMs).",
+          "kind": "mt",
+          "enabled": true,
+          "quotaGroup": "nllb_mt",
+          "endpoint": "${SPEECH_NLLB_URL}",
+          "auth": {
+            "header": "Authorization",
+            "prefix": "Bearer ",
+            "key": "${SPEECH_NLLB_TOKEN}"
+          },
+          "languages": {
+            "gh_en": "eng_Latn",
+            "twi": "twi_Latn"
+          },
+          "request": {
+            "body": "json",
+            "textField": "text",
+            "language": "body",
+            "fromField": "source",
+            "toField": "target"
+          },
+          "response": {
+            "kind": "json",
+            "path": "translation"
+          },
+          "timeouts": {
+            "connectMs": 6000,
+            "callMs": 20000
+          },
+          "cacheEntries": 256
+        },
+        "google_mt": {
+          "_note": "Google Cloud Translation v2 — Twi is the code 'ak'. Owner's pick, 2 October 2026 (translation was missing since the Khaya removal of 27 September). The key goes in local.properties as SPEECH_GOOGLE_TRANSLATE_KEY=… (never committed; restrict it to the Cloud Translation API) — without it this client isn't built. Sent in the X-goog-api-key header, never in the URL.",
+          "kind": "mt",
+          "enabled": true,
+          "quotaGroup": "google_mt",
+          "endpoint": "https://translation.googleapis.com/language/translate/v2",
+          "auth": {
+            "header": "X-goog-api-key",
+            "prefix": "",
+            "key": "${SPEECH_GOOGLE_TRANSLATE_KEY}"
+          },
+          "languages": {
+            "gh_en": "en",
+            "twi": "ak"
+          },
+          "request": {
+            "body": "json",
+            "textField": "q",
+            "language": "body",
+            "fromField": "source",
+            "toField": "target",
+            "fields": {
+              "format": "text"
+            }
+          },
+          "response": {
+            "kind": "json",
+            "path": "data.translations.0.translatedText"
+          },
+          "timeouts": {
+            "connectMs": 4000,
+            "callMs": 8000
+          },
+          "cacheEntries": 256
+        },
+        "khaya_mt": {
+          "_note": "GhanaNLP Khaya translation (what Tɛkyerɛma used until 27 September) — the fallback after Google. POST {in, lang:'tw-en'|'en-tw'} → a bare JSON string. Key in local.properties as SPEECH_KHAYA_KEY=… (never committed). Its free quota was spent until about 17 October 2026; a quota error rests it until then.",
+          "kind": "mt",
+          "enabled": true,
+          "quotaGroup": "khaya",
+          "endpoint": "https://translation-api.ghananlp.org/v1/translate",
+          "auth": {
+            "header": "Ocp-Apim-Subscription-Key",
+            "prefix": "",
+            "key": "${SPEECH_KHAYA_KEY}"
+          },
+          "languages": {
+            "gh_en": "en",
+            "twi": "tw"
+          },
+          "request": {
+            "body": "json",
+            "textField": "in",
+            "language": "body",
+            "languageField": "lang",
+            "pairFormat": "{from}-{to}"
+          },
+          "response": {
+            "kind": "json",
+            "path": "translation|text|out"
+          },
+          "timeouts": {
+            "connectMs": 5000,
+            "callMs": 12000
+          },
+          "cacheEntries": 256
+        },
         "openai_asr": {
           "_note": "Any OpenAI-compatible /audio/transcriptions server, e.g. a hosted Ghanaian-English Whisper tune. Ghanaian English ONLY (Whisper has no Twi token) — list it under asr.online.gh_en, never twi or auto. Reuses the existing local.properties slots ASR_ONLINE_URL (…/v1), ASR_ONLINE_KEY, ASR_ONLINE_MODEL.",
           "kind": "asr",
@@ -151,9 +274,9 @@
         }
       },
       "mt": {
-        "_note": "Translator ids per direction, tried in order. enToTwi localizes English replies for a Twi speaker (ReplyLocalizer: never text with numbers/money, names must survive, else the original is spoken). twiToEn is exposed for the agent (LanguageLayer.translator) but not wired into the loop.",
-        "enToTwi": [],
-        "twiToEn": [],
+        "_note": "Translator ids per direction, tried in order (a client without its key isn't built and is skipped). enToTwi localizes English replies for a Twi speaker (ReplyLocalizer: never text with numbers/money, names must survive, else the original is spoken). twiToEn puts a Twi request into English for the cloud planner, which gets BOTH (VoiceEngine.goalInEnglish → RoutingBrain.cloudGoalFor).",
+        "enToTwi": ["space_mt", "nllb_mt", "khaya_mt", "google_mt"],
+        "twiToEn": ["space_mt", "nllb_mt", "khaya_mt", "google_mt"],
         "localizeReplies": true,
         "maxChars": 400
       }
@@ -164,6 +287,10 @@
       "_note": "B-05 LanguageSession: replies follow the language of the user's last turn while the conversation is live (conversationTtlSec); the persisted habitual language (the low-signal fallback after a pause) changes only after habitualSwitchTurns turns in a row in the other language.",
       "conversationTtlSec": 300,
       "habitualSwitchTurns": 2
+    },
+    "asr": {
+      "_offlineTwiNote": "Offline Twi hearing (the on-device omni CTC model) is OFF — owner, 3 October 2026: online Twi first, English-only offline for now. true = an on-device Twi model with its own model.json is used when the HCI Lab can't be reached. Findings and the plan: docs/agent/OFFLINE_TWI.md.",
+      "offlineTwi": false
     }
   }
 }

@@ -51,8 +51,21 @@ class ManifestHardeningTest {
             // The one justified exception: the share / text-selection target takes text/plain CONTENT and nothing else
             // (shared_text_target_takes_only_plain_text_content below; its code is pinned by InteropArchitectureTest).
             val contentTarget = name == SHARE_TARGET
-            assertTrue("$name is exported without a system-only permission", launcher || systemBound || contentTarget)
+            // …and the assistant gesture's entry: one ASSIST action, no data, no UI (assistant_entry_only_opens_the_voice_screen).
+            val assistEntry = name == ASSIST_ENTRY
+            assertTrue("$name is exported without a system-only permission", launcher || systemBound || contentTarget || assistEntry)
         }
+    }
+
+    @Test fun assistant_entry_only_opens_the_voice_screen() {
+        val app = xml("src/main/AndroidManifest.xml").children("application").single()
+        val entry = app.children("activity").single { it.a("name") == ASSIST_ENTRY }
+        assertEquals("true", entry.a("exported"))
+        assertEquals("@android:style/Theme.NoDisplay", entry.a("theme"))
+        val filter = entry.children("intent-filter").single()
+        assertEquals(listOf("android.intent.action.ASSIST"), filter.children("action").map { it.a("name") })
+        assertEquals(listOf("android.intent.category.DEFAULT"), filter.children("category").map { it.a("name") })
+        assertTrue("no data: it takes nothing from the caller", filter.children("data").isEmpty())
     }
 
     /**
@@ -81,7 +94,7 @@ class ManifestHardeningTest {
             assertFalse("no $tag in the interop package", app.children(tag).any { it.a("name").contains(".interop.") })
     }
 
-    private companion object { const val SHARE_TARGET = ".interop.SharedTextActivity" }
+    private companion object { const val SHARE_TARGET = ".interop.SharedTextActivity"; const val ASSIST_ENTRY = ".ui.AssistEntryActivity" }
 
     @Test fun a_release_apk_carries_no_api_key() {
         val gradle = File("build.gradle.kts").readText()

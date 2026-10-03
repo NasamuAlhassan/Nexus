@@ -1,0 +1,93 @@
+# set	id	what was said	what the shipped offline recogniser wrote (sherpa-onnx int8, greedy), 2 Oct 2026
+gold	W01	Hey Tɛkyerɛma	He did Grema.
+gold	W02	Tɛkyerɛma	The Germana
+gold	W03	Tɛkyerɛma, wake up	Dechma, wake up.
+gold	W04	Okay Tɛkyerɛma	Okay Techema
+gold	N01	zero, one, two, three, four, five	0 1 2 3 4 5
+gold	N02	six, seven, eight, nine, ten	6 7 8 9 10
+gold	N03	eleven, twelve, thirteen, fourteen, fifteen	11 12 13 14 15
+gold	N04	sixteen, seventeen, eighteen, nineteen, twenty	16 17 18 19 20
+gold	N05	thirty, forty, fifty, sixty	30 40 50 60
+gold	N06	seventy, eighty, ninety, one hundred	70 80 90 100
+gold	N07	twenty-one	21
+gold	N08	thirty-five	35
+gold	N09	ninety-nine	99
+gold	N10	one hundred and fifty	150
+gold	N11	zero two four, four one two, three four five six	024412 3456
+gold	N12	zero five four, nine eight seven, six five four three	0549876543
+gold	C01	one cedi	1 CD
+gold	C02	two cedis	2 cds.
+gold	C03	five cedis	5 ceds
+gold	C04	ten cedis	10 cedis.
+gold	C05	twenty cedis	20 cities
+gold	C06	fifty cedis	50 cedis.
+gold	C07	one hundred cedis	100 cedis
+gold	C08	fifty pesewas	50 ps.
+gold	C09	ten cedis fifty pesewas	10 cities 50 ps.
+gold	C10	two cedis fifty pesewas	2 cds 50 pesos.
+gold	C11	how much is it	How much is it?
+gold	C12	that costs twelve cedis	That cost 12 cities.
+gold	M01	Ama	Amma
+gold	M02	Kwame	Kwame
+gold	M03	Kofi	Go feed.
+gold	M04	Adjoa	Adjua
+gold	M05	Yaw	Yow.
+gold	M06	Akosua	Akosua
+gold	M07	Kwabena	Quabena
+gold	M08	Abena	Abbey.
+gold	M09	Prince	brains.
+gold	M10	Lydia	Ledia
+gold	M11	call Kwame	Ko Kwame
+gold	M12	send it to Ama	Sent it to Ama.
+gold	M13	message Kofi	Message Kofi
+gold	K01	Read it	Read it.
+gold	K02	Read it in full	Read it in full.
+gold	K03	Who sent it	Was sent 8.
+gold	K04	Read my messages	Read my messages.
+gold	K05	What have I missed	What have I missed?
+gold	K06	Send her two cedis	Sen had two cities.
+gold	K07	Send two cedis to my wife	Send two cities to my wife.
+gold	K08	Send five cedis to Ama	Send 5 cedis to Ama.
+gold	K09	Buy five cedis of airtime	By 5 cities of airtime.
+gold	K10	Check my balance	Check my balance.
+gold	K11	How much money do I have	How much money do I have?
+gold	K12	Call my brother	Call my brother.
+gold	K13	Send a message to Kwame	Sent a message to Kwame
+gold	K14	Open WhatsApp	Open was up.
+gold	K15	What time is it	What time is it?
+gold	K16	Turn up the volume	turn up the volume.
+gold	K17	Play some music	Play some music.
+gold	K18	Stop	Stop.
+gold	K19	Yes, send it	Yes, send it.
+gold	K20	No, cancel	No. Cancel.
+gold	K21	Go to MoMo and send five cedis to Ama	Go to Mumu and send 5 cities to Ama.
+gold	S01	Someone just sent you a message.	Someone just sent you a message.
+gold	S02	You have a new message from Ama.	You have a new message from Amma.
+gold	S03	I have sent two cedis to your wife.	I have sent two cedis to your wife.
+gold	S04	Please enter your PIN to	Please enter your pin to
+gold	S05	Your balance is fifty cedis.	Your balance is 50 cedis.
+gold	S06	Do you want me to send five cedis to Kwame?	Do you want me to send 5 cities to Kwame?
+gold	S07	Sorry, I didn't catch that. Please say it again.	Sorry I couldn't catch that. Please say it again.
+gold	S08	Point your camera at the paper and I will read it.	Point your camera at the paper and I'll read it.
+gold	S09	This thing is too loud, turn it down.	This thing is too loud. Turn it down.
+gold	S10	I need to send my brother some money.	I need to send my brother some money.
+eval20	E01	What is on my screen	What is on my screen?
+eval20	E02	Do I have any notifications	Do I have any notifications?
+eval20	E03	Read my messages	Read my messages.
+eval20	E04	What is my battery level	What is my battery level?
+eval20	E05	Check my balance	Check my balance.
+eval20	E06	What time is it	What time is it?
+eval20	E07	Open WhatsApp	Hoping what's up.
+eval20	E08	Launch Spotify	Launch Spotify
+eval20	E09	Close WhatsApp	Close wasa.
+eval20	E10	Play Daddy Lumba	Played at the Lumba
+eval20	E11	Pause the music	Pause the music.
+eval20	E12	Turn the volume up	Tender for Luma
+eval20	E13	Undo that	Undo that.
+eval20	E14	Call Ama Serwaa	Quote I must say a lot.
+eval20	E15	Ring Yaw Boateng	Ringyow watting
+eval20	E16	Tell Fuseina the meeting is tomorrow	Tell Fusi and that the meeting is tomorrow.
+eval20	E17	Buy 20 cedis airtime for 0244123456	Buy 20 cities airtime for 0244123456.
+eval20	E18	Send 50 cedis of mobile money to 0244123456	1050 cedis of mobile money to 0244123456
+eval20	E19	Why is my phone not charging	Why is my phone not charging?
+eval20	E20	How much does a phone battery replacement cost in Ghana	How much does a phone battery replacement cost in Ghana?

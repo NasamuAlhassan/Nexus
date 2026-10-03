@@ -43,6 +43,16 @@ class ContactChoiceTest {
         assertEquals("055 991 6720", c.options[0].number)
     }
 
+    @Test fun the_question_has_its_own_twi_wording_names_for_the_english_voice() {
+        val c = ContactChoice.build("Prince", princes)
+        val en = com.tekyerema.language.EntityTags.EN_OPEN; val close = com.tekyerema.language.EntityTags.EN_CLOSE
+        assertEquals("Hena na wopɛ? ${en}Prince Tesano AG youth Sec, Prince Ice P, or Princess.$close Anaa obi foforɔ?", c.twiQuestion)
+        // the Twi voice says only the Twi frame; the names and digits are one English piece
+        assertEquals(listOf(false, true, false), com.tekyerema.language.EntityTags.segments(c.twiQuestion).map { it.second })
+        assertEquals("Hena na wopɛ? ${en}Prince Tesano AG youth Sec, Prince Ice P, or Princess.$close Anaa obi foforɔ?",
+            ContactChoice.build("my brother", princes).twiQuestion)
+    }
+
     @Test fun without_any_call_history_the_address_book_order_is_kept() {
         val c = ContactChoice.build("Prince", princes)
         assertEquals(listOf("Prince Tesano AG youth Sec", "Prince Ice P", "Princess"), c.options.map { it.label })

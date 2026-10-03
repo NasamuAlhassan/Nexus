@@ -20,6 +20,23 @@ object UssdSpeech {
         return "$intro.${SpokenText.PAUSE}" + items.joinToString(SpokenText.PAUSE.toString()) { spoken(it) }
     }
 
+    /**
+     * "What's my airtime balance?" answered as a sentence: the airtime figure first, then the data that is left — and
+     * nothing else. The full reply ([forEar]) reads every line the carrier sends ("No data bonus. No BOR. No just 4 u.
+     * Welcome to the new world."), and the owner asked the same question again in the middle of it (2 October 2026).
+     * Null when the reply has no account figure — then the full reading is used.
+     */
+    fun airtimeBalance(reply: String): String? {
+        val items = items(reply)
+        val account = items.firstNotNullOfOrNull { ACCOUNT.find(it)?.groupValues?.get(1) } ?: return null
+        val data = items.firstNotNullOfOrNull { i -> DATA.find(i)?.let { m -> m.groupValues[1].toDoubleOrNull()?.takeIf { it > 0 }?.let { m.value.substringAfter(':').trim() } } }
+        val line = "Your airtime balance is ${com.tekyerema.phonecare.MoneyAlerts.spokenCedis(account)}."
+        return if (data == null) line else "$line${SpokenText.PAUSE}You also have ${bigMb(data).replace(Regex("\\bMB\\b"), "megabytes")} of data."
+    }
+
+    private val ACCOUNT = Regex("(?i)\\b(?:a/c|account|airtime|main)\\b[^\\d]{0,24}?(\\d+(?:\\.\\d+)?)")
+    private val DATA = Regex("(?i)\\b(?:internet|data)\\s+bundle\\s*:\\s*(\\d+(?:\\.\\d+)?)\\s*MB")
+
     /** The blob as items: glued words unstuck, then split at separators before words and where a new "Label:" begins. */
     internal fun items(reply: String): List<String> {
         var s = reply.trim()

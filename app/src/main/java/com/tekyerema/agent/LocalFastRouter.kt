@@ -665,7 +665,9 @@ class LocalFastRouter(
             // recognizer can't hear Twi, so the switch is said, not guessed. The next listen goes to the other recognizer.
             "language" -> if (p.value == "twi") {
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_TWI; s.sessionLanguage = com.tekyerema.voice.Lang.TWI
-                "Okay, Twi. Say 'speak English' to switch back."
+                com.tekyerema.voice.VoiceEngine.warmTranslator()   // the Space sleeps when idle — wake it now, not on the first request
+                // Honest from the start (Abena study, 3 October 2026): Twi hearing still makes mistakes, and typing works.
+                "Okay, Twi. My Twi hearing is still learning — if I get it wrong, say it again, or type it. Say 'speak English' to switch back."
             } else {
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_ENGLISH; s.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
                 "Okay, English."

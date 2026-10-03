@@ -68,6 +68,10 @@ class PolicyEngine(
                 "Capability '${tool.scope}' is not granted for this task."
             )
         }
+        // A read-only balance check the user asked for is not confirmed (PolicyConfig.readOnlyCheck) — unless its
+        // arguments came off a screen or a message, in which case it is confirmed like anything else.
+        if (!hasUntrustedParams && targetTier == null && PolicyConfig.readOnlyCheck(tool, args))
+            return PolicyDecision(PolicyOutcome.ALLOW, "Read-only balance check.", tier = RiskTier.TIER1)
         // X-04: config may only raise; J-01: arguments can raise too (a Mobile-Money USSD code is TIER3).
         var tier = maxTier(maxTier(PolicyConfig.effectiveTier(tool), PolicyConfig.argTier(tool, args)), targetTier)
         var note = ""

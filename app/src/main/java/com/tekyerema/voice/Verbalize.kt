@@ -35,6 +35,9 @@ object Verbalize {
     private val DEFAULT_LEXICON = mapOf(
         "Tɛkyerɛma" to "Tekyerema",
         "MoMo" to "Momo",
+        // Said letter by letter: the system voice ran "MTN" together (owner, 2026-10-02: "it struggles to say MTN").
+        "MTN" to "M T N",
+        "AirtelTigo" to "Airtel Tigo",
         "USSD" to "U S S D",
         "OTP" to "O T P",
         "SMS" to "S M S"

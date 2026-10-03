@@ -49,7 +49,13 @@ object ContactResolver {
         "dad" to listOf("dad", "daddy", "papa", "father", "paa", "agya"),
         "father" to listOf("father", "dad", "daddy", "papa", "agya"),
         "wife" to listOf("wife", "my wife", "darling", "sweetheart"),
-        "husband" to listOf("husband", "my husband", "darling", "sweetheart")
+        "husband" to listOf("husband", "my husband", "darling", "sweetheart"),
+        // the Twi kin words ("me nua barima" → "my brother", language/TwiCommands) land here too
+        "brother" to listOf("brother", "bro", "nua"),
+        "sister" to listOf("sister", "sis", "nua"),
+        "sibling" to listOf("sibling", "brother", "sister", "nua"),
+        "son" to listOf("son"), "daughter" to listOf("daughter"),
+        "grandparent" to listOf("grandparent", "grandma", "grandpa", "nana"), "child" to listOf("child", "my child")
     )
 
     /** The saved-name candidates to try for a spoken name: itself first, then its aliases. Pure → unit-tested. */
@@ -72,11 +78,31 @@ object ContactResolver {
         if (isPronoun(name)) return emptyList()   // nobody is named: the caller asks who, never guesses
         Relations.ensureLoaded(context)
         // C-03: try the name as said, then its family aliases, before fuzzy matching.
+        val family = isFamilyWord(name)
         for (candidate in aliasesFor(name)) {
-            val hit = resolveOne(context, candidate)
+            // "my brother" must never be some other person's: a contact saved as "meshark's brother" was read back for
+            // "Frɛ me nua barima" (QA TR13, A20e, 3 October 2026). Only a contact that IS the family word (alone, or "my …")
+            // — or the relation the user told us — counts; otherwise the caller asks who.
+            val hit = resolveOne(context, candidate).let { hits ->
+                if (family && Relations.contactFor(name) == null) hits.filter { ownsFamilyWord(it.name, candidate) } else hits
+            }
             if (hit.isNotEmpty() || candidate == aliasesFor(name).last()) return hit
         }
         return emptyList()
+    }
+
+    private fun isFamilyWord(name: String): Boolean = name.trim().lowercase().removePrefix("my ").trim() in DEFAULT_ALIASES
+
+    /** The saved [contactName] is this [word] itself — "Brother", "My brother", "Brother (Kwame)", "Bro Kofi" — not
+     *  "Meshark's brother", and not "Brown" for "bro" (a whole word only; QA R4_TR13, A20e, 3 October 2026). Pure. */
+    internal fun ownsFamilyWord(contactName: String, word: String): Boolean {
+        val n = contactName.trim().lowercase().replace('’', '\'')
+        val w = word.trim().lowercase()
+        val at = n.indexOf(w)
+        if (at < 0) return false
+        if (at + w.length < n.length && n[at + w.length].isLetter()) return false
+        val before = n.substring(0, at).trim()
+        return before.isEmpty() || before == "my" || before == "our"
     }
 
     private fun resolveOne(context: Context, name: String): List<Contact> {

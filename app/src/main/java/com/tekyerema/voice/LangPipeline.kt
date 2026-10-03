@@ -32,7 +32,13 @@ private val CURRENCY_MISHEAR = mapOf(
 // currency ENTITY is recovered (mirrors phase2/asr.py _TWI_CURRENCY_VARIANTS; deterministic, not training).
 private val TWI_CURRENCY_VARIANTS = mapOf(
     "sidi" to "cedi", "sedi" to "cedi", "sidim" to "cedi", "sɛdi" to "cedi",
-    "sidii" to "cedi", "paswa" to "pesewa", "pasewa" to "pesewa"
+    "sidii" to "cedi", "paswa" to "pesewa", "pasewa" to "pesewa",
+    // the HCI Lab recogniser's plural (2 October 2026: "…tensidisma" = "ten sidis ma")
+    "sidis" to "cedis", "sedis" to "cedis",
+    // the HCI Lab recogniser's pesewa (audit/lab-asr-2026-10-02: "pasea aduonum", "pɛ soa aduonum")
+    "pasea" to "pesewa", "pɛsoa" to "pesewa", "pesoa" to "pesewa", "pɛsewa" to "pesewa",
+    // the on-device omni CTC model's cedi (3 October 2026, GOLD K06: "mano scedi me no")
+    "scedi" to "cedi"
 )
 
 /** Speaker-verified Twi numerals + observed ASR-output variants (w2v-bert + Khaya). */
@@ -48,7 +54,12 @@ private val TWI_NUMBERS: Map<String, Int> = mapOf(
     // X-06 — the other standard spellings of 2–5 and the larger units, from the Harvard Twi course's counting lesson
     // (elias.fas.harvard.edu/languages/twi/beginning/2/counting): mienu, miɛnsa, ɛnan, enum; ahaanu = 200,
     // apem = 1000. Recognition only — never spoken. [owner: verify with a native speaker]
-    "mienu" to 2, "miɛnsa" to 3, "ɛnan" to 4, "enum" to 5, "ahaanu" to 200, "apem" to 1000
+    "mienu" to 2, "miɛnsa" to 3, "ɛnan" to 4, "enum" to 5, "ahaanu" to 200, "apem" to 1000,
+    // the HCI Lab recogniser's spelling of 3 (audit/lab-asr-2026-10-02: "mmeɛnsa" every time)
+    "mmeɛnsa" to 3, "mmeensa" to 3,
+    // …and of 4 on the rest of the GOLD clips (3 October 2026: "du nnan" = 14). Its 9, "nkuro", is also a word ("towns"):
+    // read as 9 only beside another numeral, in normalizeTwi.
+    "nnan" to 4
 )
 
 /** The same tables keyed by [com.tekyerema.language.TwiText.fold], so plain-Latin and tone-marked spellings
@@ -58,6 +69,17 @@ private val TWI_NUMBERS_FOLDED: Map<String, Int> =
 private val TWI_CURRENCY_FOLDED: Map<String, String> =
     TWI_CURRENCY_VARIANTS.entries.associate { com.tekyerema.language.TwiText.fold(it.key) to it.value }
 
+/**
+ * The words a glued-together transcript is split back into ([Normalizer.unglue]): the Twi words of a phone request, the
+ * numerals, the currency words, English number words. The HCI Lab recogniser runs code-mixed speech together — "Soma ten
+ * sidis ma…" came back as "somatensidisma" (owner's test, 2 October 2026). [owner: verify the Twi with a native speaker]
+ */
+private val GLUE_WORDS: Set<String> = setOf(
+    "soma", "ma", "kɔ", "kɔma", "frɛ", "tɔ", "bue", "me", "wo", "no", "na", "ne", "sika", "kredit", "data", "nkra",
+    "mepɛ", "sɛ", "momo", "mu", "aka", "sɛn", "bɛn", "fa", "de", "kɔ", "nnɔn", "dɔn"
+) +TWI_NUMBERS.keys + TWI_CURRENCY_VARIANTS.keys + setOf("cedi", "cedis", "pesewa", "pesewas") +
+    EN_UNITS.keys + EN_TENS.keys + setOf("hundred", "thousand")
+
 /** Entity-first normalization — spoken numbers → digits; names/words untouched (§13). */
 object Normalizer {
     fun normalize(text: String?, lang: String): String {
@@ -66,6 +88,17 @@ object Normalizer {
         if (lang == Lang.TWI) return normalizeTwi(s)
         return normalizeEnglish(s)
     }
+
+    /**
+     * A Twi request made plain for a translator: every model scored on 2 October 2026 turned "sidi" into cents, dimes or
+     * pennies ("Soma sidi du ma Ama" → "Send a dime to Ama"; "Tɔ data sidi mmiɛnsa" → "three data centers"). The Twi
+     * numerals become digits and the amount goes before its currency ("Soma 10 cedis ma Ama"), which translators keep.
+     */
+    fun forTranslation(goal: String): String =
+        normalize(goal, Lang.TWI).replace(Regex("(?i)\\b(cedi|cedis|pesewa|pesewas)\\s+(\\d+(?:\\.\\d+)?)\\b")) { m ->
+            val unit = m.groupValues[1].lowercase().removeSuffix("s")
+            "${m.groupValues[2]} $unit${if (m.groupValues[2] == "1") "" else "s"}"
+        }
 
     private val PUNCT = ".,;:?!“”\"'"
     private val TWI_CURRENCY_TOKENS = setOf("cedi", "cedis", "pesewa", "pesewas")
@@ -80,10 +113,84 @@ object Normalizer {
     /** One Twi token: its text, the numeral it stands for (if any), and the punctuation around it. */
     private class TwiTok(val text: String, val value: Long?, val lead: String, val trail: String, val core: String)
 
+    /**
+     * A word the recogniser glued together, split back — ONLY when every piece is a known word ([GLUE_WORDS], each ≥ 2
+     * letters) AND a piece is a number or currency word, so an ordinary Twi word is never cut up. Fewest pieces wins.
+     * "somatensidisma" → "soma ten sidis ma"; "mesomaa" (no number in it) stays as it is. Pure.
+     */
+    fun unglue(word: String): String {
+        val w = word.lowercase()
+        if (w.length < 6 || w in GLUE_WORDS || !w.all { it.isLetter() }) return word
+        // best[i] = fewest pieces covering w[0, i)
+        val best = arrayOfNulls<List<String>>(w.length + 1).also { it[0] = emptyList() }
+        for (i in 0 until w.length) {
+            val prefix = best[i] ?: continue
+            for (j in i + 2..minOf(w.length, i + 12)) {
+                val piece = w.substring(i, j)
+                if (piece in GLUE_WORDS && (best[j] == null || best[j]!!.size > prefix.size + 1)) best[j] = prefix + piece
+            }
+        }
+        val pieces = best[w.length] ?: return word
+        val numeric = pieces.any { it in TWI_NUMBERS || it in TWI_CURRENCY_VARIANTS || it in EN_UNITS || it in EN_TENS ||
+            it in setOf("cedi", "cedis", "pesewa", "pesewas") }
+        return if (pieces.size >= 2 && numeric) pieces.joinToString(" ") else word
+    }
+
+    /**
+     * What the UG HCI Lab recogniser writes for words it can't spell, measured on the owner's own GOLD recordings
+     * (audit/lab-asr-2026-10-02, 34 sentences): split money words joined back ("si di" → sidi, "pɛ soa" → pɛsoa), and the
+     * loanwords it respells ("ɛtam" = airtime — the owner's first Twi test, "me ɛtam no akasa", was "me airtime no aka
+     * sɛn"; "mesege" = message). Plain respellings only; the numerals that depend on context are in [normalizeTwi].
+     */
+    /** A cedi as the recognisers write it, for the joins below that only apply right after an amount's currency. */
+    private const val CURRENCY_HEARD = "sidis|sedis|sidi|sedi|scedi|sɛdi|cedis|cedi"
+    private val LAB_JOINS = listOf(
+        // (…"se di" too: the on-device Twi model on the A20e, 3 October 2026 — "to mase di anoma ama")
+        Regex("(?<![\\p{L}])(ma|so|to)?s[ie]\\s+di(?![\\p{L}])") to { m: MatchResult -> (m.groupValues[1].let { if (it.isEmpty()) "" else "$it " }) + "sidi" },
+        Regex("(?<![\\p{L}])pɛ\\s+soa(?![\\p{L}])") to { _: MatchResult -> "pɛsoa" },
+        // "soma" (send) heard as "so ma" / "to ma" — only right before money ("so masi di anua ama" = "soma sidi anum ma Ama")
+        Regex("(?<![\\p{L}])(?:so|to)\\s+ma(?=\\s+(?:sidi|sedi|cedi|cedis|sika|\\d))") to { _: MatchResult -> "soma" },
+        // "how much is LEFT" — "aka sɛn" heard as one word, only after airtime / credit / money (alone, "akasa" = "has spoken")
+        Regex("(?<![\\p{L}])(airtime|ɛtam|etam|kredit|krɛdit|sika)(\\s+no)?\\s+aka\\s?(?:sa|sɛn|sen)(?![\\p{L}])") to
+            { m: MatchResult -> "${m.groupValues[1]}${m.groupValues[2]} aka sɛn" },
+        // The rest of the GOLD clips through the HCI Lab (3 October 2026): pesewa in three pieces before its amount
+        Regex("(?<![\\p{L}])pɛ\\s+so\\s+a(?=\\s+(?:adu|du|ɔha|\\d))") to { _: MatchResult -> "pɛsoa" },
+        // …and the on-device omni CTC model's (campaign/kaggle/twi-asr-diag): the "ma" of "soma" glued to the cedi
+        // ("so masedi", "to masedi" = "soma sedi"), and the numbers after a cedi it splits or glues to the next "ma":
+        // "anoma ama" = "anum ma Ama", "me no" / "mi noma" = "mmienu (ma)", "aduo no(m)" = 20 (50), "dome no" = 12.
+        Regex("(?<![\\p{L}])(?:so|to)?\\s?ma(s[ei]di|sidi)(?![\\p{L}])") to { m: MatchResult -> "soma ${m.groupValues[1]}" },
+        Regex("(?<![\\p{L}])($CURRENCY_HEARD)\\s+anoma(?=\\s+\\p{L})") to { m: MatchResult -> "${m.groupValues[1]} anum ma" },
+        Regex("(?<![\\p{L}])($CURRENCY_HEARD)\\s+m[ei]\\s+no(ma)?(?![\\p{L}])") to
+            { m: MatchResult -> "${m.groupValues[1]} mmienu${if (m.groupValues[2].isNotEmpty()) " ma" else ""}" },
+        Regex("(?<![\\p{L}])($CURRENCY_HEARD)\\s+(?:aduo|ado|adu)\\s?no(m?)(?![\\p{L}])") to
+            { m: MatchResult -> "${m.groupValues[1]} aduonu${if (m.groupValues[2].isNotEmpty()) "m" else ""}" },
+        Regex("(?<![\\p{L}])($CURRENCY_HEARD)\\s+adnom(?![\\p{L}])") to { m: MatchResult -> "${m.groupValues[1]} aduonum" },
+        Regex("(?<![\\p{L}])($CURRENCY_HEARD)\\s+do\\s?m[ei]\\s?no(?![\\p{L}])") to { m: MatchResult -> "${m.groupValues[1]} dumienu" },
+        // "sika a aka" (the money that's left) and "mewɔ sika sɛn" (how much do I have), heard run together / apart
+        Regex("(?<![\\p{L}])sikaa\\s+aka(?![\\p{L}])") to { _: MatchResult -> "sika a aka" },
+        Regex("(?<![\\p{L}])me\\s+wo\\s+sika(?=\\s+sɛn)") to { _: MatchResult -> "mewɔ sika" },
+        Regex("(?<![\\p{L}])kɔ\\s+momu(?![\\p{L}])") to { _: MatchResult -> "kɔ momo" }
+    )
+    private val LAB_WORDS = mapOf("ɛtam" to "airtime", "etam" to "airtime", "ɛtaem" to "airtime", "etaem" to "airtime",
+        "mesege" to "message", "mɛsege" to "message", "mesegye" to "message", "mɛsegye" to "message",
+        // 3 October 2026 — the HCI Lab and the on-device omni CTC model on the rest of the GOLD clips
+        "volum" to "volume", "artim" to "airtime", "ertim" to "airtime", "airtim" to "airtime",
+        "mesage" to "message", "mɛsage" to "message", "twam" to "twa mu", "bɔnwom" to "bɔ nnwom", "nwom" to "nnwom")
+    /** "zero" as the recogniser hears it — never right on the GOLD clips (sro, sio, sere) — read as 0 only beside a numeral. */
+    private val ZERO_HEARD = setOf("zero", "ziro", "sro", "sio", "sero", "siro", "zro", "zio", "sere", "zeero")
+
     private fun normalizeTwi(input: String): String {
         // X-06 — standard spelling first (look-alike ɛ/ɔ, tone marks), so every lookup below sees one form. The raw
         // transcript is kept separately by the pipeline; only the canonical goal is respelled.
-        val s = com.tekyerema.language.TwiText.canonical(input)
+        // Then the recogniser's own spellings are mended, and a glued run ("somatensidisma") is split back into its
+        // words, before any numeral is read.
+        var c = com.tekyerema.language.TwiText.canonical(input)
+        for ((re, fix) in LAB_JOINS) c = re.replace(c) { fix(it) }
+        val s = c.split(" ").joinToString(" ") { tok ->
+            val core = tok.trim(*PUNCT.toCharArray())
+            val mended = LAB_WORDS[core.lowercase()] ?: unglue(core)
+            if (core.length == tok.length) mended else tok.replace(core, mended)
+        }
         val words = s.split(" ")
         val cores = words.map { it.trim(*PUNCT.toCharArray()).lowercase() }
         val toks = words.mapIndexed { i, w ->
@@ -94,9 +201,27 @@ object Normalizer {
             // otherwise it's the ordinary Twi word and must be left alone. Compounds (dubaako=11 …) are
             // separate keys and unaffected.
             if (core == "du") {
-                val numericNeighbour = (i > 0 && isTwiNumeric(cores[i - 1])) || (i < cores.size - 1 && isTwiNumeric(cores[i + 1]))
+                val numericNeighbour = (i > 0 && isTwiNumeric(cores[i - 1])) ||
+                    (i < cores.size - 1 && (isTwiNumeric(cores[i + 1]) || cores[i + 1] == "nnum" || cores[i + 1] == "anua"))
                 return@mapIndexed TwiTok(w, if (numericNeighbour) 10L else null, lead, trail, core)
             }
+            // The recogniser's "zero" (sro / sio / sere…) — a digit only beside another numeral (a phone number, "zero
+            // mmienu anan"); "sere" alone is an ordinary word.
+            if (core in ZERO_HEARD && core != "zero" && core != "ziro") {
+                val numericNeighbour = (i > 0 && isTwiNumeric(cores[i - 1])) || (i < cores.size - 1 && isTwiNumeric(cores[i + 1]))
+                return@mapIndexed TwiTok(w, if (numericNeighbour) 0L else null, lead, trail, core)
+            }
+            // "nkron" (9) as the HCI Lab wrote it, "nkuro" — also the word for towns, so 9 only beside another numeral
+            if (core == "nkuro" || core == "nkoro") {
+                val numericNeighbour = (i > 0 && isTwiNumeric(cores[i - 1])) || (i < cores.size - 1 && isTwiNumeric(cores[i + 1]))
+                return@mapIndexed TwiTok(w, if (numericNeighbour) 9L else null, lead, trail, core)
+            }
+            // "anum" (5) written "anua" — 3 of 4 times on the GOLD clips — read as 5 only right after a currency word.
+            // (…and "nnum", the owner's own test on the phone, 2 October 2026: "soma sidi nnum ma prince".)
+            // (…and after "du": "du nnum" = 15, the HCI Lab on GOLD N03, 3 October 2026.)
+            if ((core == "anua" || core == "nnum") && i > 0 &&
+                (twiCurrency(cores[i - 1]) != null || cores[i - 1] in TWI_CURRENCY_TOKENS || cores[i - 1] == "du"))
+                return@mapIndexed TwiTok(w, 5L, lead, trail, core)
             // number table first (mirrors phase2/asr.py _twi_tok order), then colloquial currency words.
             twiNumber(core)?.let { return@mapIndexed TwiTok(w, it.toLong(), lead, trail, core) }
             twiCurrency(core)?.let { return@mapIndexed TwiTok("$lead$it$trail", null, lead, trail, core) }
@@ -121,7 +246,10 @@ object Normalizer {
         while (i < toks.size) {
             val a = toks[i]; val b = toks.getOrNull(i + 1)
             val av = a.value; val bv = b?.value
-            if (b != null && av != null && bv != null && av in 20L..90L && av % 10L == 0L && bv in 1L..9L && joinable(a, b)) {
+            // …and the teens the HCI Lab recogniser writes in two words: "dumienu" (12) came back as "du mmienu"
+            // (audit/lab-asr-2026-10-02, "ɛno yɛ cedi dumienu" → "…sidi du mmienu" = "10 2"). Only the bare word "du".
+            val teen = a.core == "du" && av == 10L
+            if (b != null && av != null && bv != null && ((av in 20L..90L && av % 10L == 0L) || teen) && bv in 1L..9L && joinable(a, b)) {
                 tens.add(TwiTok(a.text + " " + b.text, av + bv, a.lead, b.trail, a.core)); i += 2
             } else { tens.add(a); i++ }
         }

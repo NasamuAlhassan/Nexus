@@ -89,7 +89,8 @@ object AgentEngine {
     // on round-5 evidence; adjusted only by evidence.
     private const val MAX_STEPS = 30
     /** Tools whose "several contacts match" preflight the engine settles itself, with the tool's own short question. */
-    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME)
+    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
+        com.tekyerema.money.TelcoUssdTool.NAME)
     private const val TAG = "Tekyerema"
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
@@ -240,6 +241,9 @@ object AgentEngine {
             log(LogEntry.Kind.INFO, "Busy — finish or stop the current task first.")
             return
         }
+        // A new request supersedes the rest of an earlier reading: with it still pending, "carry on" after this task paused
+        // went on reading the (now different) screen instead of resuming the task (QA R5_V01c, A20e, 3 October 2026).
+        if (!ScreenReadIntent.isContinue(g) && !ScreenReadIntent.isRead(g)) ScreenReadCursor.clear()
         confirmChannel = Channel(Channel.CONFLATED)
         secureChannel = Channel(Channel.CONFLATED)
         answerChannel = Channel(Channel.CONFLATED)
@@ -487,9 +491,10 @@ object AgentEngine {
                 0 -> null; else -> FallbackBrain(cloudChain, route = route)   // even one brain gets the network-blip retry
             }
             // Twi→English rewrite before the cloud operator was provided by Khaya MT, removed 2026-09-27.
-            // Until the HCI Lab MT is wired into this seam there is no cloud Twi→English rewrite (null ⇒ goal
-            // unchanged); LocalBrain still answers command-Twi in Twi, and English planning is unaffected.
-            val twiToEn: (suspend (String) -> String?)? = null
+            // Twi→English before the cloud planner (it can't plan from Twi): the language layer's translator
+            // (`providers.speech.mt.twiToEn` — Google, then Khaya), only for a Twi turn; null ⇒ the Twi goes with a hint.
+            // RoutingBrain.cloudGoalFor sends the planner BOTH the Twi and the translation. LocalBrain still answers command-Twi.
+            val twiToEn: (suspend (String) -> String?) = { goal -> com.tekyerema.voice.VoiceEngine.goalInEnglish(goal) }
             // The app a compound goal names ("search chrome for …") — resolved STRICTLY (no fuzzy guess) so the
             // router can open it locally as step one.
             val appForGoal: (String) -> Pair<String, String>? = { goal ->
@@ -773,7 +778,8 @@ object AgentEngine {
                 // so the PIN never enters the LLM/observation/log pipeline. On resume we re-check the screen
                 // (§10) — we do NOT reason about anything that happened while blind.
                 // G-13: a "prove you're human" check is the user's to solve too — the agent never solves CAPTCHAs.
-                if (TargetSemantics.isCredentialScreen(before) || TargetSemantics.isHumanCheckScreen(before)) {
+                if (TargetSemantics.isCredentialScreen(before, confirmationAsked = com.tekyerema.money.TelcoGuide.confirmationAsked()) ||
+                    TargetSemantics.isHumanCheckScreen(before)) {
                     val reason = TargetSemantics.handoffReason(before, isDialerNavigation(before))
                     chain.clear()   // G-11: nothing queued before the secret was entered runs after it
                     // Deliberately log a SAFE label only — never the screen text.
@@ -1196,7 +1202,7 @@ object AgentEngine {
                                 contactAsks++
                                 References.noteOptions(choices)
                                 log(LogEntry.Kind.ACTION, "${decision.name} → preflight: ${pre.message}")
-                                val ans = askUser(ask, ask)
+                                val ans = askUser(ask, ask, twiWording = pre.data?.optString("askTwi")?.takeIf { it.isNotBlank() })
                                 if (ans == null) {
                                     log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
                                     finish(AgentStatus.CANNOT_DO, stats); return
@@ -1220,7 +1226,11 @@ object AgentEngine {
                             if (pre.needsDisambiguation) References.noteOptions(References.optionsFrom(pre.message))   // C-22
                             log(LogEntry.Kind.ACTION, "${decision.name} → preflight: ${pre.message}")
                             taskMemory.noteFailure("${decision.name} can't proceed: ${pre.message.take(70)}")
-                            history.add("${decision.name}(${shortArgs(decision.args)}) → fail [preflight]; verified=false (not attempted); ${pre.message.take(160)}")
+                            // A preflight the tool declares final (recoverable=false — a service sender, a missing permission) carries
+                            // the same dead-end mark as a failed action, so the router ends a locally planned task on the tool's own
+                            // line instead of asking the cloud to restate it (QA X03, 3 October 2026: one 10 s model call for that).
+                            history.add("${decision.name}(${shortArgs(decision.args)}) → fail [preflight]; verified=false (not attempted); ${pre.message.take(160)}" +
+                                if (!pre.recoverable) Recovery.hint(decision.name, Recovery.Kind.DEAD_END) else "")
                             continue
                         }
 
@@ -1363,7 +1373,9 @@ object AgentEngine {
                                 val readBackScreen = fresh?.takeIf { s -> s.elements.any { it.source == com.tekyerema.accessibility.ElementSource.TREE } } ?: before
                                 fun readBack(s: com.tekyerema.accessibility.UiSnapshot) = com.tekyerema.policy.ActionSemantics.confirmation(
                                     decision.name, resolved?.element, requestedLabel, s,
-                                    decision.args.boolOrDefault("submit", false), decision.args.str("text")
+                                    decision.args.boolOrDefault("submit", false), decision.args.str("text"),
+                                    // a chat titled by a bare number is read with the saved name (QA M01, 3 October 2026)
+                                    nameOfNumber = { n -> appContext()?.let { c -> com.tekyerema.android.ContactResolver.lookupByNumber(c, n).firstOrNull()?.name } }
                                 )
                                 var semantic = readBack(readBackScreen)
                                 // A bare "Send this message?" (no recipient, no text) usually means the screen is still
@@ -1419,9 +1431,14 @@ object AgentEngine {
                                 // D: the Twi template can't carry "your computer is asking" or an unnamed-recipient notice —
                                 // then the full English sentence is spoken rather than a Twi one that leaves the warning out.
                                 // (WS-A: nor the ledger's "already sent" warning — any addition to the plain prompt means English.)
+                                // Every other confirmation in a Twi conversation — the money walks' read-backs, the network
+                                // menus, a prompt with a warning added — is the English read-back translated, names kept as
+                                // tags and amounts / numbers in English (VoiceEngine.twiLine; owner, 2 October 2026: the
+                                // pop-ups stayed English). Null when that can't be trusted: the English line stands.
                                 val promptTwi = confirmSpecFor(decision.name, decision.args, ctxApp)
                                     ?.let { com.tekyerema.voice.ConfirmTemplates.twi(it) }
                                     ?.takeIf { prompt == plainPrompt }
+                                    ?: com.tekyerema.voice.VoiceEngine.twiLine(prompt)
                                 stats = stats.copy(confirmations = stats.confirmations + 1)
                                 log(LogEntry.Kind.CONFIRM, prompt)
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
@@ -2100,14 +2117,28 @@ object AgentEngine {
     }
 
     /** C-13 / G-12: ask the user and WAIT for the answer inside the task. null = no answer in time, or the task was stopped. */
-    private suspend fun askUser(question: String, spoken: String): String? {
+    /** @param twiWording the question's own Twi wording when the app made the question (ContactChoice) — used in a Twi
+     *  conversation instead of a translation. */
+    private suspend fun askUser(question: String, spoken: String, twiWording: String? = null): String? {
         log(LogEntry.Kind.CONFIRM, "Asking: $spoken")
         pushConvo("Tɛkyerɛma asked: $question")
         drain(answerChannel)
-        _state.update { it.copy(status = AgentStatus.ASKING, pendingQuestion = spoken) }
+        // In a Twi conversation the question is shown — and read — in Twi too (VoiceEngine.twiLine: names kept as tags,
+        // amounts and numbers in English). The ASKING state is set FIRST, with the English: a translation can take seconds,
+        // and an answer given in that window must be the answer, not a mid-task remark (QA R_TW05, 3 October 2026). The
+        // Twi wording follows when it comes (the voice waits for it briefly — AgentState.questionTwiPending).
+        val speaksTwi = com.tekyerema.voice.VoiceEngine.speaksTwi()
+        val preset = twiWording?.takeIf { speaksTwi }
+        _state.update { it.copy(status = AgentStatus.ASKING, pendingQuestion = spoken, pendingQuestionTwi = preset,
+            questionTwiPending = preset == null && speaksTwi) }
+        val twiJob = if (preset == null && speaksTwi) scope.launch {
+            val twi = try { com.tekyerema.voice.VoiceEngine.twiLine(spoken) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null }
+            _state.update { if (it.pendingQuestion == spoken) it.copy(pendingQuestionTwi = twi, questionTwiPending = false) else it }
+        } else null
         val ans = kotlinx.coroutines.withTimeoutOrNull(
             com.tekyerema.core.config.AppConfig.long("agent.askUser.timeoutMs", 120_000L)) { answerChannel.receive() }
-        _state.update { it.copy(pendingQuestion = null) }
+        twiJob?.cancel()
+        _state.update { it.copy(pendingQuestion = null, pendingQuestionTwi = null, questionTwiPending = false) }
         appContext?.let { OverlayConfirm.hideAndWait(it) }   // the question panel is gone before the next action
         if (ans.isNullOrBlank()) return null
         setStatus(AgentStatus.THINKING)
@@ -2347,6 +2378,8 @@ object AgentEngine {
             // carried by the Twi template, so the English read-back is spoken then.)
             "momo_send" -> if (com.tekyerema.tools.MoMoSendTool.networkWarning(args) != null) null
                 else Spec(Spec.Kind.SEND_MONEY, number = args.str("number"), amount = args.str("amount"))
+            // The on-phone money walk (3 October 2026: its read-back stayed English in Twi mode) — no warning attached only.
+            com.tekyerema.money.ussd.UssdNavigatorTool.NAME -> com.tekyerema.money.ussd.UssdNavigatorTool.twiSpec(args)
             // E-03: an SMS names its recipient and its words, like a reply.
             "send_sms" -> Spec(Spec.Kind.SEND_MESSAGE, name = args.str("contact") ?: args.str("number"), message = args.str("message"))
             // §A.1 — the recipient must be named in the readback. ReplyToNotificationTool declares `sender`

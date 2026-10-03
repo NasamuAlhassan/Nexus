@@ -29,7 +29,19 @@ class LanguageRoutedInput(
 
     override suspend fun listen(spec: ListenSpec, events: ListenEvents): Heard {
         val lang = language()
-        if (lang == Lang.TWI) return twi.listen(spec.copy(language = Lang.TWI), events)
+        if (lang == Lang.TWI) {
+            // A yes / no in a Twi conversation is heard by the phone's own recogniser (owner's plan D, 2 October 2026): in
+            // the loop test the HCI Lab recogniser wrote "Aane" / "Daabi" as "so" / "fida", and every answer would spend
+            // its small daily quota. "Yes", "no", "aane" (heard "Anne"), "daabi" ("Darby") all count — voice/Confirmation.
+            // …and so is a phone number or an amount the app asked for (spec.digits): said in English inside Twi, the HCI
+            // Lab recogniser wrote "0…" as "zirofftuziro ne tsi sir".
+            if ((spec.purpose == ListenPurpose.YES_NO || spec.digits) && isOnline() &&
+                com.tekyerema.core.config.AppConfig.bool("speech.twi.yesNoOnPhoneRecognizer", true)) {
+                val heard = english.listen(spec.copy(language = Lang.GH_EN), events)
+                if (!(heard is Heard.Unavailable && heard.cause in FALL_BACK)) return heard
+            }
+            return twi.listen(spec.copy(language = Lang.TWI), events)
+        }
         val en = spec.copy(language = Lang.GH_EN)
         if (!isOnline()) return twi.listen(en, events)          // on-device English (Whisper) — works with no internet
         val heard = english.listen(en, events)

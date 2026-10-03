@@ -6,6 +6,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.k2fsa.sherpa.onnx.OfflineModelConfig
 import com.k2fsa.sherpa.onnx.OfflineNemoEncDecCtcModelConfig
+import com.k2fsa.sherpa.onnx.OfflineOmnilingualAsrCtcModelConfig
 import com.k2fsa.sherpa.onnx.OfflineRecognizer
 import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
@@ -41,6 +42,8 @@ private object ResidentModels {
     /** lang → the loaded model's label. */
     val loaded = java.util.concurrent.ConcurrentHashMap<String, String>()
     val beams = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    /** lang → the loaded model's [ModelSpec.type] (padding and text clean-up differ per type). */
+    val types = java.util.concurrent.ConcurrentHashMap<String, String>()
     /** lang → the model fits only just: let it go again after each use ([AsrMemory.Decision.unloadAfterUse]). */
     val unloadAfterUse = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     /** model location → its files' total size (never changes while the app runs). */
@@ -163,6 +166,13 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         return if (v > 0) v.coerceIn(50, 2000) else null
     }
 
+    /**
+     * Offline Twi hearing is OFF for now (owner, 3 October 2026: "let's focus on making the online Twi work first — only
+     * offline English for now"). The on-device Twi model (omni CTC, docs/agent/OFFLINE_TWI.md) stays on the phone and in the
+     * code; `speech.asr.offlineTwi` = true brings it back. Off: Twi is heard by the HCI Lab only.
+     */
+    private fun offlineTwi(): Boolean = com.tekyerema.core.config.AppConfig.bool("speech.asr.offlineTwi", false)
+
     /** whisper has no Twi token — the fine-tune decoded through a Latin proxy (en for English, sw else). */
     private fun tokenLang(lang: String) = if (lang == "eng") "en" else "sw"
     private fun langKey(force: String?) = if (force == Lang.TWI) "twi" else "eng"
@@ -170,6 +180,15 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     override val ready: Boolean
         get() = Build.SUPPORTED_ABIS.any { it.equals("arm64-v8a", true) || it.startsWith("armeabi") } &&
                 (assetSpec("eng") != null || modelDir("eng")?.let(::hasModel) == true || modelDir("twi")?.let(::hasModel) == true)
+
+    /** The on-device Twi model is trusted only when it carries its own model.json (the clean whisper-base export of
+     *  2 October 2026); the legacy tiny-twi layout (trained on the GOLD clips) never is. Other languages: ready. */
+    override fun trustedFor(lang: String): Boolean {
+        if (lang != Lang.TWI && lang != "twi") return ready
+        if (!offlineTwi()) return false
+        val d = modelDir("twi") ?: return false
+        return File(d, ModelSpec.FILE).exists() && hasModel(d)
+    }
 
     /** Hotwords (contact and app names) for the next stream, when the loaded model takes them; see [ModelSpec.hotwords]. */
     @Volatile var hotwords: () -> List<String> = { emptyList() }
@@ -182,6 +201,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
 
     private fun recLocked(lang: String): OfflineRecognizer? {
         cache[lang]?.let { return it }
+        if (lang == "twi" && !offlineTwi()) return null   // English-only offline for now (see [offlineTwi])
         assetSpec(lang)?.let { spec -> extractBundledIfPresent(lang); admit(lang, null, spec); return recFor(lang, null, spec) }
         val d = modelDir(lang) ?: return null
         val spec = specOf(d)?.takeIf { hasModel(d) } ?: return null
@@ -195,21 +215,24 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         // itself up to sherpa's token cap, so the encoder time saved is eaten by the decoder (300: only 5-14% faster on
         // the desktop) while WER nearly doubles (owner 0.29 → 0.55, unseen Gh-EN 0.48 → 0.73; asr_tail_summary_clean.md).
         // Both stay configurable (`speech.asr.tailPaddings.<eng|twi>`) for an on-phone A/B.
+        // The files and the language token come from the model's own model.json (the legacy tiny layout when there is
+        // none): the clean whisper-base Twi model (2 October 2026) is twi-encoder.onnx / twi-decoder.int8.onnx, decoded
+        // with auto-detect ("") — not the old tiny-twi's Swahili proxy token.
         val whisper = OfflineWhisperModelConfig(
-            encoder = File(d, "tiny-encoder.onnx").absolutePath,      // fp32 on purpose
-            decoder = File(d, "tiny-decoder.int8.onnx").absolutePath,
-            language = tokenLang(lang), task = "transcribe"
+            encoder = File(d, spec.files.getValue("encoder")).absolutePath,      // fp32 on purpose (the hybrid)
+            decoder = File(d, spec.files.getValue("decoder")).absolutePath,
+            language = spec.language ?: tokenLang(lang), task = "transcribe"
         ).let { w -> tailPaddingsFor(lang)?.let { w.copy(tailPaddings = it) } ?: w }
         val cfg = OfflineRecognizerConfig(
             modelConfig = OfflineModelConfig(
                 whisper = whisper,
                 // 2 = the A20e's two fast (A73) cores; `speech.asr.numThreads` lets the phone try 4 (the extra threads
                 // land on the slow A53s, which can make ORT's even split slower — measure before changing the default).
-                tokens = File(d, "tiny-tokens.txt").absolutePath, numThreads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads", 2).coerceIn(1, 8),
+                tokens = File(d, spec.tokens).absolutePath, numThreads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads", 2).coerceIn(1, 8),
                 modelType = "whisper"),
             decodingMethod = "greedy_search")
         return try {
-            OfflineRecognizer(config = cfg).also { cache[lang] = it; loaded[lang] = spec.label; Log.i("Tekyerema", "[ASR] sherpa recognizer ready ($lang)") }
+            OfflineRecognizer(config = cfg).also { cache[lang] = it; loaded[lang] = spec.label; ResidentModels.types[lang] = spec.type; Log.i("Tekyerema", "[ASR] sherpa recognizer ready ($lang)") }
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa load failed ($lang): ${t.message}"); null
         }
@@ -234,6 +257,9 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             ModelSpec.NEMO_CTC -> OfflineModelConfig(
                 nemo = OfflineNemoEncDecCtcModelConfig(model = path("model")),
                 tokens = file(spec.tokens), numThreads = threads)
+            ModelSpec.OMNILINGUAL_CTC -> OfflineModelConfig(
+                omnilingual = OfflineOmnilingualAsrCtcModelConfig(model = path("model")),
+                tokens = file(spec.tokens), numThreads = threads)
             else -> { Log.w("Tekyerema", "[ASR] unknown model type '${spec.type}' in ${d?.name ?: "assets"}/model.json"); return null }
         }
         val cfg = OfflineRecognizerConfig(modelConfig = model,
@@ -242,7 +268,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         return try {
             val t0 = SystemClock.uptimeMillis()
             OfflineRecognizer(assetManager = if (d == null) appContext.assets else null, config = cfg).also {
-                cache[lang] = it; loaded[lang] = spec.label; beams[lang] = beam
+                cache[lang] = it; loaded[lang] = spec.label; beams[lang] = beam; ResidentModels.types[lang] = spec.type
                 Log.i("Tekyerema", "[ASR] sherpa ${spec.label} ready ($lang, ${spec.type}, $threads threads${if (beam) ", hotwords" else ""}) in ${SystemClock.uptimeMillis() - t0} ms")
             }
         } catch (t: Throwable) {
@@ -317,7 +343,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         val go = cache.keys.filter(which)
         for (k in go) {
             cache.remove(k)?.let { try { it.release() } catch (_: Throwable) {} }
-            loaded.remove(k); beams.remove(k); ResidentModels.unloadAfterUse.remove(k)
+            loaded.remove(k); beams.remove(k); ResidentModels.types.remove(k); ResidentModels.unloadAfterUse.remove(k)
         }
         return go.size
     }
@@ -403,7 +429,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         return try {
             s.acceptWaveform(samples, sr)
             r.decode(s)
-            guardRepetition(trimRestart(depua(r.getResult(s).text).trim()))   // §3.10 / B-19 stop runaway loops and restarts
+            guardRepetition(trimRestart(ctcWords(lang, depua(r.getResult(s).text)).trim()))   // §3.10 / B-19 stop runaway loops and restarts
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa decode failed: ${t.message}"); null
         } finally {
@@ -497,11 +523,25 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
      */
     private fun padFor(lang: String, raw: FloatArray, sr: Int): FloatArray {
         val minLen = sr                                           // 1 s floor
+        // The omni CTC Twi model loses a word's first sound when speech starts right at the clip's edge ("en kan" for
+        // Kenkan): 0.3 s of near-silence each side brought it back on 8 more of the 72 GOLD clips, CER 0.317 → 0.305
+        // (campaign/kaggle/twi-asr-diag2, 3 October 2026). A faint fixed dither, not digital zero — the measured setting.
+        if (ResidentModels.types[lang] == ModelSpec.OMNILINGUAL_CTC) {
+            val edge = (sr * 3) / 10
+            val rnd = java.util.Random(0)
+            val out = FloatArray(raw.size + 2 * edge) { (rnd.nextGaussian() * 3e-4).toFloat() }
+            System.arraycopy(raw, 0, out, edge, raw.size)
+            return out
+        }
         return when (lang) {
             "twi" -> raw + FloatArray(sr)                         // + 1 s trailing silence
             else -> if (raw.size >= minLen) raw else raw.copyOf(minLen)
         }
     }
+
+    /** The omnilingual CTC model writes `|` between words (its tokens.txt can't hold a space). */
+    private fun ctcWords(lang: String, text: String): String =
+        if (ResidentModels.types[lang] == ModelSpec.OMNILINGUAL_CTC) text.replace('|', ' ').replace(Regex("\\s+"), " ") else text
 
     /** sherpa strips invalid UTF-8 per token; tokens.txt maps split bytes (ɛ/ɔ/ʋ) to U+E000+byte. Undo it. */
     private fun depua(text: String): String {

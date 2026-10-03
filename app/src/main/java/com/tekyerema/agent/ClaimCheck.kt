@@ -52,9 +52,12 @@ object ClaimCheck {
      */
     fun check(goal: String, summary: String, history: List<String>, screen: String? = null): Unsupported? {
         if (summary.trim().endsWith("?")) return null
+        // Words lifted from a reading are the SCREEN's, not the assistant's: "open WhatsApp and read my messages" ended with
+        // the chat's own "… Read. Sent. …" read out, and the gate heard "Sent" as "I sent" (QA R4_TR06, A20e, 3 October 2026).
+        val quoted = history.filter { h -> READ_TOOLS.any { h.startsWith("$it(") } }.joinToString("\n") { LocalBrain.resultMessage(it) }
         for (f in FAMILIES) {
             if (!f.goal.containsMatchIn(goal)) continue
-            val said = firstPersonClaim(summary, f.claim) ?: continue
+            val said = firstPersonClaim(summary, f.claim, quoted) ?: continue
             val supported = history.any { h -> f.evidence.any { t -> h.startsWith("$t(") } && h.contains("→ success") &&
                     !(f.noun == "message" && UNSENT.containsMatchIn(h)) } ||
                 (f.noun == "search" && searchShowing(goal, screen))
@@ -73,16 +76,26 @@ object ClaimCheck {
         return words.isNotEmpty() && words.all { it in s }
     }
 
-    private fun firstPersonClaim(summary: String, verbs: String): String? {
+    private val READ_TOOLS = setOf("read_screen", "read_notifications", "read_state", "search_messages")
+
+    private fun firstPersonClaim(summary: String, verbs: String, quoted: String = ""): String? {
         val firstPerson = Regex("\\bI(?:'ve| have| just| also| then)?\\b[^.!?]{0,60}?\\b($verbs)\\b", I)
         val opening = Regex("(?:^|[.!?]\\s+)(?:okay,?\\s+|done[,.]?\\s+)?($verbs)\\b", I)
         for (re in listOf(firstPerson, opening)) {
             for (m in re.findAll(summary)) {
                 val before = summary.substring(0, m.groups[1]!!.range.first)
                 if (NEGATION.containsMatchIn(before)) continue
+                if (quoted.isNotEmpty() && quoted.contains(sentenceAt(summary, m.groups[1]!!.range.first))) continue   // the screen's words
                 return m.groups[1]!!.value
             }
         }
         return null
+    }
+
+    /** The sentence of [s] that position [at] is in, trimmed (no terminal punctuation). */
+    private fun sentenceAt(s: String, at: Int): String {
+        val start = (if (at <= 0) -1 else s.lastIndexOfAny(charArrayOf('.', '!', '?'), at - 1)).let { if (it < 0) 0 else it + 1 }
+        val end = s.indexOfAny(charArrayOf('.', '!', '?'), at).let { if (it < 0) s.length else it }
+        return s.substring(start, end).trim()
     }
 }

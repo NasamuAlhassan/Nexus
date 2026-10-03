@@ -32,6 +32,8 @@ object MenuModel {
             bank == BankUssd.ScreenKind.MONEY -> Kind.CONFIRM
             ERROR.containsMatchIn(t) && rows.isEmpty() -> Kind.ERROR
             hasInput && rows.isEmpty() -> Kind.INPUT
+            // "Enter amount (1 - 5000)": the range reads like one numbered row, but the screen is asking for a value.
+            hasInput && rows.size == 1 && ENTRY.containsMatchIn(t) -> Kind.INPUT
             rows.isNotEmpty() -> Kind.MENU
             else -> Kind.FINAL
         }
@@ -63,6 +65,7 @@ object MenuModel {
     internal fun amountOf(text: String): String? =
         RE_MONEY.find(text)?.groupValues?.firstOrNull { it.isNotBlank() && it[0].isDigit() }
 
+    private val ENTRY = Regex("(?i)^\\s*(?:please\\s+)?(?:enter|input|type|re-?enter|confirm|provide)\\b")
     private val RE_CONFIRM_NUM = Regex("(?i)\\b(?:confirm|re-?enter|repeat)\\b.{0,20}\\b(?:phone|number|msisdn)\\b")
     private val RE_NUMBER = Regex("(?i)\\b(?:phone|mobile|recipient|beneficiary)?\\s*number\\b|\\bmsisdn\\b|\\benter (?:the )?number\\b")
     private val RE_AMOUNT = Regex("(?i)\\bamount\\b|\\bhow much\\b|\\bGH[S₵C]?\\b.{0,12}enter|enter.{0,12}\\bGH[S₵C]?\\b")

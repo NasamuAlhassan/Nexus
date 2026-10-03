@@ -24,6 +24,20 @@ object PromptSurface {
         else -> null
     }
 
+    /**
+     * The confirmation as the panel SHOWS it: in a Twi conversation the Twi line first (amounts and numbers stay English,
+     * names as said) with the English underneath — for a sighted helper, and so the figures can always be checked (owner,
+     * 2 October 2026: "the confirmation pop-ups remain in English"). English only when there is no Twi line.
+     */
+    fun confirmationText(english: String?, twi: String?): String? {
+        val shown = twi?.takeIf { it.isNotBlank() }?.let { com.tekyerema.language.EntityTags.display(it) }
+        return if (shown == null || english.isNullOrBlank()) english else "$shown\n\n$english"
+    }
+
+    /** A question or a confirmation can be answered by keyboard on the panel itself; the secure step never offers a
+     *  text box (it could be taken for where the PIN goes). */
+    fun canType(kind: Kind): Boolean = kind != Kind.SECURE
+
     /** Button labels, left to right. The right-hand one is the main action. */
     fun buttons(kind: Kind): List<String> = when (kind) {
         Kind.CONFIRM -> listOf("No", "Yes, do it")

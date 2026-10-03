@@ -197,6 +197,20 @@ class AuditPolicyFixesTest {
         assertTrue(history, history.startsWith("Tap “Clear history” in Chrome?") && history.contains("can't be undone"))
     }
 
+    // QA M01, 3 October 2026: Telegram's chat header read "+233 540001234" (the name not loaded yet) and the Send read-back
+    // was "Send this message to +233 540001234?" — a blind user can't tell that is Richmond. The address book's name goes first.
+    @Test fun a_send_to_a_chat_titled_by_a_bare_number_is_read_with_the_saved_name() {
+        val chat = snap("org.telegram.messenger", field(3, label = "QA test one from Tekyerema", focused = true), btn(4, "Send"),
+            title = "+233 540001234", appName = "Telegram")
+        val names = mapOf("+233 540001234" to "Apenensu")
+        assertEquals("Send this message to Apenensu (+233 540001234)?\n“QA test one from Tekyerema”",
+            ActionSemantics.confirmation("tap", btn(4, "Send"), null, chat, nameOfNumber = { names[it] }))
+        // Unknown number: the digits stand. A named chat is never looked up.
+        assertEquals("Send this message to +233 540001234?\n“QA test one from Tekyerema”",
+            ActionSemantics.confirmation("tap", btn(4, "Send"), null, chat, nameOfNumber = { null }))
+        assertEquals("Richmond Apenensu", ActionSemantics.namedRecipient("Richmond Apenensu") { "WRONG" })
+    }
+
     @Test fun clearing_a_field_closing_a_dialog_and_ordinary_taps_stay_ungated() {
         for (l in listOf("Clear search field", "Clear input", "Clear text", "Clear query", "Close", "Close tab", "Close app",
                 "Start typing", "Start", "Join", "Follow", "Following", "Show more", "Balance", "Balances", "Wi-Fi", "Mobile data",

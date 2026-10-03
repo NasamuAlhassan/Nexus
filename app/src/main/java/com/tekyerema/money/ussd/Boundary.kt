@@ -23,7 +23,14 @@ object Boundary {
         data class Stop(val why: String) : Verdict()
     }
 
-    fun decide(tx: TxContext, m: MenuModel.Screen, pinTip: String? = null): Verdict {
+    /** @param paidBefore the network has already CONFIRMED a send to this number from this phone — the registered name is
+     *  still said, but the "isn't the name you have saved" note is not repeated every time (the owner's own second line
+     *  is registered in someone else's name; first live send, 2 October 2026). */
+    fun decide(tx: TxContext, m: MenuModel.Screen, pinTip: String? = null, paidBefore: Boolean = false,
+               /** A "Reply 1 to confirm" screen whose confirm key Tɛkyerɛma presses at the user's spoken yes: the line ends
+                *  with that question instead of reading the raw screen (2 October 2026: "the screen says '…to this Telecel
+                *  number, 0508797323. Reply 1 to confirm or 0 to start again.'; confirm it there…"). */
+               confirmByVoice: Boolean = false): Verdict {
         val net = tx.provider?.let { NumberSpeech.networkName(it) } ?: "The network"
         val p = MtnConfirm.parse(m.text)
         val asked = tx.amount?.replace(",", "")?.toBigDecimalOrNull()
@@ -44,12 +51,13 @@ object Boundary {
         val pin = m.kind == MenuModel.Kind.PIN
         // One sentence up to the instruction, on purpose: "brief" speech keeps the first sentence only.
         val go = if (pin) "if that's right, enter your PIN; if not, press Cancel"
+            else if (confirmByVoice) "$net asks you to confirm. Shall I confirm it, so you can enter your PIN"
             else "the screen says “${com.tekyerema.money.UssdSpeech.forEar(m.text, intro = "")}”; confirm it there and enter your PIN yourself"
         val amount = (shown ?: asked)?.let { MtnConfirm.cedis(it) }
         val line = when (tx.intent) {
             TxIntent.SEND_MONEY -> {
                 val costs = costs(p)
-                val nameNote = when (nameMatch(tx.recipientName, registered)) {
+                val nameNote = if (paidBefore) "" else when (nameMatch(tx.recipientName, registered)) {
                     NameMatch.DIFFERENT -> " — that isn't the name you have saved, ${tx.recipientName}, so make sure it's the right person"
                     NameMatch.PARTIAL -> " — only part of that matches the name you have saved, ${tx.recipientName}, so check it's the right person"
                     else -> ""
@@ -64,11 +72,14 @@ object Boundary {
             }
             TxIntent.BUY_DATA, TxIntent.SEND_DATA ->
                 "You're about to buy ${tx.product ?: "the bundle"}${tx.recipientName?.let { " for $it" } ?: ""} — $go."
-            TxIntent.CHECK_BALANCE -> if (pin) "To hear your Mobile Money balance, enter your PIN now."
+            TxIntent.CHECK_BALANCE -> if (pin) "Enter your PIN now, and I'll read your Mobile Money balance when the network answers."
                 else "To hear your balance — $go."
             else -> "You're about to ${tx.intent.spoken} — $go."
         }
-        return Verdict.HandOff(line + " I never see or type your PIN." + (pinTip?.let { " $it" } ?: ""), registered)
+        // The voice confirmation is a question (the PIN line and its tips come when the PIN is really asked for).
+        if (confirmByVoice && !pin) return Verdict.HandOff(line.trimEnd('.') + "?", registered)
+        return Verdict.HandOff(line + " I never see or type your PIN." + (pinTip?.let { " $it" } ?: "") +
+            (if (pin) com.tekyerema.money.PinPad.handOffTip() else ""), registered)
     }
 
     private fun costs(p: MtnConfirm.Screen): String = buildList {

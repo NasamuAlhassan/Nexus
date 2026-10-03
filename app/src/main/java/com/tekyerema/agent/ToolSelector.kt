@@ -44,7 +44,7 @@ object ToolSelector {
                 "balance|ussd|\\*\\d|sika)")
         ),
         "device" to Group(
-            listOf("set_alarm", "set_timer", "set_volume", "volume_up", "volume_down", "open_setting", "play_music",
+            listOf("set_alarm", "cancel_alarm", "set_timer", "set_volume", "volume_up", "volume_down", "open_setting", "play_music",
                 "show_alarms", "calendar", "create_contact", "location", "clipboard", "share_text", "open_intent"),
             Regex("(?i)\\b(alarm|alarms|timer|wake me|remind|reminder|volume|louder|quieter|sound|mute|wi-?fi|bluetooth|" +
                 "data|airplane|location|where am i|setting|settings|music|song|play|calendar|event|meeting|appointment|" +

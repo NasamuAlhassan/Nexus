@@ -31,6 +31,10 @@ object Provider {
         return Sim(GhanaMobileMoney.network(op), op, null, dualSim = false)
     }
 
+    /** The Mobile-Money root code of [network] ("mtn" → *170#), as a set — empty when the network isn't known. */
+    fun momoRoots(network: String?): Set<String> =
+        try { network?.let { GhanaMobileMoney.rootUssd(it) }?.let { setOf(it) } ?: emptySet() } catch (_: Throwable) { emptySet() }
+
     /** The provider's Mobile-Money root code for this SIM, or null (then nothing is ever guessed). */
     fun momoRoot(ctx: Context): String? {
         val sim = current(ctx)

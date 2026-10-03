@@ -110,7 +110,8 @@ interface AudioSink {
  * Online synthesis. Twi text is sent in its standard spelling ([TwiText.canonical]); unsupported languages return
  * false at once so [com.tekyerema.voice.RoutingTts] / the fallback chain moves on to the phone's own voice. Fixed
  * lines (confirmations, "Okay") recur every session, so audio is cached in memory (bounded) — fewer quota calls and
- * no network wait the second time. Nothing is written to disk except the clip being played, deleted after.
+ * no network wait the second time. Twi clips are also kept in app-private storage across restarts ([TtsDiskCache];
+ * never one holding a digit); the clip being played is a temp file, deleted after.
  */
 class HttpTtsProvider(
     val spec: HttpSpeechSpec,
@@ -144,7 +145,18 @@ class HttpTtsProvider(
         // Pause marks (voice/SpokenText) are silences on the phone's own voice; a network voice gets plain text.
         val flat = com.tekyerema.voice.SpokenText.plain(text)
         val say = if (language == Lang.TWI) TwiText.canonical(flat).trim() else flat.trim()
-        if (say.isEmpty() || !available()) return false
+        if (say.isEmpty()) return false
+        // A line already on the phone — a lab clip recorded in advance and shipped in the app (LabClips), or one cached
+        // earlier — plays at once: no network, no daily quota, and none of the lab's ~14 s wait (3 October 2026).
+        val ready = HttpSpeech.parts(say, spec.maxChars).map { p ->
+            val key = "$code|$p"
+            cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)
+        }
+        if (ready.isNotEmpty() && ready.all { it != null }) {
+            for (c in ready) if (!sink.play(c!!)) return false
+            return true
+        }
+        if (!available()) return false
         // The gateway takes at most spec.maxChars a request (HCI Lab: 250) — split, and leave a long reply to the phone's
         // own voice rather than spend several of a small day's requests on one answer.
         val parts = HttpSpeech.parts(say, spec.maxChars)
@@ -155,7 +167,7 @@ class HttpTtsProvider(
         val clips = ArrayList<ByteArray>(parts.size)
         for (p in parts) {
             val key = "$code|$p"
-            clips += cache[key] ?: run {
+            clips += cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)?.also { if (spec.cacheEntries > 0) cache[key] = it } ?: run {
                 val units = QuotaLedger.Units(chars = p.length)
                 ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return false }
                 try {
@@ -165,7 +177,7 @@ class HttpTtsProvider(
                         if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
                         HttpSpeech.failureOf(spec, r)?.let { throw it }
                         HttpSpeech.parseAudio(spec, r)
-                    }.also { if (spec.cacheEntries > 0) cache[key] = it }
+                    }.also { if (spec.cacheEntries > 0) cache[key] = it; if (language == Lang.TWI) TtsDiskCache.put(spec.id, key, it) }
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     (e as? ProviderFailure)?.window?.let { ledger.exhaust(spec.id, spec.limits, it) }
@@ -197,13 +209,113 @@ class HttpTranslationProvider(
         val t = HttpSpeech.languageCode(spec, to) ?: return null
         if (text.isBlank() || !available()) return null
         val key = "$f>$t|$text"
-        cache[key]?.let { return it }
+        cache[key]?.let { Log.i("Tekyerema", "[MT] ${spec.id} $from→$to cached (${text.length} chars)"); return it }
+        val t0 = System.currentTimeMillis()
         return try {
             guard.run {
                 val r = transport.send(HttpSpeech.mtRequest(spec, secrets(), text, f, t), spec.connectMs, spec.callMs)
                 HttpSpeech.failureOf(spec, r)?.let { throw it }
                 HttpSpeech.parseText(spec, r)
-            }.ifBlank { null }?.also { if (spec.cacheEntries > 0) cache[key] = it }
+            }.ifBlank { null }?.also {
+                if (spec.cacheEntries > 0) cache[key] = it
+                // Measured for the QA run (no content): the translator's own latency was invisible in the log before 3 Oct 2026.
+                Log.i("Tekyerema", "[MT] ${spec.id} $from→$to ok in ${System.currentTimeMillis() - t0}ms (${text.length} → ${it.length} chars)")
+            }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { ProviderGuard.log("MT", spec.id, e); null }
+    }
+}
+
+/**
+ * The HCI Lab's own voice, recorded IN ADVANCE for the app's fixed Twi lines (confirmation frames, questions, "Mante. San
+ * ka bio."…) and shipped in the APK under assets/voice/twi_lab/ — named like [TtsDiskCache] (the SHA-256 of "twi|<text>").
+ * Owner, 3 October 2026: the lab voice is "very, very good" but takes ~14 s a new line and 15 lines a day; names, amounts
+ * and numbers are the English voice's (voice/ConfirmTemplates), so these frames never change and play at once.
+ * Recorded with campaign/twi_lab_clips.py from the list TwiLabLinesTest writes. Only for the lab voice ([ID]).
+ */
+object LabClips {
+    const val ID = "hcilab_tts"
+    const val DIR = "voice/twi_lab"
+    @Volatile private var names: Set<String>? = null
+
+    private fun index(): Set<String> = names ?: try {
+        com.tekyerema.agent.AgentEngine.appContext()?.assets?.list(DIR)?.toSet().orEmpty()
+    } catch (_: Throwable) { emptySet() }.also { names = it }
+
+    fun get(id: String, key: String): ByteArray? {
+        if (id != ID) return null
+        val file = TtsDiskCache.name(key) + ".wav"
+        if (file !in index()) return null
+        return try { com.tekyerema.agent.AgentEngine.appContext()?.assets?.open("$DIR/$file")?.use { it.readBytes() } } catch (_: Throwable) { null }
+    }
+}
+
+/**
+ * Twi voice clips kept across restarts (owner, 2 October 2026: the HCI Lab voice allows 15 requests a day, and a Twi line
+ * is now spoken in pieces — "Wopɛ sɛ mesoma | five Ghana cedis | ma Ama?" — whose fixed Twi words recur on every
+ * confirmation). App-private storage only, at most [MAX] clips, oldest dropped first; a line holding a digit (an amount, a
+ * number) is never kept — those pieces are the English voice's anyway. Cleared with the app's data.
+ */
+object TtsDiskCache {
+    private const val MAX = 300
+    private fun dir(id: String): java.io.File? = try {
+        com.tekyerema.agent.AgentEngine.appContext()?.let { java.io.File(it.filesDir, "tts_cache/$id").apply { mkdirs() } }
+    } catch (_: Throwable) { null }
+
+    internal fun name(key: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it) }.take(40)
+
+    fun get(id: String, key: String): ByteArray? = try {
+        dir(id)?.let { java.io.File(it, name(key)) }?.takeIf { it.isFile }?.also { it.setLastModified(System.currentTimeMillis()) }?.readBytes()
+    } catch (_: Throwable) { null }
+
+    fun put(id: String, key: String, clip: ByteArray) {
+        if (key.substringAfter('|').any { it.isDigit() }) return
+        try {
+            val d = dir(id) ?: return
+            java.io.File(d, name(key)).writeBytes(clip)
+            val files = d.listFiles()?.sortedBy { it.lastModified() } ?: return
+            if (files.size > MAX) files.take(files.size - MAX).forEach { it.delete() }
+        } catch (_: Throwable) {}
+    }
+}
+
+/**
+ * Translation through a Gradio Space (dialect "gradio"): our own language Space, `PrinceAlhassanNasamu/tekyerema-lang`,
+ * serving the owner's NLLB fine-tune (tekyerema-nllb600m-v1) — translation was switched on there on 2 October 2026. Two
+ * calls (the event id, then its result), each under this client's timeouts; cached; null on any failure or when the Space
+ * says it did not translate (`"covered": false`).
+ */
+class GradioTranslationProvider(
+    val spec: HttpSpeechSpec,
+    private val secrets: () -> Map<String, String>,
+    private val transport: SpeechTransport,
+    private val guard: ProviderGuard
+) : TranslationProvider, HealthAware {
+    override val name = "gradio:${spec.id}"
+    override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available()
+    private val cache: MutableMap<String, String> = lru(spec.cacheEntries.coerceIn(0, 512))
+
+    override suspend fun translate(text: String, from: String, to: String): String? {
+        val f = HttpSpeech.languageCode(spec, from) ?: return null
+        val t = HttpSpeech.languageCode(spec, to) ?: return null
+        if (text.isBlank() || !available()) return null
+        val key = "$f>$t|$text"
+        cache[key]?.let { Log.i("Tekyerema", "[MT] ${spec.id} $from→$to cached (${text.length} chars)"); return it }
+        val t0 = System.currentTimeMillis()
+        return try {
+            guard.run {
+                val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(), org.json.JSONArray().put(text).put(f).put(t)),
+                    spec.connectMs, spec.callMs)
+                HttpSpeech.failureOf(spec, call)?.let { throw it }
+                val id = HttpSpeech.gradioEventId(spec, call)
+                val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), id), spec.connectMs, spec.callMs)
+                HttpSpeech.failureOf(spec, result)?.let { throw it }
+                HttpSpeech.parseGradio(spec, result.text()) ?: ""
+            }.ifBlank { null }?.also {
+                if (spec.cacheEntries > 0) cache[key] = it
+                Log.i("Tekyerema", "[MT] ${spec.id} $from→$to ok in ${System.currentTimeMillis() - t0}ms (${text.length} → ${it.length} chars)")
+            }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { ProviderGuard.log("MT", spec.id, e); null }
     }

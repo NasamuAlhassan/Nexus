@@ -53,28 +53,65 @@ object ConfirmTemplates {
             .map { if (it == '+') "plus" else it.toString() }
             .joinToString(" ")
 
-    /** "cedi <digits>", or null when no amount was said. */
-    private fun cedis(amount: String?): String? = amount?.takeIf { a -> a.any { it.isDigit() } }?.let { "cedi ${twiDigits(it)}" }
+    /**
+     * The amount IN ENGLISH, marked for the English voice — "five Ghana cedis", "ten pesewas" (owner, 2 October 2026: "I
+     * do not want the amount spoken in Twi… all numbers and amounts should be kept and pronounced in normal English";
+     * option B: the English voice says them inside the Twi line). Null when no amount was said.
+     */
+    private fun cedisWords(amount: String?): String? {
+        val v = amount?.replace(",", "")?.trim()?.toBigDecimalOrNull()?.takeIf { it.signum() > 0 } ?: return null
+        return if (v < java.math.BigDecimal.ONE) {
+            val p = v.movePointRight(2).setScale(0, java.math.RoundingMode.HALF_UP).toPlainString()
+            "$p ${if (p == "1") "pesewa" else "pesewas"}"
+        } else {
+            val c = v.stripTrailingZeros().let { if (it.scale() < 0) it.setScale(0) else it }.toPlainString()
+            "$c Ghana ${if (c == "1") "cedi" else "cedis"}"
+        }
+    }
 
-    private const val TWI_YESNO =" Ka aane anaa daabi."   // "Say yes or no." [owner: verify]
+    /** A phone number in English, digit by digit in its 3-3-4 groups. */
+    private fun numberWords(n: String?): String? = n?.takeIf { it.any(Char::isDigit) }?.let { com.tekyerema.agent.NumberSpeech.spoken(it) }
 
-    /** The Twi confirmation question for [spec], slots filled verbatim / digit-by-digit. */
+    /** The person in English: "Prince Alhassan, 0 5 5, 2 0 9, 3 6 9 0" — name and number when both are known. */
+    private fun whoWords(name: String?, number: String?): String? =
+        listOfNotNull(name?.trim()?.takeIf { it.isNotEmpty() }, numberWords(number)).joinToString(", ").ifEmpty { null }
+
+    /** Marked for the English voice ([com.tekyerema.language.EntityTags.segments]). */
+    private fun en(s: String) = com.tekyerema.language.EntityTags.EN_OPEN + s + com.tekyerema.language.EntityTags.EN_CLOSE
+
+    private const val TWI_YESNO = " Ka aane anaa daabi."   // "Say yes or no." [owner: verify]
+
+    /**
+     * The Twi confirmation question for [spec]. Since 3 October 2026 the Twi words are FIXED frames and everything that
+     * changes — the amount, the name, the number — is ONE English stretch for the English voice ("Menbue Mobile Money sɛ
+     * wode | 5 Ghana cedis to Prince Alhassan, 0 5 5, 2 0 9, 3 6 9 0? | Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi."). The
+     * frames are recorded once in the HCI Lab's voice and ship in the app (voice/LabClips), so a confirmation starts at once
+     * instead of after the lab's ~14 s, and costs no daily quota. Money safety is unchanged: the amount, name and number
+     * are all read back. [owner: verify the Twi]
+     */
     fun twi(spec: Spec): String {
+        val who = whoWords(spec.name, spec.number)
+        val amount = cedisWords(spec.amount)
         val body = when (spec.kind) {
-            Spec.Kind.CALL ->
-                if (!spec.name.isNullOrBlank()) "Wopɛ sɛ mefrɛ ${spec.name} wɔ ${twiNumber(spec.number.orEmpty())}?"
-                else "Wopɛ sɛ mefrɛ ${twiNumber(spec.number.orEmpty())}?"
-            // §P2.1 — the app OPENS Mobile Money; the user finishes the amount + PIN. Say that, don't imply
-            // the app itself pays. [owner: verify Twi]
-            // No amount said: no empty "cedi" slot — "sika" (money), and the user picks the amount in the menu.
+            Spec.Kind.CALL -> "Wopɛ sɛ mefrɛ " + en("${who ?: "this number"}?")
+            // §P2.1 — the app OPENS Mobile Money; the user finishes the amount + PIN. Say that, don't imply the app pays.
+            // No amount said: "sika" (money), and the user picks the amount in the menu.
             Spec.Kind.SEND_MONEY ->
-                "Menbue Mobile Money sɛ wode ${cedis(spec.amount) ?: "sika"} bɛkɔma " +
-                    (spec.name?.takeIf { it.isNotBlank() } ?: twiNumber(spec.number.orEmpty())) +
-                    "? Wo ankasa na wobɛhyɛ PIN."
-            Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime${cedis(spec.amount)?.let { " $it" }.orEmpty()}? Wo ankasa na wobɛhyɛ PIN."
-            // K-05: the words themselves are read back too (verbatim), not only the recipient.
-            Spec.Kind.SEND_MESSAGE -> "Wopɛ sɛ mesoma nkra kɔ ${spec.name ?: "no"} hɔ?" +
-                (spec.message?.takeIf { it.isNotBlank() }?.let { " Nkra no se: “$it”." } ?: "")
+                (if (amount != null) "Menbue Mobile Money sɛ wode " + en("$amount to ${who ?: "them"}?")
+                 else "Menbue Mobile Money sɛ wode sika " + en("to ${who ?: "them"}?")) + " Wo ankasa na wobɛhyɛ PIN."
+            Spec.Kind.BUY_AIRTIME ->
+                if (amount != null) "Menbue Mobile Money sɛ wobɛtɔ airtime " + en("$amount?") + " Wo ankasa na wobɛhyɛ PIN."
+                else "Menbue Mobile Money sɛ wobɛtɔ airtime? Wo ankasa na wobɛhyɛ PIN."
+            // K-05: the words themselves are read back too (verbatim), not only the recipient. Words dictated in Twi are
+            // read by the Twi voice; English words by the English voice.
+            Spec.Kind.SEND_MESSAGE -> {
+                val head = spec.name?.trim()?.takeIf { it.isNotEmpty() }?.let { "Wopɛ sɛ mesoma nkra kɔma " + en("$it?") }
+                    ?: "Wopɛ sɛ mesoma nkra no?"
+                val words = spec.message?.trim()?.takeIf { it.isNotEmpty() }?.let { m ->
+                    " Nkra no se: " + if (com.tekyerema.language.ReplyLocalizer.englishForVoice(m)) en("“$m”.") else "“$m”."
+                } ?: ""
+                head + words
+            }
             Spec.Kind.GENERIC -> "Wopɛ sɛ meyɛ eyi?"
         }
         return body + TWI_YESNO

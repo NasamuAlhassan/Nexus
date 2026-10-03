@@ -505,7 +505,9 @@ object FastIntentClassifier {
         return (if (i >= 0) raw.substring(i, i + lower.length) else lower).trim()
     }
 
-    private val RE_TIME = Regex("\\b(what(?:'?s| is)?\\s+(?:the\\s+)?time|what\\s+time\\s+is\\s+it|tell\\s+me\\s+(?:the\\s+)?time|current\\s+time|check\\s+the\\s+time|m?bere\\s+bɛn|m?bɛre\\s+bɛn|mmere\\s+bɛn|dɔn\\s+s[ɛe]n|don\\s+sen)\\b")   // Twi: "(m)mere bɛn", "ɛyɛ dɔn sɛn" [owner: verify]
+    private val RE_TIME = Regex("\\b(what(?:'?s| is)?\\s+(?:the\\s+)?time|what\\s+time\\s+is\\s+it|tell\\s+me\\s+(?:the\\s+)?time|current\\s+time|check\\s+the\\s+time|m?bere\\s+bɛn|m?bɛre\\s+bɛn|mmere\\s+bɛn|dɔn\\s+s[ɛe]n|don\\s+sen|" +
+        // Every way "time" is written in Twi: "ɛberɛ bɛn" was typed on 2 October 2026, missed, and answered from a stale web page.
+        "ɛ?b[ɛe]r[ɛe]\\s+b[ɛe]n|m?m[ɛe]r[ɛe]\\s+b[ɛe]n)\\b")   // Twi: "(m)mere bɛn", "ɛyɛ dɔn sɛn" [owner: verify]
     private val RE_DAY = Regex("\\bwhat\\s+day\\b|\\bwhich\\s+day\\b|\\bis\\s+today\\s+\\w+day\\b|\\btell\\s+me\\s+the\\s+day\\b|\\bday\\s+(?:of\\s+the\\s+week|is\\s+it|is\\s+today)\\b")
     private val RE_DATE = Regex("\\bdate\\b")
     // A storage QUESTION ("how much storage is left", "do I have enough space") — not an action on storage

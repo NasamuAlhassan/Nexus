@@ -84,7 +84,8 @@ class MoneySafetyTest {
         assertEquals("AMA MENSAH", MtnConfirm.data(v.screen).getString("registeredName"))
         // Spoken, it is natural cedi wording — and one sentence, so "brief" speech keeps the instruction.
         val said = com.tekyerema.voice.Verbalize.apply(v.spoken)
-        assertTrue(said, said.startsWith("MTN says this sends ten pesewas to Zelia Awini, no fee, total ten pesewas"))
+        // "MTN" is said letter by letter since 2 October 2026 (the voice ran the three letters together).
+        assertTrue(said, said.startsWith("M T N says this sends ten pesewas to Zelia Awini, no fee, total ten pesewas"))
         assertEquals(v.spoken, com.tekyerema.voice.SpeechLint.firstSentence(v.spoken))
         assertFalse(Regex("(?i)\\bstep\\b").containsMatchIn(v.spoken))
     }

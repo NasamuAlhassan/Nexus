@@ -52,7 +52,7 @@ object TrustFast {
      * make_call / send_sms preflight: the helper (by name or number) is not reached while the PIN rule holds — whatever
      * words or brain got there ("call Kofi" when Kofi is the helper, a paired computer's request). Null = go ahead.
      */
-    fun toolRefusal(ctx: ToolContext, resolvedName: String?, number: String?): ToolResult? {
+    suspend fun toolRefusal(ctx: ToolContext, resolvedName: String?, number: String?): ToolResult? {
         if (!HelperGate.pinPending() && !com.tekyerema.core.Privacy.secureStep) return null
         val helper = HelperPlan.currentHelper() ?: return null
         val byName = resolvedName?.trim()?.equals(helper.trim(), ignoreCase = true) == true
@@ -60,7 +60,19 @@ object TrustFast {
             com.tekyerema.android.ContactResolver.resolve(ctx.appContext, helper)
                 .any { it.number.filter(Char::isDigit).takeLast(9) == number.filter(Char::isDigit).takeLast(9) }
         } catch (_: Throwable) { false }
-        return if (byName || byNumber) ToolResult(false, HelperGate.PIN_LINE, recoverable = false) else null
+        if (!byName && !byNumber) return null
+        // The hold is for the PIN SCREEN, not the clock: once it has gone (the PIN entered, or the menu cancelled) the
+        // helper can be reached again. A text to the helper was refused with the PIN line minutes after a send had
+        // stopped at MTN's PIN and been cancelled (QA TW03, A20e, 3 October 2026).
+        if (!com.tekyerema.core.Privacy.secureStep && !pinScreenInFront(ctx.controller)) { HelperGate.pinDone(); return null }
+        return ToolResult(false, HelperGate.PIN_LINE, recoverable = false)
+    }
+
+    /** A phone-app (USSD) window or a credential screen is in front. When the screen can't be seen, the hold stays. */
+    private suspend fun pinScreenInFront(ctrl: AccessibilityController?): Boolean {
+        val snap = try { ctrl?.takeIf { it.ready }?.buildSnapshot() } catch (_: Throwable) { null } ?: return true
+        return com.tekyerema.accessibility.TelephonyWindows.matches(snap.appPackage) ||
+            com.tekyerema.policy.TargetSemantics.isCredentialScreen(snap)
     }
 }
 

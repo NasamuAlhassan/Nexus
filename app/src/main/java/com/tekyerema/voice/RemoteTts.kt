@@ -42,13 +42,31 @@ class RoutingTts(
             // layer's localizer also refuses anything with a quantity or a name it can't keep (ReplyLocalizer).
             val localized = try { enToTw?.invoke(plain)?.takeIf { it.isNotBlank() } }
                 catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
+            val line = localized ?: plain
+            // An ENGLISH line that couldn't be put into Twi ("The time is 22:25") is spoken by the English voice — never
+            // English read by the Twi voice, which sounded wrong and spent the small daily Twi quota (2 October 2026).
+            // (…and a list of names — "Which Prince: Prince Melanin, Prince Alhassan ending 690…" — is English too: no Twi
+            // letter or word in it, and English words around the names. The A20e, 3 October 2026, spent a Twi call on it.)
+            if (localized == null && com.tekyerema.language.ReplyLocalizer.englishForVoice(plain)) {
+                Log.i("Tekyerema", "[TTS] an English line in a Twi conversation → the English voice")
+                return speakEnglishPiece(plain)
+            }
+            // Owner's option B (2 October 2026): amounts and phone numbers inside a Twi line are spoken by the ENGLISH voice
+            // ("Wopɛ sɛ mesoma | five Ghana cedis | ma Ama?") — the Twi voice says the Twi words.
+            if (com.tekyerema.language.EntityTags.hasEnglishSpans(line)) {
+                val spoken = speakStitched(line, language)
+                if (spoken != null) return spoken
+            }
             // X-06: the Twi voice gets the standard spelling (look-alike ɛ/ɔ mapped, tone marks dropped).
-            val twiText = com.tekyerema.language.TwiText.canonical(localized ?: plain)
+            val twiText = com.tekyerema.language.TwiText.canonical(com.tekyerema.language.EntityTags.display(line))
             if (twi.speak(twiText, language)) { twiStatus.onSpoke(); Log.i("Tekyerema", "[TTS] spoke Twi via ${twi.name}"); return true }
             // Never silent, and never unexplained (audit 2026-10-01, L16): the first time a Twi reply has to be read by
             // the English voice the user is told so, once per session; then the reply itself.
             val why = (twi as? VoiceAvailability)?.whyUnavailable()
-            val tell = twiStatus.onUnavailable(why)
+            // The Twi voice is there but declined THIS line (too long for one request, say): no "there's no Twi voice on
+            // this phone" notice — that was false on the A20e (3 October 2026). The line is still said, in English.
+            val declinedOnly = twi is VoiceAvailability && why == null
+            val tell = !declinedOnly && twiStatus.onUnavailable(why)
             Log.w("Tekyerema", "[TTS] Twi voice (${twi.name}) unavailable${why?.let { " — $it" } ?: ""} → English system-engine fallback (${english.name}) (§28)")
             if (tell) {
                 val told = english.speak(TwiVoiceStatus.NOTICE, Lang.GH_EN)
@@ -67,6 +85,36 @@ class RoutingTts(
         Log.i("Tekyerema", "[TTS] spoke $language via ${english.name}")
         return english.speak(text, language)
     }
+    /**
+     * A Twi line with English stretches, spoken piece by piece in order: Twi pieces by the Twi voice, English pieces
+     * (amounts, numbers) by the Ghanaian-English voice when online, else the phone's own. Each Twi piece is cached by the
+     * Twi voice, so a template's fixed words cost the daily quota once. Null when the FIRST Twi piece can't be spoken
+     * (the caller then falls back as for any Twi line); a later failure finishes the line in English — never silent.
+     */
+    private suspend fun speakStitched(line: String, language: String): Boolean? {
+        val pieces = com.tekyerema.language.EntityTags.segments(line)
+        var spokeTwi = false
+        for ((i, piece) in pieces.withIndex()) {
+            val (text, isEnglish) = piece
+            val ok = if (isEnglish) speakEnglishPiece(text)
+                else twi.speak(com.tekyerema.language.TwiText.canonical(text), language).also { if (it) spokeTwi = true }
+            if (!ok && !isEnglish) {
+                if (!spokeTwi && i == pieces.indexOfFirst { !it.second }) return null
+                val rest = pieces.drop(i).joinToString(" ") { it.first }
+                Log.w("Tekyerema", "[TTS] the Twi voice stopped mid-line — finishing it in English")
+                return english.speak(rest, Lang.GH_EN)
+            }
+        }
+        if (spokeTwi) twiStatus.onSpoke()
+        Log.i("Tekyerema", "[TTS] spoke Twi with English amounts (${pieces.size} pieces: ${pieces.count { it.second }} English)")
+        return true
+    }
+
+    private suspend fun speakEnglishPiece(text: String): Boolean {
+        if (ghEnglish != null && isOnline() && ghEnglish.speak(text, Lang.GH_EN)) return true
+        return english.speak(text, Lang.GH_EN)
+    }
+
     override fun stop() { english.stop(); twi.stop(); ghEnglish?.stop() }
     override fun shutdown() { english.shutdown(); twi.shutdown(); ghEnglish?.shutdown() }
 }

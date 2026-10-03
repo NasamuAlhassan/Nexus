@@ -118,6 +118,18 @@ android {
     }
 }
 
+// Slim APK (3 October 2026): `./gradlew assembleDebug -PslimApk` leaves the 631 MB offline-English model out of the APK,
+// for a phone that already holds it under …/files/ondevice/eng/asr/ (pushed once with adb; SherpaAsr reads it from there).
+// A 1 GB APK needs over 1 GB free just to update, and the A20e didn't have it that night. The flag is a task input, so
+// switching between slim and full re-merges the assets.
+val slimApk = project.hasProperty("slimApk")
+tasks.withType<com.android.build.gradle.tasks.MergeSourceSetFolders>().configureEach {
+    if (name.endsWith("Assets")) {
+        inputs.property("slimApk", slimApk)
+        if (slimApk) doLast { outputDir.get().asFile.resolve("models/ondevice/eng").deleteRecursively() }
+    }
+}
+
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.02"))
     implementation("androidx.compose.ui:ui")

@@ -127,6 +127,13 @@ class WakeWordService : Service() {
                 if (fired && SecureStep.active()) {
                     // The user is typing a PIN and TalkBack is speaking the keys — never open the mic by ourselves now.
                     Log.i(TAG, "[WAKE] detection ignored: a PIN is being entered")
+                } else if (fired && NowSpeaking.recently(OWN_VOICE_TAIL_MS)) {
+                    // Our own voice said the app's name (a welcome, an announcement, a read-out outside a turn) and the
+                    // wake word scored it 1.000 — the app cut its own sentence off to listen (A20e, 2 October 2026, twice
+                    // in a row). While we are speaking, and for the length of the scorer's window after, a detection is
+                    // our own voice. The volume-key gesture still interrupts.
+                    Log.i(TAG, "[WAKE] detection ignored: it was our own voice speaking")
+                    gate.reset(); scorer.reset()
                 } else if (fired) {
                     Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (hey=${"%.3f".format(scores[WakeScorer.FIRE_HEAD])}, " +
                         "peak=${"%.4f".format(gate.lastFirePeak)}${if (gate.lastFirePeak < WakeSignal.marginalBelow()) " marginal" else ""}) → activating")
@@ -298,6 +305,9 @@ class WakeWordService : Service() {
         private const val TAG = "Tekyerema"
         private const val CHANNEL = "tekyerema_wake"
         private const val NOTIF_ID = 4202
+        /** How long after our own voice stops a wake detection is still taken to be that voice: the scorer looks at the
+         *  last 2.7 s of sound, and a room keeps ringing a little. */
+        private const val OWN_VOICE_TAIL_MS = 3000L
         @Volatile private var running = false
         @Volatile private var instance: WakeWordService? = null
         /** Monitor mode (debug): stream scores + save/transcribe candidate clips. Runtime-only, never persisted. */

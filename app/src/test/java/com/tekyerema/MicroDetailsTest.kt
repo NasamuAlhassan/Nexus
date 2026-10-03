@@ -49,9 +49,10 @@ class MicroDetailsTest {
     // ---- "say that again" (win 2)
     @Test fun `repeat is recognised, commands are not`() {
         for (s in listOf("Say that again", "repeat", "Repeat that.", "pardon?", "come again", "what did you say",
-            "I didn't catch that", "say it again please"))
+            "I didn't catch that", "say it again please", "Ka bio", "San ka bio.", "ka no bio", "Mante"))
             assertTrue(s, RepeatIntent.matches(s))
-        for (s in listOf("repeat this song", "read my messages again", "say hello to Ama", "what did Kwame say", ""))
+        for (s in listOf("repeat this song", "read my messages again", "say hello to Ama", "what did Kwame say", "",
+            "ka kyerɛ Kwame sɛ meba bio"))
             assertFalse(s, RepeatIntent.matches(s))
     }
 

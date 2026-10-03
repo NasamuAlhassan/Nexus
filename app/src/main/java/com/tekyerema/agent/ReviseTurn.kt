@@ -38,6 +38,11 @@ object ReviseTurn {
         "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10", "twenty" to "20", "fifty" to "50", "hundred" to "100")
     private const val NUM = "(\\d+(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty|hundred)"
     private val AMOUNT_UNIT = Regex("(?i)\\b$NUM\\s*(cedis?|ghs|gh₵|ghc|pesewas?)\\b")
+    /** Nothing but a new amount: "no, 20 cities", "make it 20 cities instead", "it's 2 cds 50 ps". */
+    private const val FIGURE = "(?:\\d+(?:[.,]\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|" +
+        "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)"
+    private val AMOUNT_ONLY = Regex("(?i)^$LEAD(?:(?:make|change) (?:it|that|the amount)(?: to)?\\s+|it'?s\\s+|it is\\s+)?" +
+        "$FIGURE\\s+[\\p{L}']+(?:\\s+(?:and\\s+)?$FIGURE\\s+[\\p{L}']+)?(?:\\s+instead)?$")
     private val AMOUNT_BARE = Regex("(?i)^$LEAD(?:make|change) (?:it|that|the amount)(?: to)?\\s+$NUM(?:\\s+instead)?[.!]?$")
 
     private val TRAIL = Regex("(?i)[\\s,]+(?:instead|please|rather|not (?:him|her|them|that one)|thanks?|thank you)[.!]?$")
@@ -58,7 +63,12 @@ object ReviseTurn {
     private val HAS_DIGITS = Regex("\\d(?:[\\s-]?\\d){8,12}")
 
     fun patch(tool: String, args: JSONObject, reply: String): Revised? {
-        val said = reply.trim().trimEnd('.', '!')
+        // A correction is heard by the same recognisers as a request: "make it 20 pesos" is 20 PESEWAS, and at a payment's
+        // confirmation "no, 20 cities" is 20 cedis (voice/GhanaWords). Before this, neither changed the amount.
+        // "About money" only when the reply is nothing but an amount ("no, 20 cities", "make it 20 cities instead"): a
+        // correction to the recipient or the reference ("the reference is 2 cds") must not become a new amount.
+        val heard = reply.trim().trimEnd('.', '!')
+        val said = com.tekyerema.voice.GhanaWords.fix(heard, aboutMoney = AMOUNT_KEYS.any { args.has(it) } && AMOUNT_ONLY.matches(heard))
         if (said.isEmpty() || said.length > 200 || STOP.containsMatchIn(said)) return null
         val out = JSONObject(args.toString())
         val changes = ArrayList<String>()

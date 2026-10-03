@@ -159,8 +159,9 @@ class TelcoGuideTest {
         TelcoSession.screen("Confirm Phone Number", BankUssd.ScreenKind.MENU, auto = false, more = false,
             user = true, typed = "0552093690")
         val d = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
+        // (2 October 2026: entered without a second yes — the number was read back once when it was dictated.)
         assertTrue(d.toString(), d is AgentDecision.CallTool && (d as AgentDecision.CallTool).name == TelcoUssdTool.NAME &&
-            d.args.optString("_text") == "0552093690" && !d.args.optBoolean("_auto"))
+            d.args.optString("_text") == "0552093690")
         // A later ordinary menu doesn't resend the number.
         TelcoSession.screen("MashUp Offers 1. MashUp GHC 1 2. MashUp GHC 5 0. Back", BankUssd.ScreenKind.MENU, auto = false, more = false, user = true)
         val e = TelcoGuide.decide("buy a mashup bundle", listOf(openLine, replyLine), network = "mtn")
@@ -181,14 +182,15 @@ class TelcoGuideTest {
         assertNull(TelcoGuide.end(listOf(openLine)))
     }
 
-    @Test fun `the user's answer is typed as said - cancel stops`() {
+    @Test fun `the user's answer is typed as said - cancel closes the menu`() {
         val f = flow()
         TelcoSession.opened(f, "1. Bundles\n2. Offers", BankUssd.ScreenKind.MENU)
         val ask = """ask_user("MTN says: “1 Bundles; 2 Offers”. What should I enter?") → success — the user answered: "option 2""""
         val d = TelcoGuide.decide("buy data", listOf(openLine, ask), network = "mtn")
         assertTrue(d is AgentDecision.CallTool && (d as AgentDecision.CallTool).args.optString("_text") == "2")
+        // "Cancel": Tɛkyerɛma closes the network's menu itself (2 October 2026) — a blind user isn't sent to find Cancel.
         val c = TelcoGuide.decide("buy data", listOf(openLine,
             """ask_user("MTN says: …") → success — the user answered: "cancel""""), network = "mtn")
-        assertTrue(c is AgentDecision.Done && (c as AgentDecision.Done).summary.contains("stopped"))
+        assertTrue(c.toString(), c is AgentDecision.CallTool && c.args.optString("_action") == TelcoUssdTool.CLOSE)
     }
 }

@@ -115,6 +115,22 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Tekyerema.Voice" />
 
+        <!-- The phone's assistant gesture (long-press Home, once the user picks Tɛkyerɛma as the digital assistant app) opens
+             the voice screen above. Exported because the system starts it; it reads nothing from the intent and has no UI
+             of its own. ManifestHardeningTest pins its one ASSIST filter (Abena study, 3 October 2026). -->
+        <activity
+            android:name=".ui.AssistEntryActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.ASSIST" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- P-03/P-06/P-01 camera reading: its own task so closing it returns to whatever was open.
              No fixed screenOrientation: API 26 crashes when a translucent activity locks orientation. -->
         <activity

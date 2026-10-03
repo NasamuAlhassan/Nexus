@@ -3,6 +3,7 @@ package com.tekyerema.money
 import com.tekyerema.accessibility.AccessibilityController
 import com.tekyerema.accessibility.TelephonyWindows
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Reading and answering the phone's own USSD dialog, for the guided bank menu ([BankUssdTool]). The same approach as the
@@ -77,6 +78,79 @@ internal object UssdDialog {
             read(ctrl)?.let { return it }
             if (android.os.SystemClock.uptimeMillis() >= deadline) return null
             delay(400)
+        }
+    }
+
+    /** Close [s] (its Cancel / OK, else Back) and check it went. Closing a USSD session never moves money. */
+    suspend fun close(ctrl: AccessibilityController, s: Screen): Boolean {
+        try { s.cancelId?.let { ctrl.clickElement(it) } ?: ctrl.globalAction("back") } catch (_: Throwable) {}
+        delay(900)
+        var now = read(ctrl)
+        if (now != null && now.text == s.text) {
+            try { ctrl.globalAction("back") } catch (_: Throwable) {}
+            delay(900)
+            now = read(ctrl)
+        }
+        return now == null || now.text != s.text
+    }
+
+    /**
+     * A dialog left on the screen from an earlier session is closed BEFORE a new code is dialled — otherwise its old
+     * screen is read as the new menu's first and an answer goes into the wrong session (A20e, 2 October 2026: a Mashup
+     * dialog left open was taken for the next walk's *567# menu). The old text is returned, so the wait for the new
+     * dialog can skip it if it lingers; null when nothing was open.
+     */
+    suspend fun clearStale(ctrl: AccessibilityController): String? {
+        val old = read(ctrl) ?: return null
+        android.util.Log.i("Tekyerema", "[USSD] an earlier dialog was still open — closing it before dialling")
+        close(ctrl, old)
+        read(ctrl)?.let { close(ctrl, it) }
+        return old.text
+    }
+
+    /** "Connection problem or invalid MMI code." — the request never reached the network (nothing ran): one redial is safe. */
+    val NEVER_STARTED = Regex("(?i)connection problem|invalid mmi|mmi code|ussd code (?:failed|cancelled)|network (?:busy|not available)")
+
+    /**
+     * Dial [code] and return its FIRST screen (null = nothing came in [timeoutMs]). Any dialog still open is closed first
+     * ([clearStale]); a first screen saying the request never started ("Connection problem or invalid MMI code", seen on
+     * the A20e on 2 October 2026 — the retry a minute later went through) is closed and the code dialled ONCE more —
+     * nothing ran, so nothing can be repeated. Throws when the dialer can't be started.
+     */
+    suspend fun dial(app: android.content.Context, ctrl: AccessibilityController, code: String, timeoutMs: Long = 25_000L): Screen? {
+        var prev = clearStale(ctrl) ?: ""
+        repeat(2) { attempt ->
+            app.startActivity(android.content.Intent(android.content.Intent.ACTION_CALL,
+                android.net.Uri.parse("tel:" + android.net.Uri.encode(code))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            // MTN's "Connection problem or invalid MMI code" can come AFTER its own ~30 s: a short grace past the wait
+            // catches it, so it is closed and redialled instead of popping up behind "didn't open in time" (A20e,
+            // 3 October 2026: 2 of 3 dials in one batch; also 2 October). A late screen that is a real menu is used.
+            val first = awaitNext(ctrl, prev, timeoutMs) ?: awaitNext(ctrl, prev, LATE_GRACE_MS)
+                ?: run { sweepLate(ctrl); return null }
+            if (attempt == 1 || first.hasInput || !NEVER_STARTED.containsMatchIn(first.text)) return first
+            android.util.Log.i("Tekyerema", "[USSD] the request never started — dialling once more")
+            close(ctrl, first)
+            prev = first.text
+            delay(2_500)
+        }
+        return null
+    }
+
+    /** How much longer than the wait a first screen may take before the dial is given up. */
+    const val LATE_GRACE_MS = 10_000L
+
+    /** The dial was given up: for a while longer, a network error that turns up late is closed, so the user isn't left
+     *  with a popup they can't see over the home screen. Never touches a dialog with an entry box or a menu. */
+    private fun sweepLate(ctrl: AccessibilityController) {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            val deadline = android.os.SystemClock.uptimeMillis() + 20_000L
+            while (android.os.SystemClock.uptimeMillis() < deadline) {
+                delay(1_000)
+                val s = read(ctrl) ?: continue
+                if (s.hasInput || !NEVER_STARTED.containsMatchIn(s.text)) return@launch
+                android.util.Log.i("Tekyerema", "[USSD] the network's late error was closed (gone=${close(ctrl, s)})")
+                return@launch
+            }
         }
     }
 

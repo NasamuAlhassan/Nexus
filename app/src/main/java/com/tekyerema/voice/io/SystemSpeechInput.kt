@@ -406,6 +406,17 @@ class SystemSpeechInput(
 object NBest {
     fun pick(hyps: List<Hypothesis>, vocab: EntityCorrector.Vocab, maxRank: Int = 3): Int {
         if (hyps.size < 2 || vocab.isEmpty) return 0
+        // A money request names PEOPLE, never apps: "…airtime to a telephone number" was replaced by its alternative
+        // "…a telegram number" because Telegram is an app on the phone (live A20e 2026-10-02) — and then read as a message.
+        val v = if (MONEY.containsMatchIn(hyps[0].text)) com.tekyerema.voice.EntityCorrector.Vocab(
+            vocab.entries.filter { it.kind == com.tekyerema.voice.EntityCorrector.Kind.CONTACT }) else vocab
+        return pickFrom(hyps, v, maxRank)
+    }
+
+    private val MONEY = Regex("(?i)\\b(?:airtime|credit|cedis?|pesewas?|pesos?|momo|mobile money|money|top ?up|bundles?|mash ?up|data)\\b")
+
+    private fun pickFrom(hyps: List<Hypothesis>, vocab: EntityCorrector.Vocab, maxRank: Int): Int {
+        if (vocab.isEmpty) return 0
         if (namesKnown(hyps[0].text, vocab)) return 0
         val verb = firstWord(hyps[0].text)
         val top = hyps[0].confidence

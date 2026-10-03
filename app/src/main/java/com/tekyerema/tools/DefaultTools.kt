@@ -36,6 +36,7 @@ fun defaultTools(): List<Tool> = listOf(
     FindContactTool,
     SearchMessagesTool,
     SetAlarmTool,
+    CancelAlarmTool,
     SetTimerTool,
     // Direct system-control accelerators: absolute + incremental volume via AudioManager
     // (fast semantic path; General Operator UI remains the fallback on miss/failure).

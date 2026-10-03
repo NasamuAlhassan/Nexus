@@ -272,10 +272,10 @@ class FinanceLedgerTest {
         assertEquals(MenuModel.Kind.PIN, screen().kind)
         val v = Boundary.decide(send(), screen()) as Boundary.Verdict.HandOff
         assertEquals("MTN shows 0.10 cedis to Zelia Awini, no fee, total 0.10 cedis — if that's right, enter your PIN; if not, press Cancel. " +
-            "I never see or type your PIN.", v.line)
+            "I never see or type your PIN." + com.tekyerema.money.PinPad.handOffTip(), v.line)
         assertEquals("Zelia Awini", v.registeredName)
         val tip = Boundary.decide(send(), screen(), pinTip = "Use earphones.") as Boundary.Verdict.HandOff
-        assertTrue(tip.line.endsWith("I never see or type your PIN. Use earphones."))
+        assertTrue(tip.line, tip.line.contains("I never see or type your PIN. Use earphones."))
     }
 
     @Test fun a_contact_whose_registered_name_differs_is_said_before_the_pin() {
@@ -316,12 +316,12 @@ class FinanceLedgerTest {
     @Test fun airtime_and_balance_hand_overs_say_what_the_pin_is_for() {
         val air = Boundary.decide(TxContext(TxIntent.BUY_AIRTIME, "mtn", amount = "5"), screen("Buy airtime of GHS 5.00. Enter MM PIN")) as Boundary.Verdict.HandOff
         assertEquals("You're about to buy 5 cedis of airtime for this phone — if that's right, enter your PIN; if not, press Cancel. " +
-            "I never see or type your PIN.", air.line)
+            "I never see or type your PIN." + com.tekyerema.money.PinPad.handOffTip(), air.line)
         val other = Boundary.decide(TxContext(TxIntent.SEND_AIRTIME, "mtn", recipient = "0552093690", recipientName = "Prince Melanin", amount = "5"),
             screen("Buy airtime of GHS 5.00. Enter MM PIN")) as Boundary.Verdict.HandOff
         assertTrue(other.line.startsWith("You're about to buy 5 cedis of airtime for Prince Melanin — "))
         val bal = Boundary.decide(TxContext(TxIntent.CHECK_BALANCE, "mtn"), screen("Enter MM PIN")) as Boundary.Verdict.HandOff
-        assertEquals("To hear your Mobile Money balance, enter your PIN now. I never see or type your PIN.", bal.line)
+        assertEquals("Enter your PIN now, and I'll read your Mobile Money balance when the network answers. I never see or type your PIN." + com.tekyerema.money.PinPad.handOffTip(), bal.line)
     }
 
     // ---------------------------------------------------------------- a send to a contact

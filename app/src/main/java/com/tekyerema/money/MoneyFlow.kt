@@ -85,6 +85,66 @@ object MoneyFlow {
     /** A second command joined on, or a message to someone — the planner's. */
     private val NOT_A_REQUEST = Regex("\\b(?:and then|then|after that)\\b|\\b(?:message|text|sms|whatsapp|tell|remind|call)\\b")
 
+    /**
+     * What a CLOUD planner proposed, before it is acted on. Two rules, both from one live run (A20e, 2 October 2026 03:23):
+     *  - a Mobile Money call (`mobile_money`, `momo_send`) with its details becomes the navigator's walk. `mobile_money`
+     *    only opened *170# and left the model to walk it — it typed the phone number into MTN's MAIN menu;
+     *  - a dialled code must be one the user said or one from the checked tables. The model then asked to dial
+     *    "*124*0.10*0508797323#", a code it had made up.
+     * Everything else is returned untouched.
+     */
+    fun fromPlanner(d: AgentDecision, goal: String): AgentDecision {
+        if (d !is AgentDecision.CallTool) return d
+        val a = d.args
+        fun s(key: String) = a.optString(key).trim().takeIf { it.isNotEmpty() && it != "null" }
+        if (d.name == "run_ussd") {
+            val code = s("code")?.replace(Regex("\\s"), "") ?: return d
+            return if (codeAllowed(code, goal)) d else AgentDecision.CannotDo("money", MADE_UP_CODE)
+        }
+        if (!enabled()) return d
+        val nav = JSONObject()
+        when (d.name) {
+            "momo_send" -> {
+                nav.put("number", s("number") ?: return d).put("amount", s("amount") ?: return d)
+                s("reference")?.let { nav.put("reference", it) }
+            }
+            "mobile_money" -> {
+                val kind = s("_kind")
+                if (kind == com.tekyerema.tools.MobileMoneyTool.KIND_BALANCE) nav.put(UssdNavigatorTool.ARG_INTENT, UssdNavigatorTool.CHECK_BALANCE)
+                else {
+                    if (kind != "buy_airtime" && kind != "send_money") return d
+                    nav.put("amount", s("_amount") ?: return d)
+                    val who = s("_recipient")
+                    val number = s("_number") ?: who?.takeIf { w -> w.count { it.isDigit() } >= 7 }
+                    val name = who?.takeIf { w -> w.count { it.isDigit() } < 7 }
+                    if (number != null) nav.put("number", number) else if (name != null) nav.put(UssdNavigatorTool.ARG_CONTACT, name)
+                    if (kind == "buy_airtime") nav.put(UssdNavigatorTool.ARG_INTENT,
+                        if (number != null || name != null) UssdNavigatorTool.SEND_AIRTIME else UssdNavigatorTool.BUY_AIRTIME)
+                    else if (number == null && name == null) return d
+                }
+            }
+            else -> return d
+        }
+        // A number the user never said (the model took one from an earlier turn): the read-back says so.
+        val digits = nav.optString("number").filter { it.isDigit() }
+        if (digits.length >= 7 && !goal.filter { it.isDigit() }.contains(digits.takeLast(9))) nav.put(UssdNavigatorTool.ARG_UNSAID, true)
+        return AgentDecision.CallTool(NAV, nav, "the planner's Mobile Money request — walked on the phone, by the navigator")
+    }
+
+    const val MADE_UP_CODE = "I don't have a checked code for that, and I never dial a code I made up. Nothing was dialled."
+
+    /** A code may be dialled when the user said it ("dial star 1 3 5 hash", "*135#") or it is in the checked tables: the
+     *  balance code, the networks' data / offers menus, the Mobile Money and bank roots. */
+    internal fun codeAllowed(code: String, goal: String): Boolean {
+        val said = goal.lowercase().replace(Regex("\\bstar\\b"), "*").replace(Regex("\\b(?:hash|pound)\\b"), "#")
+            .replace(Regex("[\\s,]"), "")
+        if (said.contains(code)) return true
+        if (code in com.tekyerema.policy.PolicyConfig.freeReadOnlyCodes()) return true
+        if (code in TelcoUssd.checkedCodes()) return true
+        val roots = com.tekyerema.tools.GhanaMobileMoney.moneyPrefixes() + BankUssd.moneyPrefixes()
+        return roots.any { code == "$it#" }
+    }
+
     fun decide(goal: String, history: List<String>): AgentDecision? {
         if (!enabled()) return null
         // A correction the engine could not apply itself is the planner's (RoutingBrain.pendingRevision) — never re-proposed here.
@@ -176,7 +236,7 @@ object MoneyFlow {
 
     /** A read's own result is the answer; its failure is said as a failure, never as a completion. */
     private fun spoken(last: String, fallback: String): AgentDecision {
-        val msg = LocalBrain.resultMessage(last)
+        val msg = MoneyPlan.spokenPart(LocalBrain.resultMessage(last))
         return if (last.contains("→ success")) AgentDecision.Done(msg.ifBlank { fallback })
         else AgentDecision.CannotDo("money", msg.ifBlank { fallback })
     }

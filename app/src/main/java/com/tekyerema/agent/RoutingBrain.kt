@@ -69,8 +69,49 @@ class RoutingBrain(
             // ladder, the plan). With lastOrNull, a failed local play_music ("play the playlist on the screen") was never
             // handed to the planner, and the task ended claiming "Playing …" (A20e 2026-09-29).
             val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return false
-            return last.contains("verified=false") || last.contains("verified=partial") ||
-                Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)
+            if (Regex("→ (?:fail|rejected|refused|BLOCKED|NOT )").containsMatchIn(last)) return true
+            // A READ that succeeded is its own result — the screen can't "verify" it, so its verified=false is no
+            // deviation (QA D10, A20e, 3 October 2026: the local read_notifications for "read my last message" ran fine,
+            // was marked unverified, and the task went to the cloud, which opened Messages and read the wrong bubble).
+            if (READ_ONLY_STEP.containsMatchIn(last) && last.contains("→ success")) return false
+            return last.contains("verified=false") || last.contains("verified=partial")
+        }
+
+        /** The tool's own words for the last step when it failed and declared itself a dead end (Recovery.Kind.DEAD_END —
+         *  the engine's history line carries the "genuine dead-end" hint), else null. Pure. */
+        fun deadEnd(history: List<String>): String? {
+            val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
+            if (!last.contains("→ fail") || !last.contains("genuine dead-end")) return null
+            // the tool's words only — not the planner-facing recovery hint the engine appends, nor the tool's own
+            // guidance to the planner ("Tell the user that; don't open Messages to try.")
+            return userFacing(LocalBrain.resultMessage(last).substringBefore(" — this route is a genuine dead-end")).ifBlank { "I couldn't do that." }
+        }
+
+        private val PLANNER_TALK = Regex("(?i)^(?:tell the user|ask the user|only if|don'?t open|do not open|never open|do not|use |call )|" +
+            "\\b(?:ask_user|cannot_do|install_app|the planner)\\b")
+
+        /** The sentences of a tool's message meant for the USER — everything before the first one addressed to the planner. Pure. */
+        fun userFacing(message: String): String {
+            val out = ArrayList<String>()
+            for (s in message.split(Regex("(?<=[.!?])\\s+"))) {
+                val t = s.trim().replace(Regex("\\s*\\((?:ask_user|cannot_do|install_app)\\)"), "")
+                if (t.isEmpty()) continue
+                if (PLANNER_TALK.containsMatchIn(t)) break
+                out.add(t)
+            }
+            return out.joinToString(" ").trim()
+        }
+
+        const val DEAD_END = "dead_end"
+
+        private val NOT_INSTALLED = Regex("I couldn't find an app called (.+?) on this phone")
+
+        /** The plain line for a locally planned open_app that found no such app, or null. Pure. */
+        fun appNotInstalled(history: List<String>): String? {
+            val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
+            if (!last.startsWith("open_app(") || !last.contains("→ fail")) return null
+            val app = NOT_INSTALLED.find(last)?.groupValues?.get(1)?.trim() ?: return null
+            return "I couldn't find an app called $app on this phone — it isn't installed, or I misheard the name. Say it again if I got it wrong."
         }
 
         /**
@@ -130,7 +171,9 @@ class RoutingBrain(
         const val OFFLINE_UNKNOWN = "offline_unknown_command"
 
         /** Tools that change nothing — a history of only these means nothing has been done on the phone yet. */
-        private val READ_ONLY_STEP = Regex("^(?:read_state|read_screen|read_all|read_notifications|web_search|find_tool|wait|ask_user)\\(")
+        // (search_contacts / find_contact added 3 October 2026: "what is Richmond's number" was answered on the phone and then
+        // handed to the cloud as a deviation because the look-up "didn't verify" — QA R_D11.)
+        private val READ_ONLY_STEP = Regex("^(?:read_state|read_screen|read_all|read_notifications|web_search|find_tool|wait|ask_user|search_contacts|find_contact)\\(")
     }
 
     @Volatile private var stickyCloud = false
@@ -171,10 +214,24 @@ class RoutingBrain(
         if (!stickyCloud && (cloudFirst() || skipLocal) && cloud != null && isOnline() && (skipLocal || !isWeak())) {
             android.util.Log.i("Tekyerema", "[ROUTE] cloud-first: all requests → cloud brain '${com.tekyerema.core.Privacy.content(ctx.goal.take(60))}'")
             stickyCloud = true
-            if (cloudGoal == null) cloudGoal = goalForCloud?.invoke(ctx.goal)?.takeIf { it.isNotBlank() }
+            if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
         }
         if (stickyCloud && cloud != null) return fromCloud(ctx, cloud.decide(cloudCtx(ctx)))
 
+        // A step the rules planned hit a dead end the TOOL itself declared (recoverable=false — the network refused the
+        // text, a permission is missing): no on-screen route gets round it, so the task ends with the tool's own line. It
+        // used to go to the cloud as a "deviation", which drove Samsung Messages for 9 model calls / 60 s to re-send a text
+        // the network had just refused for lack of airtime (QA R_TW03, A20e, 3 October 2026).
+        if (!stickyCloud) deadEnd(ctx.history)?.let { line ->
+            android.util.Log.i("Tekyerema", "[ROUTE] the local step hit a dead end its tool declared — ending honestly, no planner")
+            return AgentDecision.CannotDo(DEAD_END, line)
+        }
+        // "Open Signal" when no such app is installed: the phone already knows, so it says so — the cloud used to be asked
+        // (one model call, 4 s) only to ask the user which app they meant (QA E06, A20e, 3 October 2026).
+        if (!stickyCloud) appNotInstalled(ctx.history)?.let { line ->
+            android.util.Log.i("Tekyerema", "[ROUTE] the app isn't installed — said on the phone, no planner")
+            return AgentDecision.CannotDo(DEAD_END, line)
+        }
         // C-17: the local brain's last step failed or didn't verify — a deviation from its routine plan. Hand the rest
         // of the task to the cloud operator (sticky) instead of letting the rules try the same thing again.
         if (cloud != null && isOnline() && deviated(ctx.history) &&
@@ -239,7 +296,13 @@ class RoutingBrain(
 
     /** The cloud's decision, with two N-09/H-11 touches: a direct answer is remembered; a lost connection before
      *  anything was done on the phone is answered the offline way (cached answer / offer / what works offline). */
-    private fun fromCloud(ctx: BrainContext, d: AgentDecision): AgentDecision {
+    private fun fromCloud(ctx: BrainContext, proposed: AgentDecision): AgentDecision {
+        // A Twi request was planned with its names, amounts and numbers as TAGS ([P1], [A1], [N1]): the real values go back
+        // in HERE, before anything acts on, asks about or says the decision (language/EntityTags; owner, 2 October 2026).
+        val untagged = com.tekyerema.language.TwiTagSession.forGoal(ctx.goal)?.entities?.takeIf { it.isNotEmpty() }
+            ?.let { TagRestore.restoreTags(proposed, it) } ?: proposed
+        // No model walks a money menu or dials a code it made up (money/MoneyFlow.fromPlanner).
+        val d = com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal)
         if (d is AgentDecision.Done && ctx.simple) answers?.put(ctx.goal, d.summary)
         if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && nothingDoneYet(ctx.history)) {
             android.util.Log.i("Tekyerema", "[ROUTE] the cloud couldn't be reached — answering the offline way")
@@ -322,13 +385,56 @@ class RoutingBrain(
      *  unavailable but the goal is Twi, still send the raw Twi with an interpret hint. null ⇒ use the goal as-is. */
     private suspend fun cloudGoalFor(goal: String): String? {
         val translated = goalForCloud?.invoke(goal)?.takeIf { it.isNotBlank() }
+        // The request as tagged for translation: names, amounts and numbers as [P1] / [A1] / [N1]. The planner is told
+        // what KIND each tag is — never the value — and writes the tags back; fromCloud puts the real values in.
+        val tags = com.tekyerema.language.TwiTagSession.forGoal(goal)
+        val twi = tags?.twiTagged ?: goal
+        val facts = tags?.entities?.takeIf { it.isNotEmpty() }?.let { es ->
+            "\nTags in this request (the phone holds their real values): " + es.joinToString("; ") { e ->
+                e.tag + " = " + when (e.kind) {
+                    com.tekyerema.language.EntityTags.Kind.PERSON -> "a person's name"
+                    com.tekyerema.language.EntityTags.Kind.AMOUNT -> "an amount of money"
+                    com.tekyerema.language.EntityTags.Kind.NUMBER -> "a phone number"
+                }
+            } + ". Write each tag exactly as it is (e.g. [P1]) wherever you mean it — in tool arguments, questions and " +
+                "replies. Never translate, spell out or guess the value of a tag."
+        }.orEmpty()
         return when {
+            // The answer and any question go back through the English→Twi translator (ReplyLocalizer), which only takes
+            // plain English: so the planner answers in plain English (2 October 2026: an English question was read out by
+            // the Twi voice, and a Twi answer of the planner's own was wrong Twi).
             translated != null ->
-                "The user spoke Asante Twi: \"$goal\"\n" +
-                "A rough machine translation (it can be WRONG — trust the Twi if they disagree): \"$translated\"\n" +
-                "Interpret the Twi yourself and act on it; do NOT type it verbatim."
-            looksTwi(goal) -> "Asante Twi (interpret and act, do not type verbatim): $goal"
+                "The user spoke Asante Twi: \"$twi\"\n" +
+                "A machine translation (it can be WRONG — trust the Twi if they disagree; speech recognition may also have run " +
+                "words together or garbled numbers): \"$translated\"\n" +
+                "Interpret the request and act on it; do NOT type it verbatim. Write every reply and question in short, plain " +
+                "English — it is translated into Twi for the user." + facts
+            // No translation came (the translator cold or down): the tags only ever protected names and amounts from the
+            // TRANSLATOR, so the planner gets the user's own words with them in — with tags alone it asked "what is the
+            // name of the person whose messages you want?" for a name that was in the request (QA TR04, 3 October 2026).
+            looksTwi(goal) || facts.isNotEmpty() -> "Asante Twi (interpret and act, do not type verbatim). Write every reply " +
+                "and question in short, plain English: \"$goal\""
             else -> null
+        }
+    }
+
+    object TagRestore {
+        /** [d] with every tag of [entities] replaced by its real value — in a tool's arguments (strings, nested), a
+         *  question, an answer or a refusal. Amounts go back as plain figures-and-unit ("5 cedis"), numbers as digits. */
+        internal fun restoreTags(d: AgentDecision, entities: List<com.tekyerema.language.EntityTags.Entity>): AgentDecision {
+            fun r(s: String) = com.tekyerema.language.EntityTags.restore(s, entities)
+            fun deep(v: Any?): Any? = when (v) {
+                is String -> r(v)
+                is org.json.JSONObject -> org.json.JSONObject().also { o -> for (k in v.keys()) o.put(k, deep(v.opt(k))) }
+                is org.json.JSONArray -> org.json.JSONArray().also { a -> for (i in 0 until v.length()) a.put(deep(v.opt(i))) }
+                else -> v
+            }
+            return when (d) {
+                is AgentDecision.CallTool -> d.copy(args = deep(d.args) as org.json.JSONObject, rationale = d.rationale?.let(::r))
+                is AgentDecision.Done -> d.copy(summary = r(d.summary))
+                is AgentDecision.CannotDo -> d.copy(detail = r(d.detail))
+                else -> d
+            }
         }
     }
 }

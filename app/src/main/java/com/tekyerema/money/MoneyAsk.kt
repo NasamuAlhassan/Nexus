@@ -37,7 +37,31 @@ object MoneyAsk {
 
     /** The request as a financial ask, or null when it is not one (or is one this layer must leave to the planner). */
     fun parse(text: String): Ask? {
-        val clean = tidy(text)
+        // Repaired here for EVERY money request, typed ones too — on purpose: "typed" text is often a keyboard's own
+        // dictation, and in a request that is already about money "10 pesos" can only be pesewas. (A typed request
+        // that is not about money never reaches a repair: VoiceController.runTurn repairs speech only.)
+        val tidied = tidy(heard(text))
+        // "send 10 pesewas to Prince, actually make it 20" — a correction inside the sentence: the head is the request, the
+        // tail replaces its amount (unit inherited) or its person/number. Before this the tail was read as part of the
+        // name ("I couldn't find 'Prince Melanin, actually make 20'" — QA N12, A20e, 3 October 2026).
+        SELF_FIX.find(tidied)?.let { m ->
+            val head = m.groupValues[1].trim().trimEnd(','); val tail = m.groupValues[2].trim().trimEnd('.', '!')
+            if (head.isNotEmpty() && tail.isNotEmpty()) parse(head)?.let { base ->
+                val unitless = UNITLESS.matches(tail)
+                val tailAmount = if (unitless && PESEWA_WORD.containsMatchIn(head)) amount("$tail pesewas") else amount(tail)
+                if (tailAmount != null) return base.copy(amount = tailAmount)
+                val digits = tail.filter { it.isDigit() }
+                if (digits.length >= 9 && tail.all { it.isDigit() || it == ' ' || it == '+' || it == '-' })
+                    return base.copy(number = foldNumber(digits), badNumber = if (foldNumber(digits) == null) digits else null, name = null)
+                if (tail.split(' ').size <= 3 && tail.all { it.isLetter() || it == ' ' || it == '\'' || it == '.' })
+                    return base.copy(name = tail, number = null, badNumber = null, forSelf = false)
+            }
+        }
+        // "… to a telephone number", "… to another number", "… for someone": somebody else, not yet said who. The words are
+        // taken out (the recogniser also turns "telephone number" into "telegram number", which read as a message), and
+        // the caller asks for the number — the request is never quietly turned into one for the user's own phone.
+        val vague = SOME_NUMBER.containsMatchIn(tidied)
+        val clean = if (vague) SOME_NUMBER.replace(tidied, " ").replace(SPACES, " ").trim() else tidied
         if (clean.isEmpty()) return null
         val g = clean.lowercase()
         if (looksTwi(g) || CODE.containsMatchIn(g) || FOLLOW_ON.containsMatchIn(g)) return null
@@ -45,13 +69,25 @@ object MoneyAsk {
         if (balanceShaped(g)) return Ask(balanceOf(g))
         if (LIMIT.containsMatchIn(g)) return null
         // "send Kofi 5 cedis for credit" gives a reason; "send 5 cedis credit to Kofi" buys airtime.
-        if (AIRTIME_WORD.containsMatchIn(g) && !FOR_AIRTIME.containsMatchIn(g)) return airtime(clean)
-        return send(clean)
+        if (AIRTIME_WORD.containsMatchIn(g) && !FOR_AIRTIME.containsMatchIn(g))
+            return airtime(clean)?.let { if (vague && it.number == null && it.badNumber == null) it.copy(name = null, forSelf = false) else it }
+        return send(clean)?.let { if (vague && it.number == null && it.badNumber == null) it.copy(name = null) else it }
     }
+
+    /**
+     * What the recogniser makes of Ghanaian money words: "10 pesos" is ten PESEWAS (heard three times in one live session,
+     * 2 October 2026 — and read back as 10 cedis, a hundred times too much). Only after a figure, and never in a request
+     * about exchanging or converting currencies.
+     */
+    fun heard(text: String, aboutMoney: Boolean = false): String = com.tekyerema.voice.GhanaWords.fix(text, aboutMoney)
+
+    private val SOME_NUMBER = Regex("(?i)\\b(?:to|for)\\s+(?:(?:a|an|another|some|one|the|a different|someone(?:'s)?|somebody(?:'s)?)\\s+)(?:(?:other|different|new|telephone|phone|mobile|telegram|momo|mtn|telecel|else)\\s+)*(?:number|line|person)\\b|\\b(?:to|for)\\s+(?:someone|somebody)(?:\\s+else)?\\b(?!')")
 
     /** An answer to "How much?": "fifty", "50 cedis", "2 cedis 50", "fifty pesewas", "one hundred and twenty" → plain cedis; null when no amount. */
     fun amount(text: String): String? {
-        var t = toks(tidy(text))
+        // The ANSWER to "How much?" is heard by the same recognisers: "50 pesos" / "50 ps" answered here used to be
+        // taken as fifty CEDIS — the repair was only applied to whole requests (found 2026-10-02).
+        var t = toks(tidy(heard(text, aboutMoney = true)))
         val phone = findPhone(t)
         if (phone != null) t = t.subList(0, phone.from) + PHONE_TOK + t.subList(phone.to, t.size)
         return firstAmount(t)?.value
@@ -177,9 +213,11 @@ object MoneyAsk {
             BILL.containsMatchIn(g) || CARD.containsMatchIn(g) || BACK.containsMatchIn(g) || AIR_MEDIA.containsMatchIn(g)) return null
         // "for me", "my phone", "this number": the user's own line — said or not, that is the default.
         val all = toks(SELF.replace(s0, " ").replace(SPACES, " ").trim())
-        val v = verbIndex(all, AIRTIME_VERBS) ?: return null
-        var rest: List<Tok> = all.subList(v + 1, all.size)
-        if (all[v].low == "top") {
+        // "10 pesewas airtime to a telephone number" — said with no verb at all (live A20e 2026-10-02): an amount and the
+        // word airtime are the request. Without a verb AND without an amount it is not one ("my airtime finished").
+        val v = verbIndex(all, AIRTIME_VERBS)
+        var rest: List<Tok> = if (v == null) all else all.subList(v + 1, all.size)
+        if (v != null && all[v].low == "top") {
             if (rest.firstOrNull()?.low != "up") return null
             rest = rest.drop(1)
         }
@@ -192,6 +230,7 @@ object MoneyAsk {
                 (k.low == "top" && withPhone.getOrNull(i + 1)?.low == "up") || (k.low == "up" && withPhone.getOrNull(i - 1)?.low == "top"))
         }
         val amt = firstAmount(t)
+        if (v == null && amt == null) return null
         if (amt != null) t = cut(t, amt)
         val other = t.any { it.low in OTHER_PRON }
         val left = t.filter {
@@ -240,9 +279,14 @@ object MoneyAsk {
     private val PHONE_TOK = Tok("", PHONE_LOW)
     private val TRIM = charArrayOf(' ', ',', '.', ';', ':', '!', '?', '"', '\'', '(', ')')
 
+    /** "10p" / "50ps" — the everyday shorthand for pesewas ("momo 10p prince melanin" asked how much; QA N02, 3 October 2026).
+     *  Never "10pm" / "10 p.m.". */
+    private val PESEWA_SHORT = Regex("(?i)\\b(\\d+)\\s?ps?\\b(?!\\.?\\s*m\\b)")
+
     private fun tidy(text: String): String =
         WAKE.replaceFirst(text.replace('’', '\'').replace('‘', '\'').replace('“', '"').replace('”', '"')
             .replace(SPACES, " ").trim(), "").trim().trimEnd('.', '!', '?', ',', ';', ' ')
+            .replace(PESEWA_SHORT, "$1 pesewas")
 
     private fun looksTwi(g: String): Boolean = g.any { it == 'ɛ' || it == 'ɔ' } || TWI_WORD.containsMatchIn(g)
 
@@ -534,6 +578,19 @@ object MoneyAsk {
     private val TAILS = setOf("please", "now", "today", "quickly", "asap", "immediately", "thanks", "pls", "abeg", "ok", "okay")
     private val CURRENCY = setOf("cedi", "cedis", "ghs", "ghc", "gh₵", "gh¢", "₵", "¢")
     private val CUR_PREFIX = setOf("ghs", "ghc", "gh₵", "gh¢", "₵", "¢")
+    /** Digits said as a Ghana number, folded to the 0-form (10 digits), or null when they are not one. */
+    private fun foldNumber(digits: String): String? = when {
+        digits.length == 10 && digits.startsWith("0") -> digits
+        digits.length == 12 && digits.startsWith("233") -> "0" + digits.substring(3)
+        digits.length == 13 && digits.startsWith("2330") -> digits.substring(3)
+        else -> null
+    }
+
+    /** The head of a request, then a correction: ", actually make it 20" / "no wait, 2 cedis" / "I mean Kofi". */
+    private val SELF_FIX = Regex("(?i)^(.+?)[,;]?\\s+(?:actually|no wait|wait no|no,|i mean|i meant|sorry|rather|make that)[,\\s]+" +
+        "(?:(?:make|change) (?:it|that|the amount)(?: to)?\\s+|it'?s\\s+|it should be\\s+|let'?s say\\s+|say\\s+|to\\s+)?(.+)$")
+    private val UNITLESS = Regex("^\\d+(?:\\.\\d+)?$")
+    private val PESEWA_WORD = Regex("(?i)\\bpesewas?\\b")
     private val PESEWA = setOf("pesewa", "pesewas", "pese")
     private val MONEY_WORDS = setOf("money", "cash", "momo", "funds")
     private val FILL = setOf("some", "of", "worth", "amount", "sum", "about", "exactly", "only", "just", "the", "a", "an", "number",
@@ -558,7 +615,11 @@ object MoneyAsk {
     private val PICK_AIRTIME = Regex("\\bairtime\\b|\\bcredit\\b|\\bunits?\\b|\\bsecond\\b|\\blast\\b")
 
     private val LEAD_Q = Regex("^(?:(?:please|kindly|can you|could you|tell me|check|do you know|i want to know|let me know)\\s+)+")
-    private const val TX = "(?:money|payment|transfer|transaction|momo|mobile money|send|cash)"
+    /** "my last money transfer", "the momo payment", "that transaction": a payment named with its usual words. The
+     *  "last … money transfer" form went to the cloud planner, which opened the myMTN app and tapped round it for 100
+     *  seconds (A20e, 2 October 2026). */
+    private const val TX = "(?:(?:last|latest|recent|most recent|previous) )?(?:(?:money|momo|mobile money|cash) )?" +
+        "(?:money|payment|transfer|transaction|momo|mobile money|send|cash)"
     private const val Q_TAIL = "(?: to [a-z' ]{1,30})?(?: yet| now| already)?\$"
     private val STATUS = listOf(
         Regex("^did (?:it|that|this|(?:the|my|that|this) $TX)(?: to [a-z' ]{1,30}?)? " +
@@ -572,7 +633,7 @@ object MoneyAsk {
         Regex("^(?:what(?:'s| is) )?(?:the |my )?(?:payment|transfer|transaction|momo) status\$")
     )
     private val LAST = listOf(
-        Regex("\\b(?:my|the) (?:last|latest|most recent|previous) (?:(?:momo|mobile money) )?(?:transaction|payment|transfer|momo|send)\\b"),
+        Regex("\\b(?:my|the) (?:last|latest|most recent|previous) (?:(?:momo|mobile money|money|cash) )?(?:transaction|payment|transfer|momo|send)\\b"),
         Regex("^who did i (?:last|just) (?:send|pay|transfer)\\b|^who did i (?:send|pay|transfer)\\b.*\\b(?:last|just now|recently)\\b"),
         Regex("^who (?:was|is) the last (?:person|one) i (?:sent|paid)\\b")
     )

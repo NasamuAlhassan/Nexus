@@ -53,14 +53,23 @@ class HybridAsrTest {
         assertEquals("fake-online-khaya", tr.backend)
     }
 
-    @Test fun twi_stays_on_device_when_khaya_not_configured_or_offline() = runTest {
-        val dev = FakeOnDevice(); val khaya = FakeOnline("khaya")
-        // onlineFor returns null for Twi (no key OR offline) → must stay on-device, never call online.
-        val hybrid = HybridAsr(dev, onlineFor = { null }, forceLanguage = { Lang.TWI })
-        val tr = hybrid.transcribe(wav, Lang.TWI, Lang.TWI)
+    @Test fun twi_offline_needs_a_trusted_on_device_model_and_says_so_otherwise() = runTest {
+        val khaya = FakeOnline("khaya")
+        // Offline Twi is OFF for now (owner, 3 October 2026): no trusted on-device Twi → an honest "needs the internet".
+        val plain = FakeOnDevice()
+        val err = try { HybridAsr(plain, onlineFor = { null }, forceLanguage = { Lang.TWI }).transcribe(wav, Lang.TWI, Lang.TWI); null }
+            catch (e: AsrException) { e.message }
+        assertEquals(com.tekyerema.voice.TWI_NEEDS_INTERNET, err)
+        assertFalse("never guesses with an untrusted model", plain.ran)
+        // Switched back on (a trusted model): offline Twi is heard on the phone, and online is never called.
+        val trusted = object : SpeechToRaw by FakeOnDevice() {
+            var ran = false
+            override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? { ran = true; return "frɛ kwame" }
+            override fun trustedFor(lang: String) = true
+        }
+        val tr = HybridAsr(trusted, onlineFor = { null }, forceLanguage = { Lang.TWI }).transcribe(wav, Lang.TWI, Lang.TWI)
         assertFalse("online must NOT be called when unconfigured/offline", khaya.called)
-        assertTrue(dev.ran)
-        assertEquals("fake-ondevice", tr.backend)
+        assertTrue(trusted.ran)
     }
 
     @Test fun ghen_routes_online_when_endpoint_configured() = runTest {

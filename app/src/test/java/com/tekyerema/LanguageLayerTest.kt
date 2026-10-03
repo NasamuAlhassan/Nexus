@@ -274,6 +274,89 @@ class LanguageLayerTest {
         assertNull("never at a PIN screen / offline", LanguageLayer.onlineAsr(Lang.TWI, r.asr, cloudAllowed = false))
     }
 
+    /** Owner, 2 October 2026: translation back — Google first (Twi = "ak"), Khaya second — each built only with its own key,
+     *  the key in a header (never the URL), and both directions routed. */
+    @Test fun shipped_translators_are_google_then_khaya_and_need_their_keys() = runTest {
+        AppConfig.loadFrom(shippedConfig())
+        val clients = AppConfig.obj("providers.speech.clients")
+        // Our own Spaces first (free), then Khaya, then Google — each only built with its own local.properties entry.
+        assertEquals(listOf("space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.twiToEn", emptyList()))
+        assertEquals(listOf("space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.enToTwi", emptyList()))
+        val nllb = FakeTransport { json(200, """{"translation":"Send ten cedis to Ama"}""") }
+        val n = LanguageLayer.build(clients, mapOf("SPEECH_NLLB_URL" to "https://x-tekyerema-translate.hf.space/translate",
+            "SPEECH_NLLB_TOKEN" to "n-key"), nllb, { FakeSink() })
+        assertEquals(setOf("nllb_mt"), n.mt.keys)
+        assertEquals("Send ten cedis to Ama", n.mt.getValue("nllb_mt").translate("Soma sidi du ma Ama", Lang.TWI, Lang.GH_EN))
+        val nb = JSONObject(bodyText(nllb.requests.single()))
+        assertEquals("twi_Latn", nb.getString("source")); assertEquals("eng_Latn", nb.getString("target"))
+        assertEquals("Bearer n-key", nllb.requests.single().header("Authorization"))
+        val google = FakeTransport { json(200, """{"data":{"translations":[{"translatedText":"Send ten cedis to Ama"}]}}""") }
+        val r = LanguageLayer.build(clients, mapOf("SPEECH_GOOGLE_TRANSLATE_KEY" to "g-key"), google, { FakeSink() })
+        assertEquals(setOf("google_mt"), r.mt.keys)   // no Khaya key → no Khaya client
+        assertEquals("Send ten cedis to Ama", r.mt.getValue("google_mt").translate("Soma sidi du ma Ama", Lang.TWI, Lang.GH_EN))
+        val req = google.requests.single()
+        assertEquals("g-key", req.header("X-goog-api-key"))
+        assertFalse("the key never rides in the URL", req.url.toString().contains("g-key"))
+        val body = JSONObject(bodyText(req))
+        assertEquals("Soma sidi du ma Ama", body.getString("q"))
+        assertEquals("ak", body.getString("source")); assertEquals("en", body.getString("target")); assertEquals("text", body.getString("format"))
+        // Khaya: {"in", "lang":"tw-en"} → a bare JSON string, its own header.
+        val khaya = FakeTransport { json(200, "\"Send ten cedis to Ama\"") }
+        val k = LanguageLayer.build(clients, mapOf("SPEECH_KHAYA_KEY" to "k-key"), khaya, { FakeSink() })
+        assertEquals("Send ten cedis to Ama", k.mt.getValue("khaya_mt").translate("Soma sidi du ma Ama", Lang.TWI, Lang.GH_EN))
+        val kb = JSONObject(bodyText(khaya.requests.single()))
+        assertEquals("tw-en", kb.getString("lang")); assertEquals("Soma sidi du ma Ama", kb.getString("in"))
+        assertEquals("k-key", khaya.requests.single().header("Ocp-Apim-Subscription-Key"))
+        // Both keys: Google is asked first.
+        val both = LanguageLayer.build(clients, mapOf("SPEECH_GOOGLE_TRANSLATE_KEY" to "g", "SPEECH_KHAYA_KEY" to "k"), google, { FakeSink() })
+        assertEquals("khaya_mt", LanguageLayer.mtIds(Lang.TWI, Lang.GH_EN).first { it in both.mt })
+    }
+
+    /** Our language Space speaks Gradio's two-step API; its answer is a JSON STRING with "translation" and "covered"
+     *  (the live reply of 2 October 2026, word for word). A "covered": false pass-through is no translation at all. */
+    @Test fun the_language_space_is_called_the_gradio_way() = runTest {
+        AppConfig.loadFrom(shippedConfig())
+        val clients = AppConfig.obj("providers.speech.clients")
+        val space = FakeTransport { r ->
+            if (r.method == "POST") json(200, """{"event_id":"ev1"}""")
+            else HttpReply(200, ("event: complete\ndata: [\"{\\\"translation\\\": \\\"Send money to Kwame\\\", \\\"covered\\\": true, " +
+                "\\\"src\\\": \\\"twi\\\", \\\"tgt\\\": \\\"eng\\\", \\\"engine\\\": \\\"nllb600m-v1\\\"}\"]\n\n").toByteArray(), "text/event-stream", null)
+        }
+        val r = LanguageLayer.build(clients, mapOf("SPEECH_SPACE_URL" to "https://princealhassannasamu-tekyerema-lang.hf.space"), space, { FakeSink() })
+        assertEquals(setOf("space_mt"), r.mt.keys)
+        assertEquals("Send money to Kwame", r.mt.getValue("space_mt").translate("Soma sika ma Kwame", Lang.TWI, Lang.GH_EN))
+        val (call, result) = space.requests
+        assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/translate", call.url.toString())
+        assertEquals("""{"data":["Soma sika ma Kwame","twi","eng"]}""", bodyText(call))
+        assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/translate/ev1", result.url.toString())
+        // Passed through untranslated (the Space's MT off) → null, so the planner gets the Twi with a hint instead.
+        val off = FakeTransport { rq -> if (rq.method == "POST") json(200, """{"event_id":"e"}""")
+            else HttpReply(200, "event: complete\ndata: [\"{\\\"translation\\\": \\\"Soma\\\", \\\"covered\\\": false}\"]\n".toByteArray(), null, null) }
+        val r2 = LanguageLayer.build(clients, mapOf("SPEECH_SPACE_URL" to "https://x.hf.space"), off, { FakeSink() })
+        assertNull(r2.mt.getValue("space_mt").translate("Soma", Lang.TWI, Lang.GH_EN))
+    }
+
+    /** Money in Twi goes to the translator in plain form — "sidi du" was "a dime" / "cents" in every model on 2 October 2026. */
+    @Test fun twi_money_is_made_plain_before_translation() {
+        assertEquals("Soma 10 cedis ma Ama", com.tekyerema.voice.Normalizer.forTranslation("Soma sidi du ma Ama"))
+        assertEquals("Tɔ data 3 cedis", com.tekyerema.voice.Normalizer.forTranslation("Tɔ data sidi mmiɛnsa"))
+        assertEquals("Tɔ kredit 1 cedi ma me", com.tekyerema.voice.Normalizer.forTranslation("Tɔ kredit sidi baako ma me"))
+        assertEquals("Frɛ Kofi", com.tekyerema.voice.Normalizer.forTranslation("Frɛ Kofi"))
+    }
+
+    /** The time and date here are the phone's clock, never a web page (the owner's Twi test: "4:04 pm, 29 September" at 18:22, 2 October). */
+    @Test fun the_time_here_is_never_searched() {
+        val now = java.util.Calendar.getInstance().apply { set(2026, java.util.Calendar.OCTOBER, 2, 18, 22) }
+        assertEquals("It's 6:22 pm, by this phone's clock.", com.tekyerema.tools.WebSearchTool.localNow("current time in Accra Ghana", now))
+        assertEquals("It's 6:22 pm, by this phone's clock.", com.tekyerema.tools.WebSearchTool.localNow("what time is it now", now))
+        assertEquals("Today is Friday 2 October 2026.", com.tekyerema.tools.WebSearchTool.localNow("today's date", now))
+        assertNull("another city's time is a real search", com.tekyerema.tools.WebSearchTool.localNow("current time in London", now))
+        assertNull(com.tekyerema.tools.WebSearchTool.localNow("history of the Ghana cedi", now))
+        // …and the Twi ways of asking never leave the phone at all.
+        for (q in listOf("ɛberɛ bɛn", "bere bɛn na ɛyɛ", "mmerɛ bɛn"))
+            assertEquals(q, com.tekyerema.agent.FastIntent.Time, com.tekyerema.agent.FastIntentClassifier.classify(q))
+    }
+
     @Test fun enabled_clients_register_by_id_and_route_per_language() = runTest {
         AppConfig.loadFrom(listOf("config/t.json" to """{"providers":{"speech":{"asr":{"online":{"twi":["lab"],"gh_en":["gone","lab"]}}}}}"""))
         val clients = JSONObject("""{"lab":${JSONObject(mapOf("kind" to "asr", "enabled" to true, "endpoint" to "${'$'}{SPEECH_LAB_URL}",
@@ -334,8 +417,12 @@ class LanguageLayerTest {
         val routing = RoutingTts(english = phone, twi = twiVoice, enToTw = { if (it == "Good morning") "Mema wo akye" else null })
         routing.speak("Good morning", Lang.TWI)
         assertEquals("Mema wo akye", twiVoice.said.last().first)
-        routing.speak("Opening WhatsApp", Lang.TWI)
-        assertEquals("no translation → the original text", "Opening WhatsApp", twiVoice.said.last().first)
+        // No translation for an ENGLISH line → the English voice says it (2 October 2026: English read by the Twi voice
+        // sounded wrong and spent the HCI Lab's 15-a-day quota). App-authored Twi still goes to the Twi voice.
+        routing.speak("Opening WhatsApp now", Lang.TWI)
+        assertEquals("no translation → the English voice", "Opening WhatsApp now", phone.said.last().first)
+        routing.speak("Mabue no.", Lang.TWI)
+        assertEquals("Mabue no.", twiVoice.said.last().first)
         val throwing = RoutingTts(english = phone, twi = twiVoice, enToTw = { throw IllegalStateException("boom") })
         assertTrue("a translator crash never silences the reply", throwing.speak("Done", Lang.TWI))
     }

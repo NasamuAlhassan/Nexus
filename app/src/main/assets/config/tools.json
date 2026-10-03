@@ -118,6 +118,10 @@
   "set_alarm": {
    "feature": "E-05"
   },
+  "cancel_alarm": {
+   "feature": "E-05",
+   "idempotent": true
+  },
   "set_timer": {
    "feature": "E-05"
   },

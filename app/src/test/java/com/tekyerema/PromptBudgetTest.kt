@@ -34,7 +34,9 @@ class PromptBudgetTest {
         // Audit fixes (2026-10-01): measured 29,109 — + share_screenshot (the screen as a picture handed to a chat app; loads
         // only with the "comms" group), the Mobile Money balance kind / navigator intent, and reply-to-last-sender on
         // send_sms. The 'open chrome' per-step subset moved 8,382 → 8,409 (guard below, 9k, unchanged). Cap = that + ~140.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 29_250)
+        // QA run (2026-10-03): measured 29,441 — + cancel_alarm (the Clock's own DISMISS_ALARM request; "device" group, so it
+        // loads per step only with alarm words). Cap = that + ~140.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 29_580)
         assertTrue("system prompt grew to $system chars", system <= 5_600)
     }
 

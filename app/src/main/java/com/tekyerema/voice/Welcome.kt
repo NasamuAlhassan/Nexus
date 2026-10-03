@@ -391,7 +391,7 @@ class SettingsWelcomeHost(
             settings.languageMode = effect.mode
             // The habitual language follows an explicit choice; "both" leaves it to what the user speaks.
             when (effect.mode) {
-                Settings.LANG_MODE_TWI -> settings.sessionLanguage = Lang.TWI
+                Settings.LANG_MODE_TWI -> { settings.sessionLanguage = Lang.TWI; VoiceEngine.warmTranslator() }
                 Settings.LANG_MODE_ENGLISH -> settings.sessionLanguage = Lang.GH_EN
             }
             null

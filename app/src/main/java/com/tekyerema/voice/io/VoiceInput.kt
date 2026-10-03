@@ -30,7 +30,11 @@ data class ListenSpec(
     val maxAlternatives: Int = if (purpose == ListenPurpose.YES_NO) 5 else 1,
     /** B-09: the user asked for a moment ("wait") — listen patiently. Captured path: the PATIENT VAD; system recognizer:
      *  one more listen when the first hears nothing. (Not in the brief's signature: yes/no needs it after a hold.) */
-    val patient: Boolean = purpose == ListenPurpose.PATIENT
+    val patient: Boolean = purpose == ListenPurpose.PATIENT,
+    /** The answer is a phone number or an amount: in a Twi conversation it is heard by the phone's own (English)
+     *  recogniser, good at digits — the HCI Lab recogniser destroys a number said in English ("zirofftuziro"; owner's
+     *  test, 2 October 2026). */
+    val digits: Boolean = false
 )
 
 /** One recognizer hypothesis. [confidence] null = the recognizer gave none (-1 or missing) — unknown, never "low". */

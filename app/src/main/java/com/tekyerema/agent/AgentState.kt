@@ -69,6 +69,14 @@ data class AgentUiState(
     val handoffReason: String? = null,
     /** C-13: the question an ask_user step is waiting on (spoken + shown). */
     val pendingQuestion: String? = null,
+    /** The same question in Twi for a Twi conversation (names as said, amounts / numbers in English) — the panel shows
+     *  it first and the voice reads it (owner, 2 October 2026: "the pop-up… appeared in English instead of Twi"). */
+    val pendingQuestionTwi: String? = null,
+    /** The Twi wording is still being fetched (a bounded translator call): the voice waits for it a moment before
+     *  reading the English. The ASKING state itself is set at once, so an answer given meanwhile is the ANSWER — in a
+     *  Twi conversation a typed "no" arrived during a 5 s translation and was taken for a mid-task remark; the question
+     *  was then asked by voice to silence until the task was stopped (QA R_TW05, A20e, 3 October 2026). */
+    val questionTwiPending: Boolean = false,
     val serviceReady: Boolean = false,
     val hasApiKey: Boolean = false,
     val brain: String = "not configured",

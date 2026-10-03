@@ -34,6 +34,10 @@ object VoiceEngine {
     /** Kept for QA auditioning of the "thinking" filler clips over ADB (`--es play_fillers twi|en`). */
     @Volatile private var fillerPlayer: FillerPlayer? = null
     @Volatile private var sherpa: SherpaAsr? = null
+    /** The app's own Ghanaian-English voice ([SherpaTts]) when this build carries one; null ⇒ the phone's engine only. */
+    @Volatile private var ownVoice: SherpaTts? = null
+    /** What says an English line outside a voice turn: the own voice first, then the phone's engine (never silent). */
+    private lateinit var englishVoice: TtsProvider
     /** B-19: reload contact names / app labels in the background (no-op while fresh). */
     @Volatile private var vocabRefresh: () -> Unit = {}
 
@@ -56,6 +60,89 @@ object VoiceEngine {
         private set
     @Volatile internal var dictationMic: Recorder? = null
         private set
+
+    private val ENGLISH_COMMAND = Regex("(?i)^(?:send|buy|call|open|read|check|did|turn|what'?s|what|how|set|play|find|show|tell|go|text|message|remind|stop|who)\\b")
+
+    /** Twi → English for the cloud planner (`providers.speech.mt.twiToEn`), set when the voice stack is built. */
+    @Volatile private var twiToEnglish: com.tekyerema.language.TranslationProvider? = null
+    /** The language the conversation is in right now (LanguageSession), set when the voice stack is built. */
+    @Volatile private var conversationLanguage: () -> String = { Lang.GH_EN }
+
+    /**
+     * The request in English for the cloud planner when the user is speaking Twi, or null (English, no translator, offline,
+     * a failure — then the planner gets the Twi with a hint). The owner's Twi test of 2 October 2026 went to the planner
+     * untranslated — "somatensidisma ziroffvtziro…" came back as "who should I send the message to?" — since the Khaya
+     * translator was removed on 27 September and nothing took its place.
+     */
+    suspend fun goalInEnglish(goal: String): String? {
+        if (conversationLanguage() != Lang.TWI && !com.tekyerema.language.TwiText.hasAkanLetters(goal)) return null
+        // A Twi request the phone already understood arrives as its English command (language/TwiCommands): not Twi.
+        // Its quoted message words may be Twi on purpose ("…saying “Meba anɔpa”") — they are sent as said, never translated.
+        val unquoted = goal.replace(Regex("“[^”]*”"), "")
+        if (!com.tekyerema.language.TwiText.hasAkanLetters(unquoted) && ENGLISH_COMMAND.containsMatchIn(unquoted)) return null
+        // Names, amounts and numbers go to the translator — and on to the planner — as TAGS ([P1], [A1], [N1]); the real
+        // values come back in RoutingBrain (language/EntityTags; owner, 2 October 2026). A translation that loses or
+        // doubles a tag isn't used: the planner then gets the tagged Twi and the facts only (also with no translator).
+        val tagged = com.tekyerema.language.EntityTags.protect(Normalizer.forTranslation(goal), ::contactName)
+        val mt = twiToEnglish
+        // Bounded: a cold translator (the ZeroGPU Space asleep, then Khaya) cost 40 s of silence before the planner even
+        // started (QA TR03 / TR04, A20e, 3 October 2026). Past `providers.speech.mt.goalWaitMs` the planner gets the Twi.
+        val waitMs = com.tekyerema.core.config.AppConfig.long("providers.speech.mt.goalWaitMs", 8_000L)
+        val t0 = System.currentTimeMillis()
+        val out = if (mt == null) null
+            else try { kotlinx.coroutines.withTimeoutOrNull(waitMs) { mt.translate(tagged.text, Lang.TWI, Lang.GH_EN) }
+                ?.trim()?.takeIf { it.isNotBlank() && !it.equals(tagged.text.trim(), true) } }
+            catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
+        if (out == null && mt != null && System.currentTimeMillis() - t0 >= waitMs)
+            android.util.Log.i("Tekyerema", "[MT] the request's translation took longer than $waitMs ms — the planner gets the Twi")
+        val english = out?.takeIf { tagged.isEmpty || com.tekyerema.language.EntityTags.intact(tagged.text, it, tagged.entities) }
+        if (out != null && english == null) android.util.Log.w("Tekyerema", "[MT] the translation lost a name/amount tag — not used")
+        com.tekyerema.language.TwiTagSession.set(com.tekyerema.language.TwiTagSession.Entry(goal, tagged.text, english, tagged.entities))
+        return english
+    }
+
+    /** English → Twi with names as tags and amounts / numbers kept in English (ReplyLocalizer), set with the voice stack. */
+    @Volatile private var englishToTwi: (suspend (String) -> String?)? = null
+
+    /** The user is speaking Twi right now. */
+    fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
+
+    @Volatile private var warmedAt = 0L
+
+    /** Wake the translator (the owner's ZeroGPU Space sleeps when idle: its first call after a pause timed out at 32 s —
+     *  QA, 3 October 2026) with one short, cached line, in the background — when Twi mode starts or a Twi turn begins. */
+    fun warmTranslator() {
+        val mt = twiToEnglish ?: return
+        val now = System.currentTimeMillis()
+        if (now - warmedAt < 10 * 60_000L) return
+        warmedAt = now
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val t0 = System.currentTimeMillis()
+            val ok = try { mt.translate("Mepa wo kyɛw", Lang.TWI, Lang.GH_EN) != null } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[MT] translator warm-up ${if (ok) "ok" else "failed"} in ${System.currentTimeMillis() - t0}ms")
+        }
+    }
+
+    /**
+     * The Twi line for an English [text] when the conversation is in Twi — a confirmation the pop-up shows and the voice
+     * reads (owner, 2 October 2026: "even when switched to Twi, the confirmation pop-ups remain in English"). Amounts and
+     * numbers come back marked for the English voice (EntityTags). Null: not Twi, no translator, or the translation
+     * couldn't be trusted — then the English stands.
+     */
+    suspend fun twiLine(text: String): String? =
+        if (!speaksTwi()) null else try { englishToTwi?.invoke(text) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
+
+    /** Twi words that are never a contact's name, however a contact is saved ("Ma", "Sika"…). */
+    private val NOT_A_NAME = setOf("ma", "me", "wo", "no", "na", "ne", "sɛ", "kɔ", "frɛ", "soma", "sika", "aka", "sɛn", "bɛn",
+        "tɔ", "bue", "mu", "yɛ", "de", "fa", "nkra", "data", "airtime", "kredit", "cedi", "cedis", "message", "momo", "mepɛ")
+
+    /** The saved contact a word or two-word phrase names (from the recogniser's contact vocabulary), or null. */
+    private fun contactName(said: String): String? {
+        val low = said.lowercase()
+        if (low.length < 3 || low in NOT_A_NAME || low.split(" ").any { it in NOT_A_NAME }) return null
+        val compact = PhoneticKey.compact(said)
+        return SpeechVocabulary.current().entries.firstOrNull { it.kind == EntityCorrector.Kind.CONTACT && it.compact == compact }?.text
+    }
 
     /** The keyboard's own dictation can produce text in this language right now: the on-device models are
      *  present, or an online recogniser for the language is configured and reachable. */
@@ -83,6 +170,12 @@ object VoiceEngine {
         // The system voice is wrapped so Twi letters (ɛ/ɔ) are read as plain vowels instead of being spelled out;
         // English text passes through unchanged.
         val systemVoice = com.tekyerema.language.PlainLatinVoice(systemTts)
+        // The app's own Ghanaian-English voice, on the phone (owner, 2026-10-02: the Nigerian system voice mangles our
+        // words). Present only when the build bundles one (assets/models/ondevice/eng/tts/voice.json); it speaks first
+        // and the phone's engine stays behind it, so a missing or failed model is never silence.
+        val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
+        englishVoice = if (own != null) FallbackTts(listOf(own, systemVoice)) else systemVoice
+        android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}")
         val levels = ArrayList<StateFlow<Float>>()
         // B-19: contact names + app labels for post-ASR name correction, loaded off the voice path (READ_CONTACTS only
         // if already granted). Refreshed again whenever a listen starts (cheap no-op inside its TTL). Both profiles.
@@ -97,7 +190,7 @@ object VoiceEngine {
         voiceLayer = plan.profile
         // Filled by the ghana factory below (captured-audio stack); stay as-is under builtin_en.
         var hybrid: AsrProvider = LocalAsrProvider()          // never used for listening under builtin_en (no audio to give it)
-        var tts: TtsProvider = systemVoice
+        var tts: TtsProvider = englishVoice
         var sessionLang: () -> String = { Lang.GH_EN }
         var onLang: (String) -> Unit = {}
         var forced: () -> String? = { plan.pinnedLanguage }
@@ -135,11 +228,15 @@ object VoiceEngine {
                 // any REST API) from config + local.properties; with the shipped config there are none, so everything is the
                 // system engine and a Twi reply is spoken from its text (no MT).
                 asrRegistry = layer.asr
-                val ttsRegistry = layer.tts + ("system" to systemVoice)
+                val ttsRegistry = layer.tts + ("system" to systemVoice) + (own?.let { mapOf("ghvoice" to it) } ?: emptyMap())
+                val englishIds = if (own != null) listOf("ghvoice", "system") else listOf("system")
                 val localizer = com.tekyerema.language.ReplyLocalizer(
                     com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline))
+                // …and the way in: a Twi request reaches the cloud planner in English too (with its Twi), as it did with Khaya.
+                twiToEnglish = com.tekyerema.language.LanguageLayer.translator(Lang.TWI, Lang.GH_EN, layer.mt, isOnline)
+                englishToTwi = { localizer.toTwi(it) }
                 tts = RoutingTts(
-                    english = SpeechProviders.tts("english", ttsRegistry, systemVoice),
+                    english = SpeechProviders.tts("english", ttsRegistry, systemVoice, englishIds),
                     twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
                     ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
@@ -150,6 +247,7 @@ object VoiceEngine {
                 val language = com.tekyerema.language.LanguageSession(
                     loadHabitual = { settings.sessionLanguage }, saveHabitual = { settings.sessionLanguage = it })
                 sessionLang = { language.current() }
+                conversationLanguage = { language.current() }
                 onLang = { language.onTurn(it) }
                 forced = { settings.forcedLanguage }
                 // Preload the tiny on-device model off the critical path so the first voice request isn't slow (§20).
@@ -236,8 +334,9 @@ object VoiceEngine {
                     (when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })
             }).also { fillerPlayer = it },
             fastRouter = fastRouter,
-            // Fast-path ACTION confirmations speak on the offline system engine so they're instant on any network.
-            systemVoice = systemTts,
+            // Fast-path ACTION confirmations speak on an OFFLINE voice so they're instant on any network: the own voice
+            // when the build has one (one voice for every English line), else the system engine.
+            systemVoice = if (own != null) englishVoice else systemTts,
             // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
             // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
             bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
@@ -267,7 +366,7 @@ object VoiceEngine {
         // The reply panel follows the task: whenever it waits on the user (a confirmation, a question, the secure step)
         // a panel over any app shows what it's waiting for, with buttons that fit (PromptSurface).
         scope.launch(Dispatchers.Main) {
-            AgentEngine.state.map { PromptSurface.of(it.status, it.pendingConfirmation, it.pendingQuestion, it.confirmationSeq) }
+            AgentEngine.state.map { PromptSurface.of(it.status, PromptSurface.confirmationText(it.pendingConfirmation, it.pendingConfirmationTwi), PromptSurface.confirmationText(it.pendingQuestion, it.pendingQuestionTwi), it.confirmationSeq) }
                 .distinctUntilChanged()
                 .collect { p -> if (p == null) com.tekyerema.ui.OverlayConfirm.hidePrompt(app) else com.tekyerema.ui.OverlayConfirm.showPrompt(app, p) }
         }
@@ -328,11 +427,13 @@ object VoiceEngine {
         val pressing = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW &&
             level != android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
         if (pressing && !controller.isRunning) sherpa?.let { s -> scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
+        if (pressing && !controller.isRunning) ownVoice?.let { v -> scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
     }
 
     private fun applyVoiceSettings() {
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
         ReadingPace.rate = when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }   // readings sized in seconds
+        ownVoice?.rate = ReadingPace.rate
         systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
         Welcome.userName = settings.preferredName   // spoken greetings use the name from the welcome
     }
@@ -354,7 +455,7 @@ object VoiceEngine {
     fun announce(text: String) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
         scope.launch {
-            val ok = try { systemTts.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) { false }
+            val ok = try { englishVoice.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) { false }
             android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok (${text.length} chars)")   // no words in the log
         }
     }
@@ -366,8 +467,13 @@ object VoiceEngine {
     fun start() { vocabRefresh(); controller.start() }
     /** The circle tapped while Tɛkyerɛma talks: stop talking and listen. While a task works it stays the kill switch. */
     fun interrupt() = controller.interrupt()
-    /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button). */
+    /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button) — cutting the prompt's
+     *  own reading short when it is still being read. */
     fun respond() { if (initialized) controller.respond() }
+    /** A read-back or a question is being read aloud right now. */
+    val readingPrompt: Boolean get() = initialized && controller.readingPrompt
+    /** The prompt panel's Type box opened: stop reading, close the answer microphone, keep the prompt waiting. */
+    fun quietForTyping() { if (initialized) controller.quietForTyping() }
     /** Listen once more after a reply so the conversation can continue; silence just rests (no nag). */
     fun followUp() = controller.followUp()
     /** Volume-up twice (the physical "say that again"): the last reply, spoken again. */

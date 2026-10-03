@@ -87,15 +87,28 @@ object ActionSemantics {
     private fun spokenCaption(label: String): String =
         label.replace(Regex("[\\s,]+"), " ").trim().replace(Regex("(?i)\\s*button$"), "").replace(".", "").trim().take(60)
 
-    /** A confirmation sentence, or null to fall back to the tool's own prompt. */
+    /** A chat whose title is only a phone number ("+233 540001234"). */
+    private val BARE_NUMBER = Regex("^\\+?[\\d\\s().-]{8,20}$")
+
+    /** "+233 540001234" with the saved name in front — "Apenensu (+233 540001234)" — when the address book knows the number;
+     *  a blind user can't tell from the digits alone that the chat is Richmond's (A20e QA M01, 3 October 2026: Telegram
+     *  showed the number until it had loaded the contact's name). Pure given [nameOfNumber]. */
+    internal fun namedRecipient(recipient: String?, nameOfNumber: ((String) -> String?)?): String? {
+        if (recipient == null || nameOfNumber == null || !BARE_NUMBER.matches(recipient.trim())) return recipient
+        val name = try { nameOfNumber(recipient.trim()) } catch (_: Throwable) { null }?.trim()?.takeIf { it.isNotEmpty() }
+        return if (name == null) recipient else "$name ($recipient)"
+    }
+
+    /** A confirmation sentence, or null to fall back to the tool's own prompt. [nameOfNumber]: the address book's name
+     *  for a phone number (null = not known / no permission). */
     fun confirmation(
         primitive: String, target: UiElement?, requestedLabel: String?, before: UiSnapshot?,
-        submit: Boolean = false, typedText: String? = null
+        submit: Boolean = false, typedText: String? = null, nameOfNumber: ((String) -> String?)? = null
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
         val labelRecipient = labelRecipient(text)
-        val recipient = screenRecipient(text, before)
+        val recipient = namedRecipient(screenRecipient(text, before), nameOfNumber)
 
         // Sending a message: tapping a Send control (message = composer's current text) OR
         // submitting into a communication field (message = the text being typed).

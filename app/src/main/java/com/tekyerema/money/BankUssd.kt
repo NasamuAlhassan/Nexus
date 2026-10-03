@@ -170,12 +170,25 @@ object BankUssd {
     /** A numbered menu row ("4. Change PIN", "2) Balance"): an option, not what the screen asks for. */
     private val MENU_LINE = Regex("^\\s*\\d{1,2}\\s*[.):-]")
 
+    /**
+     * MTN's PIN prompt is cut off where the USSD page ends, and the cut moves with the length of what comes before it:
+     * "… Total Amount is GHS 0.10. Enter MM # for next" (29 September), and with the reference "transport" only
+     * "… Total Amount is GHS 0.10. Enter # for next" (A20e, 2 October 2026) — no "MM", no "PIN", so the screen was read
+     * as a confirmation and the user was told to "confirm it there". A payment summary whose last words before the page
+     * mark are a bare "Enter" is the same PIN prompt. Pure.
+     */
+    internal fun cutOffPinAsk(text: String): Boolean =
+        com.tekyerema.policy.TargetSemantics.isMoneyConfirmationText(text) &&
+            CUT_OFF_ASK.containsMatchIn(text.replace(Regex("\\s+"), " ").trim())
+    private val CUT_OFF_ASK = Regex("(?i)[.,;:]\\s*enter(?:\\s+(?:your|mm|momo|mobile money))*\\s*(?:\\d{1,2}\\s*[.):-]\\s*)?#\\s*(?:for\\s+)?next\\W*$")
+
     /** What a bank screen is. The PROMPT (its lines that aren't numbered options) decides whether it asks for a secret;
      *  a secret word anywhere else still keeps Tɛkyerɛma's hands off it, the same as the engine's credential check. */
     fun kind(text: String, hasInput: Boolean, masked: Boolean): ScreenKind {
         val prompt = text.lines().filterNot { MENU_LINE.containsMatchIn(it) }.joinToString("\n")
         return when {
             masked || PIN_WORDS.containsMatchIn(prompt) -> ScreenKind.PIN
+            hasInput && cutOffPinAsk(text) -> ScreenKind.PIN
             com.tekyerema.policy.TargetSemantics.isMoneyConfirmationText(text) -> ScreenKind.MONEY
             com.tekyerema.policy.TargetSemantics.credentialField.containsMatchIn(text) || PIN_WORDS.containsMatchIn(text) ||
                 ANY_CODE.containsMatchIn(text) -> ScreenKind.GUARDED
