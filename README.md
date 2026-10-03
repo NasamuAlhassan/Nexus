@@ -43,9 +43,9 @@ MIC → ASR → LanguagePipeline(LID+normalize+entities) → BRAIN(router) → T
 
 | layer | offline | online |
 |---|---|---|
-| ASR | on-device model seam (`RoutingAsr` → `SherpaSpeechToRaw`) — **not yet bundled** | Whisper via proxy `/v1/voice` |
-| Brain | `LocalBrain` (deterministic, on-device) | Groq / Gemini (OpenAI-compatible / Gemini REST) |
-| TTS | Android system engine (English, offline) | Khaya (Twi); falls back to system engine so it's never silent (§28) |
+| ASR | Ghanaian-English Parakeet 0.6B fine-tune, **bundled in the APK** (`SherpaAsr`; `-PslimApk` leaves it out for a phone that already holds it); offline Twi hearing is switched off for now (`speech.asr.offlineTwi`) | Twi: UG HCI Lab Speech Gateway (`hcilab_asr`); English stays on-device |
+| Brain | `LocalBrain` rules + the fast path + `MoneyPlan` / USSD navigator (deterministic, on-device; the Twi command matcher answers Twi here too) | Groq `openai/gpt-oss-120b` (OpenAI-compatible) → Gemini fallback; Twi that the matcher doesn't take goes translator → English brain with names/amounts as tags |
+| TTS | Android system engine (English) + recorded lab clips for the fixed Twi frames | UG HCI Lab TTS (Twi, 15 requests/day); falls back to the system engine so it's never silent (§28) |
 
 ## Device support (any Android phone, not one model)
 
@@ -70,7 +70,7 @@ reply), system-alert-window (floating trigger), network-state. Requested with ra
 
 ```
 ./gradlew :app:assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest    # 79 unit tests
+./gradlew :app:testDebugUnitTest    # 1,716 unit tests (3 October 2026)
 ```
 Requires the Android SDK (`local.properties` `sdk.dir`). Cloud-brain keys are injected from gitignored
 `local.properties` (`GEMINI_API_KEY`, `GROQ_API_KEY`); the app runs offline without them.

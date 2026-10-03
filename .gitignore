@@ -76,3 +76,8 @@ phase2/wakeword/*.log
 .kotlin/
 .tmp_hf/
 .claude/worktrees/
+
+# ---- never a key backup: .tools/local.properties.bak sat in the tree from the first commit with live Gemini + Groq keys
+#      (found by the 3 October audit; purged from history the same day). ----
+*.bak
+local.properties.*
