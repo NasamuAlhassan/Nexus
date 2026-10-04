@@ -120,6 +120,11 @@ object VoiceEngine {
             val t0 = System.currentTimeMillis()
             val ok = try { mt.translate("Mepa wo kyɛw", Lang.TWI, Lang.GH_EN) != null } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
             android.util.Log.i("Tekyerema", "[MT] translator warm-up ${if (ok) "ok" else "failed"} in ${System.currentTimeMillis() - t0}ms")
+            // …and the OTHER direction: since 3 October the Space answers English→Twi with a second model (v2) that loads
+            // on its first use (~10 s) — unwarmed, the first Twi reply would miss the 3.5 s reply bound and be spoken in English.
+            val t1 = System.currentTimeMillis()
+            val ok2 = try { englishToTwi?.invoke("Please wait a moment.") != null } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[MT] English→Twi warm-up ${if (ok2) "ok" else "sent (reply bound)"} in ${System.currentTimeMillis() - t1}ms")
         }
     }
 
