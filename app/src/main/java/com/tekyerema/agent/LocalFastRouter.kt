@@ -667,7 +667,13 @@ class LocalFastRouter(
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_TWI; s.sessionLanguage = com.tekyerema.voice.Lang.TWI
                 com.tekyerema.voice.VoiceEngine.warmTranslator()   // the Space sleeps when idle — wake it now, not on the first request
                 // Honest from the start (Abena study, 3 October 2026): Twi hearing still makes mistakes, and typing works.
-                "Okay, Twi. My Twi hearing is still learning — if I get it wrong, say it again, or type it. Say 'speak English' to switch back."
+                // The acknowledgement is the lab's own recorded "Yoo, mɛsesa." (okay, I'll switch — voice/LabClips: instant, no
+                // quota); the rest stays English for the English voice — "speak English" is what to say. The whole line used to
+                // be English sent to the translator at the very moment the warm-up was waking it, so it always missed the
+                // reply bound and the English voice read it (A20e, 4 October 2026).
+                "Yoo, mɛsesa. " + com.tekyerema.language.EntityTags.EN_OPEN +
+                    "My Twi hearing is still learning — if I get it wrong, say it again, or type it. Say 'speak English' to switch back." +
+                    com.tekyerema.language.EntityTags.EN_CLOSE
             } else {
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_ENGLISH; s.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
                 "Okay, English."

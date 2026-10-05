@@ -30,7 +30,9 @@ object Boundary {
                /** A "Reply 1 to confirm" screen whose confirm key Tɛkyerɛma presses at the user's spoken yes: the line ends
                 *  with that question instead of reading the raw screen (2 October 2026: "the screen says '…to this Telecel
                 *  number, 0508797323. Reply 1 to confirm or 0 to start again.'; confirm it there…"). */
-               confirmByVoice: Boolean = false): Verdict {
+               confirmByVoice: Boolean = false,
+               /** A Twi conversation: the PIN line is one Twi sentence (see below). */
+               twi: Boolean = false): Verdict {
         val net = tx.provider?.let { NumberSpeech.networkName(it) } ?: "The network"
         val p = MtnConfirm.parse(m.text)
         val asked = tx.amount?.replace(",", "")?.toBigDecimalOrNull()
@@ -75,6 +77,23 @@ object Boundary {
             TxIntent.CHECK_BALANCE -> if (pin) "Enter your PIN now, and I'll read your Mobile Money balance when the network answers."
                 else "To hear your balance — $go."
             else -> "You're about to ${tx.intent.spoken} — $go."
+        }
+        // Owner, 4 October 2026: in a Twi conversation the PIN line is ONE Twi sentence in the lab's voice — the network, the
+        // amount in Twi words and the registered name — never the English line through the translator with the amount in the
+        // English voice. Only the plain cases: a fee, a name that differs from the saved one, or an amount Twi words can't
+        // say keeps the English line (its warnings matter more than the voice). [owner: verify the Twi]
+        if (twi && pin && !confirmByVoice) {
+            val twiAmt = (shown ?: asked)?.toPlainString()?.let { com.tekyerema.voice.ConfirmTemplates.twiAmount(it) }
+            val plain = (p.fee == null || p.fee.signum() == 0) && (p.tax == null || p.tax.signum() == 0)
+            val twiLine = when (tx.intent) {
+                TxIntent.SEND_MONEY -> if (registered != null && twiAmt != null && plain && (paidBefore ||
+                        nameMatch(tx.recipientName, registered).let { it != NameMatch.DIFFERENT && it != NameMatch.PARTIAL }))
+                    "${net} se: $twiAmt kɔma $registered. Wo ankasa na wobɛhyɛ PIN." else null
+                TxIntent.BUY_AIRTIME -> if (twiAmt != null && plain && tx.recipientName == null)
+                    "${net} se: airtime $twiAmt ma wo fɔn yi. Wo ankasa na wobɛhyɛ PIN." else null
+                else -> null
+            }
+            if (twiLine != null) return Verdict.HandOff(twiLine, registered)
         }
         // The voice confirmation is a question (the PIN line and its tips come when the PIN is really asked for).
         if (confirmByVoice && !pin) return Verdict.HandOff(line.trimEnd('.') + "?", registered)

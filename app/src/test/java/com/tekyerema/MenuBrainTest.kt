@@ -276,19 +276,24 @@ class MenuBrainTest {
 
     // ---- the PIN with the volume keys
 
-    @Test fun `volume keys count digits - down ends one, ten is zero, hold takes one out`() {
+    // The owner's scheme (5 October 2026): DOWN counts, UP keys the digit in, UP alone is a 0. PIN 2-0-7-3:
+    @Test fun `volume keys - down counts, up keys it in, up alone is zero, hold takes one out`() {
         val c = PinPad.Counter()
-        repeat(3) { c.up() }
-        assertEquals(PinPad.Counter.Event.Digit(1), c.down())
-        repeat(10) { c.up() }
-        assertEquals(PinPad.Counter.Event.Digit(2), c.down())
-        assertEquals(PinPad.Counter.Event.Ignored, c.down())            // nothing counted, fewer than 4 digits: nothing
-        assertEquals(PinPad.Counter.Event.TooMany, run { repeat(10) { c.up() }; c.up() })
-        c.up(); assertEquals(PinPad.Counter.Event.Digit(3), c.down())
-        c.up(); c.up(); assertEquals(PinPad.Counter.Event.Removed(3), c.hold())   // a digit being counted is dropped
-        assertEquals(PinPad.Counter.Event.Removed(2), c.hold())                    // then the last one entered
-        c.up(); c.down(); repeat(7) { c.up() }; c.down()
-        assertEquals(PinPad.Counter.Event.Send(4), c.down())
-        c.wipe(); assertEquals(0, c.size)
+        repeat(2) { assertTrue(c.down() is PinPad.Counter.Event.Tick) }
+        assertEquals(PinPad.Counter.Event.Digit(1), c.up())                  // 2
+        assertEquals(PinPad.Counter.Event.Digit(2), c.up())                  // 0 — volume up on its own
+        repeat(7) { c.down() }
+        assertEquals(PinPad.Counter.Event.Digit(3), c.up())                  // 7
+        repeat(3) { c.down() }
+        assertEquals(PinPad.Counter.Event.Digit(4), c.up())                  // 3
+        assertEquals("2073", c.text())
+        // a fix: hold drops the digit being counted, then the last one entered
+        c.down(); assertEquals(PinPad.Counter.Event.Removed(4), c.hold())
+        assertEquals(PinPad.Counter.Event.Removed(3), c.hold())
+        assertEquals("207", c.text())
+        // a digit is 0–9: a tenth press starts that digit again
+        assertEquals(PinPad.Counter.Event.TooMany, run { repeat(9) { c.down() }; c.down() })
+        assertEquals(0, c.count)
+        c.wipe(); assertEquals(0, c.size); assertEquals(PinPad.Counter.Event.Ignored, c.hold())
     }
 }

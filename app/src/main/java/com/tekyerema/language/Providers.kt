@@ -4,8 +4,7 @@ import android.util.Log
 import com.tekyerema.voice.Lang
 import com.tekyerema.voice.Lid
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 
 /**
@@ -155,12 +154,20 @@ object ProviderHealthRegistry {
  * against the provider.
  */
 class ProviderGuard(val health: ProviderHealth, private val backstopMs: Long) {
+    private class Box<T>(val value: T)
+
     suspend fun <T> run(block: suspend () -> T): T {
         if (!health.available()) throw ProviderFailure(FailureKind.UNAVAILABLE, health.status())
         val result = try {
-            withTimeout(backstopMs) { block() }
-        } catch (e: TimeoutCancellationException) {
-            health.onFailure(FailureKind.TRANSIENT); throw ProviderFailure(FailureKind.TRANSIENT, "${health.id} timed out after ${backstopMs}ms")
+            // Only THIS backstop is the provider's fault. A caller's own patience (the 8 s request bound, the 3.5 s reply
+            // bound) used to land in a TimeoutCancellationException catch here and be charged as "timed out after 32000ms"
+            // — to the Space and then, in the same instant, to Khaya — until the breaker rested the translator and every Twi
+            // line after it went English (A20e, 4 October 2026). withTimeoutOrNull returns null only for its own timeout and
+            // rethrows an outer one, which then passes through as plain cancellation.
+            val boxed = withTimeoutOrNull(backstopMs) { Box(block()) }
+            // (recorded once, by the ProviderFailure catch below; a block may legitimately return null, hence the box)
+            if (boxed == null) throw ProviderFailure(FailureKind.TRANSIENT, "${health.id} timed out after ${backstopMs}ms")
+            boxed.value
         } catch (e: CancellationException) {
             throw e
         } catch (e: ProviderFailure) {

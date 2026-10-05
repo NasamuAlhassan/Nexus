@@ -46,7 +46,10 @@ class LocalBrain : AgentBrain {
         val raw = ctx.goal.trim()
         val g = raw.lowercase()
         if (g.isEmpty()) return defer("empty request")
-        twi = looksTwi(raw)   // phrase spoken confirmations in the language the user used
+        // Phrase spoken lines in the language the user used — a Twi request reaches here already glossed into English
+        // ("Frɛ Kwame" → "call Kwame"), so a Twi conversation counts too: "Merefrɛ Kwame." in the lab's voice, not
+        // "Calling Kwame." sent through the translator (4 October 2026).
+        twi = looksTwi(raw) || com.tekyerema.voice.VoiceEngine.speaksTwi()
 
         // --- online-only intents: honest network gate (router decides refuse vs escalate) ---
         // --- F-12: "call this number" — the number on the screen, when there is exactly one (the engine confirms). ---

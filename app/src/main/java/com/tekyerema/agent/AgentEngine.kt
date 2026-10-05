@@ -1030,7 +1030,10 @@ object AgentEngine {
                             if (refused != null) { history.add("ask_user(\"$q\") → not asked: $refused"); continue }
                             questions.note(q, options.size >= 2)
                             if (options.size >= 2) References.noteOptions(options)
-                            val ans = if (unattended) null else askUser(q, com.tekyerema.agent.research.SpokenOptions.withQuestion(q, options))
+                            // An app-made question may carry its own Twi ("question_twi"): a Twi conversation hears and sees that,
+                            // never a translation, and never both languages (owner, 5 October 2026).
+                            val ans = if (unattended) null else askUser(q, com.tekyerema.agent.research.SpokenOptions.withQuestion(q, options),
+                                twiWording = decision.args.optString("question_twi").takeIf { it.isNotBlank() })
                             if (ans == null) {
                                 log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
                                 finish(AgentStatus.CANNOT_DO, stats); return
@@ -1435,7 +1438,10 @@ object AgentEngine {
                                 // menus, a prompt with a warning added — is the English read-back translated, names kept as
                                 // tags and amounts / numbers in English (VoiceEngine.twiLine; owner, 2 October 2026: the
                                 // pop-ups stayed English). Null when that can't be trusted: the English line stands.
-                                val promptTwi = confirmSpecFor(decision.name, decision.args, ctxApp)
+                                // ONE language, the user's (owner, 5 October 2026): a Twi line only in a Twi conversation —
+                                // English mode used to show the template's Twi above the English too.
+                                val promptTwi = if (!com.tekyerema.voice.VoiceEngine.speaksTwi()) null
+                                    else confirmSpecFor(decision.name, decision.args, ctxApp)
                                     ?.let { com.tekyerema.voice.ConfirmTemplates.twi(it) }
                                     ?.takeIf { prompt == plainPrompt }
                                     ?: com.tekyerema.voice.VoiceEngine.twiLine(prompt)

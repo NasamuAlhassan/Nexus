@@ -17,37 +17,48 @@ object PromptSurface {
 
     /** No text, no panel: the engine clears the prompt a moment before it leaves the waiting status (the reply was
      *  given), and a panel re-shown in that gap would sit over the app while the approved action runs. */
-    fun of(status: AgentStatus, confirmation: String?, question: String?, seq: Long = 0L): Prompt? = when (status) {
+    fun of(status: AgentStatus, confirmation: String?, question: String?, seq: Long = 0L, twi: Boolean = false): Prompt? = when (status) {
         AgentStatus.WAITING_CONFIRMATION -> confirmation?.takeIf { it.isNotBlank() }?.let { Prompt(Kind.CONFIRM, it, seq) }
         AgentStatus.ASKING -> question?.takeIf { it.isNotBlank() }?.let { Prompt(Kind.QUESTION, it) }
-        AgentStatus.SECURE_INPUT -> Prompt(Kind.SECURE, "Secure step — enter it yourself. Tɛkyerɛma isn't looking.")
+        AgentStatus.SECURE_INPUT -> Prompt(Kind.SECURE, secureText(twi))
         else -> null
     }
 
     /**
-     * The confirmation as the panel SHOWS it: in a Twi conversation the Twi line first (amounts and numbers stay English,
-     * names as said) with the English underneath — for a sighted helper, and so the figures can always be checked (owner,
-     * 2 October 2026: "the confirmation pop-ups remain in English"). English only when there is no Twi line.
+     * The confirmation or question as the panel SHOWS it: ONE language, the user's (owner, 5 October 2026: "it's supposed to
+     * be only one language based on what I chose in my setting") — the Twi line in a Twi conversation, else the English.
+     * (It used to show the Twi with the English underneath.) The Twi line only exists in a Twi conversation (AgentEngine).
      */
-    fun confirmationText(english: String?, twi: String?): String? {
-        val shown = twi?.takeIf { it.isNotBlank() }?.let { com.tekyerema.language.EntityTags.display(it) }
-        return if (shown == null || english.isNullOrBlank()) english else "$shown\n\n$english"
-    }
+    fun confirmationText(english: String?, twi: String?): String? =
+        twi?.takeIf { it.isNotBlank() }?.let { com.tekyerema.language.EntityTags.display(it) } ?: english
 
     /** A question or a confirmation can be answered by keyboard on the panel itself; the secure step never offers a
      *  text box (it could be taken for where the PIN goes). */
     fun canType(kind: Kind): Boolean = kind != Kind.SECURE
 
-    /** Button labels, left to right. The right-hand one is the main action. */
-    fun buttons(kind: Kind): List<String> = when (kind) {
+    /** Button labels, left to right. The right-hand one is the main action. In Twi in a Twi conversation (one language,
+     *  owner 5 October 2026). [owner: verify the Twi] */
+    fun buttons(kind: Kind, twi: Boolean = false): List<String> = if (twi) when (kind) {
+        Kind.CONFIRM -> listOf("Daabi", "Aane, yɛ")
+        Kind.QUESTION -> listOf("Gyae", "Bua")
+        Kind.SECURE -> listOf("Gyae", "Mawie")
+    } else when (kind) {
         Kind.CONFIRM -> listOf("No", "Yes, do it")
         Kind.QUESTION -> listOf("Stop", "Answer")
         Kind.SECURE -> listOf("Stop", "Done")
     }
 
-    fun header(kind: Kind): String = when (kind) {
+    fun header(kind: Kind, twi: Boolean = false): String = if (twi) when (kind) {
+        Kind.CONFIRM -> "MA ME KWAN?"
+        Kind.QUESTION -> "TƐKYERƐMA REBISA"
+        Kind.SECURE -> "AHOTOSO ADEYƐ"
+    } else when (kind) {
         Kind.CONFIRM -> "NEEDS YOUR OK"
         Kind.QUESTION -> "TƐKYERƐMA IS ASKING"
         Kind.SECURE -> "SECURE STEP"
     }
+
+    /** The secure step's panel line. */
+    fun secureText(twi: Boolean): String = if (twi) "Ahotoso adeyɛ — wo ankasa hyɛ mu. Merenhwɛ screen no."
+        else "Secure step — enter it yourself. Tɛkyerɛma isn't looking."
 }

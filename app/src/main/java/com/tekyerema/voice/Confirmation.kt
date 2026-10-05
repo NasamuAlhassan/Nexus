@@ -26,6 +26,9 @@ object Confirmation {
 
     const val REPEAT = "Sorry, I didn't catch that. Should I go ahead? Say yes or no."
     const val DECLINED_UNCLEAR = "I didn't get a clear yes, so I'll leave it."
+    /** The same in a Twi session (it was always said in English — A20e, 4 October 2026): "Okay, I won't do it", a line
+     *  the lab voice has already recorded (voice/LabClips — instant, no quota); the re-ask before it said "Mante no". */
+    const val DECLINED_UNCLEAR_TWI = "Yoo, merenyɛ."
     const val LISTEN_HINT = "Say yes or no"
 
     // Whole-word / short-phrase signals. Twi: aane = yes, yoo = okay, kɔ so = go on, yɛ = do it;
@@ -37,14 +40,17 @@ object Confirmation {
         "aane", "ane", "yoo", "yo", "kɔ so", "ko so", "yɛ", "ɛyɛ", "eye", "yɛ no", "ye no",
         // "aane" as the phone's English recogniser writes it (a Twi yes/no is heard there — LanguageRoutedInput)
         // [owner: verify on the A20e]
-        "anne", "annie", "ani", "aani", "aane aane"
+        "anne", "annie", "ani", "aani", "aane aane",
+        // …and as it wrote "aane aane" on the A20e (4 October 2026): "honey honey" — the answer was taken as unclear and the
+        // Telegram message declined.
+        "honey", "honey honey", "hunny", "hani", "anne anne", "annie annie"
     )
     private val NO = setOf(
         "no", "nope", "nah", "don't", "dont", "do not", "stop", "cancel", "never mind", "nevermind", "not now",
         "negative", "leave it", "forget it", "abort", "no thanks", "not yet",
         "daabi", "dabi", "gyae", "mma", "ɛnyɛ", "enye", "twa mu", "nnyɛ",
         // "daabi" as the phone's English recogniser writes it [owner: verify on the A20e]
-        "darby", "dabby", "daby", "dabbie", "derby"
+        "darby", "dabby", "daby", "dabbie", "derby", "dobby", "debbie"
     )
 
     // B-09: a reply that is ONLY a request for time. Twi: twɛn (kakra) = wait (a little).

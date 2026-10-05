@@ -445,6 +445,9 @@ class VoiceController(
 
     /** The prompt panel's Type box was opened: stop reading and close the answer microphone (our own voice, the
      *  keyboard's clicks or TalkBack must never be taken as the reply). The prompt stays waiting — for what is typed. */
+    /** Stop speaking, change nothing else (the volume-key PIN pad's first key — money/PinPad). */
+    fun hush() { tts.stop() }
+
     fun quietForTyping() {
         if (agent.state.value.status !in PROMPTS) return
         tts.stop()
@@ -899,7 +902,9 @@ class VoiceController(
             stopAlreadySaid = true
             agent.confirmFor(seq, false)
             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
-            try { tts.speak(Confirmation.DECLINED_UNCLEAR, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            try {
+                if (lang == Lang.TWI) tts.speak(Confirmation.DECLINED_UNCLEAR_TWI, Lang.TWI) else tts.speak(Confirmation.DECLINED_UNCLEAR, Lang.GH_EN)
+            } catch (c: CancellationException) { throw c } catch (_: Exception) {}
         } catch (c: CancellationException) {
             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE, speechDetected = false) }
             throw c
@@ -1217,7 +1222,9 @@ class VoiceController(
             fastRouter?.tryHandle(tr.canonical, tr.language)?.let { fast ->
                 tel.mark("route"); tel.update { tier = com.tekyerema.agent.RouterTiers.FAST_PATH }   // Q-01 / Q-02
                 if (fast.listenAfter) {} else if (fast.ok) cues.done() else cues.error()   // K-03: a failure line never plays the "done" sound
-                set(VoiceState.SPEAKING, fast.spoken)
+                // A line with an English stretch for the English voice (⟦en:…⟧) is SHOWN without the markers.
+                val shown = com.tekyerema.language.EntityTags.display(fast.spoken)
+                set(VoiceState.SPEAKING, shown)
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
                 val useSystem = fast.systemVoice && systemVoice != null
@@ -1230,7 +1237,7 @@ class VoiceController(
                 tel.endTurn(if (fast.ok) "full" else "failed", byVoice = true)
                 _state.update {
                     // A command with nothing to say (the camera reader announces itself) is not a missing voice.
-                    it.copy(state = VoiceState.IDLE, spoken = fast.spoken, spokenAt = System.currentTimeMillis(),
+                    it.copy(state = VoiceState.IDLE, spoken = shown, spokenAt = System.currentTimeMillis(),
                         partialHint = if (spoke || !speakAloud() || fast.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
                 }
                 // Habits (agent/habits): a request that went well is noted; one made at the same time every week (or day)
@@ -1264,8 +1271,10 @@ class VoiceController(
             var outcome = runAgent(fastRouter?.agentGoal(tr.canonical) ?: tr.canonical) ?: return   // null: already set fail/cancel
             // After a LONG task, a small warm word before the result ("Alright — it's sent.") — the breath a person takes
             // (micro_details.md quick win 8). Never on a question (the "?" tail must stay last) or a reading.
+            // Not in Twi: a random opener makes the line different each time, so the lab voice's recording of it is never
+            // reused and every result costs a new ~14 s lab request (4 October 2026).
             if (outcome.status == AgentStatus.COMPLETED && android.os.SystemClock.uptimeMillis() - agentT0 > 10_000 &&
-                !outcome.spoken.trim().endsWith("?"))
+                !outcome.spoken.trim().endsWith("?") && tr.language != Lang.TWI)
                 outcome = outcome.copy(spoken = Closers.warm(outcome.spoken, tr.language == Lang.TWI))
             when (outcome.status) {
                 AgentStatus.COMPLETED -> cues.done()

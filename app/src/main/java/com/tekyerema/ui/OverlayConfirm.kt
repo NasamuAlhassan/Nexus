@@ -107,7 +107,10 @@ object OverlayConfirm {
             val wm = host.getSystemService(Context.WINDOW_SERVICE) as WindowManager
             val d = host.resources.displayMetrics.density
             fun dp(v: Int) = (v * d).toInt()
-            val header = PromptSurface.header(kind)
+            // ONE language, the user's (owner, 5 October 2026): in a Twi conversation the panel's own words are Twi too.
+            val twi = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
+            twiPanel = twi
+            val header = PromptSurface.header(kind, twi)
             val secure = kind == PromptSurface.Kind.SECURE
             // Reduce motion (in the app) or "Remove animations" (the phone): the panel fades in and holds still.
             calm = com.tekyerema.settings.Settings(ctx).reduceMotion || com.tekyerema.ui.theme.systemAnimatorScale(ctx) <= 0f
@@ -121,7 +124,11 @@ object OverlayConfirm {
                     // A faint amber edge ties the panel to "needs your OK" (the colour the living visual turns).
                     setStroke(dp(1), Color.parseColor(ATTENTION_EDGE))
                 }
-                contentDescription = when (kind) {
+                contentDescription = if (twi) when (kind) {   // [owner: verify the Twi]
+                    PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma pɛ wo kwan. $prompt. Ka aane anaa daabi."
+                    PromptSurface.Kind.QUESTION -> "Tɛkyerɛma rebisa. $prompt. Bua, anaa ka gyae."
+                    PromptSurface.Kind.SECURE -> "Ahotoso adeyɛ. $prompt. Sɛ wowie a, ka sɛ 'awie'."
+                } else when (kind) {
                     PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
                     PromptSurface.Kind.QUESTION -> "Tɛkyerɛma is asking. $prompt. Say your answer, or double-tap Answer. Say stop to cancel."
                     PromptSurface.Kind.SECURE -> "Secure step. $prompt. When you've finished, say done or double-tap Done."
@@ -193,16 +200,16 @@ object OverlayConfirm {
                     onClick(); if (hides) hideNow()
                 }
             }
-            val (left, right) = PromptSurface.buttons(kind)
+            val (left, right) = PromptSurface.buttons(kind, twi)
             val leftBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(left, "No, don't do it", filled = false, hides = true, haptic = TkHaptic.REJECT) { AgentEngine.confirm(false, seq) }
-                else -> btn(left, "Stop the task", filled = false, hides = true, haptic = TkHaptic.REJECT) { VoiceEngine.cancel() }
+                PromptSurface.Kind.CONFIRM -> btn(left, if (twi) "Daabi, nnyɛ" else "No, don't do it", filled = false, hides = true, haptic = TkHaptic.REJECT) { AgentEngine.confirm(false, seq) }
+                else -> btn(left, if (twi) "Gyae adwuma no" else "Stop the task", filled = false, hides = true, haptic = TkHaptic.REJECT) { VoiceEngine.cancel() }
             }
             val rightBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(right, "Yes, do it", filled = true, hides = true, guarded = true, haptic = TkHaptic.CONFIRM) { AgentEngine.confirm(true, seq) }
+                PromptSurface.Kind.CONFIRM -> btn(right, if (twi) "Aane, yɛ" else "Yes, do it", filled = true, hides = true, guarded = true, haptic = TkHaptic.CONFIRM) { AgentEngine.confirm(true, seq) }
                 // Reopens the microphone for this question; the panel stays until it is answered.
-                PromptSurface.Kind.QUESTION -> btn(right, "Answer by voice", filled = true, hides = false) { VoiceEngine.respond() }
-                PromptSurface.Kind.SECURE -> btn(right, "Done — I've finished the secure step", filled = true, hides = true, haptic = TkHaptic.CONFIRM) { AgentEngine.secureInputDone() }
+                PromptSurface.Kind.QUESTION -> btn(right, if (twi) "Bua wɔ kasa mu" else "Answer by voice", filled = true, hides = false) { VoiceEngine.respond() }
+                PromptSurface.Kind.SECURE -> btn(right, if (twi) "Mawie" else "Done — I've finished the secure step", filled = true, hides = true, haptic = TkHaptic.CONFIRM) { AgentEngine.secureInputDone() }
             }
             buttons.addView(leftBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
             // Type: the answer by keyboard, on the panel itself (owner, 2 October 2026: "when it needs feedback, you
@@ -210,7 +217,7 @@ object OverlayConfirm {
             // Never at the secure step: a box there could be mistaken for where the PIN goes.
             var startTyping: () -> Unit = {}
             if (PromptSurface.canType(kind)) buttons.addView(
-                btn("Type", "Type your answer instead of saying it", filled = false, hides = false) { startTyping() },
+                btn(if (twi) "Twerɛ" else "Type", if (twi) "Twerɛ wo mmuae" else "Type your answer instead of saying it", filled = false, hides = false) { startTyping() },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply { marginStart = dp(2); marginEnd = dp(2) })
             buttons.addView(rightBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginStart = dp(6) })
             card.addView(buttons)
@@ -255,7 +262,7 @@ object OverlayConfirm {
                 VoiceEngine.quietForTyping()     // stop reading, close the answer microphone; the prompt stays waiting
                 buttons.visibility = View.GONE
                 val field = android.widget.EditText(host).apply {
-                    hint = if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer"
+                    hint = typeHint(kind)
                     contentDescription = hint
                     setTextColor(Color.parseColor(TEXT)); setHintTextColor(Color.parseColor(TEXT2))
                     textSize = 17f
@@ -306,7 +313,7 @@ object OverlayConfirm {
                 lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
                 lp.gravity = Gravity.TOP; lp.y = dp(36)
                 try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
-                setCaption(if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer")
+                setCaption(typeHint(kind))
                 field.requestFocus()
                 field.postDelayed({ try { imm?.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) } catch (_: Throwable) {} }, 120L)
             }
@@ -323,7 +330,17 @@ object OverlayConfirm {
         }
     }
 
-    private fun captionFor(kind: PromptSurface.Kind, listening: Boolean): String = when (kind) {
+    @Volatile private var twiPanel = false
+
+    private fun typeHint(kind: PromptSurface.Kind): String = if (twiPanel) {   // [owner: verify]
+        if (kind == PromptSurface.Kind.CONFIRM) "Twerɛ aane anaa daabi" else "Twerɛ wo mmuae"
+    } else if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer"
+
+    private fun captionFor(kind: PromptSurface.Kind, listening: Boolean): String = if (twiPanel) when (kind) {   // [owner: verify]
+        PromptSurface.Kind.CONFIRM -> "Ka aane anaa daabi"
+        PromptSurface.Kind.QUESTION -> if (listening) "Meretie… ka “gyae” na yɛagyae" else "Mia Bua, anaa ka “Hey Tɛkyerɛma”"
+        PromptSurface.Kind.SECURE -> "Sɛ wowie a, ka sɛ “awie”, anaa mia Mawie"
+    } else when (kind) {
         PromptSurface.Kind.CONFIRM -> Confirmation.LISTEN_HINT
         // The way out is taught where it's needed (Abena study, 3 October 2026: "say … bye bye" in its dialogs) — both
         // words work in either language (voice/ControlVerbs).

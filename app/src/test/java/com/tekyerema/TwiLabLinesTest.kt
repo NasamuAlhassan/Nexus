@@ -62,6 +62,8 @@ class TwiLabLinesTest {
             "Yei yɛ ahotoso adeyɛ. Fa wo MoMo PIN no hyɛ wo fɔn no mu ankasa. Merenhwɛ screen no. Sɛ wowie a, ka sɛ 'awie'." to "secure MoMo PIN",
             "Yei yɛ ahotoso adeyɛ. Wo ankasa hyɛ mu wɔ wo fɔn no so. Merenhwɛ screen no. Sɛ wowie a, ka sɛ 'awie'." to "secure step")
             .forEach { (l, f) -> add(l, "VoiceController $f") }
+        // The demo flow (owner, 4 October 2026: one voice, recorded once, contact "Kwame", 1 cedi) — exactly as spoken.
+        DemoFlow.lines().forEach { (l, f) -> add(l, "demo $f") }
 
         val out = JSONArray()
         val dir = listOf(java.io.File("src/main/assets/voice/twi_lab"), java.io.File("app/src/main/assets/voice/twi_lab")).firstOrNull { it.parentFile?.isDirectory == true }

@@ -173,7 +173,8 @@ class Navigator(
         // A payment confirmation with its own confirm key ("Reply 1 to confirm or 0 to start again"): the checked summary,
         // then ONE spoken question — at the user's yes Tɛkyerɛma presses the key, and the PIN that follows is theirs.
         val keys = if (m.kind == MenuModel.Kind.CONFIRM) MenuBrain.confirmKeys(m.text) else null
-        return when (val v = Boundary.decide(tx, m, pinTip, paidBefore, confirmByVoice = keys != null)) {
+        val twi = try { com.tekyerema.voice.VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
+        return when (val v = Boundary.decide(tx, m, pinTip, paidBefore, confirmByVoice = keys != null, twi = twi)) {
             is Boundary.Verdict.Stop -> {
                 t("MISMATCH", v.why)
                 val pressed = cancel(screen)

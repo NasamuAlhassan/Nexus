@@ -114,25 +114,25 @@ class TwiTagsPlanTest {
         assertNull(ReplyLocalizer(lossy, enabled = { true }).toTwi("Do you want to send five cedis to Ama?"))
     }
 
-    @Test fun `the Twi templates say amounts and numbers in English`() {
+    // Owner, 4 October 2026: one voice — the lab's Twi voice says the amount (Twi words) and the name; it skipped digits.
+    @Test fun `the Twi templates say amounts and names in Twi words, in one voice`() {
         val money = ConfirmTemplates.twi(ConfirmTemplates.Spec(ConfirmTemplates.Spec.Kind.SEND_MONEY, name = "Ama", amount = "5"))
-        assertTrue(money, money.contains("⟦en:5 Ghana cedis to Ama?⟧"))   // one English stretch since 3 Oct (lab clips)
-        assertFalse(money, money.contains("anum"))
+        assertTrue(money, money.contains("wode sidi anum kɔma Ama?"))
+        assertFalse(money, EntityTags.hasEnglishSpans(money) || money.any { it.isDigit() })
         val small = ConfirmTemplates.twi(ConfirmTemplates.Spec(ConfirmTemplates.Spec.Kind.SEND_MONEY, name = "Ama", amount = "0.1"))
-        assertTrue(small, small.contains("⟦en:10 pesewas to Ama?⟧"))
+        assertTrue(small, small.contains("wode pesewa du kɔma Ama?"))
         val call = ConfirmTemplates.twi(ConfirmTemplates.Spec(ConfirmTemplates.Spec.Kind.CALL, name = "Kofi", number = "0552093690"))
-        assertTrue(call, call.contains("⟦en:Kofi, 0 5 5, 2 0 9, 3 6 9 0?⟧"))
-        assertTrue(call, call.contains("Kofi"))
+        assertEquals("Wopɛ sɛ mefrɛ Kofi? Ka aane anaa daabi.", call)
     }
 
     // ---------------------------------------------------------------- C: the pop-up
 
-    @Test fun `the pop-up shows the Twi line first with the English underneath`() {
+    // Owner, 5 October 2026: ONE language on the pop-up — the Twi line alone in a Twi conversation, never the English under it.
+    @Test fun `the pop-up shows the Twi line alone`() {
         val twi = "Wopɛ sɛ mesoma ⟦en:five Ghana cedis⟧ ma Ama? Ka aane anaa daabi."
         val shown = PromptSurface.confirmationText("Send 5 cedis to Ama, with Mobile Money?", twi)!!
-        assertTrue(shown, shown.startsWith("Wopɛ sɛ mesoma five Ghana cedis ma Ama?"))
-        assertTrue(shown, shown.endsWith("Send 5 cedis to Ama, with Mobile Money?"))
-        assertFalse(shown, shown.contains("⟦"))
+        assertEquals("Wopɛ sɛ mesoma five Ghana cedis ma Ama? Ka aane anaa daabi.", shown)
+        assertFalse(shown, shown.contains("⟦") || shown.contains("Send 5 cedis"))
         assertEquals("Send it?", PromptSurface.confirmationText("Send it?", null))
     }
 

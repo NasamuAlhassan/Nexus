@@ -20,7 +20,8 @@ object ConfirmTemplates {
         val name: String? = null,     // contact / recipient — passed through VERBATIM, never translated
         val number: String? = null,   // phone number — read digit by digit, in 3-3-4 groups
         val amount: String? = null,   // cedi amount — read digit by digit
-        val message: String? = null   // message body — passed through VERBATIM
+        val message: String? = null,  // message body — passed through VERBATIM
+        val firstTime: Boolean = false // a send to a number this phone has never paid (money/KnownRecipients)
     ) {
         enum class Kind { CALL, SEND_MONEY, BUY_AIRTIME, SEND_MESSAGE, GENERIC }
     }
@@ -90,6 +91,7 @@ object ConfirmTemplates {
      * are all read back. [owner: verify the Twi]
      */
     fun twi(spec: Spec): String {
+        oneVoice(spec)?.let { return it }
         val who = whoWords(spec.name, spec.number)
         val amount = cedisWords(spec.amount)
         val body = when (spec.kind) {
@@ -115,5 +117,53 @@ object ConfirmTemplates {
             Spec.Kind.GENERIC -> "Wopɛ sɛ meyɛ eyi?"
         }
         return body + TWI_YESNO
+    }
+
+    /**
+     * Owner, 4 October 2026: one voice for the whole line — the lab's Twi voice says the name and the amount too, no switch to
+     * the English voice mid-sentence. Amounts as Twi words ("sidi baako", "pesewa du"): the lab voice skipped digits and
+     * "GH₵" (audit/demo-2026-10-04/probe). A named person is said by name only; a bare number in Twi digit groups. Null for
+     * anything this can't say in Twi words (an amount over 999, a message's words) — the line above is used then.
+     */
+    internal fun oneVoice(spec: Spec): String? {
+        if (!com.tekyerema.core.config.AppConfig.bool("speech.twi.confirm.oneVoice", true)) return null
+        val name = spec.name?.trim()?.takeIf { it.isNotEmpty() && it.none(Char::isDigit) }
+        val who = name ?: spec.number?.takeIf { it.any(Char::isDigit) }?.let { twiNumber(it) }
+        val amount = spec.amount?.let { twiAmount(it) ?: return null }
+        val body = when (spec.kind) {
+            Spec.Kind.CALL -> "Wopɛ sɛ mefrɛ ${who ?: return null}?"
+            Spec.Kind.SEND_MONEY -> "Menbue Mobile Money sɛ wode ${amount ?: "sika"} kɔma ${who ?: return null}?" +
+                // "This number is new." [owner: verify the Twi] — the first-time warning, which used to force the English line
+                (if (spec.firstTime) " Nɔma yi yɛ foforɔ." else "") + " Wo ankasa na wobɛhyɛ PIN."
+            Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime${amount?.let { " $it" } ?: ""}? Wo ankasa na wobɛhyɛ PIN."
+            else -> return null
+        }
+        return body + TWI_YESNO
+    }
+
+    private val TWI_UNITS = arrayOf("", "baako", "mmienu", "mmiɛnsa", "anan", "anum", "nsia", "nson", "nwɔtwe", "nkron")
+    private val TWI_TEENS = arrayOf("du", "dubaako", "dumienu", "dumiɛnsa", "duanan", "duanum", "dunsia", "dunson", "dunwɔtwe", "dunkron")
+    private val TWI_TENS = arrayOf("", "du", "aduonu", "aduasa", "aduanan", "aduonum", "aduosia", "aduɔson", "aduɔwɔtwe", "aduɔkron")
+
+    /** 1–999 in Twi words, from the owner's speaker-verified numerals (voice/LangPipeline): 21 → "aduonu baako",
+     *  100 → "ɔha", 150 → "ɔha ne aduonum". Null outside 1–999 (and above 199 — the hundreds' forms are unverified). Pure. */
+    fun twiWords(n: Int): String? = when {
+        n in 1..9 -> TWI_UNITS[n]
+        n in 10..19 -> TWI_TEENS[n - 10]
+        n in 20..99 -> TWI_TENS[n / 10] + (if (n % 10 != 0) " " + TWI_UNITS[n % 10] else "")
+        n == 100 -> "ɔha"
+        n in 101..199 -> "ɔha ne " + twiWords(n - 100)
+        else -> null
+    }
+
+    /** An amount the lab's Twi voice can say: "1" → "sidi baako", "0.1" → "pesewa du", "10.50" → "sidi du ne pesewa
+     *  aduonum". Null when it can't be said in words. Pure. */
+    fun twiAmount(amount: String): String? {
+        val v = amount.replace(",", "").trim().toBigDecimalOrNull()?.takeIf { it.signum() > 0 } ?: return null
+        val cents = v.movePointRight(2).setScale(0, java.math.RoundingMode.HALF_UP).toInt()
+        val cedis = cents / 100; val pesewas = cents % 100
+        val c = if (cedis > 0) "sidi " + (twiWords(cedis) ?: return null) else null
+        val p = if (pesewas > 0) "pesewa " + (twiWords(pesewas) ?: return null) else null
+        return listOfNotNull(c, p).joinToString(" ne ").ifEmpty { null }
     }
 }

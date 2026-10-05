@@ -99,7 +99,7 @@ class UssdNavigatorTest {
         assertEquals("0552093690", tx.slot(SlotKind.PHONE_NUMBER))
         assertEquals("0552093690", tx.slot(SlotKind.CONFIRM_NUMBER))   // MTN's double-entry costs nothing extra
         assertEquals("50", tx.slot(SlotKind.AMOUNT))
-        assertEquals("Payment", tx.slot(SlotKind.REFERENCE))           // the default reference, as the fixed driver used
+        assertEquals(null, tx.slot(SlotKind.REFERENCE))   // never invented: asked at the reference screen (owner, 5 Oct 2026)
         assertNull(tx.slot(SlotKind.PRODUCT))                          // a bundle we weren't told → the user is asked
     }
 }

@@ -12,9 +12,10 @@ import kotlinx.coroutines.CancellationException
  *
  *  - Only text that positively reads as English is translated; the app's own Twi lines (ConfirmTemplates, "Yoo.")
  *    are never re-translated, even the short ones with no ɛ/ɔ.
- *  - Anything carrying a quantity — digits, spelled numbers, money, a USSD code, a percentage — is NOT translated:
- *    amounts and phone numbers must reach the user exactly as the app worded them. (Replies arrive here already
- *    verbalised, so "5" is "five"; that's why number WORDS count.) The reply is then spoken as it is.
+ *  - No quantity is ever translated: amounts, phone numbers and — since 4 October 2026 — every other number (a count,
+ *    a size, a time, a percentage, a USSD code) travel as TAGS and come back in English for the English voice, exactly
+ *    as the app worded them. (Replies arrive here already verbalised, so "5" is "five"; that's why number WORDS count.)
+ *    A quantity word the tagger can't take (a lone "half", "point") still keeps the line in English.
  *  - Names, app names and quoted text must survive verbatim; if the translator drops or alters one, its output is
  *    discarded and the original is spoken.
  *  - An answer that is blank or wildly longer than the source (a hallucinated ramble) is discarded.
@@ -41,7 +42,7 @@ class ReplyLocalizer(
         if (translator == null || !enabled() || src.isEmpty() || src.length > maxChars()) return null
         if (!looksEnglish(src)) return null
         val tagged = EntityTags.protectEnglish(src, protectedTerms(src))
-        if (hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N)\\d+\\]"), " "))) return null
+        if (hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N|Q)\\d+\\]"), " "))) return null
         val t0 = System.currentTimeMillis()
         val out = try { kotlinx.coroutines.withTimeoutOrNull(waitMs()) { translator.translate(tagged.text, Lang.GH_EN, Lang.TWI) } }
             catch (e: CancellationException) { throw e } catch (_: Exception) { null }
@@ -59,7 +60,8 @@ class ReplyLocalizer(
 
     companion object {
         private val NUMBER_WORDS = setOf(
-            "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+            // no "one": runs of number words are tagged before this check, so a "one" left over is a word ("which one").
+            "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
             "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
             "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
             "point", "percent", "half", "quarter", "cedi", "cedis", "pesewa", "pesewas", "star", "hash", "o'clock"
@@ -90,7 +92,10 @@ class ReplyLocalizer(
             val words = WORD.findAll(s.lowercase()).map { it.value.trim('\'') }.filter { it.isNotEmpty() }.toList()
             if (words.isEmpty()) return false
             val hits = words.count { it in ENGLISH_COMMON }
-            return hits >= 1 && hits * 3 >= words.size
+            // A longer answer is mostly content words: "Usain Bolt is the fastest man, holding the one hundred‑metre world
+            // record." has 3 common words in 13, so it was "not English" and the English voice read it in Twi mode (A20e,
+            // 4 October 2026). Six words or more, two common English words and not one Twi word is English too.
+            return hits >= 1 && (hits * 3 >= words.size || (words.size >= 6 && hits >= 2 && d.twiTok == 0))
         }
         /** For choosing the VOICE (not for translating): [looksEnglish], or — a line made mostly of names, like a list of
          *  contacts — no Akan letter, no Twi word, and at least one common English word. Pure. */
@@ -121,12 +126,19 @@ class ReplyLocalizer(
             val out = LinkedHashSet<String>()
             DOUBLE_QUOTED.findAll(s).forEach { out.add(it.groupValues[1].trim()) }
             SINGLE_QUOTED.findAll(s).forEach { out.add(it.groupValues[1].trim()) }
-            for (m in WORD.findAll(s)) {
+            val words = WORD.findAll(s).toList()
+            for ((i, m) in words.withIndex()) {
                 val w = m.value.trim('\'')
                 if (w.length < 2) continue
                 val mixed = w.drop(1).any { it.isUpperCase() } && w.any { it.isLowerCase() }
                 val capital = w[0].isUpperCase()
                 val atStart = SENTENCE_START.containsMatchIn(s.substring(0, m.range.first))
+                // A capital at a sentence start is a name when the next word is a capitalised word right after it —
+                // "Usain Bolt is…", "Kwame Nkrumah was…" — so the whole name is kept, not just "Bolt" (4 October 2026).
+                val next = words.getOrNull(i + 1)
+                val nameStart = atStart && capital && next != null && next.value[0].isUpperCase() &&
+                    s.substring(m.range.last + 1, next.range.first) == " " && w.lowercase() !in ENGLISH_COMMON
+                if (nameStart) { out.add("$w ${next!!.value.trim('\'')}"); continue }
                 if (mixed || (capital && !atStart)) out.add(w)
             }
             return out

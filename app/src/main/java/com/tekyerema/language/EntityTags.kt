@@ -10,7 +10,7 @@ package com.tekyerema.language
  * Pure → unit-tested.
  */
 object EntityTags {
-    enum class Kind { PERSON, AMOUNT, NUMBER }
+    enum class Kind { PERSON, AMOUNT, NUMBER, QUANTITY }
 
     /** [value]: what the tag stands for — a name as the user said it (or their contact's spelling), an amount in plain
      *  English ("5 cedis"), a phone number as digits. */
@@ -27,7 +27,7 @@ object EntityTags {
     /** An amount: "5 cedis", "0.10 cedis", "50 pesewas", "5 Ghana cedis", "GHS 5", "GH₵ 5.00", "₵5". */
     private val AMOUNT = Regex("(?i)(?:\\b(?:GHS|GHC|GH₵|GH¢)\\s*|[₵¢]\\s*)(\\d+(?:[.,]\\d{1,2})?)|" +
         "\\b(\\d+(?:[.,]\\d{1,2})?)\\s*(ghana\\s+cedis?|cedis?|pesewas?|ghs|ghc)\\b")
-    private val TAG = Regex("\\[(?:P|A|N)\\d+\\]")
+    private val TAG = Regex("\\[(?:P|A|N|Q)\\d+\\]")
     private val WORD = Regex("[\\p{L}][\\p{L}'’-]*")
 
     /** Akan day names and other common Ghanaian given names — tagged even when they aren't saved contacts. */
@@ -119,6 +119,19 @@ object EntityTags {
         out = SPELLED_AMOUNT.replace(out) { m ->
             a++; Entity("[A$a]", Kind.AMOUNT, "${m.groupValues[1]} ${m.groupValues[3].lowercase()}").also { ents += it }.tag
         }
+        // Any other quantity — a count, a size, a time, a percentage, a USSD code — is said in English inside the Twi line
+        // too (owner, 2 October 2026: "all numbers and amounts should be kept and pronounced in normal English"). Until
+        // 4 October one such number kept the WHOLE reply in English: "Usain Bolt is the fastest man, holding the one
+        // hundred‑metre world record." was read by the English voice in Twi mode (A20e). A lone "one" ("which one") is a
+        // word, not a quantity, and is left to the translator.
+        var q = 0
+        fun quantity(value: String): String { q++; return Entity("[Q$q]", Kind.QUANTITY, value.trim()).also { ents += it }.tag }
+        out = SPOKEN_CODE.replace(out) { m -> quantity(m.value) }
+        out = DIGIT_QUANTITY.replace(out) { m -> quantity(m.value) }
+        out = SPELLED_QUANTITY.replace(out) { m ->
+            val run = m.value.replace(TRAILING_JOINER, "")
+            if (run.isBlank() || run.equals("one", ignoreCase = true)) m.value else quantity(run) + m.value.substring(run.length)
+        }
         for (term in terms.sortedByDescending { it.length }) {
             if (term.isBlank() || !out.contains(term)) continue
             p++
@@ -128,6 +141,21 @@ object EntityTags {
         }
         return Tagged(out, ents)
     }
+
+    private const val NUMQ = "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|" +
+        "fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|" +
+        "million|billion|point|and|oh)"
+    private const val JOIN = "[\\s\\-‐‑–]+"
+    /** A unit glued to the number by a hyphen ("‑metre") or said after it ("percent", "o'clock"). */
+    private const val UNIT = "(?:[\\-‐‑–]\\p{L}+|\\s?%|\\s+(?:percent|per\\s+cent|o'clock))?"
+    /** A USSD code as the voice says it: "star one seven zero hash". */
+    private val SPOKEN_CODE = Regex("(?i)\\bstar(?:\\s+(?:star|zero|oh|one|two|three|four|five|six|seven|eight|nine))+\\s+hash\\b")
+    /** Digits left after amounts and phone numbers: "100", "3:45", "85%", "2.5", "100‑metre" — never the digit of a tag. */
+    private val DIGIT_QUANTITY = Regex("(?<![\\p{L}\\d\\[.,:])\\d+(?:[.,:]\\d+)*$UNIT(?![\\d\\]])")
+    /** A number said in words — replies reach the voice already verbalised ("one hundred‑metre", "forty-five"); never
+     *  starting on "and", "point" or "oh". */
+    private val SPELLED_QUANTITY = Regex("(?i)\\b(?!(?:and|point|oh)\\b)$NUMQ(?:$JOIN$NUMQ)*\\b$UNIT")
+    private val TRAILING_JOINER = Regex("(?i)(?:$JOIN(?:and|point|oh))+$")
 
     // ---------------------------------------------------------------- putting them back
 
@@ -152,6 +180,7 @@ object EntityTags {
             Kind.PERSON -> "${e.tag} = a person (${e.value})"
             Kind.AMOUNT -> "${e.tag} = an amount (${e.value})"
             Kind.NUMBER -> "${e.tag} = a phone number (${e.value})"
+            Kind.QUANTITY -> "${e.tag} = a number (${e.value})"
         }
     }
 
@@ -169,6 +198,7 @@ object EntityTags {
         Kind.PERSON -> e.value
         Kind.AMOUNT -> EN_OPEN + e.value.replace(Regex("\\bcedis?\\b")) { "Ghana ${it.value}" } + EN_CLOSE
         Kind.NUMBER -> EN_OPEN + com.tekyerema.agent.NumberSpeech.spoken(e.value) + EN_CLOSE
+        Kind.QUANTITY -> EN_OPEN + e.value + EN_CLOSE
     }
 
     /** The line as it is SHOWN (markers dropped). */

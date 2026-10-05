@@ -108,23 +108,30 @@ object VoiceEngine {
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
 
     @Volatile private var warmedAt = 0L
+    /** The raw English→Twi translator (no tags), for the warm-up only. */
+    @Volatile private var englishToTwiMt: com.tekyerema.language.TranslationProvider? = null
+    private val warmCount = java.util.concurrent.atomic.AtomicInteger()
 
     /** Wake the translator (the owner's ZeroGPU Space sleeps when idle: its first call after a pause timed out at 32 s —
-     *  QA, 3 October 2026) with one short, cached line, in the background — when Twi mode starts or a Twi turn begins. */
+     *  QA, 3 October 2026) with one short line each way, in the background — when Twi mode starts or a Twi turn begins.
+     *  Each warm-up line is new ("… 2", "… 3"): the fixed line was answered from the translator's own cache in 8 ms and
+     *  never reached the Space, which then timed out on the real request (A20e, 4 October 2026). */
     fun warmTranslator() {
         val mt = twiToEnglish ?: return
         val now = System.currentTimeMillis()
         if (now - warmedAt < 10 * 60_000L) return
         warmedAt = now
+        val n = warmCount.incrementAndGet()
         kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
             val t0 = System.currentTimeMillis()
-            val ok = try { mt.translate("Mepa wo kyɛw", Lang.TWI, Lang.GH_EN) != null } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
+            val ok = try { mt.translate("Mepa wo kyɛw $n", Lang.TWI, Lang.GH_EN) != null } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
             android.util.Log.i("Tekyerema", "[MT] translator warm-up ${if (ok) "ok" else "failed"} in ${System.currentTimeMillis() - t0}ms")
             // …and the OTHER direction: since 3 October the Space answers English→Twi with a second model (v2) that loads
-            // on its first use (~10 s) — unwarmed, the first Twi reply would miss the 3.5 s reply bound and be spoken in English.
+            // on its first use (~10 s) — unwarmed, the first Twi reply would miss the reply bound and be spoken in English.
             val t1 = System.currentTimeMillis()
-            val ok2 = try { englishToTwi?.invoke("Please wait a moment.") != null } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
-            android.util.Log.i("Tekyerema", "[MT] English→Twi warm-up ${if (ok2) "ok" else "sent (reply bound)"} in ${System.currentTimeMillis() - t1}ms")
+            val ok2 = try { englishToTwiMt?.translate("Please wait a moment $n.", Lang.GH_EN, Lang.TWI) != null }
+                catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[MT] English→Twi warm-up ${if (ok2) "ok" else "failed"} in ${System.currentTimeMillis() - t1}ms")
         }
     }
 
@@ -235,8 +242,9 @@ object VoiceEngine {
                 asrRegistry = layer.asr
                 val ttsRegistry = layer.tts + ("system" to systemVoice) + (own?.let { mapOf("ghvoice" to it) } ?: emptyMap())
                 val englishIds = if (own != null) listOf("ghvoice", "system") else listOf("system")
-                val localizer = com.tekyerema.language.ReplyLocalizer(
-                    com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline))
+                val enTw = com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline)
+                val localizer = com.tekyerema.language.ReplyLocalizer(enTw)
+                englishToTwiMt = enTw
                 // …and the way in: a Twi request reaches the cloud planner in English too (with its Twi), as it did with Khaya.
                 twiToEnglish = com.tekyerema.language.LanguageLayer.translator(Lang.TWI, Lang.GH_EN, layer.mt, isOnline)
                 englishToTwi = { localizer.toTwi(it) }
@@ -371,7 +379,7 @@ object VoiceEngine {
         // The reply panel follows the task: whenever it waits on the user (a confirmation, a question, the secure step)
         // a panel over any app shows what it's waiting for, with buttons that fit (PromptSurface).
         scope.launch(Dispatchers.Main) {
-            AgentEngine.state.map { PromptSurface.of(it.status, PromptSurface.confirmationText(it.pendingConfirmation, it.pendingConfirmationTwi), PromptSurface.confirmationText(it.pendingQuestion, it.pendingQuestionTwi), it.confirmationSeq) }
+            AgentEngine.state.map { PromptSurface.of(it.status, PromptSurface.confirmationText(it.pendingConfirmation, it.pendingConfirmationTwi), PromptSurface.confirmationText(it.pendingQuestion, it.pendingQuestionTwi), it.confirmationSeq, twi = speaksTwi()) }
                 .distinctUntilChanged()
                 .collect { p -> if (p == null) com.tekyerema.ui.OverlayConfirm.hidePrompt(app) else com.tekyerema.ui.OverlayConfirm.showPrompt(app, p) }
         }
@@ -472,6 +480,12 @@ object VoiceEngine {
     fun start() { vocabRefresh(); controller.start() }
     /** The circle tapped while Tɛkyerɛma talks: stop talking and listen. While a task works it stays the kill switch. */
     fun interrupt() = controller.interrupt()
+    /** Stop whatever is being said right now — and nothing else (the PIN pad: the user is entering their PIN, in silence). */
+    fun hush() {
+        if (!initialized) return
+        try { controller.hush() } catch (_: Throwable) {}
+        try { englishVoice.stop() } catch (_: Throwable) {}
+    }
     /** Reopen the microphone for the prompt the task is waiting on (the panel's Answer button) — cutting the prompt's
      *  own reading short when it is still being read. */
     fun respond() { if (initialized) controller.respond() }

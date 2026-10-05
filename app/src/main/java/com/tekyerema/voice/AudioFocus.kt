@@ -35,11 +35,29 @@ class AudioFocus(context: Context, private val onLost: () -> Unit = {}) {
             when {
                 kind == Kind.SPEAK && DuplexAudio.active -> AudioAttributes.USAGE_VOICE_COMMUNICATION
                 kind == Kind.SPEAK && ScreenReader.active(app) -> AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
+                // The phone's own Assistant volume at 0 is silence for every word we say — on the A20e (4 October 2026)
+                // it sat at 0 on the speaker while media, TTS and accessibility were at 15, and the user heard no reply at
+                // all. A blind user can't find that slider: speak on the accessibility stream they can hear instead.
+                kind == Kind.SPEAK && assistantSilent() -> AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY
                 else -> AudioAttributes.USAGE_ASSISTANT
             }
         )
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
+
+    @Volatile private var saidSilent = false
+
+    /** The Assistant stream (AudioSystem.STREAM_ASSISTANT = 11, API 29+) is muted while the accessibility one isn't. */
+    private fun assistantSilent(): Boolean {
+        val manager = am ?: return false
+        val silent = try {
+            manager.getStreamVolume(STREAM_ASSISTANT) == 0 && manager.getStreamVolume(AudioManager.STREAM_ACCESSIBILITY) > 0
+        } catch (_: Throwable) { false }
+        if (silent && !saidSilent) android.util.Log.w("Tekyerema", "[TTS] the phone's Assistant volume is 0 — speaking on the accessibility stream")
+        saidSilent = silent
+        return silent
+    }
+    private val STREAM_ASSISTANT = 11
 
     /** Request focus for [kind]; returns the request so the caller can release exactly its own ([release]). */
     fun acquire(kind: Kind): AudioFocusRequest? {

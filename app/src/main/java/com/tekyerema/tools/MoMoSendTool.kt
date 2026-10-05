@@ -101,9 +101,13 @@ object MoMoSendTool : Tool {
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val number = args.str("number")?.filter { it.isDigit() }.orEmpty()
         val amount = args.str("amount")?.trim().orEmpty()
-        val reference = args.str("reference")?.trim().ifBlankOrNull("Payment")
         if (number.length < 7) return ToolResult(false, "I don't have a valid recipient number to send to.")
         if (amount.isEmpty()) return ToolResult(false, "I don't have an amount to send.")
+        // The reference is the user's, never invented (owner, 5 October 2026) — this driver types it without stopping, so
+        // it must be known before the walk starts: ask the user, then call again with it.
+        val reference = args.str("reference")?.trim()?.takeIf { it.isNotEmpty() }
+            ?: return ToolResult(false, "MTN asks for a reference for this payment. Ask the user what it should be " +
+                "(\"none\" means MTN's usual \"Payment\"), then call momo_send again with it.", recoverable = true)
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
             return ToolResult(false, "CALL_PHONE permission isn't granted, so I can't open Mobile Money.")
         val ctrl = ctx.controller ?: return ToolResult(false, "The accessibility service isn't running, so I can't drive the menu.")

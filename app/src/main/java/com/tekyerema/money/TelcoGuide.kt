@@ -104,6 +104,11 @@ object TelcoGuide {
             if (questionOf(last)?.startsWith(AGAIN) == true) return AgentDecision.CannotDo(REASON, STOPPED)
             return ask(AGAIN + question(session, first = false))
         }
+        // A reference is typed as the user said it — the entry cleaner below keeps only the digits of an answer that has
+        // any ("school fees 2" → "2").
+        if (TelcoUssd.rows(session.screen).isEmpty() &&
+            com.tekyerema.money.ussd.MenuModel.slotOf(session.screen) == com.tekyerema.money.ussd.SlotKind.REFERENCE)
+            return reply(session, referenceOf(answer) ?: return askReference(session), auto = false, more = false, row = null)
         val entry = BankUssd.entry(answer) ?: return ask(AGAIN + question(session, first = false))
         // A MENU wants one of its options. Digits are typed as said; words must name a row ("MoMo user" → 1); anything
         // else is asked again and never typed (2 October 2026: a whole sentence went into MTN's menu — "Incorrect choice").
@@ -276,6 +281,8 @@ object TelcoGuide {
             // These values were read back and approved ONCE already (the navigator's read-back, or the open question
             // of this walk, which now says the amount and who it is for) — entered like an auto step, not asked again.
             if (value != null) return reply(session, value, auto = true, more = false, row = null)
+            // The network wants a reference and the user gave none: ASKED, never invented (owner, 5 October 2026).
+            if (slot == com.tekyerema.money.ussd.SlotKind.REFERENCE) return askReference(session)
             // An amount we hold but that's out of range: say so rather than let the network reject it.
             if (slot == com.tekyerema.money.ussd.SlotKind.AMOUNT && session.flow.amount != null)
                 return ask("Your amount, ${session.flow.amount} cedis, is outside what this offer allows. " +
@@ -311,7 +318,26 @@ object TelcoGuide {
         return AgentDecision.CallTool(TelcoUssdTool.NAME, args, RATIONALE)
     }
 
-    private fun ask(q: String): AgentDecision = AgentDecision.CallTool("ask_user", JSONObject().put("question", q), RATIONALE)
+    private fun ask(q: String, twi: String? = null): AgentDecision =
+        AgentDecision.CallTool("ask_user", JSONObject().put("question", q).apply { twi?.let { put("question_twi", it) } }, RATIONALE)
+
+    /** "MTN asks for a reference for this payment. What should it say?" — with its own Twi, so a Twi conversation hears and
+     *  sees only Twi (no translation). [owner: verify the Twi] */
+    private fun askReference(s: TelcoSession.View): AgentDecision =
+        ask("${s.flow.netName} asks for a reference for this payment. What should it say?",
+            twi = "${s.flow.netName} pɛ reference ma sika yi. Dɛn na menkyerɛw?")
+
+    private val NO_REFERENCE = Regex("^(?:none|no reference|nothing|skip(?: it)?|anything|any|whatever|leave it blank|blank|" +
+        "hwee|biribiara|biribi biara|ɛnhia|enhia)$")
+
+    /** The user's reference as said, tidied: no closing punctuation, one space between words, at most 30 characters (a
+     *  network's reference box is short). "None" / "skip" / "hwee" → MTN's usual "Payment". Null for an empty answer. Pure. */
+    internal fun referenceOf(answer: String): String? {
+        val a = answer.trim().trimEnd('.', '!', '?', ',').replace(Regex("\\s+"), " ").trim('"', '“', '”', '\'', '‘', '’', ' ')
+        if (a.isEmpty()) return null
+        if (NO_REFERENCE.matches(a.lowercase())) return "Payment"
+        return a.take(30).trim()
+    }
 
     /** "MTN says: “1 Buy Data; 2 …”. What should I enter?" — the screen first, one question. */
     fun question(s: TelcoSession.View, first: Boolean): String =

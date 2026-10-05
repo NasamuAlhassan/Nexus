@@ -395,6 +395,7 @@ class RoutingBrain(
                     com.tekyerema.language.EntityTags.Kind.PERSON -> "a person's name"
                     com.tekyerema.language.EntityTags.Kind.AMOUNT -> "an amount of money"
                     com.tekyerema.language.EntityTags.Kind.NUMBER -> "a phone number"
+                    com.tekyerema.language.EntityTags.Kind.QUANTITY -> "a number"
                 }
             } + ". Write each tag exactly as it is (e.g. [P1]) wherever you mean it — in tool arguments, questions and " +
                 "replies. Never translate, spell out or guess the value of a tag."

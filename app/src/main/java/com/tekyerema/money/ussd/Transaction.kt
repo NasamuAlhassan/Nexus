@@ -36,7 +36,9 @@ data class TxContext(
     fun slot(kind: SlotKind): String? = when (kind) {
         SlotKind.PHONE_NUMBER, SlotKind.CONFIRM_NUMBER -> recipient
         SlotKind.AMOUNT -> amount
-        SlotKind.REFERENCE -> reference ?: "Payment"
+        // Never invented: a reference the user didn't give is ASKED at the network's reference screen (owner, 5 October
+        // 2026: "it got to a reference part, it didn't pause … which is wrong"). It used to be typed as "Payment".
+        SlotKind.REFERENCE -> reference
         SlotKind.PRODUCT, SlotKind.OTHER -> null
     }
 }

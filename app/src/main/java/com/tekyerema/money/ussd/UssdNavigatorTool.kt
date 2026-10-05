@@ -213,7 +213,7 @@ object UssdNavigatorTool : Tool {
                 TelcoSession.opened(TelcoUssd.Flow(TelcoUssd.NAV, root, emptyList(), tx.intent.spoken,
                     com.tekyerema.agent.NumberSpeech.networkName(sim.provider ?: "the network"),
                     number = tx.recipient, amount = tx.amount,
-                    reference = if (intent == TxIntent.SEND_MONEY) tx.reference ?: "Payment" else null, name = contact,
+                    reference = tx.reference, name = contact,   // none said: the guide ASKS at the reference screen
                     intent = intent.name, sim = sim.provider),
                     screenText, kind)
                 TelcoSession.screen(screenText, kind, auto = false, more = false, user = true)
@@ -295,10 +295,13 @@ object UssdNavigatorTool : Tool {
         if (intent != TxIntent.SEND_MONEY) return null
         val number = args.str("number")?.takeIf { n -> n.any { it.isDigit() } } ?: return null
         if (com.tekyerema.agent.NumberSpeech.moneyReadBack(number, args.str(MoMoSendTool.ARG_SIM)).second != null) return null
-        if (args.optBoolean(ARG_UNSAID) || args.str(ARG_REPEAT) != null || MoMoSendTool.firstTimeWarning(args) != null ||
+        if (args.optBoolean(ARG_UNSAID) || args.str(ARG_REPEAT) != null ||
             args.optBoolean(MoMoSendTool.ARG_ON_CALL) || !args.str("reference").isNullOrBlank()) return null
-        return com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY,
-            name = args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }, number = number, amount = amount)
+        val firstTime = MoMoSendTool.firstTimeWarning(args) != null
+        val spec = com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY,
+            name = args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }, number = number, amount = amount, firstTime = firstTime)
+        // The first-time warning is only carried by the one-voice Twi line ("Nɔma yi yɛ foforɔ."); without it, English.
+        return spec.takeIf { !firstTime || com.tekyerema.voice.ConfirmTemplates.oneVoice(it) != null }
     }
 
     override fun confirmationPrompt(args: JSONObject): String {
