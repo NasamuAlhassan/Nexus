@@ -28,11 +28,13 @@ object AnswerContext {
     private val PHONE = Regex("(?i)\\b(?:phone number|mobile number|what(?:'s| is) the number|which number|the number|their number|" +
         "his number|her number|number should|number to|digits)\\b")
     private val CHOICE = Regex("(?i)^(?:which\\b[^:?]*|who did you mean|who do you mean|did you mean)\\s*:\\s*(.+?)\\?")
+    /** The planner's form: "Which chat should I send the message to? Richmond, or Richmond Apenensu?" */
+    private val CHOICE_AFTER = Regex("(?i)^(?:which|who)\\b[^?]*\\?\\s+([^?]+?\\bor\\b[^?]+?)\\?$")
     private val NAME = Regex("(?i)^(?:who\\b|to whom\\b|which contact\\b|what(?:'s| is) (?:their|his|her|the person's) name)")
 
     fun expect(question: String): Expect = when {
         REFERENCE.containsMatchIn(question) -> Expect.REFERENCE
-        CHOICE.containsMatchIn(question.trim()) -> Expect.CHOICE
+        CHOICE.containsMatchIn(question.trim()) || CHOICE_AFTER.containsMatchIn(question.trim()) -> Expect.CHOICE
         AMOUNT.containsMatchIn(question) -> Expect.AMOUNT
         PHONE.containsMatchIn(question) -> Expect.PHONE
         NAME.containsMatchIn(question.trim()) -> Expect.NAME
@@ -41,7 +43,7 @@ object AnswerContext {
 
     /** The options a "Which X: A, B, or C?" question offers ("ending 323" kept with its name). */
     fun options(question: String): List<String> {
-        val list = CHOICE.find(question.trim())?.groupValues?.get(1) ?: return emptyList()
+        val list = (CHOICE.find(question.trim()) ?: CHOICE_AFTER.find(question.trim()))?.groupValues?.get(1) ?: return emptyList()
         return list.split(Regex(",\\s*(?:or\\s+)?|\\s+or\\s+")).map { it.trim().trimEnd('.') }.filter { it.isNotEmpty() }
     }
 
@@ -100,8 +102,28 @@ object AnswerContext {
             o to s
         }.sortedByDescending { it.second }
         val best = scored[0]
-        if (best.second < 0.7) return null
-        if (scored[1].second > best.second - 0.1) return null
+        if (best.second >= 0.7 && scored[1].second <= best.second - 0.1) return best.first
+        if (digits.isNotEmpty()) return null
+        return bySound(a, options)
+    }
+
+    private val FILLER_WORDS = Regex("(?i)\\b(?:the|one|please|it'?s|is|nso|yes|ok(?:ay)?|that|this)\\b")
+
+    /**
+     * A CLOSED choice heard badly: the lab recogniser writes English names its own way ("Prince Melanin" → "press malam",
+     * "Richmond Apenensu" → "rekyemɔndapanu" — A20e, 5 October 2026). Among the few options offered, the one the WHOLE
+     * answer sounds closest to (sound keys) — only when it is clearly closer than every other (0.1, as for names) and alike enough
+     * (0.5). Taken as an inference: said back once in the read-back of the action that uses it (HeardAs via
+     * [noteInference]), never acted on unread.
+     */
+    internal fun bySound(a: String, options: List<String>): String? {
+        val heard = com.tekyerema.voice.PhoneticKey.of(FILLER_WORDS.replace(a, " "))
+        if (heard.length < 4) return null
+        val scored = options.map { o ->
+            o to com.tekyerema.voice.PhoneticKey.similarity(heard, com.tekyerema.voice.PhoneticKey.of(o.replace(Regex("(?i)\\s+ending\\s+[\\d ]+$"), "")))
+        }.sortedByDescending { it.second }
+        val best = scored[0]
+        if (best.second < 0.5 || (scored.size > 1 && scored[1].second > best.second - 0.1)) return null
         return best.first
     }
 

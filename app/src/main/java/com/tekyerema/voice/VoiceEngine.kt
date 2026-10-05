@@ -141,6 +141,9 @@ object VoiceEngine {
      * numbers come back marked for the English voice (EntityTags). Null: not Twi, no translator, or the translation
      * couldn't be trusted — then the English stands.
      */
+    /** How long a question / confirmation waits for its Twi wording (the voice waits the same). */
+    fun promptWaitMs(): Long = com.tekyerema.core.config.AppConfig.long("providers.speech.mt.promptWaitMs", 8_000L)
+
     suspend fun twiLine(text: String): String? =
         if (!speaksTwi()) null else try { englishToTwi?.invoke(text) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
 
@@ -247,7 +250,10 @@ object VoiceEngine {
                 englishToTwiMt = enTw
                 // …and the way in: a Twi request reaches the cloud planner in English too (with its Twi), as it did with Khaya.
                 twiToEnglish = com.tekyerema.language.LanguageLayer.translator(Lang.TWI, Lang.GH_EN, layer.mt, isOnline)
-                englishToTwi = { localizer.toTwi(it) }
+                // A question or a confirmation must be understood: in Twi it waits longer for its Twi wording than a passing
+                // reply does (one language per setting — owner, 5 October 2026; the A20e then read a confirmation in English
+                // after 3.5 s of translator). `providers.speech.mt.promptWaitMs`.
+                englishToTwi = { localizer.toTwi(it, promptWaitMs()) }
                 tts = RoutingTts(
                     english = SpeechProviders.tts("english", ttsRegistry, systemVoice, englishIds),
                     twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),

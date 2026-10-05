@@ -65,6 +65,8 @@ object UssdNavigatorTool : Tool {
     /** Set when a model supplied a number the user's request never said (money/MoneyFlow.fromPlanner). */
     const val ARG_UNSAID = "_unsaid"
     private const val UNSAID_LINE = "You didn't say this number — I chose it myself, so check it."
+    const val ARG_UNSAID_AMOUNT = "_unsaidAmount"
+    private const val UNSAID_AMOUNT_LINE = "You didn't say this amount in this request — it's from earlier, so check it."
     const val BALANCE_PROMPT = "Check your Mobile Money balance? I'll go through the menu; you'll enter your PIN."
 
     // number + amount are checked in [preflight] for a send (a missing one is asked for again there); a balance check
@@ -295,7 +297,7 @@ object UssdNavigatorTool : Tool {
         if (intent != TxIntent.SEND_MONEY) return null
         val number = args.str("number")?.takeIf { n -> n.any { it.isDigit() } } ?: return null
         if (com.tekyerema.agent.NumberSpeech.moneyReadBack(number, args.str(MoMoSendTool.ARG_SIM)).second != null) return null
-        if (args.optBoolean(ARG_UNSAID) || args.str(ARG_REPEAT) != null ||
+        if (args.optBoolean(ARG_UNSAID) || args.optBoolean(ARG_UNSAID_AMOUNT) || args.str(ARG_REPEAT) != null ||
             args.optBoolean(MoMoSendTool.ARG_ON_CALL) || !args.str("reference").isNullOrBlank()) return null
         val firstTime = MoMoSendTool.firstTimeWarning(args) != null
         val spec = com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY,
@@ -313,14 +315,16 @@ object UssdNavigatorTool : Tool {
         val tail = "I'll go through the menu quietly and stop at the PIN for you to enter."
         if (intent != TxIntent.SEND_MONEY) {
             val whom = if (intent == TxIntent.BUY_AIRTIME) "this phone" else who?.first ?: "another number"
-            val warn = listOfNotNull(UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who?.second.takeIf { intent == TxIntent.SEND_AIRTIME }, call)
+            val warn = listOfNotNull(UNSAID_AMOUNT_LINE.takeIf { args.optBoolean(ARG_UNSAID_AMOUNT) },
+                UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who?.second.takeIf { intent == TxIntent.SEND_AIRTIME }, call)
                 .joinToString(" ").ifEmpty { null }
             return "Buy $amt of airtime for $whom, from your Mobile Money wallet?\n" + (warn?.let { "$it " } ?: "") + tail
         }
         // The reference goes out with the money, so it is read back with it (A20e audit 2026-10-01, F09).
         val ref = GhanaMobileMoney.referencePhrase(args.str("reference"))
         who ?: return "Send $amt with Mobile Money$ref? I'll go through the menu and stop at the PIN for you to enter."
-        val warn = listOfNotNull(UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who.second, args.str(ARG_REPEAT),
+        val warn = listOfNotNull(UNSAID_AMOUNT_LINE.takeIf { args.optBoolean(ARG_UNSAID_AMOUNT) },
+            UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who.second, args.str(ARG_REPEAT),
             MoMoSendTool.firstTimeWarning(args), call).joinToString(" ").ifEmpty { null }
         return "Send $amt to ${who.first}, with Mobile Money$ref?\n" + (warn?.let { "$it " } ?: "") + tail
     }

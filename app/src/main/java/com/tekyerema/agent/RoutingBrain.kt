@@ -302,7 +302,7 @@ class RoutingBrain(
         val untagged = com.tekyerema.language.TwiTagSession.forGoal(ctx.goal)?.entities?.takeIf { it.isNotEmpty() }
             ?.let { TagRestore.restoreTags(proposed, it) } ?: proposed
         // No model walks a money menu or dials a code it made up (money/MoneyFlow.fromPlanner).
-        val d = com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal)
+        val d = com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal, ctx.history)
         if (d is AgentDecision.Done && ctx.simple) answers?.put(ctx.goal, d.summary)
         if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && nothingDoneYet(ctx.history)) {
             android.util.Log.i("Tekyerema", "[ROUTE] the cloud couldn't be reached — answering the offline way")

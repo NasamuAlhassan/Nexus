@@ -818,7 +818,7 @@ class VoiceController(
      *  moment, then the English is read. The ASKING state is already set, so an answer meanwhile is taken as the answer. */
     private suspend fun awaitTwiWording(question: String): String? {
         if (!agent.state.value.questionTwiPending) return null
-        val deadline = android.os.SystemClock.uptimeMillis() + TWI_WORDING_WAIT_MS
+        val deadline = android.os.SystemClock.uptimeMillis() + VoiceEngine.promptWaitMs() + 500
         while (android.os.SystemClock.uptimeMillis() < deadline) {
             val s = agent.state.value
             if (s.pendingQuestion != question || s.status != AgentStatus.ASKING) return null
@@ -827,7 +827,6 @@ class VoiceController(
         }
         return agent.state.value.takeIf { it.pendingQuestion == question }?.pendingQuestionTwi
     }
-    private val TWI_WORDING_WAIT_MS = 4_000L
 
     /** Offline in Twi: what the phone CAN do, said in English (there is no Twi voice offline). */
     private val OFFLINE_TWI_LIMIT = "Offline, I understand simple Twi requests — sending money, airtime, calls, your " +

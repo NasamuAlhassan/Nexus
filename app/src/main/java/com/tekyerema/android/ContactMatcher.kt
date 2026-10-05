@@ -86,6 +86,9 @@ object ContactMatcher {
             }
             val sim = maxOf(PhoneticKey.similarity(w, first), PhoneticKey.similarity(w, nc))
             if (sim >= 0.8) up(0.55 + (sim - 0.8))
+            // the whole name glued into one word by the recogniser, by sound ("prinsmalane" ~ Prince Melanin — the lab ASR,
+            // A20e 5 October 2026): only loosely, so it is said back and confirmed
+            if (n.size > 1 && w.length >= 8 && w[0] == nc[0] && PhoneticKey.similarity(wk, PhoneticKey.of(nc)) >= 0.75) up(0.60)
         } else {
             // several words heard: a run of the saved words, in order ("Printing Press", "Prince Alhassan")
             for (i in 1..n.size - h.size) if (n.subList(i, i + h.size) == h) up(0.80)
@@ -93,6 +96,9 @@ object ContactMatcher {
             if (sim >= 0.8) up(0.60 + (sim - 0.8))
             // one saved word heard as two ("rich man" ~ Richmond): only loosely — the read-back names the contact in full
             for (t in n) if (t.length >= 5 && hc[0] == t[0] && PhoneticKey.similarity(hc, t) >= 0.75) up(0.60)
+            // the first name exactly, then words that fit nothing ("Prince maai" — "ma me", for me, glued on): every Prince
+            // fits loosely, so "which Prince?" is asked rather than "I couldn't find Prince maai" (A20e, 5 October 2026)
+            if (h[0] == first && h[0].length >= 3) up(0.60)
         }
         return best
     }

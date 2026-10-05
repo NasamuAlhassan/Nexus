@@ -47,6 +47,7 @@ object TwiCommands {
     private val DATA = Regex("^${WANT}tɔ\\s+data(?:\\s+bundle)?(?:\\s+(?:a+\\s+ne\\s?bo\\s+yɛ\\s+)?$AMOUNT)?(?:\\s+ma\\s+(.+))?$")
     private val MASHUP = Regex("^${WANT}(?:tɔ\\s+)?mashup(?:\\s+bundle)?(?:\\s+ma\\s+(.+))?$")
     private val CALL = Regex("^frɛ\\s+(.+)$")
+    private val FOR_ME = Regex("(?i)\\s+(?:ma\\s+me|mame|maai|mma\\s+me)$")
     private val OPEN = Regex("^bue\\s+(.+)$")
     /** "Kyerɛ me nsɛm a ɛwɔ me screen so" / "Kenkan me screen" / "Hwɛ me screen" / "Ɛdeɛn na ɛwɔ me screen so" — what is on
      *  the screen: the phone reads it itself (QA TR03, 3 October 2026: it went to a cold translator for 40 s, then the cloud). */
@@ -146,7 +147,9 @@ object TwiCommands {
         "ba" to "child", "nana" to "grandparent")
 
     private fun who(raw: String): String {
-        val w = raw.trim().trimEnd('.', '!', '?')
+        // "frɛ Prince ma me" — call Prince FOR ME: "ma me" is not part of the name. The lab recogniser writes it "maai" /
+        // "mame" (A20e, 5 October 2026: "frɛ prince maai" became a call to "Prince maai", who doesn't exist).
+        val w = raw.trim().trimEnd('.', '!', '?').replace(FOR_ME, "").trim().ifEmpty { raw.trim() }
         if (w.equals("me", true)) return "me"
         // "me nua barima" (my brother) is said in two words as often as one
         Regex("^[Mm]e\\s+(\\S+(?:\\s+(?:barima|baa))?)$").find(w)?.let { m ->

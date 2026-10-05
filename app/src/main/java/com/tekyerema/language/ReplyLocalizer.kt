@@ -37,18 +37,18 @@ class ReplyLocalizer(
      * (`⟦en:5 Ghana cedis⟧`, see [EntityTags.segments]). A tag lost or doubled → the original is spoken. A quantity that
      * can't be tagged (a percentage, a code) still keeps the line in English.
      */
-    suspend fun toTwi(text: String): String? {
+    suspend fun toTwi(text: String, wait: Long = waitMs()): String? {
         val src = text.trim()
         if (translator == null || !enabled() || src.isEmpty() || src.length > maxChars()) return null
         if (!looksEnglish(src)) return null
         val tagged = EntityTags.protectEnglish(src, protectedTerms(src))
         if (hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N|Q)\\d+\\]"), " "))) return null
         val t0 = System.currentTimeMillis()
-        val out = try { kotlinx.coroutines.withTimeoutOrNull(waitMs()) { translator.translate(tagged.text, Lang.GH_EN, Lang.TWI) } }
+        val out = try { kotlinx.coroutines.withTimeoutOrNull(wait) { translator.translate(tagged.text, Lang.GH_EN, Lang.TWI) } }
             catch (e: CancellationException) { throw e } catch (_: Exception) { null }
             ?.trim()?.takeIf { it.isNotEmpty() }
         if (out == null) {
-            if (System.currentTimeMillis() - t0 >= waitMs()) Log.i("Tekyerema", "[MT] reply translation took longer than ${waitMs()} ms — speaking the English")
+            if (System.currentTimeMillis() - t0 >= wait) Log.i("Tekyerema", "[MT] reply translation took longer than $wait ms — speaking the English")
             return null
         }
         if (!tagged.isEmpty && !EntityTags.intact(tagged.text, out, tagged.entities)) {
@@ -64,7 +64,9 @@ class ReplyLocalizer(
             "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
             "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty", "thirty",
             "forty", "fifty", "sixty", "seventy", "eighty", "ninety", "hundred", "thousand", "million", "billion",
-            "point", "percent", "half", "quarter", "cedi", "cedis", "pesewa", "pesewas", "star", "hash", "o'clock"
+            // no "cedi"/"pesewa": an amount's figure or number word is what makes a quantity — "How much cedi should I send to
+            // Prince?" has none, and was read by the English voice in a Twi conversation (A20e, 5 October 2026)
+            "point", "percent", "half", "quarter", "star", "hash", "o'clock"
         )
         private val WORD = Regex("[\\p{L}\\p{M}']+")
         private val DIGIT = Regex("\\p{Nd}")

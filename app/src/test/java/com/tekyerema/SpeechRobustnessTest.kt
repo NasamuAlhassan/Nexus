@@ -273,6 +273,57 @@ class SpeechRobustnessTest {
         }
     }
 
+    // ------------------------------------------------------------------ the owner's Twi session on the A20e (5 October, 23:27–23:34)
+
+    @Test fun `a closed choice heard the lab recogniser's way is matched by sound and said back`() {
+        val which = "Which Prince: Prince Melanin, Prince Tesano AG youth Sec, or Prince Ice P? Or someone else?"
+        assertEquals("Prince Melanin", AnswerContext.read("press malam", which))
+        val chat = "Which chat should I send the message to? Richmond, or Richmond Apenensu?"
+        assertEquals(AnswerContext.Expect.CHOICE, AnswerContext.expect(chat))
+        assertEquals(listOf("Richmond", "Richmond Apenensu"), AnswerContext.options(chat))
+        assertEquals("Richmond Apenensu", AnswerContext.read("rekyemɔndapanu nso", chat))
+        // a guess like that is disclosed before the action
+        AnswerContext.noteInference("press malam", "Prince Melanin", which)
+        assertEquals("I heard 'press malam' — taking it as Prince Melanin.",
+            HeardAs.line(null, "ussd_navigate", JSONObject().put("contact", "Prince Melanin")))
+        // nothing close enough: the answer is passed on as said (and asked again), never guessed
+        assertEquals("kofi", AnswerContext.read("kofi", which))
+    }
+
+    @Test fun `call X for me in Twi calls X`() {
+        assertEquals("call Prince", com.tekyerema.language.TwiCommands.gloss("frɛ prince maai"))
+        assertEquals("call Prince", com.tekyerema.language.TwiCommands.gloss("frɛ prince ma me"))
+    }
+
+    @Test fun `a first name with words glued on, or a whole name glued into one, is asked about`() {
+        val phone = listOf("Prince Melanin", "Prince Tesano AG youth Sec", "Prince Ice P", "Kwame Mensah")
+            .mapIndexed { i, n -> ContactResolver.Contact(n, "02400001%02d".format(i)) }
+        assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(ContactMatcher.rank("Prince maai", phone)))
+        val glued = ContactMatcher.rank("prinsmalane", phone)
+        assertEquals(ContactMatcher.Confidence.WEAK, ContactMatcher.confidence(glued))
+        assertEquals(listOf("Prince Melanin"), ContactMatcher.pick("prinsmalane", glued).map { it.name })
+    }
+
+    @Test fun `an amount the planner took from an earlier request is said to be unsaid`() {
+        assertEquals(false, com.tekyerema.money.MoneyFlow.amountSaid("1", "soma pesee kɔma prinsmalane check a contact list no message prince melanin"))
+        assertEquals(true, com.tekyerema.money.MoneyFlow.amountSaid("0.1", "send 10 pesos to Kwame"))
+        assertEquals(true, com.tekyerema.money.MoneyFlow.amountSaid("1", "soma sika kɔma prince 1 cedis"))
+        assertEquals(true, com.tekyerema.money.MoneyFlow.amountSaid("1250", "send 1,250 cedis to Kwame"))
+        val d = com.tekyerema.money.MoneyFlow.fromPlanner(
+            com.tekyerema.agent.AgentDecision.CallTool("momo_send", JSONObject().put("number", "233552093690").put("amount", "1"), "planner"),
+            "soma pesee kɔma prinsmalane",
+            listOf("ask_user(\"What phone number and how much money should I send?\") → the user answered: \"check a contact list no message prince melanin\""))
+        val args = (d as com.tekyerema.agent.AgentDecision.CallTool).args
+        assertEquals(true, args.optBoolean(com.tekyerema.money.ussd.UssdNavigatorTool.ARG_UNSAID_AMOUNT))
+        assertEquals(true, com.tekyerema.money.ussd.UssdNavigatorTool.confirmationPrompt(args)
+            .contains("You didn't say this amount in this request — it's from earlier, so check it."))
+    }
+
+    @Test fun `a question with the word cedi in it is still put into Twi`() {
+        assertEquals(false, com.tekyerema.language.ReplyLocalizer.hasQuantity("How much cedi should I send to Prince?"))
+        assertEquals(true, com.tekyerema.language.ReplyLocalizer.hasQuantity("Send five cedis to Prince?"))
+    }
+
     // ------------------------------------------------------------------ contacts: sure, choose, weak, none
 
     private fun rank(h: String) = ContactMatcher.rank(h, contacts)

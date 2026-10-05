@@ -93,7 +93,7 @@ object MoneyFlow {
      *    "*124*0.10*0508797323#", a code it had made up.
      * Everything else is returned untouched.
      */
-    fun fromPlanner(d: AgentDecision, goal: String): AgentDecision {
+    fun fromPlanner(d: AgentDecision, goal: String, history: List<String> = emptyList()): AgentDecision {
         if (d !is AgentDecision.CallTool) return d
         val a = d.args
         fun s(key: String) = a.optString(key).trim().takeIf { it.isNotEmpty() && it != "null" }
@@ -125,10 +125,26 @@ object MoneyFlow {
             }
             else -> return d
         }
-        // A number the user never said (the model took one from an earlier turn): the read-back says so.
+        // A number — or an AMOUNT — the user never said in this request or its answers (the model took it from an earlier
+        // turn): the read-back says so. The amount check came from the A20e, 5 October 2026: "soma pesee kɔma prinsmalane"
+        // was read back as "Send 1 cedi …" — the 1 cedi was from the request before.
+        val said = goal + " " + answers(history).joinToString(" ") { it.second }
         val digits = nav.optString("number").filter { it.isDigit() }
-        if (digits.length >= 7 && !goal.filter { it.isDigit() }.contains(digits.takeLast(9))) nav.put(UssdNavigatorTool.ARG_UNSAID, true)
+        if (digits.length >= 7 && !said.filter { it.isDigit() }.contains(digits.takeLast(9))) nav.put(UssdNavigatorTool.ARG_UNSAID, true)
+        nav.optString("amount").takeIf { it.isNotBlank() }?.let { amt ->
+            if (!amountSaid(amt, said)) nav.put(UssdNavigatorTool.ARG_UNSAID_AMOUNT, true)
+        }
         return AgentDecision.CallTool(NAV, nav, "the planner's Mobile Money request — walked on the phone, by the navigator")
+    }
+
+    /** [amount] (cedis) is in [said] — as a figure or number words, in cedis or as pesewas, in English or Twi. Pure. */
+    internal fun amountSaid(amount: String, said: String): Boolean {
+        val a = amount.replace(",", "").trim().toBigDecimalOrNull() ?: return false
+        val figures = (com.tekyerema.voice.Normalizer.normalize(said, com.tekyerema.voice.Lang.GH_EN) + " " +
+            com.tekyerema.voice.Normalizer.normalize(said, com.tekyerema.voice.Lang.TWI))
+            .replace(Regex("(\\d),(\\d{3})\\b"), "$1$2")   // "1,250" is one thousand two hundred and fifty
+            .let { Regex("\\d+(?:[.,]\\d+)?").findAll(it) }.mapNotNull { it.value.replace(",", ".").toBigDecimalOrNull() }.toList()
+        return figures.any { f -> f.compareTo(a) == 0 || f.compareTo(a.movePointRight(2)) == 0 }
     }
 
     const val MADE_UP_CODE = "I don't have a checked code for that, and I never dial a code I made up. Nothing was dialled."
