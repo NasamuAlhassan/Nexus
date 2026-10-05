@@ -1,0 +1,259 @@
+package com.tekyerema
+
+import com.tekyerema.android.ContactMatcher
+import com.tekyerema.android.ContactResolver
+import com.tekyerema.money.MoneyAsk
+import com.tekyerema.voice.EntityCorrector
+import com.tekyerema.voice.HeardAs
+import com.tekyerema.voice.Lang
+import com.tekyerema.voice.LanguagePipeline
+import com.tekyerema.voice.Normalizer
+import com.tekyerema.voice.Verbalize
+import com.tekyerema.voice.understand.AnswerContext
+import com.tekyerema.voice.understand.FinanceVocab
+import com.tekyerema.voice.understand.TelcoTerms
+import com.tekyerema.voice.understand.TwiSpeechText
+import org.json.JSONObject
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Before
+import org.junit.Test
+
+/**
+ * The robustness layer around the HCI Lab recognisers and voice (5 October 2026): what an English or lab recogniser
+ * writes for a Ghanaian money request → what the app acts on → what the voice says. Realistic commands only — Ghanaian
+ * names, cedis/pesewas/GHS, MTN, phone numbers, MoMo, airtime, data.
+ */
+class SpeechRobustnessTest {
+    private val names = listOf("Kwame Mensah", "Osei Kwame", "Abena Owusu", "Akosua Boateng", "Kofi Annan", "Prince Alhassan",
+        "Princess Adjei", "Richmond Apenensu", "Yaw Asante", "Ama Serwaa", "Nana Yaa", "Efua Mensah", "Kwabena Darko",
+        "Abuakwa Printing Press", "Mum", "Adwoa Pokuaa")
+    private val contacts = names.mapIndexed { i, n -> ContactResolver.Contact(n, "05540000%02d".format(i)) }
+    private lateinit var saved: () -> EntityCorrector.Vocab
+
+    @Before fun setUp() {
+        saved = LanguagePipeline.vocabulary
+        LanguagePipeline.vocabulary = { EntityCorrector.Vocab.of(names, listOf("WhatsApp", "Telegram")) }
+        HeardAs.clear()
+    }
+
+    @After fun tearDown() { LanguagePipeline.vocabulary = saved; HeardAs.clear() }
+
+    private fun heard(raw: String) = LanguagePipeline.process(raw, Lang.GH_EN, Lang.GH_EN).canonical
+    private fun ask(raw: String) = MoneyAsk.parse(heard(raw))
+    private fun en(s: String) = Normalizer.normalize(s, Lang.GH_EN)
+
+    // ------------------------------------------------------------------ numbers as Ghanaians say them
+
+    @Test fun `spoken numbers become figures`() {
+        assertEquals("send 10 cedis to Kwame", en("send ten cedis to Kwame"))
+        assertEquals("send 2.5 cedis", en("send two point five cedis"))
+        assertEquals("send 1.50 cedis", en("send one point five zero cedis"))
+        assertEquals("send 50 pesewas to Yaw", en("send half a cedi to Yaw"))
+        assertEquals("send 1 cedi to Kofi", en("send a cedi to Kofi"))
+        assertEquals("send 120 cedis", en("send one hundred and twenty cedis"))
+        assertEquals("send 3500 cedis", en("send three thousand five hundred cedis"))
+        assertEquals("send 150 cedis to Mum", en("send 100 and fifty cedis to Mum"))
+        assertEquals("send 1050 cedis", en("send 1000 and fifty cedis"))
+    }
+
+    @Test fun `phone digits said the Ghanaian way`() {
+        assertEquals("0552093690", en("oh five five two oh nine three six nine oh").filter { it.isDigit() })
+        assertEquals("0552093690", en("zero double five two zero nine three six nine zero").filter { it.isDigit() })
+        assertEquals("0244000123", en("zero two double four triple zero one two three").filter { it.isDigit() })
+    }
+
+    @Test fun `number words that are not numbers stay words`() {
+        assertEquals("book a double room", en("book a double room"))
+        assertEquals("triple check it", en("triple check it"))
+        assertEquals("Oh, 5 cedis? No, 10", en("Oh, five cedis? No, ten"))
+        assertEquals("100 and 50 people came", en("100 and fifty people came"))
+    }
+
+    // ------------------------------------------------------------------ networks, currencies, money words
+
+    @Test fun `network names as recognisers write them`() {
+        assertEquals("buy MTN airtime", TelcoTerms.repair("buy em ti en airtime"))
+        assertEquals("buy MTN data bundle", TelcoTerms.repair("buy MTM data bundle"))
+        assertEquals("check my MTN balance", TelcoTerms.repair("check my M10 balance"))
+        assertEquals("airtime for MTN number", TelcoTerms.repair("airtime for empty n number"))
+        assertEquals("buy MTN airtime", TelcoTerms.repair("buy m.t.n airtime"))
+        assertEquals("buy AirtelTigo airtime", TelcoTerms.repair("buy airtel tigo airtime"))
+        assertEquals("send GHS 20 to Akosua", TelcoTerms.repair("send GH 20 to Akosua"))
+    }
+
+    @Test fun `ordinary words are never made into networks`() {
+        assertEquals("I met the men at the market", TelcoTerms.repair("I met the men at the market"))
+        assertEquals("send money to the men", TelcoTerms.repair("send money to the men"))
+        assertEquals("I am at home", TelcoTerms.repair("I am at home"))
+    }
+
+    @Test fun `money words repaired only in a money request and never in a message`() {
+        assertEquals("check my MoMo balance", FinanceVocab.repair("check my mumu balance").text)
+        assertEquals("check my Mobile Money balance", FinanceVocab.repair("check my mobile many balance").text)
+        assertEquals("transfer 30 cedis to Adwoa with reference rent", FinanceVocab.repair("transfer 30 cedis to Adwoa with reverence rent").text)
+        assertEquals("message Abena saying the mumu is ready", FinanceVocab.repair("message Abena saying the mumu is ready").text)
+        assertEquals("my mama is at home", FinanceVocab.repair("my mama is at home").text)
+        assertEquals("send 5 cedis to Mumu", FinanceVocab.repair("send 5 cedis to Mumu", protect = setOf("mumu")).text)
+    }
+
+    // ------------------------------------------------------------------ whole requests, recogniser → slots
+
+    private data class Want(val amount: String?, val name: String? = null, val number: String? = null, val kind: MoneyAsk.Kind = MoneyAsk.Kind.SEND)
+
+    @Test fun `realistic money requests reach the right amount and recipient`() {
+        val cases = mapOf(
+            "send ten cedis to Kwame Mensah" to Want("10", "Kwame Mensah"),
+            "send 10 pesos to Kwame" to Want("0.1", "Kwame"),
+            "send five cedis fifty pesewas to Abena on MoMo" to Want("5.5", "Abena"),
+            "send GH 20 to Akosua" to Want("20", "Akosua"),
+            "send two point five cedis to Yaw Asante" to Want("2.5", "Yaw Asante"),
+            "send half a cedi to Nana Yaa" to Want("0.5", "Nana Yaa"),
+            "send 5 cities to Ama Serwaa" to Want("5", "Ama Serwaa"),
+            "send fifty Ghana cedis to Richmond Apenensu" to Want("50", "Richmond Apenensu"),
+            "send GH₵ 2.50 to Abena Owusu" to Want("2.5", "Abena Owusu"),
+            "pay 10 GHC to Ama" to Want("10", "Ama"),
+            "send five see dis to Kofi" to Want("5", "Kofi"),
+            "send 100 and fifty cedis to Mum" to Want("150", "Mum"),
+            "send 5 cedis to Kofi on MTN" to Want("5", "Kofi"),
+            "send twenty five cedis to oh five five two oh nine three six nine oh" to Want("25", number = "0552093690"),
+            "send 5 cedis to zero double five two zero nine three six nine zero" to Want("5", number = "0552093690"),
+            "send 1 cedi to +233 55 209 3690" to Want("1", number = "0552093690"),
+            "buy em ti en airtime of 5 cedis" to Want("5", kind = MoneyAsk.Kind.AIRTIME),
+            "top up my airtime with 3 cedis" to Want("3", kind = MoneyAsk.Kind.AIRTIME),
+            "recharge 50 pesewas airtime" to Want("0.5", kind = MoneyAsk.Kind.AIRTIME),
+            "buy airtel tigo airtime 5 cedis for 0271234567" to Want("5", number = "0271234567", kind = MoneyAsk.Kind.AIRTIME),
+            "buy 2 cedis airtime for empty n number 0244123456" to Want("2", number = "0244123456", kind = MoneyAsk.Kind.AIRTIME),
+        )
+        for ((raw, want) in cases) {
+            val a = ask(raw) ?: throw AssertionError("not understood: $raw → ${heard(raw)}")
+            assertEquals(raw, want.kind, a.kind)
+            assertEquals(raw, want.amount, a.amount)
+            assertEquals(raw, want.name, a.name)
+            assertEquals(raw, want.number, a.number)
+        }
+        // airtime for the user's own line stays the user's own line
+        assertEquals(true, ask("top up my airtime with 3 cedis")!!.forSelf)
+        assertEquals(true, ask("buy MTN airtime of 5 cedis")!!.forSelf)
+        assertEquals(true, ask("recharge my own credit with 2 cedis")!!.forSelf)
+    }
+
+    @Test fun `balance and reference words reach the request`() {
+        assertEquals(MoneyAsk.Kind.BALANCE_MOMO, ask("check my mumu balance")!!.kind)
+        assertEquals(MoneyAsk.Kind.BALANCE_MOMO, ask("check my mobile many balance")!!.kind)
+        assertEquals("rent", ask("transfer 30 cedis to Adwoa Pokuaa with reverence rent")!!.reference)
+        assertEquals("school fees", ask("send 2 cedis to 055 209 3690 reference school fees")!!.reference)
+    }
+
+    @Test fun `an amount said two ways is never guessed`() {
+        // "two fifty" — 2.50 or 250? Left for the flow to ask; never turned into either.
+        assertEquals("two fifty", AnswerContext.read("two fifty", "How much should I send?"))
+        // …and in a request: the person is kept, the amount is not decided (the flow asks "How much?")
+        val a = ask("send two fifty to Kwame")
+        assertNull(a!!.amount); assertEquals("Kwame", a.name)
+    }
+
+    @Test fun `a message keeps its words`() {
+        assertEquals("tell Kwame I will send the money tomorrow", heard("tell Kwame I will send the money tomorrow"))
+        assertEquals("message Abena saying the MTN office is closed", heard("message Abena saying the MTN office is closed"))
+        // a name split by the recogniser is still joined ("Kofi Anan" → Kofi Annan)
+        assertEquals("call Kofi Annan", heard("call Kofi Anan"))
+        assertEquals("call Prince", heard("call prints"))
+    }
+
+    // ------------------------------------------------------------------ contacts: sure, choose, weak, none
+
+    private fun rank(h: String) = ContactMatcher.rank(h, contacts)
+    private fun picks(h: String) = ContactMatcher.pick(h, rank(h)).map { it.name }
+
+    @Test fun `contact names matched by sound without renaming anyone`() {
+        assertEquals(ContactMatcher.Confidence.SURE, ContactMatcher.confidence(rank("prince")))
+        assertEquals(listOf("Prince Alhassan"), picks("prince"))                     // not Princess
+        assertEquals(listOf("Kwame Mensah"), picks("kwami"))
+        assertEquals(listOf("Kofi Annan"), picks("coffee"))
+        assertEquals(listOf("Efua Mensah"), picks("afua"))                            // Akan initial vowel
+        assertEquals(listOf("Mum"), picks("mom"))
+    }
+
+    @Test fun `several people fit - the user is asked`() {
+        assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(rank("press")))
+        assertEquals(listOf("Abuakwa Printing Press", "Prince Alhassan", "Princess Adjei"), picks("press"))
+        assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(rank("mensah")))
+    }
+
+    @Test fun `a loose match is weak and a stranger is nobody`() {
+        assertEquals(ContactMatcher.Confidence.WEAK, ContactMatcher.confidence(rank("rich man")))
+        assertEquals(ContactMatcher.Confidence.NONE, ContactMatcher.confidence(rank("jaw")))
+    }
+
+    @Test fun `a loose contact match is said in the read-back`() {
+        HeardAs.noteGuess("rich man", "Richmond Apenensu")
+        assertEquals("I heard 'rich man' — taking it as Richmond Apenensu.",
+            HeardAs.line("call rich man", "make_call", JSONObject().put("contact", "Richmond Apenensu")))
+        assertNull(HeardAs.line("call rich man", "make_call", JSONObject().put("contact", "Richmond Apenensu")))   // once
+    }
+
+    // ------------------------------------------------------------------ answers read for their question
+
+    @Test fun `answers are read as what the question asked for`() {
+        val much = "How much should I send?"
+        assertEquals("10 cedis", AnswerContext.read("ten cedis", much))
+        assertEquals("10 pesewas", AnswerContext.read("10 pesos", much))
+        assertEquals("GHS 20", AnswerContext.read("GH 20", much))
+        assertEquals("50 pesewas", AnswerContext.read("half a cedi", much))
+        val number = "What number should I send it to?"
+        assertEquals("0552093690", AnswerContext.read("oh five five two oh nine three six nine oh", number))
+        assertEquals("0552093690", AnswerContext.read("zero double five two zero nine three six nine zero", number))
+        assertEquals("0552093690", AnswerContext.read("+233 55 209 3690", number))
+        assertEquals("0552093690", AnswerContext.read("552093690", number))
+        assertEquals("0244123456", AnswerContext.read("it is 024 412 3456", number))
+        val who = "Who did you mean: Kwame Mensah, Osei Kwame or Efua Mensah?"
+        assertEquals("Kwame Mensah", AnswerContext.read("the first one", who))
+        assertEquals("Efua Mensah", AnswerContext.read("the last one", who))
+        assertEquals("Osei Kwame", AnswerContext.read("Osei", who))
+        assertEquals("Efua Mensah", AnswerContext.read("afua", who))
+        assertEquals("mensah", AnswerContext.read("mensah", who))                  // two fit: asked again, not guessed
+        assertEquals("school fees", AnswerContext.read("school fees", "What is the reference?"))
+    }
+
+    // ------------------------------------------------------------------ what the voices are given
+
+    @Test fun `heard money words are said back once`() {
+        HeardAs.noteWords("send 10 pesos to Kwame", "send 10 pesewas to Kwame")
+        assertNull(HeardAs.moneyLine("ussd_navigate", JSONObject().put("amount", "10")))
+        assertEquals("I heard '10 pesos' — taking it as 10 pesewas.", HeardAs.moneyLine("ussd_navigate", JSONObject().put("amount", "0.1")))
+        assertNull(HeardAs.moneyLine("ussd_navigate", JSONObject().put("amount", "0.1")))
+    }
+
+    @Test fun `the English voice gets amounts, networks and numbers it can say`() {
+        assertEquals("Send ten cedis fifty pesewas to Kwame on M T N?", Verbalize.apply("Send GH₵ 10.50 to Kwame on MTN?"))
+        assertEquals("Send five cedis to zero five five, two zero nine, three six nine zero?", Verbalize.apply("Send 5 cedis to 055 209 3690?"))
+        assertEquals("Send to plus two three three, five five, two zero nine, three six nine zero?", Verbalize.apply("Send to +233552093690?"))
+        assertEquals("Prince Alhassan ending three two three", Verbalize.apply("Prince Alhassan ending 323"))
+        assertEquals("Buy two gigabytes M T N data for five cedis?", Verbalize.apply("Buy 2GB MTN data for GH₵ 5?"))
+        assertEquals("Your balance is one thousand two hundred fifty cedis seventy five pesewas.", Verbalize.apply("Your balance is GHS 1,250.75."))
+    }
+
+    @Test fun `the Twi voice gets every figure as Twi words`() {
+        assertEquals("Mede sidi du ne pesewa aduonum rekɔma Kwame. Wopene?", TwiSpeechText.prepare("Mede GH₵ 10.50 rekɔma Kwame. Wopene?"))
+        assertEquals("Mede sidi anum rekɔma zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero.",
+            TwiSpeechText.prepare("Mede sidi 5 rekɔma 0552093690."))
+        assertEquals("Me nsa aka pesewa aduonum.", TwiSpeechText.prepare("Me nsa aka 50 pesewas."))
+        assertEquals("Wo balance yɛ sidi apem ne ahaanu ne aduonum ne pesewa aduɔson anum.", TwiSpeechText.prepare("Wo balance yɛ GHS 1,250.75."))
+        assertEquals("Prince Alhassan ending mmiɛnsa mmienu mmiɛnsa", TwiSpeechText.prepare("Prince Alhassan ending 323"))
+    }
+
+    @Test fun `a Twi line already verbalised in English still reaches the Twi voice in Twi`() {
+        // VoiceController runs every line through Verbalize before the voice: the English number words go back to Twi
+        assertEquals("Mede sidi du ne pesewa aduonum rekɔma Kwame. Wopene?",
+            TwiSpeechText.prepare(Verbalize.apply("Mede GH₵ 10.50 rekɔma Kwame. Wopene?")))
+        assertEquals("Mede sidi anum rekɔma zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero.",
+            TwiSpeechText.prepare(Verbalize.apply("Mede sidi 5 rekɔma 0552093690.")))
+    }
+
+    @Test fun `a Twi line with no figure is left exactly as recorded`() {
+        for (l in listOf("Yoo, mɛyɛ o.", "Wo ankasa na wobɛhyɛ PIN.", "M T N se: airtime sidi baako ma wo fɔn yi."))
+            assertEquals(l, TwiSpeechText.prepare(l))
+    }
+}

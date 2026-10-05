@@ -386,7 +386,13 @@ class VoiceController(
                     (more as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical?.takeIf { it.isNotBlank() }
                         ?.let { text = text.trimEnd(',', ' ') + " " + it }
                 }
-                if (text.isNotBlank()) { agent.answer(englishReply(text)); return }
+                // Read as what the question asked for — an amount, a number, one of the options, a name, or a reference left
+                // as said (voice/understand/AnswerContext).
+                if (text.isNotBlank()) {
+                    val read = com.tekyerema.voice.understand.AnswerContext.read(englishReply(text), question, SpeechVocabulary.current())
+                    if (read != englishReply(text)) Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(question)}")
+                    agent.answer(read); return
+                }
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) {}
             }
@@ -628,6 +634,31 @@ class VoiceController(
      * dropped any more (it was, silently, while a reply was being read) — see [submitTyped].
      */
     fun submitText(text: String): Boolean = submitTyped(text).accepted
+
+    /**
+     * DEBUG (RunGoalReceiver `heard_text`): [raw] as if a recogniser had just written it — the request goes through the
+     * whole robustness layer (LanguagePipeline: numbers, network and money words, contact names; GhanaWords) and runs as a
+     * SPOKEN turn; while a question waits, it is the spoken answer (AnswerContext). For testing the layer on the phone
+     * without spending the HCI Lab's hearings.
+     */
+    fun submitHeard(raw: String): Boolean {
+        val t = raw.trim()
+        if (t.isEmpty()) return false
+        val language = forceLanguage() ?: sessionLanguage()
+        val st = agent.state.value
+        if (st.status == AgentStatus.ASKING) {
+            val q = st.pendingQuestion
+            val heard = LanguagePipeline.process(t, language, forceLanguage()).canonical
+            askJob?.cancel(); hideAsking(); cues.captured()
+            agent.answer(com.tekyerema.voice.understand.AnswerContext.read(englishReply(heard), q, SpeechVocabulary.current()))
+            return true
+        }
+        if (st.status == AgentStatus.WAITING_CONFIRMATION) return submitTyped(t).accepted
+        val tr = LanguagePipeline.process(t, language, forceLanguage(), backend = "debug-heard")
+        followUpChain = 0
+        launchTurn { runTurn(tr, InputSource.ASR) }
+        return true
+    }
 
     /** Typed input, routed like any new request ([NewRequest]); see [submitText]. */
     fun submitTyped(text: String): TypedResult = submitTyped(text, allowWait = true)
@@ -1167,6 +1198,8 @@ class VoiceController(
         // Only what a recogniser wrote is repaired: typed words are the user's own (a typed "2 cities" means cities).
         val masked = com.tekyerema.core.Privacy.maskCredentials(heard.canonical)
         val repaired = if (source == InputSource.ASR) com.tekyerema.money.MoneyAsk.heard(masked) else masked
+        // A repair that changed what is paid ("10 pesos" → "10 pesewas") is said once in the read-back (voice/HeardAs).
+        if (repaired != masked) HeardAs.noteWords(masked, repaired)
         // A core Twi request (send money, airtime, data, call, open, the time, the light…) is understood HERE, on the phone,
         // as the English command the rest of the app runs — online or offline, never through a translator that turns
         // "Frɛ Kofi" into "get some coffee" (language/TwiCommands; owner's Twi test, 2 October 2026).

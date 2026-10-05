@@ -416,8 +416,11 @@ class Round2Build12Test {
         val c = com.tekyerema.tools.ContactChoice.build("my brother", listOf(
             com.tekyerema.android.ContactResolver.Contact("Bro Ganiu", "0241"), com.tekyerema.android.ContactResolver.Contact("Bro Kwe", "0242")))
         org.junit.Assert.assertEquals("Which one is your brother: Bro Ganiu, or Bro Kwe?", c.question)
-        org.junit.Assert.assertEquals("Which Prince: A, or B?", com.tekyerema.tools.ContactChoice.build("Prince", listOf(
-            com.tekyerema.android.ContactResolver.Contact("A", "1"), com.tekyerema.android.ContactResolver.Contact("B", "2"))).question)
+        org.junit.Assert.assertEquals("Which Prince: Prince Alhassan, or Prince Melanin?", com.tekyerema.tools.ContactChoice.build("Prince", listOf(
+            com.tekyerema.android.ContactResolver.Contact("Prince Alhassan", "1"), com.tekyerema.android.ContactResolver.Contact("Prince Melanin", "2"))).question)
+        // a misheard name and its sound-alikes (robustness layer, 5 October 2026): not "Which press: …?"
+        org.junit.Assert.assertEquals("Who did you mean: Abuakwa Printing Press, or Prince Alhassan?", com.tekyerema.tools.ContactChoice.build("press", listOf(
+            com.tekyerema.android.ContactResolver.Contact("Abuakwa Printing Press", "1"), com.tekyerema.android.ContactResolver.Contact("Prince Alhassan", "2"))).question)
     }
 }
 

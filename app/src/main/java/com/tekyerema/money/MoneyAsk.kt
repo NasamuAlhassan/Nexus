@@ -235,7 +235,7 @@ object MoneyAsk {
         val other = t.any { it.low in OTHER_PRON }
         val left = t.filter {
             it.low != PHONE_LOW && it.low.isNotEmpty() && it.low !in FILL_AIR && it.low !in OTHER_PRON &&
-                it.low !in MONEY_WORDS && !isCurrency(it.low) && !isPesewa(it.low)
+                it.low !in MONEY_WORDS && it.low !in NETWORK_WORDS && !isCurrency(it.low) && !isPesewa(it.low)
         }
         if (left.size > 4 || left.any { it.low == "and" || it.low == "or" }) return null
         val name = if (phone != null) null else joinRaw(left).takeIf { n -> n.any { it.isLetter() } }
@@ -322,7 +322,9 @@ object MoneyAsk {
 
     /** What is left of a segment once the number, the amount, money words and filler are gone: the person's name. */
     private fun leftover(t: List<Tok>): List<Tok> = t.filter {
-        it.low != PHONE_LOW && it.low.isNotEmpty() && it.low !in FILL && it.low !in MONEY_WORDS && !isCurrency(it.low) && !isPesewa(it.low)
+        it.low != PHONE_LOW && it.low.isNotEmpty() && it.low !in FILL && it.low !in MONEY_WORDS && !isCurrency(it.low) && !isPesewa(it.low) &&
+            // "send 5 cedis to Kofi on MTN": the network is how, not who (robustness audit 2026-10-05 — was "Kofi MTN")
+            it.low !in NETWORK_WORDS
     }
 
     private fun cut(t: List<Tok>, a: Amt): List<Tok> = t.subList(0, a.from) + t.subList(a.to, t.size)
@@ -556,8 +558,11 @@ object MoneyAsk {
     private val CARD = Regex("\\bcards?\\b|\\bscratch\\b|\\bvouchers?\\b")
     private val VIA = Regex("\\b(?:via|on|with|by|through|using|from)\\s+(?:my\\s+)?(?:mtn\\s+)?(?:momo|mobile\\s+money)(?:\\s+(?:wallet|account))?\\b|" +
         "\\bfrom\\s+my\\s+(?:wallet|account)\\b", RegexOption.IGNORE_CASE)
-    private val SELF = Regex("\\b(?:(?:for|to|on|onto|into)\\s+)?(?:me|myself|(?:my|this)\\s+(?:own\\s+)?(?:phone|number|line|sim|mobile))\\b",
-        RegexOption.IGNORE_CASE)
+    private val SELF = Regex("\\b(?:(?:for|to|on|onto|into)\\s+)?(?:me|myself|(?:my|this)\\s+(?:own\\s+)?(?:phone|number|line|sim|mobile))\\b|" +
+        // "top up my airtime", "recharge my own credit": the user's airtime (robustness audit 2026-10-05 — "my" was a name)
+        "\\bmy\\s+(?:own\\s+)?(?=(?:airtime|credit|credits|units?)\\b)", RegexOption.IGNORE_CASE)
+    /** A network named in an airtime request says which network, never who it is for ("buy MTN airtime of 5 cedis"). */
+    private val NETWORK_WORDS = setOf("mtn", "mtn's", "telecel", "vodafone", "airteltigo", "airtel", "tigo", "glo")
     /** "for me" / "for him" at the end of a send is not a reference ("for her birthday" is). */
     private val FOR_PRONOUN = Regex("\\bfor\\s+(?:me|him|her|them|us|myself)\\b(?=\\s*\$|\\s*,|\\s+to\\b)", RegexOption.IGNORE_CASE)
     private val AS_REF = Regex("\\b(?:use|with|put|make)\\s+(.+?)\\s+as\\s+(?:the\\s+|my\\s+)?(?:reference|ref|narration|remark)\\b",

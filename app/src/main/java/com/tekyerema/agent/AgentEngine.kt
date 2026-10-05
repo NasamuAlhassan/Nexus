@@ -1425,6 +1425,8 @@ object AgentEngine {
                                 // once — "I heard 'prints' — taking it as Prince." — before the read-back the user approves.
                                 val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
                                     (com.tekyerema.voice.HeardAs.line(goal, decision.name, decision.args)?.let { "$it " } ?: "") +
+                                    // …and a money word the recogniser got wrong ("10 pesos" → 10 pesewas): heard once, here
+                                    (com.tekyerema.voice.HeardAs.moneyLine(decision.name, decision.args)?.let { "$it " } ?: "") +
                                     com.tekyerema.policy.ActionSemantics.withRecipientNotice(
                                     plainPrompt, com.tekyerema.policy.ActionSemantics.recipientNotice(decision.name, decision.args,
                                         resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal + saidNumbers, tags)))

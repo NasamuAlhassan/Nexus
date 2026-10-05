@@ -105,6 +105,12 @@ object ContactResolver {
         return before.isEmpty() || before == "my" || before == "our"
     }
 
+    /** One contact taken on a loose match is said in the read-back ("I heard 'rich man' — taking it as Richmond …"). */
+    private fun noteLoose(heard: String, picked: List<Contact>) {
+        if (picked.size == 1 && ContactMatcher.score(heard, picked[0].name) < ContactMatcher.STRONG)
+            try { com.tekyerema.voice.HeardAs.noteGuess(heard, picked[0].name) } catch (_: Throwable) {}
+    }
+
     private fun resolveOne(context: Context, name: String): List<Contact> {
         val q = name.trim()
         // Exact-ish substring match first. The user's spoken name is untrusted text going into a SQL LIKE,
@@ -112,6 +118,19 @@ object ContactResolver {
         // "_" would silently match any character (§1.11).
         val exact = query(context, "${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} LIKE ? ESCAPE '\\'",
             arrayOf("%${escapeLike(q)}%"), name)
+        if (exact.isNotEmpty() && com.tekyerema.core.config.AppConfig.bool("speech.contactMatcher.enabled", true)) {
+            // Robustness layer (5 October 2026): how WELL each hit fits. A sure hit — the whole name, its first word, the
+            // first word by sound — is used as before ("Prince" = every Prince, no longer "Princess"). A loose one — only a
+            // later word or a fragment ("press" in "Abuakwa Printing Press", for a misheard "Prince") — is never returned
+            // alone: the sound-alikes among all contacts come with it, so the caller asks "who did you mean?".
+            val ranked = ContactMatcher.rank(q, exact)
+            if (ranked.isNotEmpty() && ranked[0].score >= ContactMatcher.STRONG) return ContactMatcher.pick(q, ranked)
+            val all = ContactMatcher.rank(q, query(context, null, null, name))
+            val merged = ContactMatcher.pick(q, (ranked + all).sortedByDescending { it.score }
+                .distinctBy { it.contact.number.filter(Char::isDigit).takeLast(9) })
+            noteLoose(q, merged)
+            return merged.ifEmpty { exact }
+        }
         if (exact.isNotEmpty()) return exact
 
         // Fuzzy fallback for ASR-mangled names ("Kwami" → "Kwame", "Efua" → "Afua"). Load the address book
@@ -119,6 +138,16 @@ object ContactResolver {
         // return the close ones (best first). The caller disambiguates when more than one comes back — we
         // never silently dial a low-confidence guess (§1.11, and the product rule: honest ask > wrong call).
         val all = query(context, null, null, name)
+        // By sound and shape first (ContactMatcher: "Kwami" → Kwame by key, "prints" → Prince by skeleton) — the close ones
+        // together, so two people who fit are asked about, never guessed between.
+        if (com.tekyerema.core.config.AppConfig.bool("speech.contactMatcher.enabled", true)) {
+            val ranked = ContactMatcher.rank(q, all)
+            if (ranked.isNotEmpty()) {
+                val picked = ContactMatcher.pick(q, ranked)
+                noteLoose(q, picked)
+                return picked
+            }
+        }
         val nq = normalize(q)
         if (nq.isEmpty()) return emptyList()
         return all.map { c ->

@@ -60,9 +60,15 @@ object ContactChoice {
             else -> labels.dropLast(1).joinToString(", ") + ", or " + labels.last()
         }
         val who = said.trim().ifEmpty { "one" }
+        // Options that are not all named what was heard (a misheard name and its sound-alikes — android/ContactMatcher):
+        // "Who did you mean: …?", not "Which press: Abuakwa Printing Press, Prince Melanin…?" (5 October 2026).
+        val allNamed = options.all { o -> o.name.contains(who.removePrefix("my ").trim(), ignoreCase = true) }
         // "Which my brother: …?" is not English — a "my …" is asked as "Which one is your brother: …?" (QA R4_TR13, 3 October 2026).
-        val question = (if (who.lowercase().startsWith("my ")) "Which one is your ${who.substring(3).trim()}: $list?" else "Which $who: $list?") +
-            if (more > 0) " Or someone else?" else ""
+        val question = (when {
+            who.lowercase().startsWith("my ") -> "Which one is your ${who.substring(3).trim()}: $list?"
+            !allNamed && options.size > 1 -> "Who did you mean: $list?"
+            else -> "Which $who: $list?"
+        }) + if (more > 0) " Or someone else?" else ""
         // The planner-facing line keeps the shape References.optionsFrom reads ("…: A, B, C. Which one?").
         val message = "More than one contact matches $who: ${labels.joinToString(", ")}" +
             (if (more > 0) " (and $more more)" else "") + ". Which one?"

@@ -503,6 +503,9 @@ object VoiceEngine {
 
     /** Typed command → the same agent entry point as an ASR transcript (see VoiceController.submitText). */
     fun submitText(text: String): Boolean = controller.submitText(text)
+
+    /** DEBUG: [raw] as a recogniser's transcript (the full speech-robustness layer), not as typed text. */
+    fun submitHeard(raw: String): Boolean = initialized && controller.submitHeard(raw)
     /** Typed command with what happened to it (a notice for the screen when it went to a running task, etc.). */
     fun submitTyped(text: String): VoiceController.TypedResult = controller.submitTyped(text)
     fun beginTyping() = controller.beginTyping()

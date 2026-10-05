@@ -131,7 +131,7 @@ class VoiceLogicTest {
     @Test fun verbalize_speaks_quantities_but_spells_long_digit_runs() {
         assertTrue(Verbalize.apply("You have 1500 cedis").contains("one thousand five hundred"))
         assertEquals("two cedis", Verbalize.apply("2 cedis"))
-        assertEquals("Call zero five five two zero nine three six nine zero", Verbalize.apply("Call 0552093690"))
+        assertEquals("Call zero five five, two zero nine, three six nine zero", Verbalize.apply("Call 0552093690"))
         assertEquals("zero", Verbalize.intToWords(0))
         assertEquals("twenty one", Verbalize.intToWords(21))
         assertEquals("three hundred five", Verbalize.intToWords(305))

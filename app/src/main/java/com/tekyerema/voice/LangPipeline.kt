@@ -282,7 +282,14 @@ object Normalizer {
         return listOf(tok)
     }
 
-    private fun normalizeEnglish(s: String): String {
+    private fun normalizeEnglish(input: String): String {
+        // "double five", "oh five five", "a cedi" — said the Ghanaian way, put in the shape the parser below reads
+        // (voice/understand/SpokenNumbers); "2 point 5" → "2.5" after it.
+        val s = com.tekyerema.voice.understand.SpokenNumbers.beforeParse(input)
+        return com.tekyerema.voice.understand.SpokenNumbers.afterParse(parseEnglish(s))
+    }
+
+    private fun parseEnglish(s: String): String {
         val toks = s.split(" ").flatMap { expand(it) }
         val out = ArrayList<String>()
         var i = 0
@@ -445,10 +452,22 @@ object LanguagePipeline {
             Lang.GH_EN, Lang.TWI -> forceLanguage to "explicit"
             else -> Lid.resolve(raw, sessionDefault = sessionLanguage)
         }
-        val normalized = Normalizer.normalize(raw, lang)
+        val numbers = Normalizer.normalize(raw, lang)
+        // The robustness layer around the recognisers (voice/understand): in a request about money or a network, the
+        // network's name ("em ti en", "MTM" → MTN) and the money words ("mumu" → MoMo, "reverence" → reference) by
+        // sound — never a word that names a contact, never the words of a message.
+        val vocab = vocabulary()
+        val normalized = try {
+            val frame = com.tekyerema.voice.understand.Frame.of(numbers)
+            val telco = com.tekyerema.voice.understand.TelcoTerms.repair(numbers, frame)
+            val protect = vocab.entries.filter { it.kind == EntityCorrector.Kind.CONTACT }.map { it.compact }.toHashSet()
+            val fin = com.tekyerema.voice.understand.FinanceVocab.repair(telco, protect, frame || com.tekyerema.voice.understand.Frame.of(telco))
+            HeardAs.noteWords(numbers, fin.text, fin.fixes)
+            fin.text
+        } catch (t: Throwable) { numbers }
         // B-19: names in a name slot are checked against this phone's contacts and apps ("message coffee" → "message
         // Kofi"). Only the canonical goal changes; the raw transcript stays as heard.
-        val fixed = try { EntityCorrector.correct(normalized, vocabulary()) } catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
+        val fixed = try { EntityCorrector.correct(normalized, vocab) } catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
         val canonical = fixed.text
         if (fixed.fixes.isNotEmpty()) try { com.tekyerema.core.telemetry.Telemetry.update { voice["nameFixes"] = fixed.fixes.size } } catch (_: Throwable) {}
         // Spoken doubt (2026-09-29): a corrected name that turns out to be a call's / message's / payment's recipient is said
@@ -461,4 +480,8 @@ object LanguagePipeline {
 
     /** The names to correct against — [SpeechVocabulary]'s in-memory snapshot (empty in unit tests unless set). */
     @Volatile var vocabulary: () -> EntityCorrector.Vocab = { SpeechVocabulary.current() }
+
+    /** The request part of the layer on its own (numbers, network names, money words, contact names) — for text that did
+     *  not come through [process]: a debug hook's "heard" text, tests. Same steps, same order. */
+    fun understand(raw: String, lang: String = Lang.GH_EN): String = process(raw, lang, lang).canonical
 }

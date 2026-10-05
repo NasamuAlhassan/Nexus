@@ -241,6 +241,12 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // TYPED command through the FULL voice pipeline (TTS + ask-card + Twi translation) — mirrors typing in
         // the command field. Use for validating the typed demo. --es type_text "<command>"
+        // As if the recogniser wrote it: the speech-robustness layer runs (numbers, MTN, money words, contact names, the
+        // read-back's "I heard …"), and an answer is read for its question. --es heard_text "<what the ASR wrote>"
+        intent.getStringExtra("heard_text")?.let { t ->
+            if (t.isNotBlank()) Log.i("Tekyerema", "[HEARD_TEXT] accepted=${com.tekyerema.voice.VoiceEngine.submitHeard(t.trim())} len=${t.trim().length}")
+            return
+        }
         intent.getStringExtra("type_text")?.let { t ->
             // accepted=false: dropped because a turn was still running — the device suite waits and resends. No words logged.
             if (t.isNotBlank()) Log.i("Tekyerema", "[TYPE_TEXT] accepted=${com.tekyerema.voice.VoiceEngine.submitText(t.trim())} len=${t.trim().length}")

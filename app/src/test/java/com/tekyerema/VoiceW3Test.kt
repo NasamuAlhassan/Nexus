@@ -33,7 +33,7 @@ class VoiceW3Test {
         assertEquals("Done", Verbalize.apply("**Done** ✅"))
         assertEquals("twenty eight September two thousand twenty six", Verbalize.apply("28/09/2026"))
         assertEquals("Open Momo", Verbalize.apply("Open MoMo"))                        // lexicon
-        assertEquals("Call zero five five two zero nine three six nine zero", Verbalize.apply("Call 0552093690"))
+        assertEquals("Call zero five five, two zero nine, three six nine zero", Verbalize.apply("Call 0552093690"))
         AppConfig.loadFrom(listOf("c" to """{"speech":{"tts":{"lexicon":{"Kwame":"Kwah-meh"}}}}"""))
         assertEquals("Call Kwah-meh", Verbalize.apply("Call Kwame"))
     }

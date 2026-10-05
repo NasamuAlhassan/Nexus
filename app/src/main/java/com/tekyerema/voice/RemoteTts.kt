@@ -42,7 +42,13 @@ class RoutingTts(
             // layer's localizer also refuses anything with a quantity or a name it can't keep (ReplyLocalizer).
             val localized = try { enToTw?.invoke(plain)?.takeIf { it.isNotBlank() } }
                 catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
-            val line = localized ?: plain
+            // ONE voice (owner, 4 October 2026) and no figure the lab voice would skip: amounts, numbers and phone numbers as
+            // Twi words, English stretches put into Twi (voice/understand/TwiSpeechText). A line with neither is unchanged.
+            val oneVoice = com.tekyerema.core.config.AppConfig.bool("speech.twi.oneVoice", true)
+            val line = (localized ?: plain).let { l ->
+                if (oneVoice && (localized != null || !com.tekyerema.language.ReplyLocalizer.englishForVoice(plain)))
+                    com.tekyerema.voice.understand.TwiSpeechText.prepare(l) else l
+            }
             // An ENGLISH line that couldn't be put into Twi ("The time is 22:25") is spoken by the English voice — never
             // English read by the Twi voice, which sounded wrong and spent the small daily Twi quota (2 October 2026).
             // (…and a list of names — "Which Prince: Prince Melanin, Prince Alhassan ending 690…" — is English too: no Twi

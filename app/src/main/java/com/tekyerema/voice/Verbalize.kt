@@ -31,6 +31,24 @@ object Verbalize {
     private val TIME = Regex("\\b([01]?\\d|2[0-3]):([0-5]\\d)\\b")
     private val PERCENT = Regex("(\\d+(?:\\.\\d+)?)\\s?%")
     private val DECIMAL = Regex("\\b(\\d+)\\.(\\d+)\\b")
+    /** A Ghana phone number: 0 and nine digits, or +233 / 233 and nine, together or in groups (spaces or dashes). */
+    private val PHONE = Regex("(?<![\\d.,])(?:\\+233|233|0)(?:[ -]?\\d){9}(?![\\d.,]?\\d)")
+    private val ENDING = Regex("(?i)\\b(ending(?: in)?)\\s+(\\d{2,4})\\b")
+    private val DATA_SIZE = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s?(GB|MB)\\b")
+
+    /** "0552093690" / "+233 55 209 3690" → "zero five five, two zero nine, three six nine zero" (the local 3-3-4 grouping). */
+    private fun phone(raw: String): String {
+        val d = raw.filter { it.isDigit() }
+        val local = when {
+            raw.startsWith("+233") || (d.length == 12 && d.startsWith("233")) -> d.substring(3)
+            else -> d.drop(1)
+        }
+        if (local.length != 9) return raw
+        val lead = if (raw.startsWith("+")) "plus two three three, " else if (d.length == 12) "two three three, " else "zero "
+        fun said(s: String) = s.map { ONES[it - '0'] }.joinToString(" ")
+        return if (lead == "zero ") "zero " + said(local.substring(0, 2)) + ", " + said(local.substring(2, 5)) + ", " + said(local.substring(5))
+        else lead + said(local.substring(0, 2)) + ", " + said(local.substring(2, 5)) + ", " + said(local.substring(5))
+    }
 
     private val DEFAULT_LEXICON = mapOf(
         "Tɛkyerɛma" to "Tekyerema",
@@ -47,6 +65,15 @@ object Verbalize {
         var t = text.replace(URL, "a link").replace(EMOJI, "").replace(MARKDOWN, "")
         t = lexicon(t)
         t = USSD.replace(t) { m -> m.value.map { c -> when (c) { '*' -> "star"; '#' -> "hash"; else -> ONES[c - '0'] } }.joinToString(" ") }
+        // Phone numbers digit by digit in their groups ("055 209 3690" was "fifty-five, two hundred nine, three thousand six
+        // hundred ninety"; "+233…" kept a "+"), the last digits of a contact's number too ("ending 323") — robustness
+        // audit, 5 October 2026.
+        t = PHONE.replace(t) { m -> phone(m.value) }
+        t = ENDING.replace(t) { m -> m.groupValues[1] + " " + m.groupValues[2].map { ONES[it - '0'] }.joinToString(" ") }
+        t = DATA_SIZE.replace(t) { m ->
+            val unit = if (m.groupValues[2].equals("GB", true)) "gigabyte" else "megabyte"
+            m.groupValues[1] + " " + unit + if (m.groupValues[1] == "1") "" else "s"
+        }
         t = MONEY_BEFORE.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
         t = MONEY_AFTER.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
         t = DATE.replace(t) { m ->
@@ -78,7 +105,8 @@ object Verbalize {
         }
         t = Regex("\\d+").replace(t) { m ->
             val digits = m.value
-            if (digits.length >= 7) digits.map { ONES[it - '0'] }.joinToString(" ")   // phone-like → digit-by-digit
+            // phone-like, or a group that starts with 0 ("055") → digit-by-digit
+            if (digits.length >= 7 || (digits.length > 1 && digits[0] == '0')) digits.map { ONES[it - '0'] }.joinToString(" ")
             else intToWords(digits.toLongOrNull() ?: return@replace digits)
         }
         return t.replace(Regex("[ \\t]{2,}"), " ").trim()

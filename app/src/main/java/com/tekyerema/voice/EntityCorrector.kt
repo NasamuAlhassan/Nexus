@@ -151,7 +151,7 @@ object EntityCorrector {
     )
     /** A word that ends a name span: the name is over once one of these comes. */
     private val STOP = setOf("and", "to", "with", "on", "about", "that", "saying", "say", "please", "now", "again", "for",
-        "from", "in", "at", "if", "so", "then", "but", "or", "is", "are", "was")
+        "from", "in", "at", "if", "so", "then", "but", "or", "is", "are", "was", "i", "i'm", "i'll", "i've", "we")
 
     private fun core(w: String) = w.lowercase().trim('.', ',', '!', '?', ';', ':', '"', '\'', '(', ')')
     private fun isRelation(w: String) = try { com.tekyerema.android.Relations.canonical(w) != null } catch (_: Throwable) { false }
@@ -226,6 +226,9 @@ object EntityCorrector {
                 val hits = pool.filter { it.compact == compact || (it.key == PhoneticKey.of(compact) && PhoneticKey.similarity(it.compact, compact) >= 0.8) }
                     .distinctBy { it.compact }
                 if (hits.isEmpty()) continue
+                // a name already right is not stretched over the next word: "tell Kwame I will come" kept its "I" only
+                // after this (robustness audit 2026-10-05 — "Kwame I" sounds like "Kwame", and the "I" was lost)
+                if (hits.any { it.compact == PhoneticKey.compact(cores[0]) }) continue
                 if (hits.size > 1 || words.subList(0, n).joinToString(" ").trim('.', ',', '!', '?').equals(hits[0].text, ignoreCase = true)) return null
                 return n to hits[0]
             }
