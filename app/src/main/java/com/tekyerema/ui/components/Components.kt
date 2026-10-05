@@ -228,26 +228,28 @@ fun Hairline(modifier: Modifier = Modifier, inset: Dp = 0.dp) {
     Box(modifier.fillMaxWidth().padding(start = inset).height(1.dp).background(Tk.Hairline))
 }
 
-/**
- * Page header: an optional back control on its own line, then a large left-aligned title. Titles are TalkBack
- * headings and the page's pane title.
- */
 @Composable
 fun PageTitle(text: String, onBack: (() -> Unit)? = null, modifier: Modifier = Modifier) {
-    // K-17: the page title is also the pane title, so TalkBack announces "Voice", "Permissions"… on arrival.
     Column(modifier.fillMaxWidth().semantics { paneTitle = text }) {
         if (onBack != null) {
-            IconButton(
-                onClick = onBack,
-                modifier = Modifier.padding(start = 12.dp, top = 8.dp).size(48.dp).glass(CircleShape, elevation = 6.dp)
+            Row(
+                Modifier.fillMaxWidth().clickable(role = Role.Button, onClickLabel = "Back", onClick = onBack)
+                    .padding(start = PageMargin, end = PageMargin, top = 16.dp, bottom = 14.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = "Back", tint = Tk.Text)
+                Icon(Icons.AutoMirrored.Outlined.ArrowBack, contentDescription = null, tint = Tk.Text,
+                    modifier = Modifier.size(28.dp))
+                Spacer(Modifier.width(12.dp))
+                Text(text, style = MaterialTheme.typography.displaySmall, color = Tk.Text,
+                    modifier = Modifier.semantics { heading() })
             }
-        } else Spacer(Modifier.height(20.dp))
-        Text(
-            text, style = MaterialTheme.typography.displaySmall, color = Tk.Text,
-            modifier = Modifier.semantics { heading() }.padding(start = PageMargin, end = PageMargin, top = 10.dp, bottom = 14.dp)
-        )
+        } else {
+            Spacer(Modifier.height(20.dp))
+            Text(
+                text, style = MaterialTheme.typography.displaySmall, color = Tk.Text,
+                modifier = Modifier.semantics { heading() }.padding(start = PageMargin, end = PageMargin, top = 10.dp, bottom = 14.dp)
+            )
+        }
     }
 }
 

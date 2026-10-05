@@ -38,12 +38,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessibilityNew
 import androidx.compose.material.icons.outlined.HealthAndSafety
-import androidx.compose.material.icons.outlined.Dialpad
 import androidx.compose.material.icons.outlined.HelpOutline
-import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Tune
@@ -53,10 +49,7 @@ import com.tekyerema.ui.components.ChoiceRow
 import com.tekyerema.ui.components.GlassGroup
 import com.tekyerema.ui.theme.Spectrum
 import com.tekyerema.ui.theme.glass
-import com.tekyerema.ui.components.Hairline
 import com.tekyerema.ui.components.Note
-import com.tekyerema.ui.components.Overline
-import com.tekyerema.ui.components.PageMargin
 import com.tekyerema.ui.components.PageTitle
 import com.tekyerema.ui.components.SettingRow
 import com.tekyerema.ui.components.SwitchRow
@@ -65,19 +58,10 @@ import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.theme.TkMotion
 
 internal enum class Page {
-    ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, PRIVACY, HELP, KEYBOARD, APPEARANCE,
-    // WS-C: Control and its sub-pages.
+    ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, HELP,
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
-    // Phone care: "check my phone" and the event alerts (PhoneCarePage).
-    PHONE_CARE,
-    // Money safety round 2: the user's Mobile Money limits (MoneyLimitsPage, under Control).
-    MONEY_LIMITS,
-    // D8: the user's per-app rules (AppRulesPage, under Control).
-    APP_RULES,
-    // Practise typing a PIN with TalkBack on a phone-style keypad, practice numbers only (PinPracticePage).
-    PIN_PRACTICE;
+    PHONE_CARE, MONEY_LIMITS, APP_RULES;
 
-    /** Where Back goes. */
     val parent: Page get() = when (this) {
         ROOT -> ROOT
         PROVIDERS, KEYS, USAGE, DATA, AUDIT, MONEY_LIMITS, APP_RULES -> CONTROL
@@ -107,55 +91,28 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                 SettingRow("Language", value = remember(version) { languageLabel(settings.languageMode) },
                     icon = Icons.Outlined.Language, iconTint = Spectrum.Cyan) { page = Page.LANGUAGE }
                 SettingRow("Voice", value = remember(version) { rateLabel(settings.speechRate) },
-                    icon = Icons.Outlined.RecordVoiceOver, iconTint = Spectrum.Violet) { page = Page.VOICE }
-                // G-05: the Twi keyboard's setup and options live in ime/ (TwiKeyboardPage).
-                SettingRow("Twi keyboard", value = com.tekyerema.ime.rememberTwiKeyboardStatusLabel(),
-                    icon = Icons.Outlined.Keyboard, iconTint = Spectrum.Azure, divider = false) { page = Page.KEYBOARD }
+                    icon = Icons.Outlined.RecordVoiceOver, iconTint = Spectrum.Violet, divider = false) { page = Page.VOICE }
             }
-            GlassGroup("Look & feel") {
-                SettingRow("Appearance", value = remember(version) { appearanceLabel(settings.appearance) },
-                    icon = Icons.Outlined.Palette, iconTint = Spectrum.Rose) { page = Page.APPEARANCE }
+            GlassGroup {
                 SettingRow("Accessibility", icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Mint, divider = false) { page = Page.ACCESSIBILITY }
             }
-            GlassGroup("Privacy & safety") {
-                // WS-C: the user's say over what Tɛkyerɛma does, which AI it uses, what it spends and keeps.
-                SettingRow("Control", value = remember(version) { controlSummary() },
-                    icon = Icons.Outlined.Tune, iconTint = Spectrum.Violet,
-                    description = "How much it does on its own, which AI it uses, limits, and your data.") { page = Page.CONTROL }
+            GlassGroup("Safety") {
                 SettingRow("Permissions", value = permissionsSummary(context),
                     icon = Icons.Outlined.VerifiedUser, iconTint = Spectrum.Gold) { page = Page.PERMISSIONS }
-                SettingRow("Privacy", icon = Icons.Outlined.Lock, iconTint = Spectrum.Azure, divider = false) { page = Page.PRIVACY }
-            }
-            // Phone care (A20e 2026-09-29): the self-test and the money / missed-call / battery alerts.
-            GlassGroup {
+                SettingRow("Control", value = remember(version) { controlSummary() },
+                    icon = Icons.Outlined.Tune, iconTint = Spectrum.Violet) { page = Page.CONTROL }
                 SettingRow("Phone care", value = remember(version) { phoneCareSummary(settings) },
-                    icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Mint, divider = false,
-                    description = "Check my phone, and alerts for money, missed calls and low battery.") { page = Page.PHONE_CARE }
-            }
-            // Payment-safety research #10: get quick with TalkBack typing before a real Mobile Money PIN screen.
-            GlassGroup {
-                SettingRow("Practise typing a PIN", icon = Icons.Outlined.Dialpad, iconTint = Spectrum.Gold, divider = false,
-                    description = "A made-up number on a keypad like the phone's — never your real PIN.") { page = Page.PIN_PRACTICE }
+                    icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Mint, divider = false) { page = Page.PHONE_CARE }
             }
             GlassGroup {
-                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet) { page = Page.HELP }
-                // First-run voice welcome (voice/Welcome.kt): the questions and the practice text, by voice, again.
-                var replay by remember { mutableStateOf("") }
-                SettingRow("Replay the welcome", value = replay, icon = Icons.Outlined.Replay, iconTint = Spectrum.Mint, divider = false,
-                    description = "Hear the first-time questions and the practice message again.") {
-                    replay = if (com.tekyerema.voice.VoiceEngine.startWelcome(replay = true)) "Playing"
-                        else "Needs the microphone and Read replies aloud"
-                }
+                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet, divider = false) { page = Page.HELP }
             }
         }
         Page.LANGUAGE -> LanguagePage(settings) { page = Page.ROOT }
         Page.VOICE -> VoicePage(settings) { page = Page.ROOT }
         Page.PERMISSIONS -> PermissionsPage { page = Page.ROOT }
         Page.ACCESSIBILITY -> AccessibilityPage(settings) { page = Page.ROOT }
-        Page.PRIVACY -> PrivacyPage(settings) { page = Page.ROOT }
-        Page.HELP -> HelpPage { page = Page.ROOT }
-        Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
-        Page.APPEARANCE -> AppearancePage(settings) { page = Page.ROOT }
+        Page.HELP -> HelpPage(settings) { page = Page.ROOT }
         Page.CONTROL -> ControlPage(settings, onBack = { page = Page.ROOT }) { page = it }
         Page.PROVIDERS -> ProvidersPage(settings) { page = Page.CONTROL }
         Page.KEYS -> KeysPage(settings) { page = Page.CONTROL }
@@ -164,8 +121,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.AUDIT -> AuditPage { page = Page.CONTROL }
         Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
         Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
-        Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }         // D8
-        Page.PIN_PRACTICE -> PinPracticePage { page = Page.ROOT }
+        Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }
     } }
 }
 
@@ -193,12 +149,6 @@ private fun languageLabel(mode: String) = when (mode) {
 }
 
 private fun rateLabel(rate: Int) = when (rate) { 0 -> "Slow"; 2 -> "Fast"; else -> "Normal" }
-
-private fun appearanceLabel(a: String) = when (a) {
-    Settings.APPEARANCE_LIGHT -> "Light"
-    Settings.APPEARANCE_DARK -> "Dark"
-    else -> "System"
-}
 
 @Composable
 private fun permissionsSummary(context: android.content.Context): String {
@@ -246,67 +196,26 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
     val version by settings.changes.collectAsState()
     val speak = remember(version) { settings.speakAloud }
     val rate = remember(version) { settings.speechRate }
-    val pitch = remember(version) { settings.speechPitch }
-    val detail = remember(version) { settings.verbosity }
-    val patience = remember(version) { settings.vadStrategy }
     val profile = remember(version) { settings.profile }
+    val privateReading = remember(version) { settings.privateReading }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageTitle("Voice", onBack)
         GlassGroup {
-            SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak, divider = false,
+            SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak,
                 icon = Icons.Outlined.VolumeUp, iconTint = Spectrum.Violet) { settings.speakAloud = it }
-        }
-        // Private reading (2026-09-29): who a message is from, not what it says, when the phone's own speaker would read it.
-        val privateReading = remember(version) { settings.privateReading }
-        GlassGroup("Reading messages") {
             SwitchRow("Private reading", "On the loudspeaker, say who your messages are from, not what they say. " +
                 "Say “read them” to hear them. Headphones read them in full.", privateReading, divider = false) { settings.privateReading = it }
         }
-        // K-11: one choice sets how much is said and how long Tɛkyerɛma waits for you.
         GlassGroup("Experience") { Column(Modifier.selectableGroup()) {
             ChoiceRow("New to Tɛkyerɛma", "Fuller explanations, and more time to finish speaking.", profile == "beginner") { settings.profile = "beginner" }
-            ChoiceRow("Experienced", "Short replies, and it answers as soon as you stop.", profile == "expert") { settings.profile = "expert" }
-            ChoiceRow("Custom", "Set detail and patience below.", profile != "beginner" && profile != "expert", divider = false) { settings.profile = "custom" }
+            ChoiceRow("Experienced", "Short replies, and it answers as soon as you stop.", profile == "expert", divider = false) { settings.profile = "expert" }
         } }
         GlassGroup("Speaking speed") { Column(Modifier.selectableGroup()) {
             ChoiceRow("Slow", selected = rate == 0) { settings.speechRate = 0 }
             ChoiceRow("Normal", selected = rate == 1) { settings.speechRate = 1 }
             ChoiceRow("Fast", selected = rate == 2, divider = false) { settings.speechRate = 2 }
         } }
-        GlassGroup("Voice pitch") { Column(Modifier.selectableGroup()) {
-            ChoiceRow("Lower", selected = pitch == 0) { settings.speechPitch = 0 }
-            ChoiceRow("Normal", selected = pitch == 1) { settings.speechPitch = 1 }
-            ChoiceRow("Higher", selected = pitch == 2, divider = false) { settings.speechPitch = 2 }
-        } }
-        GlassGroup("How much it says") { Column(Modifier.selectableGroup()) {
-            ChoiceRow("Brief", "Just the result, and a soft tick while it works.", detail == "brief") { settings.verbosity = "brief"; settings.profile = "custom" }
-            ChoiceRow("Normal", selected = detail == "normal") { settings.verbosity = "normal"; settings.profile = "custom" }
-            ChoiceRow("Detailed", "Explains more and tells you what it's doing.", detail == "detailed", divider = false) { settings.verbosity = "detailed"; settings.profile = "custom" }
-        } }
-        GlassGroup("Waiting for you to finish") { Column(Modifier.selectableGroup()) {
-            ChoiceRow("Quick", "Answers as soon as you pause.", patience == "quick") { settings.vadStrategy = "quick"; settings.profile = "custom" }
-            ChoiceRow("Normal", selected = patience == "normal") { settings.vadStrategy = "normal"; settings.profile = "custom" }
-            ChoiceRow("Patient", "Waits through longer pauses.", patience == "patient", divider = false) { settings.vadStrategy = "patient"; settings.profile = "custom" }
-        } }
-        Note("Tɛkyerɛma speaks with your phone's voice. You can also say “speak slower”, “keep it short” or “be patient with me”.")
-    }
-}
-
-/** Light, dark, or follow the phone. The change is live: the whole app re-colours at once. */
-@Composable
-private fun AppearancePage(settings: Settings, onBack: () -> Unit) {
-    val version by settings.changes.collectAsState()
-    val choice = remember(version) { settings.appearance }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        PageTitle("Appearance", onBack)
-        Note("Dark is easiest on the eyes at night; light is easiest to read in bright sun.")
-        GlassGroup {
-            Column(Modifier.selectableGroup()) {
-                ChoiceRow("Same as the phone", "Follows your phone's dark mode.", choice == Settings.APPEARANCE_SYSTEM) { settings.appearance = Settings.APPEARANCE_SYSTEM }
-                ChoiceRow("Light", selected = choice == Settings.APPEARANCE_LIGHT) { settings.appearance = Settings.APPEARANCE_LIGHT }
-                ChoiceRow("Dark", selected = choice == Settings.APPEARANCE_DARK, divider = false) { settings.appearance = Settings.APPEARANCE_DARK }
-            }
-        }
+        Note("You can also say “speak slower”, “keep it short” or “be patient with me”.")
     }
 }
 
@@ -380,56 +289,18 @@ private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
         // N-11: Samsung puts unused apps to sleep, which silently stops the wake word and background tasks.
         SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off", divider = false) { Perms.requestBatteryUnrestricted(context) }
         }
-        Note("Text size and TalkBack follow your phone's accessibility settings. On Samsung phones, also add Tɛkyerɛma to " +
-            "Settings › Battery › Background usage limits › Never sleeping apps.")
-    }
-}
-
-/** J-15 / H-12 / Q-07 / Q-08: what Tɛkyerɛma keeps, the two opt-ins, and deleting it. */
-@Composable
-private fun PrivacyPage(settings: Settings, onBack: () -> Unit) {
-    val version by settings.changes.collectAsState()
-    val improve = remember(version) { settings.trajectoryConsent }
-    val taskLog = remember(version) { settings.fieldLog }
-    val context = LocalContext.current
-    var historyCleared by remember { mutableStateOf(false) }
-    var memoryCleared by remember { mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        PageTitle("Privacy", onBack)
-        GlassGroup {
-        SwitchRow("Help improve Tɛkyerɛma", "Keep a copy of your tasks — what was on the screen and what I did — on this phone, " +
-            "encrypted, so they can be used to improve me. Nothing is sent anywhere. Turning this off deletes them.", improve) {
-            settings.trajectoryConsent = it
-            if (!it) com.tekyerema.core.telemetry.Trajectories.clear(context)
-        }
-        SwitchRow("Keep a task log", "A private list of what you asked and how it went, to check how well I work. " +
-            "Encrypted, on this phone. Turning this off deletes it.", taskLog) {
-            settings.fieldLog = it
-            if (!it) com.tekyerema.core.telemetry.FieldLog.clear(context)
-        }
-        SettingRow("Delete history", if (historyCleared) "Deleted" else "") {
-            com.tekyerema.history.HistoryStore.clear()
-            com.tekyerema.audit.AuditLog.clear()
-            com.tekyerema.core.telemetry.Telemetry.clear()
-            com.tekyerema.agent.AgentEngine.clearTraces()
-            historyCleared = true
-        }
-        SettingRow("Delete memory", if (memoryCleared) "Deleted" else "", divider = false) {
-            com.tekyerema.agent.AgentEngine.resetConversation()
-            com.tekyerema.agent.References.clear()
-            com.tekyerema.notifications.MessageIndex.clear()
-            com.tekyerema.core.telemetry.Trajectories.clear(context)
-            memoryCleared = true
-        }
-        }
-        Note("History is kept for ${com.tekyerema.core.Privacy.historyDays()} days and messages for a week, all encrypted on " +
-            "this phone. Screenshots are never saved. You can also say “what do you remember”, “forget everything” or " +
-            "“clear my history”.")
+        Note("Text size and TalkBack follow your phone's accessibility settings.")
+        val appearance = remember(version) { settings.appearance }
+        GlassGroup("Appearance") { Column(Modifier.selectableGroup()) {
+            ChoiceRow("Same as the phone", selected = appearance == Settings.APPEARANCE_SYSTEM) { settings.appearance = Settings.APPEARANCE_SYSTEM }
+            ChoiceRow("Light", selected = appearance == Settings.APPEARANCE_LIGHT) { settings.appearance = Settings.APPEARANCE_LIGHT }
+            ChoiceRow("Dark", selected = appearance == Settings.APPEARANCE_DARK, divider = false) { settings.appearance = Settings.APPEARANCE_DARK }
+        } }
     }
 }
 
 @Composable
-private fun HelpPage(onBack: () -> Unit) {
+private fun HelpPage(settings: Settings, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 32.dp)) {
         PageTitle("Help", onBack)
         HelpBlock(
@@ -457,6 +328,14 @@ private fun HelpPage(onBack: () -> Unit) {
             "Tap the centre of the screen while Tɛkyerɛma is working. Nothing more happens.",
             "From any app: press volume-down twice, tap the Tɛkyerɛma tile, or press Stop on its notification."
         ))
+        GlassGroup {
+            var replay by remember { mutableStateOf("") }
+            SettingRow("Replay the welcome", value = replay, icon = Icons.Outlined.Replay, iconTint = Spectrum.Mint, divider = false,
+                description = "Hear the first-time questions and the practice message again.") {
+                replay = if (com.tekyerema.voice.VoiceEngine.startWelcome(replay = true)) "Playing"
+                    else "Needs the microphone and Read replies aloud"
+            }
+        }
     }
 }
 

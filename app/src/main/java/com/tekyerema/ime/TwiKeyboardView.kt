@@ -51,6 +51,8 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
     private val keyViews = ArrayList<Pair<Key, View>>()
     private var stripMode = StripMode.SUGGESTIONS
     private var shownSuggestions: List<String> = emptyList()
+    private var keyPopup: android.widget.PopupWindow? = null
+    private var popupLabel: TextView? = null
 
     var bigKeys = false
         set(v) { if (field != v) { field = v; current?.let { current = null; setLayout(it) }; sizeStrip() } }
@@ -164,7 +166,13 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
                 true
             }
         } else {
-            v.setOnTouchListener { _, e -> if (e.actionMasked == MotionEvent.ACTION_DOWN) listener.onKeyDown(key); false }
+            v.setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> { listener.onKeyDown(key); if (key.kind == KeyKind.CHAR) showKeyPopup(key, v) }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dismissKeyPopup()
+                }
+                false
+            }
         }
     }
 
@@ -173,6 +181,38 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
             listener.onBackspaceRepeat()
             keyViews.firstOrNull { it.first.kind == KeyKind.BACKSPACE }?.second?.postDelayed(this, REPEAT_EVERY_MS)
         }
+    }
+
+    // --------------------------------------------------------------------------------------- popup
+
+    private fun showKeyPopup(key: Key, anchor: View) {
+        if (key.kind != KeyKind.CHAR || key.text.length > 2) return
+        val tv = popupLabel ?: TextView(context).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, if (bigKeys) 38f else 32f)
+            setTextColor(TEXT)
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply { cornerRadius = dp(10).toFloat(); setColor(KEY) }
+            setPadding(dp(20), dp(8), dp(20), dp(8))
+        }.also { popupLabel = it }
+        tv.text = key.label
+        val pw = keyPopup ?: android.widget.PopupWindow(tv,
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+            isClippingEnabled = false; isTouchable = false
+        }.also { keyPopup = it }
+        pw.contentView = tv
+        tv.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED)
+        val loc = IntArray(2)
+        anchor.getLocationInWindow(loc)
+        val x = loc[0] + anchor.width / 2 - tv.measuredWidth / 2
+        val y = loc[1] - tv.measuredHeight - dp(6)
+        try {
+            if (pw.isShowing) pw.update(x, y, -1, -1)
+            else pw.showAtLocation(this, Gravity.NO_GRAVITY, x, y)
+        } catch (_: Throwable) {}
+    }
+
+    private fun dismissKeyPopup() {
+        try { keyPopup?.dismiss() } catch (_: Throwable) {}
     }
 
     // ----------------------------------------------------------------------------------------- strip
@@ -193,6 +233,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
     }
 
     fun showVariants(variants: List<String>) {
+        dismissKeyPopup()
         stripMode = StripMode.VARIANTS
         stripContent.removeAllViews()
         for (t in variants) stripContent.addView(stripButton(t, KeyNames.spoken(t), big = true) { listener.onVariant(t) },

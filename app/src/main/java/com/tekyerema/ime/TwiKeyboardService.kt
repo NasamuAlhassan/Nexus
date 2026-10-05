@@ -47,6 +47,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     private lateinit var suggester: WordSuggester
     private var voice: VoiceTyping? = null
     private var variantsOpen = false
+    private var lastSpaceMs = 0L
     private var listeningShown = false
 
     // The user's options, read when each field opens (a change on the Settings page applies to the next field).
@@ -100,6 +101,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         habit.reset()
         shift.reset()
         variantsOpen = false
+        lastSpaceMs = 0L
         listeningShown = false
         view?.let { v ->
             v.bigKeys = prefs.bigKeys
@@ -187,7 +189,23 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         if (variantsOpen) closeVariants()
         when (key.kind) {
             KeyKind.CHAR -> type(key.text)
-            KeyKind.SPACE -> finishWord(" ")
+            KeyKind.SPACE -> {
+                val now = SystemClock.uptimeMillis()
+                val before = currentInputConnection?.getTextBeforeCursor(1, 0)
+                if (lastSpaceMs > 0 && now - lastSpaceMs < 400 && policy.autoCapitalize &&
+                    before?.length == 1 && before[0] == ' ') {
+                    currentInputConnection?.let { ic ->
+                        ic.deleteSurroundingText(1, 0)
+                        ic.commitText(". ", 1)
+                        habit.onOtherInput()
+                    }
+                    lastSpaceMs = 0
+                    if (autoCapitalize()) render()
+                } else {
+                    finishWord(" ")
+                    lastSpaceMs = now
+                }
+            }
             KeyKind.ENTER -> pressEnter()
             KeyKind.BACKSPACE -> backspace()
             KeyKind.SHIFT -> {

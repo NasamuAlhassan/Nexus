@@ -495,12 +495,26 @@ internal fun DataPage(settings: Settings, onBack: () -> Unit, openAudit: () -> U
             SettingRow("Activity log", icon = Icons.Outlined.History, iconTint = Spectrum.Violet, divider = false,
                 description = "Read it here, step by step.") { openAudit() }
         }
+        val improve = remember(version) { settings.trajectoryConsent }
+        val taskLog = remember(version) { settings.fieldLog }
+        GlassGroup("Privacy") {
+            SwitchRow("Help improve Tɛkyerɛma", "Keep a copy of your tasks on this phone, encrypted, so they can " +
+                "be used to improve me. Nothing is sent anywhere. Turning this off deletes them.", improve) {
+                settings.trajectoryConsent = it
+                if (!it) com.tekyerema.core.telemetry.Trajectories.clear(context)
+            }
+            SwitchRow("Keep a task log", "A private list of what you asked and how it went. " +
+                "Encrypted, on this phone. Turning this off deletes it.", taskLog, divider = false) {
+                settings.fieldLog = it
+                if (!it) com.tekyerema.core.telemetry.FieldLog.clear(context)
+            }
+        }
         GlassGroup {
             SettingRow("Delete everything", icon = Icons.Outlined.DeleteForever, iconTint = Spectrum.Rose, divider = false,
                 description = "Erases everything listed above. Your settings, keys and emergency contact stay.") { confirmDelete = true }
         }
         message?.let { Note(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }
-        Note("Or say “what do you keep about me”, “export my history” or “delete everything”.")
+        Note("Or say “what do you keep about me”, “export my history”, “forget everything” or “delete everything”.")
     }
 
     if (confirmDelete) AlertDialog(
