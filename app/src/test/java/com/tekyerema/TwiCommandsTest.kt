@@ -65,6 +65,17 @@ class TwiCommandsTest {
         assertEquals("who sent it", TwiCommands.gloss("na ɔsomaa no"))
     }
 
+    @Test fun `the demo script's money lines, as the lab is expected to write them`() {
+        // B6 "Soma pesewa du ma Prince": the lab splits "soma" and "pesewa" ("so ma", "pɛ soa") and swallows "ma" ("ama prince")
+        assertEquals("send 10 pesewas to Prince", TwiCommands.gloss("Soma pesewa du ma Prince"))
+        assertEquals("send 10 pesewas to Prince", TwiCommands.gloss("so ma pɛ soa du ama prince"))
+        assertEquals("send 10 pesewas to Prince", TwiCommands.gloss("soma pasea du ma prince"))
+        // B8 "Tɔ airtime sidi mmienu": the lab writes airtime as "ɛtam"
+        assertEquals("buy 2 cedis of airtime for my number", TwiCommands.gloss("tɔ ɛtam sidi mmienu"))
+        // B1
+        assertEquals("check my mobile money balance", TwiCommands.gloss("mewɔ sika sɛn"))
+    }
+
     @Test fun `everyday code-mixed balance checks, as Ghanaians say them`() {
         assertEquals("check my airtime balance", TwiCommands.gloss("Aka me credit sɛn?"))
         assertEquals("check my airtime balance", TwiCommands.gloss("Checki me MTN credit no ma me"))

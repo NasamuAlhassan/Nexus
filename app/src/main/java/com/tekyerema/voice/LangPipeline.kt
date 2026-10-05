@@ -149,7 +149,8 @@ object Normalizer {
         Regex("(?<![\\p{L}])(ma|so|to)?s[ie]\\s+di(?![\\p{L}])") to { m: MatchResult -> (m.groupValues[1].let { if (it.isEmpty()) "" else "$it " }) + "sidi" },
         Regex("(?<![\\p{L}])pɛ\\s+soa(?![\\p{L}])") to { _: MatchResult -> "pɛsoa" },
         // "soma" (send) heard as "so ma" / "to ma" — only right before money ("so masi di anua ama" = "soma sidi anum ma Ama")
-        Regex("(?<![\\p{L}])(?:so|to)\\s+ma(?=\\s+(?:sidi|sedi|cedi|cedis|sika|\\d))") to { _: MatchResult -> "soma" },
+        // (…and before pesewas: "so ma pɛ soa du ama prince" = "soma pesewa du ma Prince" — the demo script, 4 October 2026)
+        Regex("(?<![\\p{L}])(?:so|to)\\s+ma(?=\\s+(?:sidi|sedi|cedi|cedis|sika|pesewas?|pɛsoa|pesoa|pasea|pɛsewa|\\d))") to { _: MatchResult -> "soma" },
         // "how much is LEFT" — "aka sɛn" heard as one word, only after airtime / credit / money (alone, "akasa" = "has spoken")
         Regex("(?<![\\p{L}])(airtime|ɛtam|etam|kredit|krɛdit|sika)(\\s+no)?\\s+aka\\s?(?:sa|sɛn|sen)(?![\\p{L}])") to
             { m: MatchResult -> "${m.groupValues[1]}${m.groupValues[2]} aka sɛn" },
