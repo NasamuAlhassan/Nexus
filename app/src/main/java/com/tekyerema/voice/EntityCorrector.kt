@@ -110,7 +110,10 @@ object EntityCorrector {
                 }
                 for (c in contacts) {
                     add(c, Kind.CONTACT)
-                    c.split(Regex("[\\s,.]+")).filter { PhoneticKey.compact(it).length >= 3 }.forEach { add(it, Kind.CONTACT) }
+                    // A possessive part is its name ("Richmond's Dad" → "Richmond"): a heard "Richmond" is already right,
+                    // never turned into "Richmond's" — someone else (A20e, 5 October 2026).
+                    c.split(Regex("[\\s,.]+")).map { it.replace(Regex("['’]s$", RegexOption.IGNORE_CASE), "") }
+                        .filter { PhoneticKey.compact(it).length >= 3 }.forEach { add(it, Kind.CONTACT) }
                 }
                 for (a in apps) {
                     add(a, Kind.APP)

@@ -10,7 +10,7 @@ import com.tekyerema.voice.PhoneticKey
  *  - 0.90 the whole name by sound ("Prinse Melanin")      0.85 the first word by sound ("Kwami" → Kwame)
  *  - 0.80 a later word exactly ("Melanin", "press" in "Abuakwa Printing Press")
  *  - 0.70 a later word by sound; the start of the first word ("Princ" → Prince/Princess)
- *  - 0.60 the consonant skeleton of the first word one edit away ("press" ~ "Prince": p-r-s / p-r-n-s), or the start of a
+ *  - 0.60 the consonant skeleton of the first word with one consonant dropped ("press" ~ "Prince": p-r-s / p-r-n-s), or the start of a
  *         later word; spelling ≥ 0.8 alike (Levenshtein)
  *  - 0.50 inside a word, or a later word's skeleton
  *
@@ -23,8 +23,19 @@ object ContactMatcher {
     const val STRONG = 0.85
     const val FLOOR = 0.55
 
+    /** Words, lower-case; a possessive stays one word ("Richmond's" → "richmonds", not "richmond" + "s"). */
     private fun tokens(s: String): List<String> =
-        s.split(Regex("[^\\p{L}\\p{N}]+")).map { PhoneticKey.compact(it) }.filter { it.isNotEmpty() }
+        s.split(Regex("[^\\p{L}\\p{N}'’]+")).map { PhoneticKey.compact(it) }.filter { it.isNotEmpty() }
+
+    private val POSSESSIVE = Regex("(?i)\\p{L}['’]s\\b")
+
+    /**
+     * Two consonant skeletons are one DROPPED consonant apart ("press" p-r-s / "Prince" p-r-n-s — the n before an s is
+     * what recognisers lose), or the same. A changed consonant is a different name: Kwame k-w-m is not Kwesi k-w-s or
+     * Qweku k-w-k (A20e, 5 October 2026: "Kwame" offered Kwesi Dain and Qweku Marvin).
+     */
+    private fun skeletonNear(a: String, b: String): Boolean =
+        a == b || (kotlin.math.abs(a.length - b.length) == 1 && lev(a, b) == 1)
 
     /** Consonants only, after the sound folding ("prince" → p-r-n-s, "press" → p-r-s). */
     internal fun skeleton(word: String): String {
@@ -43,6 +54,10 @@ object ContactMatcher {
         if (h.isEmpty() || n.isEmpty()) return 0.0
         val hc = h.joinToString(""); val nc = n.joinToString("")
         if (hc == nc) return 1.0
+        // "Richmond's Dad" is someone Richmond knows, not Richmond: a possessive name fits only when the possessive is said
+        // (A20e, 5 October 2026: "tell Richmond …" was turned towards the contact "Richmond's Dad").
+        if (POSSESSIVE.containsMatchIn(name) && !POSSESSIVE.containsMatchIn(heard) && !(h.size > 1 && PhoneticKey.similarity(hc, nc) >= 0.85))
+            return 0.0
         if (h.size <= n.size && n.subList(0, h.size) == h) return 0.95
         var best = 0.0
         fun up(v: Double) { if (v > best) best = v }
@@ -62,8 +77,8 @@ object ContactMatcher {
             }
             val ws = skeleton(w)
             if (ws.length >= 3) {
-                if (lev(ws, skeleton(first)) <= 1) up(0.60)
-                if (n.drop(1).any { lev(ws, skeleton(it)) <= 1 && skeleton(it).length >= 3 }) up(0.50)
+                if (skeletonNear(ws, skeleton(first))) up(0.60)
+                if (n.drop(1).any { skeleton(it).length >= 3 && skeletonNear(ws, skeleton(it)) }) up(0.50)
             }
             val sim = maxOf(PhoneticKey.similarity(w, first), PhoneticKey.similarity(w, nc))
             if (sim >= 0.8) up(0.55 + (sim - 0.8))

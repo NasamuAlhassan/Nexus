@@ -182,6 +182,21 @@ class SpeechRobustnessTest {
         assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(rank("mensah")))
     }
 
+    @Test fun `found on the A20e - a changed consonant or a possessive is someone else`() {
+        val phone = listOf("Osei Kwame", "Kwesi Dain", "Qweku Marvin", "Richmond's Dad", "Prince Melanin")
+            .mapIndexed { i, n -> ContactResolver.Contact(n, "02400000%02d".format(i)) }
+        val kwame = ContactMatcher.rank("Kwame", phone)
+        assertEquals(listOf("Osei Kwame"), ContactMatcher.pick("Kwame", kwame).map { it.name })      // not Kwesi, not Qweku
+        assertEquals(ContactMatcher.Confidence.NONE, ContactMatcher.confidence(ContactMatcher.rank("Richmond", phone)))
+        assertEquals(listOf("Richmond's Dad"), ContactMatcher.pick("Richmond's Dad", ContactMatcher.rank("Richmond's Dad", phone)).map { it.name })
+        assertEquals(listOf("Richmond's Dad"), ContactMatcher.pick("Richmonds dad", ContactMatcher.rank("Richmonds dad", phone)).map { it.name })
+        // the press/Prince rule still holds: one consonant dropped
+        assertEquals(listOf("Prince Melanin"), ContactMatcher.pick("press", ContactMatcher.rank("press", phone)).map { it.name })
+        // and the name corrector leaves "Richmond" alone when the only Richmond on the phone is "Richmond's Dad"
+        LanguagePipeline.vocabulary = { EntityCorrector.Vocab.of(phone.map { it.name }, emptyList()) }
+        assertEquals("tell Richmond I will call you", heard("tell Richmond I will call you"))
+    }
+
     @Test fun `a loose match is weak and a stranger is nobody`() {
         assertEquals(ContactMatcher.Confidence.WEAK, ContactMatcher.confidence(rank("rich man")))
         assertEquals(ContactMatcher.Confidence.NONE, ContactMatcher.confidence(rank("jaw")))
