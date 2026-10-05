@@ -105,10 +105,23 @@ object ContactResolver {
         return before.isEmpty() || before == "my" || before == "our"
     }
 
-    /** One contact taken on a loose match is said in the read-back ("I heard 'rich man' — taking it as Richmond …"). */
+    /** One contact taken on anything less than its name as said — by sound, a later word, a loose fit — is said in the
+     *  read-back once ("I heard 'rich man' — taking it as Richmond Apenensu."). Safety audit 2026-10-05: every inferred
+     *  recipient, not only the weak ones. */
     private fun noteLoose(heard: String, picked: List<Contact>) {
-        if (picked.size == 1 && ContactMatcher.score(heard, picked[0].name) < ContactMatcher.STRONG)
+        if (picked.size == 1 && ContactMatcher.score(heard, picked[0].name) < ContactMatcher.AS_SAID)
             try { com.tekyerema.voice.HeardAs.noteGuess(heard, picked[0].name) } catch (_: Throwable) {}
+    }
+
+    /**
+     * [contact] is a SURE match for what was said — its name (or a family word / relation the user set) as said, or by sound
+     * (ContactMatcher ≥ STRONG). An action that is not read back for approval ("set my emergency contact to …", "remember
+     * that … is my mother") is taken only on a sure match; otherwise the user is asked to say the full name. Pure apart
+     * from the user's relations and config.
+     */
+    fun isSure(said: String, contact: Contact): Boolean {
+        if (!com.tekyerema.core.config.AppConfig.bool("speech.contactMatcher.enabled", true)) return true
+        return aliasesFor(said).any { ContactMatcher.score(it, contact.name) >= ContactMatcher.STRONG }
     }
 
     private fun resolveOne(context: Context, name: String): List<Contact> {
@@ -124,12 +137,14 @@ object ContactResolver {
             // later word or a fragment ("press" in "Abuakwa Printing Press", for a misheard "Prince") — is never returned
             // alone: the sound-alikes among all contacts come with it, so the caller asks "who did you mean?".
             val ranked = ContactMatcher.rank(q, exact)
-            if (ranked.isNotEmpty() && ranked[0].score >= ContactMatcher.STRONG) return ContactMatcher.pick(q, ranked)
+            if (ranked.isNotEmpty() && ranked[0].score >= ContactMatcher.STRONG) return ContactMatcher.pick(q, ranked).also { noteLoose(q, it) }
             val all = ContactMatcher.rank(q, query(context, null, null, name))
             val merged = ContactMatcher.pick(q, (ranked + all).sortedByDescending { it.score }
                 .distinctBy { it.contact.number.filter(Char::isDigit).takeLast(9) })
             noteLoose(q, merged)
-            return merged.ifEmpty { exact }
+            // NONE is nobody: the name only turns up INSIDE another ("Richmond" in "Richmond's Dad", "ama" in "Kwamena") —
+            // those hits used to come back unscored and a single one was read back as the recipient (safety audit 2026-10-05).
+            return merged
         }
         if (exact.isNotEmpty()) return exact
 

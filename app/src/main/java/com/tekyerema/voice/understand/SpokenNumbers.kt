@@ -28,6 +28,17 @@ object SpokenNumbers {
     /** Word-level repairs, before the number parser. */
     fun beforeParse(text: String): String {
         if (text.isBlank()) return text
+        var s = digitRuns(text)
+        // 3. "half a cedi" → 50 pesewas; "a cedi" / "one cedi" → 1 cedi (an amount word the parser has no number for).
+        s = HALF_CEDI.replace(s) { "50 pesewas" }
+        s = A_CEDI.replace(s) { m -> "1 ${m.groupValues[1].ifEmpty { "" }}cedi" }
+        return s
+    }
+
+    /** Only the digit-run rules (1, 2): "double five", "oh" for zero — all a MESSAGE command gets (its recipient's number
+     *  said aloud), never the money rules ([MessageBody]). */
+    fun digitRuns(text: String): String {
+        if (text.isBlank()) return text
         var toks = text.split(" ").filter { it.isNotEmpty() }.toMutableList()
         // 1. "double five" / "triple 0" → the digit said 2 / 3 times — only inside a number (a digit before it or just after
         //    the repeated digit), so "a double room" or "triple check" are left alone.
@@ -63,11 +74,7 @@ object SpokenNumbers {
                 (next != null && next2 != null && isDigitish(next) && isDigitish(next2) && !toks[j].endsWith(",")))
                 toks[j] = toks[j].replace(Regex("(?i)\\b(?:oh|o|nought|naught|nil)\\b"), "zero")
         }
-        var s = toks.joinToString(" ")
-        // 3. "half a cedi" → 50 pesewas; "a cedi" / "one cedi" → 1 cedi (an amount word the parser has no number for).
-        s = HALF_CEDI.replace(s) { "50 pesewas" }
-        s = A_CEDI.replace(s) { m -> "1 ${m.groupValues[1].ifEmpty { "" }}cedi" }
-        return s
+        return toks.joinToString(" ")
     }
 
     private val HALF_CEDI = Regex("(?i)\\bhalf\\s+(?:a|of\\s+a|one)\\s+(?:ghana\\s+)?cedi\\b")
@@ -76,6 +83,8 @@ object SpokenNumbers {
     /** Figure-level repairs, after the number parser: "2 point 5" → "2.5", "1 point 5 0" → "1.50". */
     fun afterParse(text: String): String {
         var s = POINT.replace(text) { m -> m.groupValues[1] + "." + m.groupValues[2].replace(" ", "") }
+        // "point 5 cedis" (no whole part said) is 0.5 cedis — only with the money word right after it
+        s = LEADING_POINT.replace(s) { m -> "0." + m.groupValues[1].replace(" ", "") + " " + m.groupValues[2] }
         // "100 and 50 cedis": the recogniser wrote "a hundred" as a figure and "and fifty" as words, so the parser saw two
         // numbers. A round hundred/thousand, "and", a smaller number, then a money word, is ONE amount (150) — the way
         // the amount is said; anything else ("100 and 50 people", "2 and 3") is left alone.
@@ -88,6 +97,7 @@ object SpokenNumbers {
     }
 
     private val POINT = Regex("(?<![\\d.])(\\d+)\\s+point\\s+(\\d(?:\\s\\d)*)(?![\\d.])", RegexOption.IGNORE_CASE)
+    private val LEADING_POINT = Regex("(?<![\\d.]\\s?)\\bpoint\\s+(\\d(?:\\s\\d)?)\\s+((?:ghana\\s+)?(?:cedis?|ghs|ghc))\\b", RegexOption.IGNORE_CASE)
     private val AND_AMOUNT = Regex("(?<![\\d.,])([1-9]\\d*00)\\s+and\\s+(\\d{1,3})\\s+((?:ghana\\s+)?(?:cedis?|pesewas?|ghs|ghc))\\b",
         RegexOption.IGNORE_CASE)
 }

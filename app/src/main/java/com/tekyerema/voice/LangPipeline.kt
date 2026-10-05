@@ -285,6 +285,13 @@ object Normalizer {
     private fun normalizeEnglish(input: String): String {
         // "double five", "oh five five", "a cedi" — said the Ghanaian way, put in the shape the parser below reads
         // (voice/understand/SpokenNumbers); "2 point 5" → "2.5" after it.
+        // A MESSAGE keeps its own words (safety audit 2026-10-05): the body after "saying" / "that" / ":" is passed on as
+        // heard, and the rest gets the digit-run rules only (a recipient's number said aloud) — no money rules.
+        if (com.tekyerema.voice.understand.MessageBody.isMessaging(input)) {
+            val (head, body) = com.tekyerema.voice.understand.MessageBody.split(input)
+            return parseEnglish(com.tekyerema.voice.understand.SpokenNumbers.digitRuns(head)).trimEnd() +
+                (if (body.isNotEmpty() && head.endsWith(" ")) " " else "") + body
+        }
         val s = com.tekyerema.voice.understand.SpokenNumbers.beforeParse(input)
         return com.tekyerema.voice.understand.SpokenNumbers.afterParse(parseEnglish(s))
     }
@@ -457,7 +464,8 @@ object LanguagePipeline {
         // network's name ("em ti en", "MTM" → MTN) and the money words ("mumu" → MoMo, "reverence" → reference) by
         // sound — never a word that names a contact, never the words of a message.
         val vocab = vocabulary()
-        val normalized = try {
+        val messaging = com.tekyerema.voice.understand.MessageBody.isMessaging(numbers)
+        val normalized = if (messaging) { HeardAs.noteWords(numbers, numbers); numbers } else try {
             val frame = com.tekyerema.voice.understand.Frame.of(numbers)
             val telco = com.tekyerema.voice.understand.TelcoTerms.repair(numbers, frame)
             val protect = vocab.entries.filter { it.kind == EntityCorrector.Kind.CONTACT }.map { it.compact }.toHashSet()
@@ -467,7 +475,11 @@ object LanguagePipeline {
         } catch (t: Throwable) { numbers }
         // B-19: names in a name slot are checked against this phone's contacts and apps ("message coffee" → "message
         // Kofi"). Only the canonical goal changes; the raw transcript stays as heard.
-        val fixed = try { EntityCorrector.correct(normalized, vocab) } catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
+        // …and never inside a message's own words: "saying call coffee now" stays as said (safety audit 2026-10-05).
+        val (head, body) = if (messaging) com.tekyerema.voice.understand.MessageBody.split(normalized) else normalized to ""
+        val fixed = try { EntityCorrector.correct(head, vocab).let { r -> if (body.isEmpty()) r else
+                EntityCorrector.Result(r.text.trimEnd() + (if (head.endsWith(" ")) " " else "") + body, r.fixes) } }
+            catch (t: Throwable) { EntityCorrector.Result(normalized, emptyList()) }
         val canonical = fixed.text
         if (fixed.fixes.isNotEmpty()) try { com.tekyerema.core.telemetry.Telemetry.update { voice["nameFixes"] = fixed.fixes.size } } catch (_: Throwable) {}
         // Spoken doubt (2026-09-29): a corrected name that turns out to be a call's / message's / payment's recipient is said

@@ -35,6 +35,7 @@ object Verbalize {
     private val PHONE = Regex("(?<![\\d.,])(?:\\+233|233|0)(?:[ -]?\\d){9}(?![\\d.,]?\\d)")
     private val ENDING = Regex("(?i)\\b(ending(?: in)?)\\s+(\\d{2,4})\\b")
     private val DATA_SIZE = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s?(GB|MB)\\b")
+    private val CUR_ALONE = Regex("(?<![\\p{L}\\p{N}])(?:GH₵|GH¢|GHS|GHC)(?![\\p{L}\\p{N}])")
 
     /** "0552093690" / "+233 55 209 3690" → "zero five five, two zero nine, three six nine zero" (the local 3-3-4 grouping). */
     private fun phone(raw: String): String {
@@ -76,6 +77,8 @@ object Verbalize {
         }
         t = MONEY_BEFORE.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
         t = MONEY_AFTER.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
+        // the currency on its own ("Balance in GHS") is a word, not letters
+        t = CUR_ALONE.replace(t, "cedis")
         t = DATE.replace(t) { m ->
             val d = m.groupValues[1].toInt(); val mo = m.groupValues[2].toInt()
             if (mo in 1..12 && d in 1..31) "$d ${MONTHS[mo - 1]} ${m.groupValues[3]}" else m.value

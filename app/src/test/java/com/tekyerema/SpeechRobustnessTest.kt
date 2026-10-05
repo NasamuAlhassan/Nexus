@@ -162,6 +162,117 @@ class SpeechRobustnessTest {
         assertEquals("call Prince", heard("call prints"))
     }
 
+    // ------------------------------------------------------------------ safety audit (5 October 2026)
+
+    @Test fun `a message is passed on in the user's own words`() {
+        val asSaid = listOf(
+            "message Abena saying em ti en office is closed",
+            "send Kofi a message saying em ti en is down",
+            "tell Kofi that I don't have a cedi",
+            "tell Kofi I don't have a cedi",
+            "text Ama saying meet me at half a cedi junction",
+            "message Abena saying the mumu line is down",
+            "text Ama saying I visited 5 cities",
+            "message Abena saying call coffee now",
+            "text Ama: I'll pay 2 point 5 cedis",
+            "let Kofi know that I sent 10 pesos")
+        for (raw in asSaid) {
+            assertEquals(raw, raw, heard(raw))
+            assertEquals(raw, raw, MoneyAsk.heard(heard(raw)))          // the recogniser's money repair (GhanaWords) too
+        }
+        // the recipient's number said aloud is still a number
+        assertEquals("text 0 5 5 2 0 9 3 6 9 0 saying hi", heard("text oh five five two oh nine three six nine oh saying hi"))
+        // and a request that only mentions telling is not a message: "tell me my mumu balance" is a balance question
+        assertEquals("tell me my MoMo balance", MoneyAsk.heard(heard("tell me my mumu balance")))
+    }
+
+    @Test fun `unrelated speech and contact names are not repaired`() {
+        assertEquals("play MTV on my data", heard("play MTV on my data"))
+        assertEquals("buy an airline ticket", heard("buy an airline ticket"))
+        assertEquals("send the report to Kwame", heard("send the report to Kwame"))
+        LanguagePipeline.vocabulary = { EntityCorrector.Vocab.of(listOf("Mumu Boateng"), emptyList()) }
+        assertEquals("send 5 cedis to Mumu Boateng", heard("send 5 cedis to Mumu Boateng"))
+    }
+
+    @Test fun `an amount that reads two ways is asked, never taken`() {
+        for (raw in listOf("send two fifty to Kwame", "send five fifty to Kwame", "send 2 50 to Kwame", "send one fifty cedis to Kwame",
+                "send 1 50 cedis to Kwame", "send 10 50 cedis to Kwame", "send fifty fifty to Kwame", "send 20 cedis 5 to Kwame",
+                "send 5 pesewas 50 to Kwame", "send 5 hundred cedis to Kwame", "send 2 thousand cedis to Kwame",
+                "send 1,5 cedis to Kwame", "send 2.500 cedis to Kwame", "send 0.005 cedis to Kwame", "send 1.5.0 cedis to Kwame")) {
+            val a = ask(raw) ?: throw AssertionError("dropped: $raw")
+            assertEquals(raw, MoneyAsk.Kind.SEND, a.kind)
+            assertNull(raw, a.amount)
+            assertEquals(raw, "Kwame", a.name)
+        }
+        // the same as an answer to "How much?": nothing taken, the flow asks again
+        for (ans in listOf("two fifty", "2 50", "1,5", "2.500", "0.005", "1.5.0", "20 cedis 5"))
+            assertNull(ans, MoneyAsk.amount(AnswerContext.read(ans, "How much should I send?")))
+        assertEquals("500", MoneyAsk.amount(AnswerContext.read("5 hundred", "How much should I send?")))   // one reading only
+        // what IS clear stays clear
+        mapOf("send 5 cedis 50 to Kwame" to "5.5", "send one cedi fifty to Kwame" to "1.5", "send point five cedis to Kwame" to "0.5",
+            "send 2,500 cedis to Kwame" to "2500", "send fifteen hundred cedis to Kwame" to "1500", "send 5 cedis 5 pesewas to Kwame" to "5.05",
+            "send a hundred cedis to Kwame" to "100", "send GHS5 to Kwame" to "5").forEach { (raw, amt) -> assertEquals(raw, amt, ask(raw)!!.amount) }
+    }
+
+    @Test fun `every inferred interpretation is said once before the action`() {
+        // an option chosen by its sound
+        val who = "Who did you mean: Kwame Mensah, Osei Kwame or Efua Mensah?"
+        AnswerContext.noteInference("afua", AnswerContext.read("afua", who), who)
+        assertEquals("I heard 'afua' — taking it as Efua Mensah.",
+            HeardAs.line(null, "ussd_navigate", JSONObject().put("contact", "Efua Mensah")))
+        // …not an ordinal, which is the user's own choice
+        HeardAs.clear()
+        AnswerContext.noteInference("the first one", AnswerContext.read("the first one", who), who)
+        assertNull(HeardAs.line(null, "ussd_navigate", JSONObject().put("contact", "Kwame Mensah")))
+        // an amount answer whose unit was repaired
+        val much = "How much should I send?"
+        AnswerContext.noteInference("10 pesos", AnswerContext.read("10 pesos", much), much)
+        assertEquals("I heard '10 pesos' — taking it as 10 pesewas.", HeardAs.moneyLine("ussd_navigate", JSONObject().put("amount", "0.1")))
+        // a guess that stands on a corrected name says the word actually heard, once
+        HeardAs.note("call Kwame", listOf(EntityCorrector.Fix("Kwami", "Kwame", EntityCorrector.Kind.CONTACT)))
+        HeardAs.noteGuess("Kwame", "Osei Kwame")
+        assertEquals("I heard 'Kwami' — taking it as Osei Kwame.", HeardAs.line("call Kwame", "make_call", JSONObject().put("contact", "Kwame")))
+        assertNull(HeardAs.line("call Kwame", "make_call", JSONObject().put("contact", "Kwame")))
+    }
+
+    @Test fun `contact matching keeps its four answers and refuses lookalikes`() {
+        val phone = listOf("Kwamena Boateng", "Efua Mensah", "Kwame Mensah", "Richmond's Dad").mapIndexed { i, n -> ContactResolver.Contact(n, "02000000%02d".format(i)) }
+        // NONE: a name only found INSIDE another word, or a possessive
+        assertEquals(ContactMatcher.Confidence.NONE, ContactMatcher.confidence(ContactMatcher.rank("ama", phone)))
+        assertEquals(ContactMatcher.Confidence.NONE, ContactMatcher.confidence(ContactMatcher.rank("Richmond", phone)))
+        // a three-letter start of a LATER word is not a match ("men" is not Mensah)
+        assertEquals(ContactMatcher.Confidence.NONE, ContactMatcher.confidence(ContactMatcher.rank("men", phone)))
+        // SURE: the name as said, glued or not
+        assertEquals(1.0, ContactMatcher.score("Kwamemensah", "Kwame Mensah"), 0.0)
+        assertEquals(ContactMatcher.Confidence.SURE, ContactMatcher.confidence(ContactMatcher.rank("Kwame Mensah", phone)))
+        // CHOOSE: two people fit
+        assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(ContactMatcher.rank("Mensah", phone)))
+        // CHOOSE too when a fragment fits two people ("Kwamen": Kwamena, and Kwame Mensah with a consonant dropped)
+        assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(ContactMatcher.rank("Kwamen", phone)))
+        // WEAK: one, loosely ("Efu" is the start of Efua — read back in full, said as a guess)
+        assertEquals(ContactMatcher.Confidence.WEAK, ContactMatcher.confidence(ContactMatcher.rank("Efu", phone)))
+    }
+
+    @Test fun `the voices get money, numbers and codes they can say`() {
+        assertEquals("Balance in cedis:", Verbalize.apply("Balance in GHS:"))
+        assertEquals("Send to zero two four, four one two, three four five six?", Verbalize.apply("Send to 0244-123-456?"))
+        assertEquals("Call plus two three three, five five, two zero nine, three six nine zero?", Verbalize.apply("Call +233 55 209 3690?"))
+        assertEquals("Fee: thirty eight pesewas", Verbalize.apply("Fee: GH₵ 0.38"))
+        assertEquals("Dial star one seven zero hash", Verbalize.apply("Dial *170#"))
+        assertEquals("Send ten pesewas to Osei Kwame, on zero five four, two nine zero, six six six six, an M T N number, with Mobile Money?",
+            Verbalize.apply("Send 0.1 cedis to Osei Kwame, on 0 5 4, 2 9 0, 6 6 6 6, an MTN number, with Mobile Money?"))
+        // Twi: the same, whether the line comes straight or through the English verbaliser first
+        for ((line, twi) in mapOf(
+            "Frɛ +233 55 209 3690?" to "Frɛ zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero?",
+            "Frɛ *170#" to "Frɛ star baako nson zero hash",
+            "Wo balance yɛ GHS 1,000,000." to "Wo balance yɛ sidi ɔpepem.",
+            "data 2.5GB" to "data gigabyte mmienu pɔint anum",
+            "Fee yɛ GH₵ 0.38." to "Fee yɛ pesewa aduasa nwɔtwe.")) {
+            assertEquals(line, twi, TwiSpeechText.prepare(line))
+            assertEquals(line, twi, TwiSpeechText.prepare(Verbalize.apply(line)).replace("M T N", "MTN"))
+        }
+    }
+
     // ------------------------------------------------------------------ contacts: sure, choose, weak, none
 
     private fun rank(h: String) = ContactMatcher.rank(h, contacts)

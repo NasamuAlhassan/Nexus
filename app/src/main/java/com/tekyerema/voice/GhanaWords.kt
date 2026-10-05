@@ -77,6 +77,14 @@ object GhanaWords {
      */
     fun fix(text: String, aboutMoney: Boolean = false): String {
         if (text.isBlank()) return text
+        // A MESSAGE keeps its words: no money or network repair in it, the app's name only, and only before the message
+        // itself begins ("let Kofi know that I sent 10 pesos" is what the user said — safety audit 2026-10-05).
+        if (!aboutMoney && com.tekyerema.voice.understand.MessageBody.isMessaging(text)) {
+            val (head, body) = com.tekyerema.voice.understand.MessageBody.split(text)
+            val h = HOPING.replace(WHATSAPP.replace(head) { m -> m.groupValues[1] + m.groupValues[2] + "WhatsApp" }) { m ->
+                m.groupValues[1] + "Open" + m.groupValues[2] }
+            return h + body
+        }
         var t = text
         if (!FOREX.containsMatchIn(t)) {
             t = PESEWAS.replace(t) { m -> m.groupValues[1] + "pesewas" }

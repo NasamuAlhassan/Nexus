@@ -622,6 +622,10 @@ class LocalFastRouter(
             matches.isEmpty() -> handled(FastIntent.SetEmergencyContact(name), "I couldn't find $name in your contacts.")
             matches.size > 1 -> handled(FastIntent.SetEmergencyContact(name),
                 "More than one contact matches $name: ${matches.take(3).joinToString(", ") { it.name }}. Say the full name.")
+            // Nothing reads this back before it is saved, so a loose match ("afua" → Efua Mensah) is asked, never taken.
+            !com.tekyerema.android.ContactResolver.isSure(name, matches[0]) -> handled(FastIntent.SetEmergencyContact(name),
+                "The closest contact to $name is ${matches[0].name}. To make it your emergency contact, say: " +
+                    "set my emergency contact to ${matches[0].name}.")
             else -> {
                 val s = com.tekyerema.settings.Settings(appContext)
                 s.emergencyContactName = matches[0].name
@@ -845,13 +849,16 @@ class LocalFastRouter(
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-03", true)) return null
         if (!granted(android.Manifest.permission.READ_CONTACTS))
             return if (i.explicit) handled(i, "I need contacts access to find ${i.contact} — allow it for Tɛkyerɛma in Settings.") else null
-        val names = try { com.tekyerema.android.ContactResolver.resolve(appContext, i.contact) } catch (_: Throwable) { emptyList() }
-            .map { it.name }.distinct()
+        val found = try { com.tekyerema.android.ContactResolver.resolve(appContext, i.contact) } catch (_: Throwable) { emptyList() }
+        val names = found.map { it.name }.distinct()
         return when {
             // "my mother is sick" said in passing: not a contact → not a relation; the agent answers it as usual.
             names.isEmpty() -> if (i.explicit) handled(i, "I couldn't find ${i.contact} in your contacts.") else null
             names.size > 1 -> handled(i, "More than one contact matches ${i.contact}: ${com.tekyerema.audit.AuditLog.joinAnd(names.take(3))}. " +
                 "Say the full name — for example: remember that my ${i.said} is ${names[0]}.")
+            // Saved without a read-back, so only on a sure match (safety audit 2026-10-05).
+            !com.tekyerema.android.ContactResolver.isSure(i.contact, found[0]) -> handled(i,
+                "The closest contact to ${i.contact} is ${names[0]}. If that's who you mean, say: remember that ${names[0]} is my ${i.said}.")
             else -> {
                 com.tekyerema.android.Relations.set(i.relation, names[0])
                 action(i.name, "Okay. ${names[0]} is your ${i.said}. Now you can say “call my ${i.said}”.")

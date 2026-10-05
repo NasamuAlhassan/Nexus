@@ -389,8 +389,12 @@ class VoiceController(
                 // Read as what the question asked for — an amount, a number, one of the options, a name, or a reference left
                 // as said (voice/understand/AnswerContext).
                 if (text.isNotBlank()) {
-                    val read = com.tekyerema.voice.understand.AnswerContext.read(englishReply(text), question, SpeechVocabulary.current())
-                    if (read != englishReply(text)) Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(question)}")
+                    val said = englishReply(text)
+                    val read = com.tekyerema.voice.understand.AnswerContext.read(said, question, SpeechVocabulary.current())
+                    if (read != said) {
+                        Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(question)}")
+                        com.tekyerema.voice.understand.AnswerContext.noteInference(said, read, question)
+                    }
                     agent.answer(read); return
                 }
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
@@ -650,7 +654,13 @@ class VoiceController(
             val q = st.pendingQuestion
             val heard = LanguagePipeline.process(t, language, forceLanguage()).canonical
             askJob?.cancel(); hideAsking(); cues.captured()
-            agent.answer(com.tekyerema.voice.understand.AnswerContext.read(englishReply(heard), q, SpeechVocabulary.current()))
+            val said = englishReply(heard)
+            val read = com.tekyerema.voice.understand.AnswerContext.read(said, q, SpeechVocabulary.current())
+            if (read != said) {
+                Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(q.orEmpty())}")
+                com.tekyerema.voice.understand.AnswerContext.noteInference(said, read, q)
+            }
+            agent.answer(read)
             return true
         }
         if (st.status == AgentStatus.WAITING_CONFIRMATION) return submitTyped(t).accepted

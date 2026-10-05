@@ -21,6 +21,8 @@ object ContactMatcher {
     enum class Confidence { SURE, CHOOSE, WEAK, NONE }
 
     const val STRONG = 0.85
+    /** The name as said — whole, or its first word(s). Anything less is an inference, said back once (HeardAs). */
+    const val AS_SAID = 0.95
     const val FLOOR = 0.55
 
     /** Words, lower-case; a possessive stays one word ("Richmond's" → "richmonds", not "richmond" + "s"). */
@@ -72,7 +74,9 @@ object ContactMatcher {
                 if (i > 0 && w == t) up(0.80)
                 if (i > 0 && wk.length >= 3 && wk == PhoneticKey.of(t)) up(0.70)
                 if (i > 0 && akanVowelVariant(w, t)) up(0.70)
-                if (w.length >= 3 && t.startsWith(w) && t != w) up(if (i == 0) 0.70 else 0.60)
+                // the start of a word: of the first, from 3 letters ("Kwa" → Kwame, Kwabena); of a later word, from 4 —
+                // "men" is not Mensah (safety audit 2026-10-05)
+                if (w.length >= (if (i == 0) 3 else 4) && t.startsWith(w) && t != w) up(if (i == 0) 0.70 else 0.60)
                 if (w.length >= 3 && t.contains(w) && !t.startsWith(w)) up(0.50)
             }
             val ws = skeleton(w)

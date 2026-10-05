@@ -40,7 +40,7 @@ object FinanceVocab {
     data class Result(val text: String, val fixes: List<Pair<String, String>>)
 
     fun repair(text: String, protect: Set<String> = emptySet(), frame: Boolean = Frame.of(text)): Result {
-        if (text.isBlank() || !frame) return Result(text, emptyList())
+        if (text.isBlank() || !frame || MessageBody.isMessaging(text)) return Result(text, emptyList())
         val bodyAt = BODY.find(text)?.range?.first ?: text.length
         val head = text.substring(0, bodyAt)
         val tail = text.substring(bodyAt)

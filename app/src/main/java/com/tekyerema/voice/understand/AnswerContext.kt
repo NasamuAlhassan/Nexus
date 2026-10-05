@@ -126,6 +126,21 @@ object AnswerContext {
         return null
     }
 
+    /**
+     * An answer that was READ as something else is said back once in the read-back that uses it (HeardAs): an option
+     * chosen by its sound ("afua" → Efua Mensah — not "the first one", not the name as said), or an amount whose unit was
+     * repaired ("10 pesos" → 10 pesewas). Safety audit 2026-10-05.
+     */
+    fun noteInference(answer: String, read: String, question: String?) {
+        if (question.isNullOrBlank() || answer.trim().equals(read.trim(), ignoreCase = true)) return
+        when (expect(question)) {
+            Expect.CHOICE -> if (ordinal(answer, options(question).size) == null && !read.contains(answer.trim(), ignoreCase = true))
+                com.tekyerema.voice.HeardAs.noteGuess(answer.trim(), read.trim())
+            Expect.AMOUNT -> com.tekyerema.voice.HeardAs.noteWords(answer.trim(), read.trim())
+            else -> {}
+        }
+    }
+
     /** A name said alone, corrected against the contacts as if after "call" ("coffee" → Kofi). */
     private fun name(a: String, vocab: EntityCorrector.Vocab): String {
         if (vocab.isEmpty || a.split(" ").size > 4) return a

@@ -57,6 +57,15 @@ object MoneyAsk {
                     return base.copy(name = tail, number = null, badNumber = null, forSelf = false)
             }
         }
+        // A figure that reads two ways ("1,5": 1.5 or 15? "2.500": 2.5 or 2,500?) or is finer than a pesewa ("0.005"): the
+        // request is kept, its amount is NOT taken — the flow asks "How much?". It used to send the whole request to the
+        // cloud planner, which picked a reading (safety audit 2026-10-05).
+        UNCLEAR_FIGURE.findAll(tidied).filter { m -> m.value.count { it.isDigit() } < 9 }.toList().takeIf { it.isNotEmpty() }?.let { hits ->
+            var rest = tidied
+            for (m in hits.reversed()) rest = rest.removeRange(m.range)
+            val base = parse(rest.replace(SPACES, " ").trim()) ?: return null
+            return if (base.kind == Kind.SEND || base.kind == Kind.AIRTIME) base.copy(amount = null) else null
+        }
         // "… to a telephone number", "… to another number", "… for someone": somebody else, not yet said who. The words are
         // taken out (the recogniser also turns "telephone number" into "telegram number", which read as a message), and
         // the caller asks for the number — the request is never quietly turned into one for the user's own phone.
@@ -595,6 +604,7 @@ object MoneyAsk {
     private val SELF_FIX = Regex("(?i)^(.+?)[,;]?\\s+(?:actually|no wait|wait no|no,|i mean|i meant|sorry|rather|make that)[,\\s]+" +
         "(?:(?:make|change) (?:it|that|the amount)(?: to)?\\s+|it'?s\\s+|it should be\\s+|let'?s say\\s+|say\\s+|to\\s+)?(.+)$")
     private val UNITLESS = Regex("^\\d+(?:\\.\\d+)?$")
+    private val UNCLEAR_FIGURE = Regex("(?i)(?<![\\d.,])(?:(?:gh[sc₵¢]|₵|¢)\\s?)?(?:\\d+,\\d{1,2}|\\d+\\.\\d{3,}|\\d+(?:\\.\\d+){2,})(?![\\d.,]*\\d)")
     private val PESEWA_WORD = Regex("(?i)\\bpesewas?\\b")
     private val PESEWA = setOf("pesewa", "pesewas", "pese")
     private val MONEY_WORDS = setOf("money", "cash", "momo", "funds")

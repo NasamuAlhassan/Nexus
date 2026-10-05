@@ -73,7 +73,11 @@ object HeardAs {
         val who = keys.firstNotNullOfOrNull { k -> args.optString(k).trim().takeIf { it.isNotEmpty() && it != "null" } } ?: return null
         if (!names(who, g.name) && !names(who, g.heard)) return null
         guess = null
-        return "I heard '${g.heard}' — taking it as ${g.name}."
+        // The guess may stand on a name the corrector already changed ("Kwami" → Kwame → Osei Kwame): say what was HEARD,
+        // and only once — the corrector's own note for this person goes with it.
+        val earlier = last?.fixes?.firstOrNull { (_, to) -> to.equals(g.heard, ignoreCase = true) }
+        if (earlier != null) last = null
+        return "I heard '${earlier?.first ?: g.heard}' — taking it as ${g.name}."
     }
 
     fun clear() { last = null; money = null; guess = null }

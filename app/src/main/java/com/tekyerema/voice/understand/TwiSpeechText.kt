@@ -25,6 +25,9 @@ object TwiSpeechText {
         if (text.isBlank() || (text.none { it.isDigit() } && !text.contains(EN_OPEN) && !CUR_ALONE.containsMatchIn(text) &&
                 !EN_NUMBER_RUN.containsMatchIn(text))) return text
         var s = SPAN.replace(text) { m -> spanToTwi(m.groupValues[1]) }
+        // a USSD code is said one digit at a time, "star" and "hash" as Ghanaians say them in Twi too — never as a number
+        s = EN_USSD.replace(s) { m -> "*" + m.groupValues[1].trim().split(" ").joinToString("") { w -> USSD_WORD[w.lowercase()] ?: "" } + "#" }
+        s = USSD.replace(s) { m -> m.value.map { c -> when (c) { '*' -> "star"; '#' -> "hash"; else -> ConfirmTemplates.twiDigits(c.toString()) } }.joinToString(" ") }
         // Lines reach the voice through the English verbaliser (VoiceController: Verbalize.apply), which has already made
         // "GH₵ 10.50" into "ten cedis fifty pesewas" and 0552093690 into "zero five five …" — English words the Twi voice
         // would read as English. Those runs go back to figures first, then into Twi like any other figure.
@@ -34,15 +37,23 @@ object TwiSpeechText {
     }
 
     private const val EN_NUM = "(?:zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|" +
-        "sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)"
+        "sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million)"
     /** A run of English number words ("ten", "twenty-five", "one thousand two hundred fifty", "zero five five two …",
-     *  "two point five"). "and" and "point" only between number words. */
-    private val EN_NUMBER_RUN = Regex("(?i)\\b$EN_NUM(?:-$EN_NUM)?(?:[ ,]+(?:(?:and|point) )?$EN_NUM(?:-$EN_NUM)?)*\\b")
+     *  "two point five"), a phone number's "plus" with it. "and" and "point" only between number words. */
+    private val EN_NUMBER_RUN = Regex("(?i)\\b(?:plus )?$EN_NUM(?:-$EN_NUM)?(?:[ ,]+(?:(?:and|point) )?$EN_NUM(?:-$EN_NUM)?)*\\b")
+    /** The English verbaliser's USSD code ("star one seven zero hash"): kept as one code. */
+    private val EN_USSD = Regex("(?i)\\bstar((?: (?:star|zero|one|two|three|four|five|six|seven|eight|nine))+) hash\\b")
 
     private fun englishRun(run: String): String {
-        val n = try { com.tekyerema.voice.Normalizer.normalize(run.replace("-", " ").replace(",", ""), com.tekyerema.voice.Lang.GH_EN) }
+        val plus = run.startsWith("plus ", ignoreCase = true)
+        val words = if (plus) run.substring(5) else run
+        val n = try { com.tekyerema.voice.Normalizer.normalize(words.replace("-", " ").replace(",", ""), com.tekyerema.voice.Lang.GH_EN) }
             catch (_: Throwable) { return run }
-        return if (n.any { it.isDigit() }) n else run
+        if (!n.any { it.isDigit() }) return run
+        // "plus two three three, five five, …" is a +233 number: its digits together, for the phone rule below
+        if (plus) return "+" + n.filter { it.isDigit() }
+        // the parser stops at thousands: "1 million" / "2 million 500000" → one figure
+        return MILLION.replace(n) { m -> ((m.groupValues[1].toLong() * 1_000_000) + (m.groupValues[2].toLongOrNull() ?: 0)).toString() }
     }
 
     /** An English stretch: its number words become figures first ("five Ghana cedis" → "5 Ghana cedis"), then Twi. */
@@ -62,8 +73,13 @@ object TwiSpeechText {
     private val ENDING = Regex("(?i)\\b(ending(?:\\s+in)?)\\s+(\\d+)")
     /** Cedis and pesewas said together ("10 cedis 50 pesewas", "5 cedis and 20 pesewas") — one amount. */
     private val AMOUNT_PAIR = Regex("(?i)\\b(\\d+)\\s?(?:ghana\\s+)?cedis?,?\\s+(?:and\\s+)?(\\d{1,2})\\s?pesewas?\\b")
-    /** Data sizes: "2GB", "500 MB" — the unit first, then its number, as an amount is said ("sidi du") [owner: verify]. */
-    private val DATA_SIZE = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s?(GB|MB)\\b")
+    /** Data sizes: "2GB", "500 MB", the verbaliser's "2 gigabytes" — the unit first, then its number, as an amount is said
+     *  ("sidi du") [owner: verify]. */
+    private val DATA_SIZE = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s?(GB|MB|gigabytes?|megabytes?)\\b")
+    private val USSD = Regex("\\*[0-9*]+#")
+    private val MILLION = Regex("(?i)\\b(\\d{1,3})\\s+million(?:\\s+(\\d{1,6}))?\\b")
+    private val USSD_WORD = mapOf("star" to "*", "zero" to "0", "one" to "1", "two" to "2", "three" to "3", "four" to "4", "five" to "5",
+        "six" to "6", "seven" to "7", "eight" to "8", "nine" to "9")
 
     private fun figures(input: String): String {
         var s = input
@@ -71,7 +87,7 @@ object TwiSpeechText {
         // "Prince Alhassan ending 323": the last digits of a number are said one by one, not as three hundred and twenty-three
         s = ENDING.replace(s) { m -> m.groupValues[1] + " " + ConfirmTemplates.twiDigits(m.groupValues[2]) }
         s = AMOUNT_PAIR.replace(s) { m -> amount(m.groupValues[1], m.groupValues[2].padStart(2, '0'), cedis = true) ?: m.value }
-        s = DATA_SIZE.replace(s) { m -> (if (m.groupValues[2].equals("GB", true)) "gigabyte " else "megabyte ") + number(m.groupValues[1]) }
+        s = DATA_SIZE.replace(s) { m -> (if (m.groupValues[2].startsWith("g", true)) "gigabyte " else "megabyte ") + number(m.groupValues[1]) }
         s = AMOUNT_BEFORE.replace(s) { m -> amount(m.groupValues[1], m.groupValues[2], cedis = true) ?: m.value }
         s = AMOUNT_AFTER.replace(s) { m ->
             amount(m.groupValues[1], m.groupValues[2], cedis = !m.groupValues[3].lowercase().startsWith("pesewa")) ?: m.value
@@ -105,7 +121,7 @@ object TwiSpeechText {
 
     private val HUNDREDS = arrayOf("", "ɔha", "ahaanu", "ahasa", "ahanan", "ahanum", "ahansia", "ahanson", "ahanwɔtwe", "ahankron")
 
-    /** 0–999,999 as a Twi numeral, or null. 1–199 from [ConfirmTemplates.twiWords] (the verified range). */
+    /** 0–999,999,999 as a Twi numeral, or null. 1–199 from [ConfirmTemplates.twiWords] (the verified range). */
     fun words(n: Long): String? {
         if (n == 0L) return "zero"
         if (n in 1..199) return ConfirmTemplates.twiWords(n.toInt())
@@ -116,6 +132,12 @@ object TwiSpeechText {
         if (n in 1000..999_999) {
             val k = n / 1000; val r = n % 1000
             val head = if (k == 1L) "apem" else "mpem " + (words(k) ?: return null)
+            return if (r == 0L) head else "$head ne " + (words(r) ?: return null)
+        }
+        // a million and more (a balance can be): "ɔpepem" [owner: verify] — not "one zero zero zero zero zero zero"
+        if (n in 1_000_000..999_999_999) {
+            val m = n / 1_000_000; val r = n % 1_000_000
+            val head = if (m == 1L) "ɔpepem" else "ɔpepem " + (words(m) ?: return null)
             return if (r == 0L) head else "$head ne " + (words(r) ?: return null)
         }
         return null

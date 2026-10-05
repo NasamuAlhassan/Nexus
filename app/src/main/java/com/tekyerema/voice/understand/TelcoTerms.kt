@@ -29,7 +29,8 @@ object TelcoTerms {
 
     /** [text] with spelled acronyms and network names put right; [frame] = money or a network is being talked about. */
     fun repair(text: String, frame: Boolean = Frame.of(text)): String {
-        if (text.isBlank()) return text
+        // never inside a message: "saying em ti en office is closed" is the user's own words (MessageBody)
+        if (text.isBlank() || MessageBody.isMessaging(text)) return text
         var s = spelledRuns(text, frame)
         if (!frame) return s
         s = EMPTY_N.replace(s) { m -> "MTN" + m.groupValues[1] }
@@ -83,7 +84,10 @@ object TelcoTerms {
         if (w in NOT_MTN) return null
         val d = levenshtein(w, "mtn")
         val plural = w == "mtns"
-        return if (d <= 1 || plural || w == "emtn" || w == "emtien") lead + "MTN" + (if (plural) "'s" else poss) + trail else null
+        // one letter added ("mttn", "mtnn") or the last one heard as the other nasal ("mtm") — never another consonant:
+        // "MTV", "mts", "mtb" are other things (safety audit 2026-10-05: "play MTV on my data" became MTN)
+        val near = d == 1 && (w.length == 4 || (w.length == 3 && w.startsWith("mt") && w[2] == 'm'))
+        return if (near || plural || w == "emtn" || w == "emtien") lead + "MTN" + (if (plural) "'s" else poss) + trail else null
     }
 
     /** Real words one letter from "mtn" ("men", "man", "mat", "met", "min", "mt" as in Mt. Afadjato…). */
