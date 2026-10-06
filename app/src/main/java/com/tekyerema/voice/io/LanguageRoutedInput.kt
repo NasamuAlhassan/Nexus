@@ -30,13 +30,19 @@ class LanguageRoutedInput(
     override suspend fun listen(spec: ListenSpec, events: ListenEvents): Heard {
         val lang = language()
         if (lang == Lang.TWI) {
-            // A yes / no in a Twi conversation is heard by the phone's own recogniser (owner's plan D, 2 October 2026): in
-            // the loop test the HCI Lab recogniser wrote "Aane" / "Daabi" as "so" / "fida", and every answer would spend
-            // its small daily quota. "Yes", "no", "aane" (heard "Anne"), "daabi" ("Darby") all count — voice/Confirmation.
-            // …and so is a phone number or an amount the app asked for (spec.digits): said in English inside Twi, the HCI
-            // Lab recogniser wrote "0…" as "zirofftuziro ne tsi sir".
-            if ((spec.purpose == ListenPurpose.YES_NO || spec.digits) && isOnline() &&
-                com.tekyerema.core.config.AppConfig.bool("speech.twi.yesNoOnPhoneRecognizer", true)) {
+            // A yes / no in a Twi conversation is heard in TWI (owner, 6 October 2026: the confirmation "must NOT silently
+            // switch to the English recogniser" — on the A20e, 5 October, a Twi answer at a confirmation came back "error 7"
+            // twice). The lab recogniser's own spellings of "aane" / "daabi" are read by voice/Confirmation. (Owner's plan D of
+            // 2 October sent it to the phone's recogniser; `speech.twi.yesNoOnPhoneRecognizer` brings that back.)
+            // A phone number or an amount the app asked for (spec.digits) is the one explicit exception: said in English
+            // inside Twi, the HCI Lab recogniser wrote "0552093690" as "zeroffvtziro ne tsi sir" — the digits go to the phone's
+            // recogniser, and the log says so.
+            val yesNoOnPhone = spec.purpose == ListenPurpose.YES_NO &&
+                com.tekyerema.core.config.AppConfig.bool("speech.twi.yesNoOnPhoneRecognizer", false)
+            val digitsOnPhone = spec.digits && com.tekyerema.core.config.AppConfig.bool("speech.twi.digitsOnPhoneRecognizer", true)
+            if ((yesNoOnPhone || digitsOnPhone) && isOnline()) {
+                try { android.util.Log.i("Tekyerema", "[VOICE] Twi session: ${if (digitsOnPhone) "a number / amount" else "yes / no"} " +
+                    "is heard by the phone's recogniser (explicit setting)") } catch (_: Throwable) {}
                 val heard = english.listen(spec.copy(language = Lang.GH_EN), events)
                 if (!(heard is Heard.Unavailable && heard.cause in FALL_BACK)) return heard
             }

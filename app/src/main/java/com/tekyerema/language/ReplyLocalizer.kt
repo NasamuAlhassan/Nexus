@@ -118,7 +118,11 @@ class ReplyLocalizer(
         // Single quotes only when they open after a non-letter and close before one, so "can't … 'Mum'" finds Mum,
         // not "t … ".
         private val SINGLE_QUOTED = Regex("(?<![\\p{L}])['‘]([^'‘’]{1,60})['’](?![\\p{L}])")
-        private val SENTENCE_START = Regex("(^|[.!?]\\s+)$")
+        /** A sentence starts at the beginning, after . ! ? and a space, or on a new line (a read-back's "\nYou didn't name…"
+         *  was tagged as a NAME "You" and stayed English in the Twi — A20e, 5 October 2026). */
+        private val SENTENCE_START = Regex("(^|[.!?]\\s+|\\n[\\s“”\"']*)$")
+        /** "I", "I've", "I'm", "I'll", "I'd" — never a name ("Okay, I've left it." was tagged "[P1] left it"). */
+        private val FIRST_PERSON = Regex("^I(?:['’](?:ve|m|ll|d|s))?$")
 
         /**
          * Protected spans: quoted text, and capitalised words that are not the first word of a sentence (names, app
@@ -131,7 +135,7 @@ class ReplyLocalizer(
             val words = WORD.findAll(s).toList()
             for ((i, m) in words.withIndex()) {
                 val w = m.value.trim('\'')
-                if (w.length < 2) continue
+                if (w.length < 2 || FIRST_PERSON.matches(w)) continue
                 val mixed = w.drop(1).any { it.isUpperCase() } && w.any { it.isLowerCase() }
                 val capital = w[0].isUpperCase()
                 val atStart = SENTENCE_START.containsMatchIn(s.substring(0, m.range.first))

@@ -46,10 +46,12 @@ class ContactChoiceTest {
     @Test fun the_question_has_its_own_twi_wording_names_for_the_english_voice() {
         val c = ContactChoice.build("Prince", princes)
         val en = com.tekyerema.language.EntityTags.EN_OPEN; val close = com.tekyerema.language.EntityTags.EN_CLOSE
-        assertEquals("Hena na wopɛ? ${en}Prince Tesano AG youth Sec, Prince Ice P, or Princess.$close Anaa obi foforɔ?", c.twiQuestion)
-        // the Twi voice says only the Twi frame; the names and digits are one English piece
-        assertEquals(listOf(false, true, false), com.tekyerema.language.EntityTags.segments(c.twiQuestion).map { it.second })
-        assertEquals("Hena na wopɛ? ${en}Prince Tesano AG youth Sec, Prince Ice P, or Princess.$close Anaa obi foforɔ?",
+        assertEquals("Hena na wopɛ? ${en}Prince Tesano AG youth Sec$close, ${en}Prince Ice P$close anaa ${en}Princess$close. Anaa obi foforɔ?", c.twiQuestion)
+        // the Twi words (the frame, "anaa" — or) are Twi; each name its own English piece (the line said "or" in Twi on the
+        // A20e, 5 October 2026)
+        assertEquals(listOf(false, true, false, true, false, true, false),
+            com.tekyerema.language.EntityTags.segments(c.twiQuestion).map { it.second })
+        assertEquals("Hena na wopɛ? ${en}Prince Tesano AG youth Sec$close, ${en}Prince Ice P$close anaa ${en}Princess$close. Anaa obi foforɔ?",
             ContactChoice.build("my brother", princes).twiQuestion)
     }
 

@@ -25,10 +25,56 @@ object SpokenNumbers {
     private fun isDigitToken(c: String) = c in DIGIT_WORDS || (c.isNotEmpty() && c.all { it.isDigit() })
     private fun isDigitish(c: String) = isDigitToken(c) || c in ZERO_SAID
 
+    /**
+     * An amount glued into one word by the recogniser: "tempɛsos" (ten pesos — "ten" said "tem" before the p; the HCI Lab,
+     * A20e 5 October 2026), "fivecedis", "10pesewas", "5GHS" → "10 pesewas", "5 cedis", "10 pesewas", "5 GHS". Only a number
+     * word or figure directly joined to a money unit — never anything else. Used by the English and the Twi normaliser.
+     */
+    fun unglueAmounts(text: String): String {
+        if (text.isBlank()) return text
+        var s = GLUED_FIGURE.replace(text) { m -> m.groupValues[1] + " " + unit(m.groupValues[2]) }
+        s = GLUED_WORD.replace(s) { m ->
+            val n = NUMBER_WORD[m.groupValues[1].lowercase().replace("tem", "ten")] ?: return@replace m.value
+            "$n ${unit(m.groupValues[2])}"
+        }
+        return s
+    }
+
+    private fun unit(u: String): String = u.lowercase().let { when {
+        it.startsWith("p") -> "pesewas"
+        it == "ghs" || it == "ghc" -> u.uppercase()
+        else -> "cedis"
+    } }
+
+    private val NUMBER_WORD = mapOf("one" to "1", "two" to "2", "three" to "3", "four" to "4", "five" to "5", "six" to "6",
+        "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10", "eleven" to "11", "twelve" to "12", "fifteen" to "15",
+        "twenty" to "20", "thirty" to "30", "forty" to "40", "fifty" to "50", "hundred" to "100")
+    private const val UNIT = "(p[eɛ]s(?:[eɛ]?was?|[eɛ]wa?s?|os)|c[eɛ]dis?|sidi|ghs|ghc)"
+    private val GLUED_FIGURE = Regex("(?i)(?<![\\p{L}\\d.])(\\d+(?:\\.\\d{1,2})?)$UNIT(?![\\p{L}])")
+    private val GLUED_WORD = Regex("(?i)(?<![\\p{L}])(one|two|three|four|five|six|seven|eight|nine|te[nm]|eleven|twelve|fifteen|twenty|thirty|forty|fifty|hundred)$UNIT(?![\\p{L}])")
+
+    /**
+     * A phone number the recogniser destroyed: digit words glued into nonsense ("zeroffvtziro ne tsi sir" — "0552093690" said
+     * in English inside Twi, the HCI Lab, 5 October 2026), or a run of digit words / a few digits that can't be a whole
+     * number. Not a name, and not something to look up: the flow asks for the number again. Pure.
+     */
+    fun looksLikeLostDigits(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty()) return false
+        if (GLUED_ZERO.containsMatchIn(t)) return true
+        val toks = t.split(Regex("\\s+")).map { it.trim(',', '.', '!', '?') }.filter { it.isNotEmpty() }
+        val digitish = toks.count { DIGITISH.matches(it) }
+        val digits = t.count { it.isDigit() }
+        return (digitish >= 2 && digitish * 2 >= toks.size) || (digits in 3..8 && digits * 2 >= t.count { !it.isWhitespace() })
+    }
+
+    private val GLUED_ZERO = Regex("(?i)z[iɛe]ro\\p{L}{2,}|\\p{L}{2,}z[iɛe]ro")
+    private val DIGITISH = Regex("(?i)zero|ziro|oh|one|two|three|four|five|six|seven|eight|nine|double|triple|\\d+")
+
     /** Word-level repairs, before the number parser. */
     fun beforeParse(text: String): String {
         if (text.isBlank()) return text
-        var s = digitRuns(text)
+        var s = digitRuns(unglueAmounts(text))
         // 3. "half a cedi" → 50 pesewas; "a cedi" / "one cedi" → 1 cedi (an amount word the parser has no number for).
         s = HALF_CEDI.replace(s) { "50 pesewas" }
         s = A_CEDI.replace(s) { m -> "1 ${m.groupValues[1].ifEmpty { "" }}cedi" }

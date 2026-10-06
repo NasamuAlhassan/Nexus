@@ -37,6 +37,13 @@ object NumberSpeech {
         return g
     }
 
+    /** "ending 3 6 9 0" — the last four digits of a contact's number, for a read-back that names the contact (end-to-end
+     *  pass, 6 October 2026: the whole number is read only when the user said it, or when it needs checking). "" if none. */
+    fun ending(raw: String?): String {
+        val d = raw?.filter { it.isDigit() }.orEmpty()
+        return if (d.length < 4) "" else "ending " + d.takeLast(4).toList().joinToString(" ")
+    }
+
     /** Spoken grouping: "0 5 5, 3 2 3, 8 0 1 1" (digits apart, a comma pause between groups). A non-Ghana
      *  international number keeps its "plus". Empty input gives "". */
     fun spoken(raw: String?): String {

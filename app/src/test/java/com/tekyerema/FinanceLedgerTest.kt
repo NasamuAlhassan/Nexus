@@ -335,7 +335,7 @@ class FinanceLedgerTest {
         assertEquals("0552093690", args.getString("number"))
         assertEquals("Prince Melanin", args.getString(UssdNavigatorTool.ARG_CONTACT))
         args.put(MoMoSendTool.ARG_SIM, "mtn")
-        assertEquals("Send 50 cedis to Prince Melanin, on 0 5 5, 2 0 9, 3 6 9 0, an MTN number, with Mobile Money?\n" +
+        assertEquals("Send 50 cedis to Prince Melanin, ending 3 6 9 0, an MTN number, with Mobile Money?\n" +
             "I'll go through the menu quietly and stop at the PIN for you to enter.", UssdNavigatorTool.confirmationPrompt(args))
         args.put(MoMoSendTool.ARG_NEW_RECIPIENT, true).put(UssdNavigatorTool.ARG_REPEAT, "REPEAT.")
         assertTrue(UssdNavigatorTool.confirmationPrompt(args).contains("with Mobile Money?\nREPEAT. You haven't sent money to this number before. I'll go through"))
@@ -374,7 +374,7 @@ class FinanceLedgerTest {
             "I'll go through the menu quietly and stop at the PIN for you to enter.", UssdNavigatorTool.confirmationPrompt(self))
         val other = JSONObject().put(UssdNavigatorTool.ARG_INTENT, UssdNavigatorTool.SEND_AIRTIME).put("amount", "5")
             .put("number", "0552093690").put(UssdNavigatorTool.ARG_CONTACT, "Prince Melanin").put(MoMoSendTool.ARG_SIM, "mtn")
-        assertEquals("Buy 5 cedis of airtime for Prince Melanin, on 0 5 5, 2 0 9, 3 6 9 0, an MTN number, from your Mobile Money wallet?\n" +
+        assertEquals("Buy 5 cedis of airtime for Prince Melanin, ending 3 6 9 0, an MTN number, from your Mobile Money wallet?\n" +
             "I'll go through the menu quietly and stop at the PIN for you to enter.", UssdNavigatorTool.confirmationPrompt(other))
         assertEquals(TxIntent.SEND_MONEY, UssdNavigatorTool.intentOf(JSONObject().put("number", "0552093690")))
         assertEquals(UssdNavigatorTool.BALANCE_PROMPT,

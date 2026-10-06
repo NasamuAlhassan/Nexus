@@ -53,7 +53,8 @@ object AnswerContext {
         if (a.isEmpty() || question.isNullOrBlank()) return answer
         return when (expect(question)) {
             Expect.AMOUNT -> amount(a)
-            Expect.PHONE -> phone(numbers(a)) ?: phone(a) ?: a
+            // English digits ("oh five five", "double", "+233"), then Twi ones ("zero anum anum …"), then the words as said
+            Expect.PHONE -> phone(numbers(a)) ?: phone(twiDigits(a)) ?: phone(a) ?: a
             Expect.CHOICE -> choice(a, options(question)) ?: a
             Expect.NAME -> name(a, vocab)
             Expect.REFERENCE, Expect.FREE -> a
@@ -62,6 +63,14 @@ object AnswerContext {
 
     /** Number words as figures, with the spoken-digit rules ("oh five five", "double five", "two point five"). */
     private fun numbers(a: String): String = try { Normalizer.normalize(a, Lang.GH_EN) } catch (_: Throwable) { a }
+
+    private val TWI_DIGIT = mapOf("zero" to "0", "hwee" to "0", "baako" to "1", "biako" to "1", "mmienu" to "2", "abien" to "2",
+        "mmiɛnsa" to "3", "mmiensa" to "3", "abiɛsa" to "3", "anan" to "4", "anum" to "5", "nsia" to "6", "nson" to "7",
+        "nnson" to "7", "nwɔtwe" to "8", "nwotwe" to "8", "awɔtwe" to "8", "nkron" to "9", "akron" to "9")
+
+    /** A phone number said one Twi digit at a time ("zero anum anum, mmienu zero nkron …") as digits; other words kept. */
+    private fun twiDigits(a: String): String =
+        a.split(Regex("[\\s,.]+")).filter { it.isNotEmpty() }.joinToString(" ") { w -> TWI_DIGIT[w.lowercase()] ?: w }
 
     /** Two bare figures side by side ("2 50" from "two fifty") — 2.50 or 250? Not decided here: the words stay as said
      *  and the flow that asked reads them back or asks again (never a silent guess at an amount). */

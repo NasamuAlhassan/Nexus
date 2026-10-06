@@ -86,20 +86,28 @@ object References {
     private val THAT_NUMBER = Regex("\\b(?:call|ring|phone|dial|text|message|sms|save)\\s+(that number)\\b", RegexOption.IGNORE_CASE)
 
     /** The goal with its reference replaced, or null when there is nothing (resolvable) to replace. */
+    /** What the last [rewrite] filled in from an earlier turn — (the words said, what they were taken as) — so the read-back
+     *  can say it once ("Taking 'him' as Ama, from before."). Null when the last rewrite changed nothing. */
+    @Volatile var lastFilled: Pair<String, String>? = null; private set
+
     fun rewrite(goal: String, person: String? = recentPerson(), options: List<String> = lastOptions, number: String? = lastNumber,
                 channel: String? = lastChannel): String? {
+        lastFilled = null
         THAT_NUMBER.find(goal)?.let { m ->
             val n = number ?: return null
+            lastFilled = m.groups[1]!!.value to n
             return goal.replaceRange(m.groups[1]!!.range, n)
         }
         ORDINAL.find(goal)?.let { m ->
             val key = m.groupValues[1].lowercase()
             val idx = if (key == "last") options.lastIndex else ORDINALS[key] ?: return null
             val pick = options.getOrNull(idx) ?: return null
+            lastFilled = m.value to pick
             return goal.replaceRange(m.range, pick)
         }
         PRONOUN.find(goal.trim())?.let { m ->
             val who = person ?: return null
+            lastFilled = m.groups[2]!!.value to who
             return goal.trim().replaceRange(m.groups[2]!!.range, who)
         }
         // Demo journey (A20e 2026-09-30): "read my last WhatsApp message" → "reply saying I'm on my way". The words are
@@ -107,6 +115,7 @@ object References {
         BARE_REPLY.find(goal.trim())?.let { m ->
             val who = person ?: return null
             val via = when (channel) { "WhatsApp" -> " on WhatsApp"; "SMS" -> ""; else -> return null }
+            lastFilled = "reply" to who
             return "reply to $who$via saying ${m.groupValues[1].trim()}"
         }
         return null

@@ -108,7 +108,7 @@ class RunGoalReceiver : BroadcastReceiver() {
                 Log.i("Tekyerema", "[PING] Unknown scenario '$name'. Valid: ${TestScenario.entries.joinToString()}")
                 return
             }
-            AgentEngine.submitTestScenario(scenario)
+            AgentEngine.submitTestScenario(scenario, intent.getStringExtra("contact"))
             return
         }
         // Voice debug (Phase 2): validate ASR→agent wiring + mic/VAD on-device without a human voice.
@@ -257,8 +257,8 @@ class RunGoalReceiver : BroadcastReceiver() {
         intent.getStringExtra("overlay_test")?.let { v ->
             when {
                 v.equals("off", true) -> com.tekyerema.ui.OverlayConfirm.hide(context.applicationContext)
-                v.equals("ask", true) -> com.tekyerema.ui.OverlayConfirm.showQuestion(context.applicationContext, "What's Prince's number?")
-                else -> com.tekyerema.ui.OverlayConfirm.show(context.applicationContext, "Send Kofi: “On my way”?")
+                v.equals("ask", true) -> com.tekyerema.ui.OverlayConfirm.showQuestion(context.applicationContext, "What's their number?")
+                else -> com.tekyerema.ui.OverlayConfirm.show(context.applicationContext, "Send this message: “On my way”?")
             }
             return
         }

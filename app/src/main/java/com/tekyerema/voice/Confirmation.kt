@@ -43,14 +43,19 @@ object Confirmation {
         "anne", "annie", "ani", "aani", "aane aane",
         // …and as it wrote "aane aane" on the A20e (4 October 2026): "honey honey" — the answer was taken as unclear and the
         // Telegram message declined.
-        "honey", "honey honey", "hunny", "hani", "anne anne", "annie annie"
+        "honey", "honey honey", "hunny", "hani", "anne anne", "annie annie",
+        // As the HCI Lab recogniser writes a Twi yes, now that a Twi confirmation is heard there (6 October 2026). Never
+        // "so" (the lab's "aane" in the 2 October loop test): "so" is an everyday Twi word — a reply like that is asked again.
+        "aan", "aanee", "anee", "yiw", "yiiw", "yɔ"
     )
     private val NO = setOf(
         "no", "nope", "nah", "don't", "dont", "do not", "stop", "cancel", "never mind", "nevermind", "not now",
         "negative", "leave it", "forget it", "abort", "no thanks", "not yet",
         "daabi", "dabi", "gyae", "mma", "ɛnyɛ", "enye", "twa mu", "nnyɛ",
         // "daabi" as the phone's English recogniser writes it [owner: verify on the A20e]
-        "darby", "dabby", "daby", "dabbie", "derby", "dobby", "debbie"
+        "darby", "dabby", "daby", "dabbie", "derby", "dobby", "debbie",
+        // …and as the HCI Lab recogniser writes "daabi" / "gyae" ("fida" in the 2 October loop test). A no is the safe side.
+        "fida", "daabe", "daabɛ", "deabi", "dabe", "gyai", "nnyae", "ntwa", "mmfa"
     )
 
     // B-09: a reply that is ONLY a request for time. Twi: twɛn (kakra) = wait (a little).

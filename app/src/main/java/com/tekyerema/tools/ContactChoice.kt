@@ -75,8 +75,15 @@ object ContactChoice {
         // "Hena na wopɛ?" (who do you want?) — a FIXED frame, recorded once in the lab's voice (voice/LabClips); the names
         // are the English voice's. [owner: verify the Twi]
         val frame = "Hena na wopɛ?"
-        val twi = if (labels.isEmpty()) "" else frame + " " + com.tekyerema.language.EntityTags.EN_OPEN + list + "." +
-            com.tekyerema.language.EntityTags.EN_CLOSE + (if (more > 0) " Anaa obi foforɔ?" else "")
+        // Each name its own stretch, joined in Twi — "…, Prince Tesano anaa Prince Ice P." — not the English ", or …": the
+        // Twi line said "or" on the A20e (5 October 2026). [owner: verify the Twi]
+        fun en(s: String) = com.tekyerema.language.EntityTags.EN_OPEN + s + com.tekyerema.language.EntityTags.EN_CLOSE
+        val twiList = when (labels.size) {
+            0 -> ""
+            1 -> en(labels[0])
+            else -> labels.dropLast(1).joinToString(", ") { en(it) } + " anaa " + en(labels.last())
+        }
+        val twi = if (labels.isEmpty()) "" else "$frame $twiList." + (if (more > 0) " Anaa obi foforɔ?" else "")
         return Choice(question, message, options, more, twi)
     }
 

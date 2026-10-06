@@ -19,21 +19,29 @@ object HeardAs {
 
     /** Who each consequential tool sends to, call or pays (argument names). */
     private val RECIPIENT_ARGS = mapOf(
-        "make_call" to listOf("contact"),
-        "send_sms" to listOf("contact"),
+        "make_call" to listOf("contact", "number"),
+        "send_sms" to listOf("contact", "number"),
         "reply_to_notification" to listOf("sender"),
         "mobile_money" to listOf("_recipient", "recipient"),
-        "ussd_navigate" to listOf("contact"),
-        "momo_send" to listOf("contact", "name")
+        "ussd_navigate" to listOf("contact", "number"),
+        "momo_send" to listOf("contact", "name", "number")
     )
 
     /** A contact the resolver took on a LOOSE match (android/ContactMatcher, below "sure"): the words heard and who. */
-    private class Guess(val heard: String, val name: String, val at: Long)
+    private class Guess(val heard: String, val name: String, val at: Long, val fromBefore: Boolean = false)
 
     @Volatile private var guess: Guess? = null
 
     /** The resolver matched [heard] to [name] only loosely ("rich man" → Richmond Apenensu) — said in the next read-back
      *  that names that person, so the user hears the guess before approving it (robustness layer, 5 October 2026). */
+    /** "call him" / "that number" / "the second one" was filled in from an earlier turn ([said] → [value]): said once in the
+     *  read-back of the action that uses it — "Taking 'him' as Ama, from before." */
+    @Synchronized
+    fun noteReference(said: String, value: String, now: Long = System.currentTimeMillis()) {
+        if (said.isBlank() || value.isBlank()) return
+        guess = Guess(said.trim(), value.trim(), now, fromBefore = true)
+    }
+
     @Synchronized
     fun noteGuess(heard: String, name: String, now: Long = System.currentTimeMillis()) {
         if (heard.isBlank() || name.isBlank() || heard.trim().equals(name.trim(), ignoreCase = true)) return
@@ -73,12 +81,26 @@ object HeardAs {
         val who = keys.firstNotNullOfOrNull { k -> args.optString(k).trim().takeIf { it.isNotEmpty() && it != "null" } } ?: return null
         if (!names(who, g.name) && !names(who, g.heard)) return null
         guess = null
+        if (g.fromBefore) return "Taking '${g.heard}' as ${g.name}, from before."
         // The guess may stand on a name the corrector already changed ("Kwami" → Kwame → Osei Kwame): say what was HEARD,
         // and only once — the corrector's own note for this person goes with it.
         val earlier = last?.fixes?.firstOrNull { (_, to) -> to.equals(g.heard, ignoreCase = true) }
         if (earlier != null) last = null
         return "I heard '${earlier?.first ?: g.heard}' — taking it as ${g.name}."
     }
+
+    /**
+     * The Twi line for one of this object's English disclosures, with the heard words and the reading kept as said:
+     * "I heard 'press malam' — taking it as Prince Melanin." → "Mete sɛ “press malam”, enti mɛfa no sɛ Prince Melanin."
+     * Null for any other line (it is then translated with the rest). [owner: verify the Twi]
+     */
+    fun twi(line: String): String? {
+        HEARD_EN.matchEntire(line.trim())?.let { m -> return "Mete sɛ “${m.groupValues[1]}”, enti mɛfa no sɛ ${m.groupValues[2]}." }
+        FROM_BEFORE_EN.matchEntire(line.trim())?.let { m -> return "Mɛfa “${m.groupValues[1]}” sɛ ${m.groupValues[2]}, sɛnea yɛkaa no dedaw." }
+        return null
+    }
+    private val HEARD_EN = Regex("^I heard '(.+)' — taking it as (.+)\\.$")
+    private val FROM_BEFORE_EN = Regex("^Taking '(.+)' as (.+), from before\\.$")
 
     fun clear() { last = null; money = null; guess = null }
 

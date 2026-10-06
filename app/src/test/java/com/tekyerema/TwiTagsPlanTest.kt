@@ -66,13 +66,17 @@ class TwiTagsPlanTest {
 
     /** The PC-side chain check of 2 October 2026 (audit/twi-plan-2026-10-02): what went wrong, fixed. */
     @Test fun `a garbled recipient is never named - and a swallowed ma still finds Ama`() {
-        // "send 10 cedis to ziroffvtziro ne tsi sir" before: now the amount alone, and the money flow asks who.
-        assertEquals("send 10 cedis", com.tekyerema.language.TwiCommands.gloss("somatensidisma ziroffvtziro ne tsi sir"))
+        // "send 10 cedis to ziroffvtziro ne tsi sir": a phone number the recogniser destroyed — kept as heard, and never
+        // anyone's NAME: the money flow asks for the number again (end-to-end pass, 6 October 2026).
+        val g = com.tekyerema.language.TwiCommands.gloss("somatensidisma ziroffvtziro ne tsi sir")!!
+        val a = com.tekyerema.money.MoneyAsk.parse(g)!!
+        assertEquals(null, a.name); assertEquals(null, a.number); assertEquals("10", a.amount)
+        assertEquals("ziroffvtziro ne tsi sir", a.lostNumber)
         // "Soma sidi anum ma Ama" heard as "so masi di anua ama": soma, 5 cedis, Ama.
         assertEquals("send 5 cedis to Ama", com.tekyerema.language.TwiCommands.gloss("so masi di anua ama"))
         assertEquals("soma [A1] [P1]", EntityTags.protect(com.tekyerema.voice.Normalizer.forTranslation("so masi di anua ama")).text)
         // A saved contact is a person; a typed capitalised name is too; a lower-case unknown word is not.
-        assertEquals("send 2 cedis to akos", com.tekyerema.language.TwiCommands.gloss("soma sidi mmienu ma akos") { it == "akos" })
+        assertEquals("send 2 cedis to Akos", com.tekyerema.language.TwiCommands.gloss("soma sidi mmienu ma akos") { it == "akos" })
         assertEquals("send 2 cedis to Selasi", com.tekyerema.language.TwiCommands.gloss("Soma sidi mmienu ma Selasi"))
         assertEquals("send 2 cedis", com.tekyerema.language.TwiCommands.gloss("soma sidi mmienu ma blorpt"))
     }

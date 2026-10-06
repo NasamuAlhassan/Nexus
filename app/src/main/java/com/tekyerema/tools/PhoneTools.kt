@@ -308,8 +308,10 @@ object SendSmsTool : Tool {
      *  people check it in, digits apart, so a voice never says "four hundred and twelve" (money safety pass, 2026-09-29). */
     internal fun recipientWords(name: String?, number: String): String {
         val spoken = com.tekyerema.agent.NumberSpeech.spoken(number).ifBlank { CallLogFormat.spokenNumber(number) }
+        // A contact is named with the last four digits of the number found for them ("Prince Melanin, ending 3 6 9 0"); a
+        // number the user gave is read back whole, in its groups, so it can be checked (end-to-end pass, 6 October 2026).
         return name?.trim()?.takeIf { it.isNotEmpty() && it.filter(Char::isDigit) != number.filter(Char::isDigit) }
-            ?.let { "$it on $spoken" } ?: spoken
+            ?.let { n -> com.tekyerema.agent.NumberSpeech.ending(number).takeIf { it.isNotEmpty() }?.let { "$n, $it" } ?: "$n on $spoken" } ?: spoken
     }
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {

@@ -187,6 +187,8 @@ object Normalizer {
         // words, before any numeral is read.
         var c = com.tekyerema.language.TwiText.canonical(input)
         for ((re, fix) in LAB_JOINS) c = re.replace(c) { fix(it) }
+        // "tempɛsos" — an English amount said inside Twi and glued by the lab recogniser ("ten pesos", 5 October 2026)
+        c = com.tekyerema.voice.understand.SpokenNumbers.unglueAmounts(c)
         val s = c.split(" ").joinToString(" ") { tok ->
             val core = tok.trim(*PUNCT.toCharArray())
             val mended = LAB_WORDS[core.lowercase()] ?: unglue(core)
@@ -467,8 +469,8 @@ object LanguagePipeline {
         val messaging = com.tekyerema.voice.understand.MessageBody.isMessaging(numbers)
         val normalized = if (messaging) { HeardAs.noteWords(numbers, numbers); numbers } else try {
             val frame = com.tekyerema.voice.understand.Frame.of(numbers)
-            val telco = com.tekyerema.voice.understand.TelcoTerms.repair(numbers, frame)
             val protect = vocab.entries.filter { it.kind == EntityCorrector.Kind.CONTACT }.map { it.compact }.toHashSet()
+            val telco = com.tekyerema.voice.understand.TelcoTerms.repair(numbers, frame, protect)
             val fin = com.tekyerema.voice.understand.FinanceVocab.repair(telco, protect, frame || com.tekyerema.voice.understand.Frame.of(telco))
             HeardAs.noteWords(numbers, fin.text, fin.fixes)
             fin.text

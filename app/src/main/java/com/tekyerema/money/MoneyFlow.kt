@@ -193,6 +193,7 @@ object MoneyFlow {
                 listOf((if (zero) "I heard zero cedis. " else "") + "$AMOUNT_PREFIX do you want to send" + (to?.let { " to $it" } ?: "") + "?",
                     "$AMOUNT_PREFIX, in cedis? For example, say “twenty cedis”."))
         }
+        if (a.number == null && a.name == null && a.lostNumber != null) return lostNumber(history)
         if (a.number == null && a.name == null)
             return question(history, WHO_PREFIX, listOf("$WHO_PREFIX the ${cedis(amount)} to? Say a name from your contacts, or the phone number.",
                 "$WHO_PREFIX it to? Say the name as it is saved, or the ten digits of the number."))
@@ -212,6 +213,7 @@ object MoneyFlow {
         if (amount == null || amount.toBigDecimalOrNull()?.let { it.signum() <= 0 } != false)
             return question(history, AMOUNT_PREFIX, listOf("$AMOUNT_PREFIX airtime do you want to buy" +
                 (a.name?.let { " for $it" } ?: "") + "?", "$AMOUNT_PREFIX airtime, in cedis? For example, say “five cedis”."))
+        if (a.number == null && a.name == null && a.lostNumber != null) return lostNumber(history)
         val other = !a.forSelf || a.number != null || a.name != null
         if (other && a.number == null && a.name == null)
             return question(history, WHO_PREFIX, listOf("$WHO_PREFIX the airtime to? Say a name from your contacts, or the phone number.",
@@ -221,6 +223,11 @@ object MoneyFlow {
         if (other) { if (a.number != null) args.put("number", a.number) else args.put(UssdNavigatorTool.ARG_CONTACT, a.name) }
         return AgentDecision.CallTool(NAV, args, R_AIRTIME)
     }
+
+    /** The number was destroyed by the recogniser: asked for again — never looked up, never guessed. The answer is read
+     *  as a phone number (voice/understand/AnswerContext: "oh five five…", "double", "+233"). */
+    private fun lostNumber(history: List<String>): AgentDecision = question(history, NUMBER_PREFIX,
+        listOf("$NUMBER_PREFIX. Please say the phone number again.", "$NUMBER_PREFIX. Please say the ten digits of the number, one at a time."))
 
     // ------------------------------------------------------------------ balance
     private fun momoBalance() = AgentDecision.CallTool(NAV,
@@ -260,6 +267,8 @@ object MoneyFlow {
     // ------------------------------------------------------------------ slots from the user's answers
     private const val AMOUNT_PREFIX = "How much"
     private const val WHO_PREFIX = "Who should I send"
+    /** The number was said but the recogniser destroyed it: asked for again, on its own (end-to-end pass, 6 October 2026). */
+    private const val NUMBER_PREFIX = "I couldn't catch the phone number"
     private val ASKED = Regex("^ask_user\\(\"(.*?)\"\\) → the user answered: \"(.*?)\"(?: \\(= .*\\))?$")
 
     /** (question, answer) for every question of this task that was answered, oldest first. */
@@ -273,8 +282,10 @@ object MoneyFlow {
         var a = first
         for ((q, ans) in answers(history)) when {
             q.contains(AMOUNT_PREFIX) -> MoneyAsk.amount(ans)?.let { a = a.copy(amount = it) }
-            q.startsWith(WHO_PREFIX) -> MoneyAsk.recipient(ans)?.let { r ->
-                a = a.copy(number = r.number, badNumber = r.badNumber, name = r.name, forSelf = false) }
+            q.startsWith(WHO_PREFIX) || q.startsWith(NUMBER_PREFIX) -> MoneyAsk.recipient(ans)?.let { r ->
+                val lost = r.name?.takeIf { com.tekyerema.voice.understand.SpokenNumbers.looksLikeLostDigits(it) }
+                a = a.copy(number = r.number, badNumber = r.badNumber, name = if (lost != null) null else r.name,
+                    lostNumber = lost, forSelf = false) }
         }
         return a
     }

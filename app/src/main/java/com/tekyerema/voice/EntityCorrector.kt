@@ -275,6 +275,20 @@ object SpeechVocabulary {
     /** What the corrector uses now (empty until the first [refresh], and always in unit tests). */
     fun current(): EntityCorrector.Vocab = snapshot
 
+    /**
+     * [said] names someone saved on this phone: their name as saved (the whole, or one part), or a sound-alike of a whole
+     * saved name at the matcher's loose level or better ("prinsmalane" ~ Prince Melanin — android/ContactMatcher). Only
+     * says "this is a person", for the Twi parser; WHO it is, and how sure, is the contact resolver's (read back, confirmed).
+     */
+    fun isContactPhrase(said: String, vocab: EntityCorrector.Vocab = snapshot): Boolean {
+        val key = PhoneticKey.compact(said)
+        if (key.length < 2) return false
+        val contacts = vocab.entries.filter { it.kind == EntityCorrector.Kind.CONTACT }
+        if (contacts.any { it.compact == key }) return true
+        if (key.length < 5) return false
+        return contacts.any { it.text.contains(' ') && com.tekyerema.android.ContactMatcher.score(said, it.text) >= 0.6 }
+    }
+
     /** For tests and the debug hook. */
     fun set(v: EntityCorrector.Vocab) { snapshot = v; loadedAt = System.currentTimeMillis() }
 

@@ -89,6 +89,10 @@ object AgentEngine {
     // on round-5 evidence; adjusted only by evidence.
     private const val MAX_STEPS = 30
     /** Tools whose "several contacts match" preflight the engine settles itself, with the tool's own short question. */
+    /** "someone else", "someone else: Kofi", "no, somebody else — Ama Serwaa": the answer to "Which X …? Or someone else?"
+     *  that names a NEW person (group 1, possibly empty). */
+    private val SOMEONE_ELSE = Regex("(?i)^(?:no[,.]?\\s*)?(?:someone|somebody|a different person|another person)\\s+else\\b[,.:;—-]*\\s*" +
+        "(?:it'?s\\s+|called\\s+|named\\s+|i mean\\s+)?(.*)$")
     private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
         com.tekyerema.money.TelcoUssdTool.NAME)
     private const val TAG = "Tekyerema"
@@ -234,7 +238,12 @@ object AgentEngine {
             if (money != null) { log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$money\""); money }
             // D: a computer's "her" is not the phone user's "her" — its words are never resolved against their conversation.
             else if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-22", true) || com.tekyerema.mcp.RemoteGate.isRemote(origin)) raw
-            else References.rewrite(raw)?.also { log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$it\"") } ?: raw
+            else References.rewrite(raw)?.also {
+                log(LogEntry.Kind.INFO, "Understood \"$raw\" as \"$it\"")
+                // a person / number / option filled in from an EARLIER turn is said once in the read-back (end-to-end pass,
+                // 6 October 2026: nothing from a previous request is reused unsaid)
+                References.lastFilled?.let { (said, value) -> com.tekyerema.voice.HeardAs.noteReference(said, value) }
+            } ?: raw
         }
         if (g.isEmpty()) return
         if (currentJob?.isActive == true) {
@@ -298,7 +307,7 @@ object AgentEngine {
      * with a real model result (Track A, plan §22).
      */
     @Synchronized
-    fun submitTestScenario(scenario: TestScenario) {
+    fun submitTestScenario(scenario: TestScenario, contact: String? = null) {
         if (!initialized) return
         if (currentJob?.isActive == true) {
             log(LogEntry.Kind.INFO, "Busy — finish or stop the current task first.")
@@ -308,7 +317,7 @@ object AgentEngine {
         confirmChannel = Channel(Channel.CONFLATED)
         secureChannel = Channel(Channel.CONFLATED)
         currentJob = scope.launch {
-            runTask("[TEST SCENARIO] ${scenario.name}", forcedBrain = TestBrain(scenario, ctxApp), forcedLabel = "TEST (${scenario.name})")
+            runTask("[TEST SCENARIO] ${scenario.name}", forcedBrain = TestBrain(scenario, ctxApp, contact), forcedLabel = "TEST (${scenario.name})")
         }
     }
 
@@ -1205,22 +1214,47 @@ object AgentEngine {
                                 contactAsks++
                                 References.noteOptions(choices)
                                 log(LogEntry.Kind.ACTION, "${decision.name} → preflight: ${pre.message}")
-                                val ans = askUser(ask, ask, twiWording = pre.data?.optString("askTwi")?.takeIf { it.isNotBlank() })
-                                if (ans == null) {
-                                    log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
+                                val askTwi = pre.data?.optString("askTwi")?.takeIf { it.isNotBlank() }
+                                // A CLOSED question: an answer that is none of the options is not a new name to look up — the
+                                // lab recogniser's "press malam" for Prince Melanin became a contact search and "I couldn't find
+                                // 'press malam'" (A20e, 5 October 2026). Only "someone else, <name>" names a new person; any other
+                                // miss hears the same question once more, right here, then the task stops — nothing is guessed.
+                                val args2 = org.json.JSONObject(decision.args.toString())
+                                var ans: String? = null
+                                var chosen = false
+                                var newName: String? = null
+                                for (round in 0..1) {
+                                    val a = askUser(ask, ask, twiWording = askTwi)
+                                    if (a == null) {
+                                        log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
+                                        finish(AgentStatus.CANNOT_DO, stats); return
+                                    }
+                                    if (com.tekyerema.voice.ControlVerbs.classify(a) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
+                                        log(LogEntry.Kind.RESULT, "Okay, I've left it.")
+                                        pushConvo("Tɛkyerɛma: stopped — the user said \"$a\".")
+                                        finish(AgentStatus.STOPPED, stats); return
+                                    }
+                                    ans = a
+                                    val idx = (com.tekyerema.agent.research.OptionAnswer.parse(a, choices) as?
+                                        com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index
+                                    if (idx != null && com.tekyerema.tools.ContactChoice.apply(args2, pre.data, choices[idx])) { chosen = true; break }
+                                    val other = SOMEONE_ELSE.find(a.trim())
+                                    if (other != null) {
+                                        newName = other.groupValues[1].trim().trim(',', '.', ' ').takeIf { it.isNotEmpty() }
+                                        if (newName == null) {
+                                            log(LogEntry.Kind.RESULT, "Who should it be? Say the name as it's saved, or the phone number.")
+                                            finish(AgentStatus.CANNOT_DO, stats); return
+                                        }
+                                        break
+                                    }
+                                    history.add("${decision.name}(${shortArgs(decision.args)}) → the user's answer \"$a\" was none of the options offered" +
+                                        if (round == 0) "; the same question was asked again." else ".")
+                                }
+                                if (!chosen && newName == null) {
+                                    log(LogEntry.Kind.RESULT, "I couldn't tell which one you meant, so nothing was done. Say the full name as it's saved, or the phone number.")
                                     finish(AgentStatus.CANNOT_DO, stats); return
                                 }
-                                if (com.tekyerema.voice.ControlVerbs.classify(ans) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
-                                    log(LogEntry.Kind.RESULT, "Okay, I've left it.")
-                                    pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
-                                    finish(AgentStatus.STOPPED, stats); return
-                                }
-                                val idx = (com.tekyerema.agent.research.OptionAnswer.parse(ans, choices) as?
-                                    com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index
-                                val args2 = org.json.JSONObject(decision.args.toString())
-                                val applied = idx != null && com.tekyerema.tools.ContactChoice.apply(args2, pre.data, choices[idx])
-                                // Another name ("Prince Melanin"): the same tool resolves it, and asks again if it must.
-                                if (!applied) { args2.put("contact", ans.trim()); args2.remove("number") }
+                                if (!chosen) { args2.put("contact", newName); args2.remove("number") }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → several contacts matched; the user was asked " +
                                     "\"${ask.take(120)}\" and answered \"$ans\" — the call is being proposed again for that contact.")
                                 planned.addFirst(decision.copy(args = args2, rationale = "the user chose the contact"))
@@ -1423,10 +1457,12 @@ object AgentEngine {
                                 // (after "Your computer is asking me…" for a remote task).
                                 // Spoken doubt (2026-09-29, voice/HeardAs): a recipient the recogniser's name fix chose is said
                                 // once — "I heard 'prints' — taking it as Prince." — before the read-back the user approves.
+                                val heardLine = com.tekyerema.voice.HeardAs.line(goal, decision.name, decision.args)
+                                // …and a money word the recogniser got wrong ("10 pesos" → 10 pesewas): heard once, here
+                                val moneyHeard = com.tekyerema.voice.HeardAs.moneyLine(decision.name, decision.args)
+                                val disclosures = listOfNotNull(heardLine, moneyHeard)
                                 val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
-                                    (com.tekyerema.voice.HeardAs.line(goal, decision.name, decision.args)?.let { "$it " } ?: "") +
-                                    // …and a money word the recogniser got wrong ("10 pesos" → 10 pesewas): heard once, here
-                                    (com.tekyerema.voice.HeardAs.moneyLine(decision.name, decision.args)?.let { "$it " } ?: "") +
+                                    disclosures.joinToString("") { "$it " } +
                                     com.tekyerema.policy.ActionSemantics.withRecipientNotice(
                                     plainPrompt, com.tekyerema.policy.ActionSemantics.recipientNotice(decision.name, decision.args,
                                         resolved?.element, requestedLabel, readBackScreen, decision.args.boolOrDefault("submit", false), goal + saidNumbers, tags)))
@@ -1442,13 +1478,21 @@ object AgentEngine {
                                 // pop-ups stayed English). Null when that can't be trusted: the English line stands.
                                 // ONE language, the user's (owner, 5 October 2026): a Twi line only in a Twi conversation —
                                 // English mode used to show the template's Twi above the English too.
+                                // The "I heard …" disclosures alone don't force a translation: they have a fixed Twi frame
+                                // (voice/HeardAs.twi) put before the template — a translated read-back took > 8 s on the A20e and
+                                // was spoken in English (6 October 2026). Any other addition still means the whole line translated.
+                                val onlyDisclosed = disclosures.isNotEmpty() && prompt == disclosures.joinToString("") { "$it " } + plainPrompt
+                                val twiDisclosed = if (onlyDisclosed) disclosures.map { com.tekyerema.voice.HeardAs.twi(it) } else emptyList()
                                 val promptTwi = if (!com.tekyerema.voice.VoiceEngine.speaksTwi()) null
                                     else confirmSpecFor(decision.name, decision.args, ctxApp)
                                     ?.let { com.tekyerema.voice.ConfirmTemplates.twi(it) }
-                                    ?.takeIf { prompt == plainPrompt }
+                                    ?.takeIf { prompt == plainPrompt || (onlyDisclosed && twiDisclosed.none { d -> d == null }) }
+                                    ?.let { t -> twiDisclosed.filterNotNull().joinToString("") { "$it " } + t }
                                     ?: com.tekyerema.voice.VoiceEngine.twiLine(prompt)
                                 stats = stats.copy(confirmations = stats.confirmations + 1)
                                 log(LogEntry.Kind.CONFIRM, prompt)
+                                // the Twi wording the user is asked in (debug builds only — the read-back names people and amounts)
+                                if (promptTwi != null && com.tekyerema.BuildConfig.DEBUG) android.util.Log.i("Tekyerema", "[CONFIRM-TWI] $promptTwi")
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
                                 drain(confirmChannel)   // only a reply to THIS prompt counts
                                 val seq = ++confirmSeq   // J-02: every surface's yes must name this number
@@ -2286,11 +2330,12 @@ object AgentEngine {
         val number = args.str("number")?.filter { it.isDigit() || it == '+' }
         val contact = args.str("contact")?.trim().orEmpty()
         // The name is said with the number when both are known (after "which Prince?" the read-back gave digits only).
+        // A contact chosen by name is said with the last four digits of its number; a number on its own is read whole.
         if (!number.isNullOrBlank()) return if (contact.isNotEmpty() && !contact.any { it.isDigit() })
-            "Call $contact on ${spokenDigits(number)}?" else "Call ${spokenDigits(number)}?"
+            "Call $contact, ${NumberSpeech.ending(number)}?" else "Call ${spokenDigits(number)}?"
         if (contact.isEmpty()) return base
         val matches = try { ContactResolver.resolve(ctxApp, contact) } catch (t: Throwable) { emptyList() }
-        return if (matches.size == 1) "Call ${matches[0].name} on ${spokenDigits(matches[0].number)}?" else base
+        return if (matches.size == 1) "Call ${matches[0].name}, ${NumberSpeech.ending(matches[0].number)}?" else base
     }
 
     /**
@@ -2365,7 +2410,9 @@ object AgentEngine {
         return when (name) {
             "make_call" -> {
                 val number = args.str("number")?.filter { it.isDigit() || it == '+' }
-                if (!number.isNullOrBlank()) return Spec(Spec.Kind.CALL, number = number)
+                val named = args.str("contact")?.trim()?.takeIf { it.isNotEmpty() && it.none(Char::isDigit) }
+                // a contact chosen by name is said by name (the English says "…, ending 3 6 9 0"); a number alone in full
+                if (!number.isNullOrBlank()) return Spec(Spec.Kind.CALL, name = named, number = number)
                 val contact = args.str("contact")?.trim().orEmpty()
                 if (contact.isEmpty()) return null
                 val m = try { ContactResolver.resolve(ctxApp, contact) } catch (t: Throwable) { emptyList() }

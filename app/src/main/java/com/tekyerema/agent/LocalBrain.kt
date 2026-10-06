@@ -748,6 +748,9 @@ class LocalBrain : AgentBrain {
             val m = SMS_STRONG.firstNotNullOfOrNull { it.find(s) } ?: SMS_WEAK.firstNotNullOfOrNull { it.find(s) }
                 ?: return parseSendWords(s) ?: parseRelay(s)
             var who = m.groupValues[1].trim().removePrefix("to ").trim()
+            // "… to Richmond on Telegram saying …": an app this parser doesn't send through — the planner works in that app's
+            // own screens (the A20e, 6 October 2026: it became an SMS to a contact "Richmond on Telegram")
+            if (RE_OTHER_APP.containsMatchIn(who)) return null
             var whatsApp = RE_VIA_WHATSAPP.containsMatchIn(s.substring(0, m.groups[2]!!.range.first))
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
             val msg = m.groupValues[2].trim().trim('"', '\'', '“', '”').replaceFirst(Regex("^(?i)that\\s+"), "").trim()
@@ -770,6 +773,7 @@ class LocalBrain : AgentBrain {
             val m = RE_SEND_WORDS.matchEntire(s) ?: return null
             val msg = m.groupValues[1].trim().trim('"', '\'', '“', '”').trim()
             var who = m.groupValues[2].trim()
+            if (RE_OTHER_APP.containsMatchIn(who)) return null
             if (msg.isEmpty() || msg.split(' ').size > 6 || RE_NOT_WORDS.containsMatchIn(msg)) return null
             var whatsApp = false
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
@@ -789,6 +793,7 @@ class LocalBrain : AgentBrain {
         internal fun parseRelay(s: String): Sms? {
             val m = RE_RELAY.matchEntire(s) ?: return null
             var who = m.groupValues[2].trim()
+            if (RE_OTHER_APP.containsMatchIn(who) || RE_OTHER_APP.containsMatchIn(m.groupValues[3])) return null
             var whatsApp = m.groupValues[1].equals("whatsapp", ignoreCase = true) || m.groupValues[3].isNotEmpty() &&
                 m.groupValues[3].contains("whatsapp", ignoreCase = true)
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
@@ -1072,6 +1077,9 @@ class LocalBrain : AgentBrain {
         private val SMS_STRONG = smsPatterns(MARK_STRONG)
         private val SMS_WEAK = smsPatterns(MARK_WEAK)
         private val RE_VIA_WHATSAPP = Regex("\\bwhatsapp\\b", RegexOption.IGNORE_CASE)
+        /** A chat app this parser doesn't send through, named with the person ("Richmond on Telegram"). */
+        private val RE_OTHER_APP = Regex("\\b(?:on|via|through|in|using)\\s+(?:telegram|messenger|signal|instagram|facebook|imo)\\b",
+            RegexOption.IGNORE_CASE)
         private val RE_SEND_WORDS = Regex("^\\s*$LEADIN(?:send)\\s+(.+?)\\s+to\\s+(.+)$", RegexOption.IGNORE_CASE)
         // What "send X to Y" means when X is NOT the words of a message: money, a file or thing, a pronoun, a number.
         private val RE_NOT_WORDS = Regex("(?i)^(?:an?|the|my|your|his|her|our|their|this|that|these|those|it|them|some|all|me|him|us)\\b|" +

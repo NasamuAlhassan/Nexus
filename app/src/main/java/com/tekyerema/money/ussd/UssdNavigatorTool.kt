@@ -280,6 +280,13 @@ object UssdNavigatorTool : Tool {
         val name = args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }
         if (raw == null) return name?.let { it to null }
         val (to, netWarn) = com.tekyerema.agent.NumberSpeech.moneyReadBack(raw, args.str(MoMoSendTool.ARG_SIM))
+        // A contact found by name: the name and the LAST FOUR digits ("Prince Melanin, ending 3 6 9 0, an MTN number"). The
+        // whole number is read when the user gave the number, or when something about it needs checking (end-to-end pass,
+        // 6 October 2026: "do NOT read out the entire phone number unless necessary").
+        val spoken = com.tekyerema.agent.NumberSpeech.spoken(raw)
+        val ending = com.tekyerema.agent.NumberSpeech.ending(raw)
+        val needsWhole = netWarn != null || !to.startsWith(spoken) || args.optBoolean(ARG_UNSAID)
+        if (name != null && !needsWhole && ending.isNotEmpty()) return "$name, $ending${to.removePrefix(spoken)}" to null
         return (name?.let { "$it, on $to" } ?: to) to netWarn
     }
 

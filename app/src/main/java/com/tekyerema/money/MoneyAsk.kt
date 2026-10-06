@@ -32,7 +32,10 @@ object MoneyAsk {
         val name: String? = null,
         val reference: String? = null,
         /** AIRTIME only: true = for the user's own line. */
-        val forSelf: Boolean = true
+        val forSelf: Boolean = true,
+        /** A phone number the recogniser destroyed ("zeroffvtziro ne tsi sir"): neither a name nor a number — the caller asks
+         *  for the number again (end-to-end pass, 6 October 2026). The words as heard. */
+        val lostNumber: String? = null
     )
 
     /** The request as a financial ask, or null when it is not one (or is one this layer must leave to the planner). */
@@ -199,6 +202,9 @@ object MoneyAsk {
         var name: String? = joinRaw(nameToks).takeIf { n -> n.any { it.isLetter() } }
         if (name != null && name.lowercase() in PRONOUNS) name = null             // "send him 50 cedis": who is asked for
         if (phone != null) name = null                                            // a number said out loud wins
+        // A number the recogniser destroyed is no one's name: asked for again, never looked up as a contact.
+        val lost = name?.takeIf { com.tekyerema.voice.understand.SpokenNumbers.looksLikeLostDigits(it) }
+        if (lost != null) name = null
 
         val hasAmt = amt != null
         val hasWho = phone != null || name != null
@@ -210,7 +216,7 @@ object MoneyAsk {
         if (!evidence) return null
         if (ref != null && BILL.containsMatchIn(ref.lowercase()) && !hasWho) return null   // "pay 50 cedis for my light bill"
         if (POLITE_Q.containsMatchIn(g) && !hasAmt && !hasWho) return null                 // "can you send money?"
-        return Ask(Kind.SEND, amt?.value, phone?.number, phone?.bad, name, ref)
+        return Ask(Kind.SEND, amt?.value, phone?.number, phone?.bad, name, ref, lostNumber = lost)
     }
 
     // ------------------------------------------------------------------ airtime
@@ -247,9 +253,11 @@ object MoneyAsk {
                 it.low !in MONEY_WORDS && it.low !in NETWORK_WORDS && !isCurrency(it.low) && !isPesewa(it.low)
         }
         if (left.size > 4 || left.any { it.low == "and" || it.low == "or" }) return null
-        val name = if (phone != null) null else joinRaw(left).takeIf { n -> n.any { it.isLetter() } }
-        val forSelf = phone == null && name == null && !other
-        return Ask(Kind.AIRTIME, amt?.value, phone?.number, phone?.bad, name, null, forSelf)
+        val heardName = if (phone != null) null else joinRaw(left).takeIf { n -> n.any { it.isLetter() } }
+        val lost = heardName?.takeIf { com.tekyerema.voice.understand.SpokenNumbers.looksLikeLostDigits(it) }
+        val name = if (lost != null) null else heardName
+        val forSelf = phone == null && name == null && lost == null && !other
+        return Ask(Kind.AIRTIME, amt?.value, phone?.number, phone?.bad, name, null, forSelf, lostNumber = lost)
     }
 
     // ------------------------------------------------------------------ balances, status, history

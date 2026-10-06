@@ -28,7 +28,7 @@ object TelcoTerms {
     private fun core(t: String) = t.lowercase().trim(*PUNCT.toCharArray()).replace(".", "")
 
     /** [text] with spelled acronyms and network names put right; [frame] = money or a network is being talked about. */
-    fun repair(text: String, frame: Boolean = Frame.of(text)): String {
+    fun repair(text: String, frame: Boolean = Frame.of(text), protect: Set<String> = emptySet()): String {
         // never inside a message: "saying em ti en office is closed" is the user's own words (MessageBody)
         if (text.isBlank() || MessageBody.isMessaging(text)) return text
         var s = spelledRuns(text, frame)
@@ -37,7 +37,9 @@ object TelcoTerms {
         // "GH 20" / "G H 5" — how an amount in cedis is said here — is the currency before its figure
         s = GH_AMOUNT.replace(s) { "GHS " }
         s = AIRTELTIGO.replace(s, "AirtelTigo")
-        s = s.split(" ").joinToString(" ") { tok -> mtnWord(tok) ?: tok }
+        // a word that is part of a saved contact's name ("MTM Ventures") is the user's contact, not a network
+        s = s.split(" ").joinToString(" ") { tok ->
+            if (protect.isNotEmpty() && com.tekyerema.voice.PhoneticKey.compact(tok) in protect) tok else mtnWord(tok) ?: tok }
         return s
     }
 

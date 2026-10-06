@@ -27,7 +27,19 @@ object TwiCommands {
     private val SEND_AMOUNT_NO_MA = Regex("^$VIA${WANT}soma\\s+$AMOUNT\\s+(\\S+(?:\\s+\\S+)?)$")
     /** "soma sidi du" — an amount and no one (yet): the money flow asks who. */
     private val SEND_AMOUNT_ONLY = Regex("^$VIA${WANT}soma\\s+$AMOUNT(?:\\s+.*)?$")
-    private val SEND_MONEY = Regex("^$VIA${WANT}soma\\s+sika(?:\\s+$AMOUNT)?\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    /** "soma sika (cedi) kɔma Prince" — money, with a currency word but no figure ("cedi" alone used to break the match and
+     *  send the request to the translator, which dropped it: "Send money to Prince" — A20e, 5 October 2026). */
+    private val SEND_MONEY = Regex("^$VIA${WANT}soma\\s+sika(?:\\s+(?:cedis?|pesewas?))?(?:\\s+$AMOUNT)?\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    /** "soma pesee kɔma prinsmalane" — a unit and no figure (the translator made it "Send a bus to Princesman"): money to a
+     *  person, amount still to be asked. */
+    private val SEND_UNIT = Regex("^$VIA${WANT}soma\\s+(?:sika\\s+)?(?:cedis?|pesewas?|pes[eɛ]e|pɛs[eɛ]e|pes[eɛ]wa|pɛs[eɛ]wa)\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    /** "10 pesewas kɔma 055…" — the amount and the person with the verb lost: a send ("tempɛsos kɔma …", 5 October 2026). */
+    private val SEND_NO_VERB = Regex("^$AMOUNT\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    /** "katweɛrichmond", "ka tweɛ Richmond", "kakyerɛ Kofi" — "ka kyerɛ" (tell) as the lab recogniser writes it, often glued
+     *  to the name after it (A20e, 5 October 2026). Split back into "ka kyerɛ <name>". */
+    private val KA_KYERE = Regex("(?i)(?<![\\p{L}])ka\\s?(?:ky|ty|tw|kw)(?:[ɛe]r[ɛe]|[ɛe][ɛe]|[ɛe]|ere)(?=\\p{L}{3,}|\\s)")
+    /** "Richmond wɔ Telegram" — the person, and the app the message goes by. */
+    private val ON_APP = Regex("(?i)^(.+?)\\s+wɔ\\s+(telegram|whatsapp|sms)$")
     /** "Tɔ airtime a ne bo yɛ sidi anum" (airtime whose price is 5 cedis) as well as "tɔ airtime sidi anum". */
     private val AIRTIME = Regex("^${WANT}tɔ\\s+(?:kredit|krɛdit|airtime|ɛtaem)(?:\\s+(?:a+\\s+ne\\s?bo\\s+yɛ\\s+)?$AMOUNT)?(?:\\s+ma\\s+(.+))?$")
     /** "Twerɛ nkra kɔ ma Prince sɛ meba" / "Ka kyerɛ Kwame sɛ meba anɔpa" — a message WITH its words. The words after "sɛ"
@@ -185,6 +197,7 @@ object TwiCommands {
         // A polite lead-in ("Mesrɛ wo, …" please; "Mepa wo kyɛw, …") is not part of the request — with it in front no
         // pattern matched, and the English bundle parser then took the raw Twi and lost the amount (QA TW05, 3 October 2026).
         val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(text).trim(), "").replace(Regex("\\s+"), " "), "")
+            .let { KA_KYERE.replace(it, "ka kyerɛ ").replace(Regex("\\s+"), " ").trim() }
         if (t.isEmpty()) return null
         // Matched in lower case (Ɛ/ɛ and Ɔ/ɔ fold — a regex case flag alone doesn't, and the Unicode-case flag isn't
         // safe on Android's regex engine); a name is taken from the user's own spelling at the same place.
@@ -195,14 +208,17 @@ object TwiCommands {
         // Prince"): a leading "ama" before another name is the swallowed "ma", unless the whole phrase is a saved contact.
         fun person(to: String?): String? {
             val t2 = to?.trim() ?: return null
-            if (isContact(t2)) return t2
+            // a saved contact, in the user's spelling, with its capitals back ("richmond" → "Richmond")
+            if (isContact(t2)) return t2.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercaseChar() } }
             val rest = Regex("^(?i:ama)\\s+(.+)$").find(t2)?.groupValues?.get(1)
             if (rest != null && plausible(rest, isContact)) return rest
             return t2.takeIf { plausible(it, isContact) }
         }
         // A send: the person only when they are plausibly a person — otherwise the amount alone, and the flow asks who.
         fun send(a: String?, to: String?): String =
-            "send ${a ?: "money"}" + (person(to)?.let { " to ${who(it)}" } ?: "")
+            "send ${a ?: "money"}" + (person(to)?.let { " to ${who(it)}" }
+                // a number the recogniser destroyed stays in, as heard: the money flow asks for it again (MoneyAsk.lostNumber)
+                ?: to?.trim()?.takeIf { com.tekyerema.voice.understand.SpokenNumbers.looksLikeLostDigits(it) }?.let { " to $it" } ?: "")
         // "Bue WhatsApp na kenkan me nkra" — two requests joined by "na" (and): each understood on its own, said with "and"
         // (the OPEN pattern used to take "WhatsApp na kenkan me nkra" as the app's name — QA TR06, 3 October 2026).
         Regex("\\s+na\\s+").let { na ->
@@ -222,6 +238,8 @@ object TwiCommands {
             if (a == null) TRAILING_AMOUNT.find(to)?.let { ta -> a = amount(ta.groupValues[1], ta.groupValues[2]); to = to.substring(0, ta.range.first).trim().trimEnd(',') }
             return send(a, to)
         }
+        SEND_UNIT.find(low)?.let { m -> return send(null, m.g(1)) }
+        SEND_NO_VERB.find(low)?.let { m -> return send(amount(m.g(1), m.g(2)), m.g(3)) }
         SEND_AMOUNT_NO_MA.find(low)?.let { m ->
             val to = m.g(3)
             if (person(to) != null) return send(amount(m.g(1), m.g(2)), to)
@@ -242,10 +260,14 @@ object TwiCommands {
             return "buy a mashup bundle for " + (if (forWho == null || forWho == "me") "my number" else forWho)
         }
         MESSAGE_SAY.find(low)?.let { m ->
-            val to = person(m.g(1))
+            // "… Richmond wɔ Telegram sɛ …": the person, and the app it goes by
+            val onApp = ON_APP.find(m.g(1))
+            val app = onApp?.groupValues?.get(2)?.let { a -> if (a.equals("sms", true)) "SMS" else a.replaceFirstChar { it.uppercaseChar() } }
+            val to = person(onApp?.groupValues?.get(1) ?: m.g(1))
             val words = m.g(2).trim().replaceFirstChar { it.uppercaseChar() }
             // "Ka kyerɛ me sɛ…" is "tell ME…" — a question to the phone, never a message to oneself
-            if (to != null && who(to) != "me" && words.isNotEmpty()) return "send a message to ${who(to)} saying “$words”"
+            if (to != null && who(to) != "me" && words.isNotEmpty())
+                return "send a message to ${who(to)}" + (app?.let { " on $it" } ?: "") + " saying “$words”"
         }
         MESSAGE_TO.find(low)?.let { m -> return "send a message to ${who(person(m.g(1)) ?: m.g(1))}" }
         if (SCREEN.matches(low)) return "read my screen"

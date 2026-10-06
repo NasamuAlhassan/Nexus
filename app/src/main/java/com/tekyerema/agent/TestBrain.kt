@@ -41,9 +41,17 @@ enum class TestScenario {
  */
 class TestBrain(
     private val scenario: TestScenario,
-    private val appContext: Context
+    private val appContext: Context,
+    /** The contact a person scenario uses — given by whoever runs it (`--es contact "<a name on this phone>"`). There is
+     *  NO default: a name built into the app could become somebody's recipient (owner, 6 October 2026: "it automatically
+     *  used my contact … like it's hard coded for me"). */
+    private val contact: String? = null
 ) : AgentBrain {
     private var step = 0
+
+    /** The scenario's contact, or a stop when none was given. */
+    private fun person(): String? = contact?.trim()?.takeIf { it.isNotEmpty() }
+    private fun noContact() = done("this scenario needs a contact: --es contact \"<a name saved on this phone>\"")
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         step++
@@ -81,7 +89,7 @@ class TestBrain(
             }
             TestScenario.CALL_CONTACT -> when (step) {
                 // Tier 2 — exercises the real PolicyEngine confirmation gate (confirm via --es confirm).
-                1 -> tool("make_call", JSONObject().put("contact", "Prince"))
+                1 -> person()?.let { tool("make_call", JSONObject().put("contact", it)) } ?: noContact()
                 else -> done("call_contact scenario complete")
             }
             TestScenario.SEND_READBACK -> when (step) {
@@ -90,7 +98,7 @@ class TestBrain(
                 else -> done("send_readback scenario complete")
             }
             TestScenario.DIRECT_REPLY -> when (step) {
-                1 -> tool("reply_to_notification", JSONObject().put("sender", "Prince").put("message", "I'll call him after class"))
+                1 -> person()?.let { tool("reply_to_notification", JSONObject().put("sender", it).put("message", "I'll call after class")) } ?: noContact()
                 else -> done("direct_reply scenario complete")
             }
             TestScenario.STOP_MID_TASK -> when (step) {
@@ -124,9 +132,10 @@ class TestBrain(
                 2 -> tool("tap", JSONObject().put("label", "Search"), "policy-test: open search")
                 3 -> {
                     val searchField = findElement(ctx.screen) { _, role, label -> role.contains("Edit", true) || label?.contains("Search", true) == true }
-                    tool("type", JSONObject().put("element_id", searchField ?: -1).put("text", "Prince").put("submit", true), "policy-test: search a known contact")
+                    val who = person() ?: return noContact()
+                    tool("type", JSONObject().put("element_id", searchField ?: -1).put("text", who).put("submit", true), "policy-test: search the given contact")
                 }
-                4 -> tool("tap", JSONObject().put("label", "Prince Melanin"), "policy-test: open the real conversation")
+                4 -> person()?.let { tool("tap", JSONObject().put("label", it), "policy-test: open the given contact's conversation") } ?: noContact()
                 5 -> {
                     val rx = Regex("\\b(message|reply|chat|comment|caption|post)\\b", RegexOption.IGNORE_CASE)
                     val msgId = findElement(ctx.screen) { _, _, label -> label?.let(rx::containsMatchIn) == true }

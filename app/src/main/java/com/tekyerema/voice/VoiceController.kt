@@ -806,10 +806,7 @@ class VoiceController(
      *  "pesewa du" → "10 pesewas"); anything else unchanged (language/TwiReply — QA TR10 / TR12, 3 October 2026). */
     private fun englishReply(t: String): String {
         if ((forceLanguage() ?: sessionLanguage()) != Lang.TWI) return t
-        val out = com.tekyerema.language.TwiReply.toEnglish(t) { said ->
-            val key = PhoneticKey.compact(said)
-            SpeechVocabulary.current().entries.any { it.kind == EntityCorrector.Kind.CONTACT && it.compact == key }
-        }
+        val out = com.tekyerema.language.TwiReply.toEnglish(t) { said -> SpeechVocabulary.isContactPhrase(said) }
         if (out != t) Log.i("Tekyerema", "[TWI] reply understood on the phone → '${com.tekyerema.core.Privacy.content(out)}'")
         return out
     }
@@ -1214,8 +1211,7 @@ class VoiceController(
         // "Frɛ Kofi" into "get some coffee" (language/TwiCommands; owner's Twi test, 2 October 2026).
         if (heard.language == Lang.TWI) VoiceEngine.warmTranslator()   // a Twi turn may need the translator in a moment
         val glossed = if (heard.language == Lang.TWI) com.tekyerema.language.TwiCommands.gloss(repaired) { said ->
-            val key = PhoneticKey.compact(said)
-            SpeechVocabulary.current().entries.any { it.kind == EntityCorrector.Kind.CONTACT && it.compact == key }
+            SpeechVocabulary.isContactPhrase(said)
         }?.also {
             Log.i("Tekyerema", "[TWI] understood on the phone → '${com.tekyerema.core.Privacy.content(it)}'")
         } else null
