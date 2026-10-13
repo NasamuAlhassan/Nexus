@@ -122,7 +122,7 @@ internal fun AppRulesPage(settings: Settings, onBack: () -> Unit) {
         if (said.isNotEmpty()) Note(said, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         GlassGroup("Your rules") {
             if (rules.isEmpty()) FixedRow("No rules yet", "Tɛkyerɛma may use any app, and still asks before anything important.",
-                null, Icons.Outlined.Apps, Spectrum.Mint, divider = false)
+                null, Icons.Outlined.Apps, Spectrum.Lime, divider = false)
             else rules.forEachIndexed { i, r ->
                 SettingRow(r.label, value = AppRules.name(r.rule), icon = ruleIcon(r.rule), iconTint = ruleTint(r.rule),
                     description = AppRules.meaning(r.rule), divider = i < rules.lastIndex) {
@@ -143,18 +143,18 @@ internal fun AppRulesPage(settings: Settings, onBack: () -> Unit) {
             SearchField(query) { query = it }
             val list = apps
             when {
-                list == null -> FixedRow("Finding your apps…", null, null, Icons.Outlined.Apps, Spectrum.Azure, divider = false)
+                list == null -> FixedRow("Finding your apps…", null, null, Icons.Outlined.Apps, Spectrum.Teal, divider = false)
                 else -> {
                     val q = query.trim()
                     val shown = if (q.isEmpty()) list else list.filter { it.label.contains(q, ignoreCase = true) }
-                    if (shown.isEmpty()) FixedRow("No app called “$q”", null, null, Icons.Outlined.Apps, Spectrum.Azure, divider = false)
+                    if (shown.isEmpty()) FixedRow("No app called “$q”", null, null, Icons.Outlined.Apps, Spectrum.Teal, divider = false)
                     shown.forEachIndexed { i, app ->
                         val last = i == shown.lastIndex
                         val config = AppRules.configRule(app.packageName, configDeny, configGuide)
                         when {
                             AppRules.protectedKind(app.packageName) == AppRules.Protected.PHONE ->
                                 FixedRow(app.label, "Always allowed: needed for emergency calls.", AppRules.name(null), Icons.Outlined.Call,
-                                    Spectrum.Mint, divider = !last)
+                                    Spectrum.Lime, divider = !last)
                             config == AppRule.NEVER ->
                                 FixedRow(app.label, "Set by the app, so it can't be changed here.", AppRules.name(config), Icons.Outlined.Lock,
                                     ruleTint(config), divider = !last)
@@ -227,9 +227,9 @@ private fun ruleIcon(r: AppRule?): ImageVector = when (r) {
 }
 
 private fun ruleTint(r: AppRule?) = when (r) {
-    AppRule.NEVER -> Spectrum.Rose
+    AppRule.NEVER -> Spectrum.Coral
     AppRule.GUIDE -> Spectrum.Gold
-    null -> Spectrum.Azure
+    null -> Spectrum.Teal
 }
 
 /** A row that isn't a control — a rule the user can't change here. TalkBack reads it as one item, state included. */

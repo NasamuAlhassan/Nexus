@@ -74,7 +74,7 @@ internal fun AuditPage(onBack: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 IconTile(if (c == null || c.intact) Icons.Outlined.GppGood else Icons.Outlined.GppMaybe,
-                    if (c == null || c.intact) Spectrum.Mint else Spectrum.Rose)
+                    if (c == null || c.intact) Spectrum.Lime else Spectrum.Coral)
                 Spacer(Modifier.width(14.dp))
                 Text(if (c == null) "Checking the log…" else AuditView.chainLine(c), style = MaterialTheme.typography.bodyLarge,
                     color = if (c == null || c.intact) Tk.Text else Tk.Danger, modifier = Modifier.weight(1f))
@@ -96,10 +96,10 @@ private fun TaskCardView(card: AuditView.TaskCard, shape: RoundedCornerShape) {
     val time = SimpleDateFormat("EEE d MMM, h:mm a", Locale.getDefault()).format(Date(card.time))
     val (icon, tint) = when {
         card.source == "fast" -> Icons.Outlined.Bolt to Spectrum.Gold
-        card.source == "user" -> Icons.Outlined.Tune to Spectrum.Cyan
-        card.source == "trigger" -> Icons.Outlined.Schedule to Spectrum.Rose
-        card.source.startsWith("remote") -> Icons.Outlined.Computer to Spectrum.Azure
-        else -> Icons.Outlined.AutoAwesome to Spectrum.Violet
+        card.source == "user" -> Icons.Outlined.Tune to Spectrum.Aqua
+        card.source == "trigger" -> Icons.Outlined.Schedule to Spectrum.Coral
+        card.source.startsWith("remote") -> Icons.Outlined.Computer to Spectrum.Teal
+        else -> Icons.Outlined.AutoAwesome to Spectrum.Green
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = CardMargin).glass(shape, elevation = 8.dp).padding(horizontal = 16.dp, vertical = 14.dp)) {
         // Read as one item from its texts (title, then "source · time · status"); a description here would be read on top of

@@ -337,7 +337,8 @@ object OpenSettingTool : Tool {
     override val isAccelerator = true
     override val params = listOf(
         ToolParam("target", "string", "Which setting: wifi | mobile_data | bluetooth | airplane | location | nfc | volume | sound | " +
-            "display | battery | accessibility | apps | storage | date | language | security | dnd | settings."),
+            "display | battery (saver) | battery_usage (the Battery page) | about_phone | accessibility | apps | storage | date | " +
+            "language | security | privacy | notifications | dnd (priority) | dnd_page | settings."),
         ToolParam("state", "string", "The position to leave the switch in. Omit to only open the screen.", required = false,
             enumValues = listOf("on", "off"))
     )
@@ -365,6 +366,12 @@ object OpenSettingTool : Tool {
             "sound", "silent", "ringtone" -> Settings.ACTION_SOUND_SETTINGS to "sound"
             "display", "brightness", "screen" -> Settings.ACTION_DISPLAY_SETTINGS to "display"
             "battery", "battery_saver", "power_saving" -> Settings.ACTION_BATTERY_SAVER_SETTINGS to "battery saver"
+            // N-09 (3): the pages a local plan reaches in one intent instead of "open Settings, then tap the row".
+            "battery_usage", "battery_page", "battery_use" -> Intent.ACTION_POWER_USAGE_SUMMARY to "battery"
+            "about", "about_phone", "about_device", "device_info", "phone_info" -> Settings.ACTION_DEVICE_INFO_SETTINGS to "about phone"
+            "dnd_page", "do_not_disturb_page", "zen" -> "android.settings.ZEN_MODE_SETTINGS" to "Do Not Disturb"
+            "privacy" -> Settings.ACTION_PRIVACY_SETTINGS to "privacy"
+            "notifications", "notification" -> "android.settings.NOTIFICATION_SETTINGS" to "notifications"
             "accessibility", "talkback" -> Settings.ACTION_ACCESSIBILITY_SETTINGS to "accessibility"
             "apps", "applications" -> Settings.ACTION_APPLICATION_SETTINGS to "apps"
             "storage" -> Settings.ACTION_INTERNAL_STORAGE_SETTINGS to "storage"
@@ -422,7 +429,8 @@ object OpenSettingTool : Tool {
             before = ctrl.buildSnapshot()
         }
         if (before.appPackage != settingsPkg)
-            return ToolResult(true, "Opened $label settings — the screen didn't come up in time, so please use the switch there.",
+            return ToolResult(true, if (want == null) "Opened $label settings — it was still coming up." else
+                "Opened $label settings — the screen didn't come up in time, so please use the switch there.",
                 data = JSONObject().put("confirmed", false), channel = "intent", recoverable = true)
         ctrl.waitForSettle(800)
         before = ctrl.buildSnapshot()

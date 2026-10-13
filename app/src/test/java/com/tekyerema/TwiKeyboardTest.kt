@@ -292,6 +292,31 @@ class TwiKeyboardTest {
         assertTrue("sɛ" in lex && "medaase" in lex)
     }
 
+    @Test fun english_words_are_suggested_in_both_modes_and_twi_leads_in_twi_mode() {
+        val english = TwiLexicon.parse(sequenceOf("the\t22761659", "they\t5000000", "then\t3000000", "me\t8500000",
+            "mean\t500000", "cat\t200000", "come\t2000000"))
+        val s = WordSuggester(lexicon, { english })
+        assertEquals("the", s.suggest("th", twi = false).first())
+        assertEquals("the", s.suggest("th", twi = true).first())        // no Twi word starts with th: English fills in
+        assertEquals(setOf("meyɛ", "mepɛ", "medaase"), s.suggest("me", twi = true).toSet())   // Twi first on the Twi keyboard
+        assertTrue("mean" in s.suggest("me", twi = false))
+        assertFalse("ɔ is not a c: typing ɔ must not offer English c-words", "cat" in s.suggest("ɔ", twi = true))
+        assertTrue("the texting c still finds c-words", "cat" in s.suggest("c", twi = true))
+        assertEquals("Come", s.suggest("Co", twi = false).first())
+        assertTrue(WordSuggester(lexicon).suggest("th", twi = false).isEmpty())
+    }
+
+    @Test fun the_bundled_english_list_is_large_credited_and_clean() {
+        val text = File("src/main/assets/ime/en_words.tsv").readText()
+        assertTrue(text.contains("MIT License"))
+        val lex = TwiLexicon.parse(text.lineSequence())
+        assertTrue("${lex.size}", lex.size in 15_000..30_000)
+        for (w in listOf("the", "hello", "please", "money", "tomorrow")) assertTrue(w, w in lex)
+        for ((w, c) in lex.words) assertTrue(w, c > 0 && w.all { it.isLetter() || it == '\'' } && w.first().isLetter())
+        assertEquals("the most common word first", lex.words.maxOf { it.second }, lex.words.first().second)
+        assertEquals("folded keys line up with the words", lex.words.size, lex.folded.size)
+    }
+
     // ------------------------------------------------------------------------------------------ voice key
 
     @Test fun the_voice_key_route() {

@@ -30,6 +30,11 @@ MIC → ASR → LanguagePipeline(LID+normalize+entities) → BRAIN(router) → T
   the agent stops before any PIN entry and never stores or sees a PIN.
 - **Observe → verify → recover** (`verifier/`): a `Done` is only `COMPLETED` if the substantive change
   actually verified (the hallucination guard).
+- **Tɛkyerɛma keyboard** (`ime/`, Settings › Keyboard): a Twi + English keyboard with ɛ and ɔ where Q and C are, swipe
+  typing decided on the phone (`GestureDecoder`: the keys the finger crossed and turned on, aligned against the word lists),
+  suggestions from a 20,000-word English list and the reviewed Twi list (optional learned words), numbers on the top row
+  (slide up or long-press), a voice key, and keys TalkBack can explore. Nothing typed leaves the phone; suggestions, swipe
+  and learning are off in password/PIN boxes and in the Secure Input step.
 
 ## Supported languages
 

@@ -39,6 +39,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AccessibilityNew
 import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.HelpOutline
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Replay
@@ -58,7 +59,7 @@ import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.theme.TkMotion
 
 internal enum class Page {
-    ROOT, LANGUAGE, VOICE, PERMISSIONS, ACCESSIBILITY, HELP,
+    ROOT, LANGUAGE, VOICE, KEYBOARD, PERMISSIONS, ACCESSIBILITY, HELP,
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
     PHONE_CARE, MONEY_LIMITS, APP_RULES;
 
@@ -89,27 +90,31 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
             PageTitle("Settings")
             GlassGroup("Voice & language") {
                 SettingRow("Language", value = remember(version) { languageLabel(settings.languageMode) },
-                    icon = Icons.Outlined.Language, iconTint = Spectrum.Cyan) { page = Page.LANGUAGE }
+                    icon = Icons.Outlined.Language, iconTint = Spectrum.Aqua) { page = Page.LANGUAGE }
                 SettingRow("Voice", value = remember(version) { rateLabel(settings.speechRate) },
-                    icon = Icons.Outlined.RecordVoiceOver, iconTint = Spectrum.Violet, divider = false) { page = Page.VOICE }
+                    icon = Icons.Outlined.RecordVoiceOver, iconTint = Spectrum.Green) { page = Page.VOICE }
+                // G-05: the Twi keyboard's own page (setup, options, a box to try it) — reachable from here since 13 Oct 2026.
+                SettingRow("Keyboard", value = keyboardLabel(com.tekyerema.ime.rememberKeyboardStatus()),
+                    icon = Icons.Outlined.Keyboard, iconTint = Spectrum.Teal, divider = false) { page = Page.KEYBOARD }
             }
             GlassGroup {
-                SettingRow("Accessibility", icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Mint, divider = false) { page = Page.ACCESSIBILITY }
+                SettingRow("Accessibility", icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Lime, divider = false) { page = Page.ACCESSIBILITY }
             }
             GlassGroup("Safety") {
                 SettingRow("Permissions", value = permissionsSummary(context),
                     icon = Icons.Outlined.VerifiedUser, iconTint = Spectrum.Gold) { page = Page.PERMISSIONS }
                 SettingRow("Control", value = remember(version) { controlSummary() },
-                    icon = Icons.Outlined.Tune, iconTint = Spectrum.Violet) { page = Page.CONTROL }
+                    icon = Icons.Outlined.Tune, iconTint = Spectrum.Green) { page = Page.CONTROL }
                 SettingRow("Phone care", value = remember(version) { phoneCareSummary(settings) },
-                    icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Mint, divider = false) { page = Page.PHONE_CARE }
+                    icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Lime, divider = false) { page = Page.PHONE_CARE }
             }
             GlassGroup {
-                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Violet, divider = false) { page = Page.HELP }
+                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Green, divider = false) { page = Page.HELP }
             }
         }
         Page.LANGUAGE -> LanguagePage(settings) { page = Page.ROOT }
         Page.VOICE -> VoicePage(settings) { page = Page.ROOT }
+        Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
         Page.PERMISSIONS -> PermissionsPage { page = Page.ROOT }
         Page.ACCESSIBILITY -> AccessibilityPage(settings) { page = Page.ROOT }
         Page.HELP -> HelpPage(settings) { page = Page.ROOT }
@@ -123,6 +128,13 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
         Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }
     } }
+}
+
+/** The Keyboard row's value: where the Twi keyboard stands on this phone. */
+private fun keyboardLabel(status: com.tekyerema.ime.KeyboardStatus): String = when (status) {
+    com.tekyerema.ime.KeyboardStatus.IN_USE -> "Twi keyboard in use"
+    com.tekyerema.ime.KeyboardStatus.ENABLED_NOT_SELECTED -> "Twi keyboard added"
+    com.tekyerema.ime.KeyboardStatus.NOT_ENABLED -> "Add the Twi keyboard"
 }
 
 /** "Alerts off" / "2 alerts on" — the Phone care row's value (on screen only). */
@@ -202,7 +214,7 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
         PageTitle("Voice", onBack)
         GlassGroup {
             SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak,
-                icon = Icons.Outlined.VolumeUp, iconTint = Spectrum.Violet) { settings.speakAloud = it }
+                icon = Icons.Outlined.VolumeUp, iconTint = Spectrum.Green) { settings.speakAloud = it }
             SwitchRow("Private reading", "On the loudspeaker, say who your messages are from, not what they say. " +
                 "Say “read them” to hear them. Headphones read them in full.", privateReading, divider = false) { settings.privateReading = it }
         }
@@ -330,7 +342,7 @@ private fun HelpPage(settings: Settings, onBack: () -> Unit) {
         ))
         GlassGroup {
             var replay by remember { mutableStateOf("") }
-            SettingRow("Replay the welcome", value = replay, icon = Icons.Outlined.Replay, iconTint = Spectrum.Mint, divider = false,
+            SettingRow("Replay the welcome", value = replay, icon = Icons.Outlined.Replay, iconTint = Spectrum.Lime, divider = false,
                 description = "Hear the first-time questions and the practice message again.") {
                 replay = if (com.tekyerema.voice.VoiceEngine.startWelcome(replay = true)) "Playing"
                     else "Needs the microphone and Read replies aloud"

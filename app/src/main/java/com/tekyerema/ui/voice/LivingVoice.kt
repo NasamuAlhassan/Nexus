@@ -137,16 +137,16 @@ fun LivingVoice(
                         1f to Color.Transparent, center = Offset.Zero, radius = UNIT
                     ),
                     body = if (palette.dark) Brush.radialGradient(
-                        0f to Color(0xFF26337A), 0.65f to Color(0xFF121B45), 1f to Color(0xFF0A1028),
+                        0f to Color(0xFF1E4A48), 0.65f to Color(0xFF0F2A2B), 1f to Color(0xFF071617),
                         center = Offset(-0.18f * UNIT, -0.22f * UNIT), radius = UNIT * 1.25f
                     ) else Brush.radialGradient(
-                        0f to Color(0xFFFFFFFF), 0.65f to Color(0xFFEFF3FF), 1f to Color(0xFFDCE4FA),
+                        0f to Color(0xFFFFFFFF), 0.65f to Color(0xFFEEF8F4), 1f to Color(0xFFD9EEE7),
                         center = Offset(-0.18f * UNIT, -0.22f * UNIT), radius = UNIT * 1.25f
                     ),
                     // The glass's weight: a soft darkening toward the lower edge, so it reads as a sphere, not a disc.
                     depth = Brush.radialGradient(
                         0f to Color.Transparent, 0.72f to Color.Transparent,
-                        1f to (if (palette.dark) Color(0x8C000000) else Color(0x331B2A55)),
+                        1f to (if (palette.dark) Color(0x8C000000) else Color(0x33103B37)),
                         center = Offset(0f, -0.12f * UNIT), radius = UNIT * 1.08f
                     ),
                     rim = Brush.sweepGradient(
@@ -187,7 +187,7 @@ private class OrbKit(
 private const val UNIT = 100f
 /** Orb radius as a share of the smaller side; the aura reaches ~1.55× that, inside the square. */
 private const val BASE_R = 0.30f
-private val LIGHTS = arrayOf(Spectrum.Cyan, Spectrum.Azure, Spectrum.Violet, Spectrum.Rose)
+private val LIGHTS = arrayOf(Spectrum.Aqua, Spectrum.Teal, Spectrum.Green, Spectrum.Coral)
 private val ErrorGrey = Color(0xFF6B7490)
 /** The waveform's taper toward the rim (sin^1.6). Clamped: sin(π) is a tiny negative → NaN. */
 private val WAVE_WINDOW = FloatArray(PresenceSim.THREAD_POINTS) { j ->
@@ -241,7 +241,7 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
             val age = s.rippleAge(i)
             if (age < 0f) continue
             val eased = 1f - (1f - age) * (1f - age)
-            drawCircle(tone(Spectrum.Cyan).copy(alpha = (0.45f * (1f - age) * (1f - age) * alphaScale * s.actMix.value).coerceIn(0f, 1f)),
+            drawCircle(tone(Spectrum.Aqua).copy(alpha = (0.45f * (1f - age) * (1f - age) * alphaScale * s.actMix.value).coerceIn(0f, 1f)),
                 radius = r * (1.02f + 0.5f * eased), center = Offset(cx, cy), style = kit.ripple)
         }
     }
@@ -286,7 +286,7 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
         }
     }
     // A faint outline so the sphere keeps its edge on the pale page.
-    if (!pal.dark) drawCircle(Color(0x221B2A55), radius = r, center = Offset(cx, cy), style = kit.ripple)
+    if (!pal.dark) drawCircle(Color(0x22103B37), radius = r, center = Offset(cx, cy), style = kit.ripple)
 
     // 7. The specular highlight, top-left.
     withTransform({
@@ -300,7 +300,7 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
     if (!calm && bloom > 0f) {
         val e = 1f - bloom
         val eased = 1f - (1f - e) * (1f - e)
-        drawCircle(tone(Spectrum.Cyan).copy(alpha = (0.65f * bloom * bloom * alphaScale).coerceIn(0f, 1f)),
+        drawCircle(tone(Spectrum.Aqua).copy(alpha = (0.65f * bloom * bloom * alphaScale).coerceIn(0f, 1f)),
             radius = r * (1.0f + 0.6f * eased), center = Offset(cx, cy), style = kit.bloom)
     }
 
@@ -319,7 +319,7 @@ private fun DrawScope.drawWaves(
     val twoPi = 2f * PI.toFloat()
     val x0 = cx - r * 0.98f
     val w = r * 1.96f
-    val colors = arrayOf(Spectrum.Cyan, Spectrum.Violet, Spectrum.Rose)
+    val colors = arrayOf(Spectrum.Aqua, Spectrum.Green, Spectrum.Coral)
     for (k in 0 until 3) {
         val path = kit.wave
         path.reset()

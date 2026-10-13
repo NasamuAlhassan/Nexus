@@ -46,33 +46,66 @@ class SettingsNavigationTest {
         assertNull(LocalBrain.inAppNavTarget("send a message"))
     }
 
-    @Test fun `open settings and go to the battery page - open, tap the page, done`() = runBlocking {
+    /** N-09 (3), 13 October 2026: a Settings page Android opens directly is ONE step — its own intent, checked by its title. */
+    @Test fun `open settings and go to the battery page - straight to the page by its own intent, done`() = runBlocking {
         val goal = "open Settings and go to the battery page"
+        val b = LocalBrain()
+        val first = b.decide(ctx(goal, screenOf(HOME, "Phone", "Messages", "Chrome")))
+        assertTrue(first.toString(), first is AgentDecision.CallTool && first.name == "open_setting")
+        assertEquals("battery_usage", (first as AgentDecision.CallTool).args.getString("target"))
+        assertEquals("foreground_is: Battery", first.expects)
+
+        val h1 = listOf("""open_setting({"target":"battery_usage"}) → success verified=true; Opened battery settings.""")
+        val second = b.decide(ctx(goal, screenOf(SETTINGS, "Battery Saver", "Battery percentage", "Battery usage").put("screen", "Battery"), h1))
+        assertTrue(second.toString(), second is AgentDecision.Done)
+        assertEquals("Settings is open, on Battery.", (second as AgentDecision.Done).summary)
+        // the judges' stress case has a third clause the rules can't do ("tell me the android version"), so the whole request
+        // is the planner's — but the router's own first step goes straight to the page by its own intent, not to Settings'
+        // front page ("About emulated device" on the emulator: the title fragment is "About")
+        val cloud = ScriptedBrain({ tool("read_screen", JSONObject()) })
+        val router = RoutingBrain(LocalBrain(), cloud, appForGoal = { g -> if (g.contains("settings", true)) "Settings" to SETTINGS else null },
+            linkCheck = null, answers = null, localModel = null) { true }
+        val about = router.decide(ctx("open settings and go to about phone and tell me the android version", screenOf(HOME)))
+        assertTrue(about.toString(), about is AgentDecision.CallTool && about.name == "open_setting" &&
+            (about as AgentDecision.CallTool).args.getString("target") == "about_phone" && about.expects == "foreground_is: About")
+        assertEquals("about_phone", router.settingsPageIn("open settings and go to about phone and tell me the android version", SETTINGS)?.target)
+        assertNull(router.settingsPageIn("open settings and tell me the android version", SETTINGS))
+        assertNull(router.settingsPageIn("open settings and go to about phone", "com.android.chrome"))
+    }
+
+    @Test fun `a page without its own intent is still a tap on its row - open, tap, done`() = runBlocking {
+        val goal = "open Settings and go to the Software information page"
         val b = LocalBrain()
         val first = b.decide(ctx(goal, screenOf(HOME, "Phone", "Messages", "Chrome")))
         assertTrue(first.toString(), first is AgentDecision.CallTool && first.name == "open_app")
         assertEquals("Settings", (first as AgentDecision.CallTool).args.getString("app"))
 
         val h1 = listOf("""open_app({"app":"Settings"}) → success verified=true; Settings is open.""")
-        val second = b.decide(ctx(goal, screenOf(SETTINGS, "Network & internet", "Battery", "Display"), h1))
+        val second = b.decide(ctx(goal, screenOf(SETTINGS, "About phone", "Software information"), h1))
         assertTrue(second.toString(), second is AgentDecision.CallTool && second.name == "tap")
-        assertEquals("battery", (second as AgentDecision.CallTool).args.getString("label"))
+        assertEquals("Software information", (second as AgentDecision.CallTool).args.getString("label"))
 
-        val h2 = h1 + """tap({"label":"battery"}) → success verified=true; Tapped 'Battery' in com.android.settings."""
-        val third = b.decide(ctx(goal, screenOf(SETTINGS, "Battery Saver", "Battery percentage", "Battery usage"), h2))
+        val h2 = h1 + """tap({"label":"Software information"}) → success verified=true; Tapped 'Software information' in com.android.settings."""
+        val third = b.decide(ctx(goal, screenOf(SETTINGS, "One UI version", "Android version").put("screen", "Software information"), h2))
         assertTrue(third.toString(), third is AgentDecision.Done)
-        assertEquals("Settings is open. Battery is open.", (third as AgentDecision.Done).summary)
+        assertEquals("Settings is open. Software information is open.", (third as AgentDecision.Done).summary)
     }
 
     @Test fun `an app that reopens on the wanted page is already there - no tap on its own title`() = runBlocking {
-        val goal = "open Settings and go to the battery page"
+        // the deep-link page: Settings reopened on Battery — nothing to do but say so
+        val onBattery = screenOf(SETTINGS, "Battery", "Battery Saver", "Battery percentage").put("screen", "Battery")
+        val d0 = LocalBrain().decide(ctx("open Settings and go to the battery page", onBattery))
+        assertTrue(d0.toString(), d0 is AgentDecision.Done)
+        assertEquals("Settings is open, on Battery.", (d0 as AgentDecision.Done).summary)
+        // the tap-path page: after "open Settings", the screen already carries the page's title
+        val goal = "open Settings and go to the Software information page"
         val b = LocalBrain()
         b.decide(ctx(goal, screenOf(HOME)))
         val h1 = listOf("""open_app({"app":"Settings"}) → success verified=true; Settings is open.""")
-        val onBattery = screenOf(SETTINGS, "Battery", "Battery Saver", "Battery percentage").put("screen", "Battery")
-        val d = b.decide(ctx(goal, onBattery, h1))
+        val onPage = screenOf(SETTINGS, "One UI version", "Android version").put("screen", "Software information")
+        val d = b.decide(ctx(goal, onPage, h1))
         assertTrue(d.toString(), d is AgentDecision.Done)
-        assertEquals("Settings is open. Battery is open.", (d as AgentDecision.Done).summary)
+        assertEquals("Settings is open. Software information is open.", (d as AgentDecision.Done).summary)
     }
 
     @Test fun `a page that is not one tap away hands the task to the planner from inside the app`() = runBlocking {

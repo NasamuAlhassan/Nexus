@@ -2,6 +2,9 @@ package com.tekyerema.ime
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
@@ -14,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.view.ViewCompat
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+import kotlin.math.abs
 
 /**
  * G-05 — the keyboard on screen. Plain Android Views on purpose, not Compose and not a single canvas:
@@ -24,6 +28,11 @@ import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
  *    source of crashes; a keyboard must be the most boring, reliable screen on the phone.
  * Long-press options appear in the strip across the top (not a popup), where TalkBack users can explore them like
  * keys; every option is also a TalkBack custom action on the key itself ("Type ɛ, open e").
+ *
+ * G-05 (2), 13 October 2026 — the Gboard habits: a swipe across the letters types a word (the view only collects the
+ * path and the keys it crossed; [GestureDecoder] and the service decide the word), the top row shows its numbers in
+ * small print and a slide up from a key types that number. TalkBack's explore-by-touch turns touches into hover, so
+ * with a screen reader on nothing changes: keys are tapped or lifted on as before.
  * The view never keeps, logs or reads typed text — it only reports which key was touched.
  */
 @SuppressLint("ViewConstructor")
@@ -39,6 +48,8 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         fun onCloseVariants()
         fun onVoiceKey()
         fun onVoiceLongPress(): Boolean
+        /** A swipe across the letters ended: the keys it crossed, first to last, with the ones the finger paused or turned on marked. */
+        fun onGesture(path: List<GestureDecoder.Step>)
     }
 
     private enum class StripMode { SUGGESTIONS, VARIANTS, MESSAGE }
@@ -56,6 +67,20 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
 
     var bigKeys = false
         set(v) { if (field != v) { field = v; current?.let { current = null; setLayout(it) }; sizeStrip() } }
+
+    /** Swipe typing for the field in front: the letters page, not a password or PIN box, the option on. The service sets it. */
+    var gesturesEnabled = false
+
+    // The swipe in progress (G-05 (2)).
+    private val trail = ArrayList<GestureDecoder.Pt>(256)
+    private val trailPath = Path()
+    private val trailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = TRAIL
+    }
+    private var letterBoxes: List<GestureDecoder.KeyBox> = emptyList()
+    private var gestureArmed = false     // the touch began on a letter key with swiping on
+    private var gesturing = false        // the touch stream belongs to the swipe now
+    private var gesturePointer = -1
 
     init {
         orientation = VERTICAL
@@ -97,18 +122,23 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         current = layout
         if (old != null && old.shape() == layout.shape() && keyViews.size == layout.rows.sumOf { it.size }) {
             var i = 0
-            for (row in layout.rows) for (key in row) { val v = keyViews[i].second; bind(v, key); keyViews[i] = key to v; i++ }
+            for ((r, row) in layout.rows.withIndex()) for (key in row) {
+                val v = keyViews[i].second
+                bind(v, key, hintFor(layout, r, key))
+                keyViews[i] = key to v
+                i++
+            }
             return
         }
         rows.removeAllViews()
         keyViews.clear()
         val height = keyHeight(layout.page)
-        for (row in layout.rows) {
+        for ((r, row) in layout.rows.withIndex()) {
             val line = LinearLayout(context).apply { orientation = HORIZONTAL; weightSum = row.sumOf { it.width.toDouble() }.toFloat() }
             for (key in row) {
                 val v: View = if (key.kind == KeyKind.SPACER) View(context).apply {
                     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-                } else TextView(context).apply {
+                } else KeyView(context).apply {
                     gravity = Gravity.CENTER
                     setTextColor(TEXT)
                     maxLines = 1
@@ -116,7 +146,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
                     isClickable = true
                     importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
                 }
-                bind(v, key)
+                bind(v, key, hintFor(layout, r, key))
                 line.addView(v, LayoutParams(0, height, key.width).apply { setMargins(dp(3), dp(3), dp(3), dp(3)) })
                 keyViews += key to v
             }
@@ -124,8 +154,13 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         }
     }
 
+    /** The number a top-row letter gives on a slide up (and on a long-press): drawn small in the key's corner. */
+    private fun hintFor(layout: KeyboardLayout, row: Int, key: Key): String? =
+        if (layout.page == Page.LETTERS && row == 0 && key.kind == KeyKind.CHAR)
+            key.variants.firstOrNull { it.length == 1 && it[0].isDigit() } else null
+
     @SuppressLint("ClickableViewAccessibility")   // backspace: touches repeat; TalkBack's click deletes once (onClick)
-    private fun bind(v: View, key: Key) {
+    private fun bind(v: View, key: Key, hint: String?) {
         if (key.kind == KeyKind.SPACER || v !is TextView) return
         v.text = key.label
         val letterLike = key.label.length <= 2 && key.kind == KeyKind.CHAR
@@ -140,6 +175,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         }
         v.background = keyBackground(face)
         v.setTextColor(if (face == ACCENT) BG else TEXT)
+        if (v is KeyView) { v.hint = hint; v.hintSize = sp(if (bigKeys) 13f else 11f); v.hintColor = TEXT_SECONDARY }
         // Custom actions: every long-press option, reachable from TalkBack's actions menu.
         @Suppress("UNCHECKED_CAST")
         (v.getTag(TAG_ACTIONS) as? List<Int>)?.forEach { ViewCompat.removeAccessibilityAction(v, it) }
@@ -147,8 +183,10 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
             ViewCompat.addAccessibilityAction(v, "Type ${KeyNames.spoken(variant)}") { _, _ -> listener.onVariant(variant); true }
         }
         v.setTag(TAG_ACTIONS, ids)
+        // touch[0]: this touch became a slide up (its number typed); touch[1]: its long-press already fired.
+        val touch = BooleanArray(2)
         v.setOnClickListener { listener.onKey(key) }
-        v.setOnLongClickListener { listener.onKeyLongPress(key) }
+        v.setOnLongClickListener { touch[1] = true; listener.onKeyLongPress(key) }
         // Only keys that DO something on a long-press say so: otherwise TalkBack would add "double-tap and hold to long
         // press" to every letter, which is noise a blind typist hears hundreds of times a day.
         v.isLongClickable = key.variants.isNotEmpty() ||
@@ -166,12 +204,32 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
                 true
             }
         } else {
-            v.setOnTouchListener { _, e ->
+            v.setOnTouchListener { view, e ->
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_DOWN -> { listener.onKeyDown(key); if (key.kind == KeyKind.CHAR) showKeyPopup(key, v) }
-                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dismissKeyPopup()
+                    MotionEvent.ACTION_DOWN -> {
+                        touch[0] = false; touch[1] = false
+                        listener.onKeyDown(key)
+                        if (key.kind == KeyKind.CHAR) showKeyPopup(key, view)
+                        false
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        // A slide up off a top-row key types its number — no long-press, no symbols page. (Not after a
+                        // long-press that already typed it: a finger that dawdled on the key, then slid, gets one number.)
+                        if (!touch[0] && !touch[1] && hint != null && e.y < -view.height * 0.5f && abs(e.x - view.width / 2f) < view.width) {
+                            touch[0] = true
+                            view.isPressed = false
+                            view.cancelLongPress()
+                            showKeyPopup(key.copy(text = hint, label = hint), view)
+                            listener.onVariant(hint)
+                        }
+                        touch[0]
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        dismissKeyPopup()
+                        if (touch[0]) { view.isPressed = false; true } else false
+                    }
+                    else -> false
                 }
-                false
             }
         }
     }
@@ -182,6 +240,125 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
             keyViews.firstOrNull { it.first.kind == KeyKind.BACKSPACE }?.second?.postDelayed(this, REPEAT_EVERY_MS)
         }
     }
+
+    /** A key: a TextView that can also paint a small hint (the number a top-row key gives) in its top-right corner. */
+    @SuppressLint("AppCompatCustomView")
+    private class KeyView(context: Context) : TextView(context) {
+        var hint: String? = null
+            set(v) { if (field != v) { field = v; invalidate() } }
+        var hintSize = 0f
+        var hintColor = 0
+        private val hintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textAlign = Paint.Align.RIGHT }
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val h = hint ?: return
+            if (hintSize <= 0f) return
+            hintPaint.textSize = hintSize
+            hintPaint.color = hintColor
+            canvas.drawText(h, width - hintSize * 0.55f, hintSize * 1.2f, hintPaint)
+        }
+    }
+
+    // --------------------------------------------------------------------------------------- swipe
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                gesturing = false
+                gestureArmed = false
+                trail.clear()
+                if (gesturesEnabled && current?.page == Page.LETTERS) {
+                    letterBoxes = letterBoxes()
+                    if (letterBoxes.any { it.contains(ev.x, ev.y) }) {
+                        gestureArmed = true
+                        gesturePointer = ev.getPointerId(0)
+                        trail += GestureDecoder.Pt(ev.x, ev.y)
+                    }
+                }
+            }
+            // A second finger means two-thumb tapping, not a swipe.
+            MotionEvent.ACTION_POINTER_DOWN -> if (!gesturing) { gestureArmed = false; trail.clear() }
+            MotionEvent.ACTION_MOVE -> if (gestureArmed && !gesturing) {
+                val n = trail.size
+                addPoints(ev)
+                if (trail.size != n && GestureDecoder.isGesture(trail, letterBoxes, keyUnit() * 0.5f)) {
+                    gesturing = true
+                    dismissKeyPopup()
+                    invalidate()
+                    return true   // the key under the finger gets ACTION_CANCEL; the rest of the stream comes to onTouchEvent
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { gestureArmed = false; trail.clear() }
+        }
+        return false
+    }
+
+    @SuppressLint("ClickableViewAccessibility")   // the swipe is a sighted gesture; every key stays a clickable View
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (!gesturing) return super.onTouchEvent(event)
+        when (event.actionMasked) {
+            MotionEvent.ACTION_MOVE -> { addPoints(event); invalidate() }
+            MotionEvent.ACTION_UP -> { addPoints(event); finishGesture() }
+            MotionEvent.ACTION_POINTER_UP -> if (event.getPointerId(event.actionIndex) == gesturePointer) { addPoints(event); finishGesture() }
+            MotionEvent.ACTION_CANCEL -> endGesture()
+        }
+        return true
+    }
+
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        if (!gesturing || trail.size < 2) return
+        trailPath.rewind()
+        trailPath.moveTo(trail[0].x, trail[0].y)
+        for (i in 1 until trail.size) trailPath.lineTo(trail[i].x, trail[i].y)
+        trailPaint.strokeWidth = dp(5).toFloat()
+        canvas.drawPath(trailPath, trailPaint)
+    }
+
+    private fun addPoints(e: MotionEvent) {
+        val idx = e.findPointerIndex(gesturePointer)
+        if (idx < 0) return
+        for (h in 0 until e.historySize) push(e.getHistoricalX(idx, h), e.getHistoricalY(idx, h))
+        push(e.getX(idx), e.getY(idx))
+    }
+
+    /** A sample that did not move (a held finger, or a flood of identical injected events) adds nothing to the path. */
+    private fun push(x: Float, y: Float) {
+        val last = trail.lastOrNull()
+        if (last != null && abs(last.x - x) < 1f && abs(last.y - y) < 1f) return
+        trail += GestureDecoder.Pt(x, y)
+    }
+
+    private fun finishGesture() {
+        val path = GestureDecoder.steps(trail, letterBoxes)
+        endGesture()
+        if (path.size >= 2) listener.onGesture(path)
+    }
+
+    private fun endGesture() {
+        gesturing = false
+        gestureArmed = false
+        trail.clear()
+        invalidate()
+    }
+
+    /** The letter keys' boxes in this view's coordinates, grown by their margins so the gaps between keys belong to a key. */
+    private fun letterBoxes(): List<GestureDecoder.KeyBox> {
+        val m = dp(3).toFloat()
+        val out = ArrayList<GestureDecoder.KeyBox>(32)
+        for ((key, v) in keyViews) {
+            if (key.kind != KeyKind.CHAR || key.text.length != 1 || !key.text[0].isLetter()) continue
+            val line = v.parent as? View ?: continue
+            val l = (v.left + line.left + rows.left).toFloat()
+            val t = (v.top + line.top + rows.top).toFloat()
+            out += GestureDecoder.KeyBox(key.text, l - m, t - m, l + v.width + m, t + v.height + m)
+        }
+        return out
+    }
+
+    private fun keyUnit(): Float =
+        keyViews.firstOrNull { it.first.kind == KeyKind.CHAR && it.first.width == 1f }?.second?.width?.toFloat() ?: dp(36).toFloat()
 
     // --------------------------------------------------------------------------------------- popup
 
@@ -298,18 +475,20 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density + 0.5f).toInt()
+    private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
     companion object {
-        // The app's palette (ui/theme Tk): ink surfaces, near-white text, the brand blue for a pressed key and cyan
-        // for "on" (caps lock, listening, an action enter key). Text on keys is 14:1+ against the key face.
-        private const val BG = 0xFF070A15.toInt()
-        private const val KEY = 0xFF1C2440.toInt()
-        private const val FN_KEY = 0xFF121A30.toInt()
-        private const val STRIP_KEY = 0xFF0F1628.toInt()
-        private const val PRESSED = 0xFF1B49C8.toInt()
-        private const val ACCENT = 0xFF38BDF8.toInt()
-        private const val TEXT = 0xFFF4F6FB.toInt()
-        private const val TEXT_SECONDARY = 0xFF9AA6C4.toInt()
+        // The app's palette (ui/theme Tk, 13 Oct 2026): green-ink surfaces, near-white text, deep teal for a pressed key and
+        // the mark's teal for "on" (caps lock, listening, an action enter key). Text on keys is 14:1+ against the key face.
+        private const val BG = 0xFF050B0D.toInt()
+        private const val KEY = 0xFF14262A.toInt()
+        private const val FN_KEY = 0xFF0C1A1D.toInt()
+        private const val STRIP_KEY = 0xFF0A1518.toInt()
+        private const val PRESSED = 0xFF0E6F66.toInt()
+        private const val ACCENT = 0xFF1ED1BB.toInt()
+        private const val TRAIL = 0xB31ED1BB.toInt()
+        private const val TEXT = 0xFFF1F7F4.toInt()
+        private const val TEXT_SECONDARY = 0xFF9DBDB5.toInt()
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_EVERY_MS = 60L
         private val TAG_ACTIONS = com.tekyerema.R.id.ime_key_actions

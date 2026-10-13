@@ -63,49 +63,52 @@ class TkPalette(
     val tileBacking: Float
 )
 
-/** The orb's spectrum — the same in both palettes (it is light, not paint). */
+/** The orb's spectrum — the colours of the Tɛkyerɛma mark (aqua → teal → green → lime on ink), the same in both palettes
+ *  (it is light, not paint). Owner, 13 October 2026: the old cyan/violet/rose did not fit the logo. */
 object Spectrum {
-    val Cyan = Color(0xFF38BDF8)
-    val Azure = Color(0xFF3B6BFF)
-    val Violet = Color(0xFF8B5CF6)
-    val Rose = Color(0xFFF472B6)
-    val Gold = Color(0xFFF5C26B)
-    val Mint = Color(0xFF34D399)
+    val Aqua = Color(0xFF38C6F0)
+    val Teal = Color(0xFF17C9B4)
+    val Green = Color(0xFF3BD37D)
+    val Lime = Color(0xFFB5E853)
+    val Gold = Color(0xFFF5C542)
+    val Coral = Color(0xFFFF8A6B)
 }
 
 val DarkPalette = TkPalette(
     dark = true,
-    ink = Color(0xFF070A15), inkTop = Color(0xFF0D1533), inkBottom = Color(0xFF05070F),
-    field = listOf(Color(0x3338BDF8), Color(0x2E6D4BFF), Color(0x243B6BFF)),
+    // Ink with a breath of the mark's green in it, not the old navy.
+    ink = Color(0xFF050B0D), inkTop = Color(0xFF0A1A1C), inkBottom = Color(0xFF03080A),
+    field = listOf(Color(0x3317C9B4), Color(0x2E3BD37D), Color(0x2438C6F0)),
     glass = Color(0x17FFFFFF), glassLow = Color(0x0AFFFFFF),
     glassEdgeTop = Color(0x4DFFFFFF), glassEdgeBottom = Color(0x0FFFFFFF),
-    glassStrong = Color(0xE6121A33),
+    glassStrong = Color(0xE60F1F21),
     pressed = Color(0x24FFFFFF),
     hairline = Color(0x1FFFFFFF),
-    // 16.9:1 / 8.6:1 / 5.2:1 on ink
-    text = Color(0xFFF4F6FB), textSecondary = Color(0xFFA9B4D0), textTertiary = Color(0xFF8490B0),
-    accent = Color(0xFF38BDF8), onAccent = Color(0xFF06101F),
-    blue = Color(0xFF1B49C8), blueBright = Color(0xFF4A7BFF), blueDeep = Color(0xFF111F45),
-    attention = Color(0xFFF5C26B), danger = Color(0xFFFF8A8A), success = Color(0xFF4ADE80),
+    // 18.3:1 / 10.6:1 / 7.1:1 on ink (13 Oct 2026)
+    text = Color(0xFFF1F7F4), textSecondary = Color(0xFFA9C3BC), textTertiary = Color(0xFF84A19A),
+    accent = Color(0xFF1ED1BB), onAccent = Color(0xFF04110F),        // accent 10.3:1 on ink; ink on accent 10:1
+    blue = Color(0xFF0E6F66), blueBright = Color(0xFF22B8A6), blueDeep = Color(0xFF0A2A2A),
+    attention = Color(0xFFF5C542), danger = Color(0xFFFF8A8A), success = Color(0xFF7BE495),
     focus = Color(0xFFFFFFFF),
     tileBacking = 0.16f
 )
 
 val LightPalette = TkPalette(
     dark = false,
-    ink = Color(0xFFF5F7FC), inkTop = Color(0xFFE6EDFF), inkBottom = Color(0xFFF8F4FB),
-    field = listOf(Color(0x4D7DD3FC), Color(0x40A78BFA), Color(0x33F9A8D4)),
+    // A warm mint-white page with the mark's lights in the corners.
+    ink = Color(0xFFF3F8F5), inkTop = Color(0xFFE4F3EE), inkBottom = Color(0xFFF7F6EC),
+    field = listOf(Color(0x4D17C9B4), Color(0x403BD37D), Color(0x33B5E853)),
     glass = Color(0xB8FFFFFF), glassLow = Color(0x94FFFFFF),
-    glassEdgeTop = Color(0xFFFFFFFF), glassEdgeBottom = Color(0x1A1B2A55),
+    glassEdgeTop = Color(0xFFFFFFFF), glassEdgeBottom = Color(0x1A103B37),
     glassStrong = Color(0xF2FFFFFF),
-    pressed = Color(0x140D1326),
-    hairline = Color(0x1A0D1326),
-    // 17.1:1 / 8.1:1 / 5.3:1 on ink
-    text = Color(0xFF0D1326), textSecondary = Color(0xFF465173), textTertiary = Color(0xFF5E6989),
-    accent = Color(0xFF0369A1), onAccent = Color(0xFFFFFFFF),
-    blue = Color(0xFF1B49C8), blueBright = Color(0xFF2F5FE0), blueDeep = Color(0xFF111F45),
-    attention = Color(0xFF9A5B00), danger = Color(0xFFB42318), success = Color(0xFF15803D),
-    focus = Color(0xFF0D1326),
+    pressed = Color(0x140E1F1C),
+    hairline = Color(0x1A0E1F1C),
+    // 15.9:1 / 7.3:1 / 5.1:1 on ink (13 Oct 2026)
+    text = Color(0xFF0E1F1C), textSecondary = Color(0xFF3B5751), textTertiary = Color(0xFF556F69),
+    accent = Color(0xFF0A7268), onAccent = Color(0xFFFFFFFF),        // accent 5:1 on the page; white on accent 5.3:1
+    blue = Color(0xFF0E6F66), blueBright = Color(0xFF159C8E), blueDeep = Color(0xFF0A2A2A),
+    attention = Color(0xFF8A5A00), danger = Color(0xFFB42318), success = Color(0xFF0F7A3E),
+    focus = Color(0xFF0E1F1C),
     tileBacking = 0.13f
 )
 
@@ -137,8 +140,8 @@ object Tk {
 }
 
 /**
- * The page background: the palette's base with a lift toward the top, and three large soft lights (cyan, violet,
- * azure) resting in the corners — the "liquid" behind the glass. Drawn once per size; nothing here moves (the orb is
+ * The page background: the palette's base with a lift toward the top, and three large soft lights (teal, green,
+ * aqua) resting in the corners — the "liquid" behind the glass. Drawn once per size; nothing here moves (the orb is
  * the only thing alive, and a full-screen animation would cost the A20e battery for no information).
  */
 fun Modifier.pageBackground(): Modifier = composed {

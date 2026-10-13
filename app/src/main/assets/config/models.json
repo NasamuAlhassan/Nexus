@@ -1,61 +1,134 @@
 {
-  "schema_version": 1,
-  "providers": {
-    "groq": {
-      "baseUrl": "https://api.groq.com/openai/v1",
-      "visionModel": "qwen/qwen3.8-27b",
-      "_visionNote": "P-01 fallback rung (camera/GroqVision): Groq's current vision-capable model. Each image counts ~2k input tokens from the same daily budget the planner runs on, so it is tried only when Gemini fails."
-    },
-    "gemini": {"baseUrl": "https://generativelanguage.googleapis.com/v1beta"},
-    "speech": {
-      "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. Twi goes to the UG HCI Lab gateway (language.json hcilab_asr / hcilab_tts) when its token is in local.properties and its quota lasts; English stays on the phone.",
-      "tts": {"english": ["ghvoice", "system"], "twi": ["hcilab_tts", "system"], "ghEnglish": []},
-      "_ttsNote": "ghvoice = the app's own on-device Ghanaian-English voice (voice/SherpaTts, assets/models/ondevice/eng/tts/voice.json). A build without that voice has no 'ghvoice' provider and the id is skipped — English is then the phone's engine, as before.",
-      "asr": {"online": {"twi": ["hcilab_asr"], "gh_en": [], "auto": []}}
-    }
+ "schema_version": 1,
+ "providers": {
+  "groq": {
+   "baseUrl": "https://api.groq.com/openai/v1",
+   "visionModel": "qwen/qwen3.8-27b",
+   "_visionNote": "P-01 fallback rung (camera/GroqVision): Groq's current vision-capable model. Each image counts ~2k input tokens from the same daily budget the planner runs on, so it is tried only when Gemini fails."
   },
-  "models": {
-    "planner": {
-      "provider": "groq",
-      "model": "openai/gpt-oss-120b",
-      "fallbacks": ["openai/gpt-oss-20b"],
-      "fastModel": "openai/gpt-oss-20b",
-      "weakModels": ["openai/gpt-oss-20b"],
-      "chain": ["groq", "gemini"],
-      "_extraNote": "P1-15 (R-A6): extra OpenAI-compatible rungs. Each exists at run time only when local.properties has PLANNER_KEY_<ID> (debug builds). A keyed rung joins the chain after the named ones; name it in `chain` to place it earlier. Request-shape fields: toolChoice (some providers accept only auto), parallelToolCalls (false = one tool call per reply where the default is several), reasoningEffort (false for a provider that rejects the field), maxTokensField (max_completion_tokens | max_tokens | empty = none).",
-      "extra": {
-        "order": ["zai", "nvidia", "openrouter", "openai"],
-        "zai": {"baseUrl": "https://api.z.ai/api/paas/v4", "model": "glm-4.7-flash", "fallbacks": [], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": false, "maxTokensField": "max_tokens"},
-        "nvidia": {"baseUrl": "https://integrate.api.nvidia.com/v1", "model": "openai/gpt-oss-120b", "fallbacks": ["openai/gpt-oss-20b"], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": true, "maxTokensField": "max_tokens"},
-        "openrouter": {"baseUrl": "https://openrouter.ai/api/v1", "model": "openai/gpt-oss-120b", "fallbacks": ["openai/gpt-oss-20b"], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": true, "maxTokensField": "max_tokens"},
-        "openai": {"baseUrl": "https://api.openai.com/v1", "model": "gpt-6-luna", "fallbacks": [], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": false, "maxTokensField": "max_completion_tokens"}
-      },
-      "temperature": 0.2,
-      "requestTokens": 4800,
-      "timeouts": {"connectSec": 8, "callSec": 35},
-      "networkRetryWithinMs": 10000,
-      "hedgeAfterMs": 8000,
-      "fallbackHedgeMs": 16000,
-      "_hedgeNote": "N-15 hedge: a Groq call still unanswered after hedgeAfterMs (x1.75 at high effort) is also sent on a fresh connection with the next key; the fallback chain itself (FallbackBrain) checks the link after router.network.watchdogMs of silence instead of racing providers; fallbackHedgeMs is unused. First answer wins, the other is cancelled. 0 = off. A normal step takes 1-2 s.",
-      "_networkRetryNote": "The cloud chain retries once after a network failure only if that failure came within this many ms (a blip); a slower one means a stalled connection and the user is told at once."
-    },
-    "guard": {
-      "provider": "groq",
-      "model": "meta-llama/llama-prompt-guard-2-86m",
-      "role": "guard",
-      "_note": "O-14: separate free-tier quota bucket; used by J-19 (flag off until verified on device)"
-    },
-    "vision": {
-      "provider": "gemini",
-      "model": "gemini-3.6-flash",
-      "_note": "N-06/P-01: camera descriptions; defaults to the Gemini brain model when absent"
-    },
-    "gemini": {
-      "provider": "gemini",
-      "model": "gemini-3.6-flash",
-      "temperature": 0.2,
-      "timeouts": {"connectSec": 15, "callSec": 45},
-      "maxRateLimitWaitMs": 60000
+  "gemini": {
+   "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
+  },
+  "speech": {
+   "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. Twi goes to the UG HCI Lab gateway (language.json hcilab_asr / hcilab_tts) when its token is in local.properties and its quota lasts; English stays on the phone.",
+   "tts": {
+    "english": [
+     "ghvoice",
+     "system"
+    ],
+    "twi": [
+     "hcilab_tts",
+     "system"
+    ],
+    "ghEnglish": []
+   },
+   "_ttsNote": "ghvoice = the app's own on-device Ghanaian-English voice (voice/SherpaTts, assets/models/ondevice/eng/tts/voice.json). A build without that voice has no 'ghvoice' provider and the id is skipped — English is then the phone's engine, as before.",
+   "asr": {
+    "online": {
+     "twi": [
+      "hcilab_asr"
+     ],
+     "gh_en": [],
+     "auto": []
     }
+   }
   }
+ },
+ "models": {
+  "planner": {
+   "provider": "groq",
+   "model": "openai/gpt-oss-120b",
+   "fallbacks": [
+    "openai/gpt-oss-20b"
+   ],
+   "fastModel": "openai/gpt-oss-20b",
+   "weakModels": [
+    "openai/gpt-oss-20b"
+   ],
+   "chain": [
+    "groq",
+    "gemini"
+   ],
+   "_extraNote": "P1-15 (R-A6): extra OpenAI-compatible rungs. Each exists at run time only when local.properties has PLANNER_KEY_<ID> (debug builds). A keyed rung joins the chain after the named ones; name it in `chain` to place it earlier. Request-shape fields: toolChoice (some providers accept only auto), parallelToolCalls (false = one tool call per reply where the default is several), reasoningEffort (false for a provider that rejects the field), maxTokensField (max_completion_tokens | max_tokens | empty = none).",
+   "extra": {
+    "order": [
+     "zai",
+     "nvidia"
+    ],
+    "zai": {
+     "baseUrl": "https://api.z.ai/api/paas/v4",
+     "model": "glm-4.7-flash",
+     "fallbacks": [],
+     "toolChoice": "auto",
+     "parallelToolCalls": "false",
+     "reasoningEffort": false,
+     "maxTokensField": "max_tokens"
+    },
+    "nvidia": {
+     "baseUrl": "https://integrate.api.nvidia.com/v1",
+     "model": "openai/gpt-oss-120b",
+     "fallbacks": [
+      "openai/gpt-oss-20b"
+     ],
+     "toolChoice": "auto",
+     "parallelToolCalls": "false",
+     "reasoningEffort": true,
+     "maxTokensField": "max_tokens"
+    },
+    "openrouter": {
+     "baseUrl": "https://openrouter.ai/api/v1",
+     "model": "openai/gpt-oss-120b",
+     "fallbacks": [
+      "openai/gpt-oss-20b"
+     ],
+     "toolChoice": "auto",
+     "parallelToolCalls": "false",
+     "reasoningEffort": true,
+     "maxTokensField": "max_tokens"
+    },
+    "openai": {
+     "baseUrl": "https://api.openai.com/v1",
+     "model": "gpt-6-luna",
+     "fallbacks": [],
+     "toolChoice": "auto",
+     "parallelToolCalls": "false",
+     "reasoningEffort": false,
+     "maxTokensField": "max_completion_tokens"
+    },
+    "_note": "D-020 (13 Oct 2026): only free sign-ups are in the order; openrouter/openai stay as inert shapes because they need a paid balance."
+   },
+   "temperature": 0.2,
+   "requestTokens": 4800,
+   "timeouts": {
+    "connectSec": 8,
+    "callSec": 35
+   },
+   "networkRetryWithinMs": 10000,
+   "hedgeAfterMs": 8000,
+   "fallbackHedgeMs": 16000,
+   "_hedgeNote": "N-15 hedge: a Groq call still unanswered after hedgeAfterMs (x1.75 at high effort) is also sent on a fresh connection with the next key; the fallback chain itself (FallbackBrain) checks the link after router.network.watchdogMs of silence instead of racing providers; fallbackHedgeMs is unused. First answer wins, the other is cancelled. 0 = off. A normal step takes 1-2 s.",
+   "_networkRetryNote": "The cloud chain retries once after a network failure only if that failure came within this many ms (a blip); a slower one means a stalled connection and the user is told at once."
+  },
+  "guard": {
+   "provider": "groq",
+   "model": "meta-llama/llama-prompt-guard-2-86m",
+   "role": "guard",
+   "_note": "O-14: separate free-tier quota bucket; used by J-19 (flag off until verified on device)"
+  },
+  "vision": {
+   "provider": "gemini",
+   "model": "gemini-3.6-flash",
+   "_note": "N-06/P-01: camera descriptions; defaults to the Gemini brain model when absent"
+  },
+  "gemini": {
+   "provider": "gemini",
+   "model": "gemini-3.6-flash",
+   "temperature": 0.2,
+   "timeouts": {
+    "connectSec": 15,
+    "callSec": 45
+   },
+   "maxRateLimitWaitMs": 60000
+  }
+ }
 }

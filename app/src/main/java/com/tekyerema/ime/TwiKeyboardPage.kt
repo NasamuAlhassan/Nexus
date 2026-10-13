@@ -52,6 +52,7 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
     var vibrate by remember { mutableStateOf(prefs.vibrate) }
     var sound by remember { mutableStateOf(prefs.sound) }
     var suggest by remember { mutableStateOf(prefs.suggestions) }
+    var swipe by remember { mutableStateOf(prefs.swipeTyping) }
     var habit by remember { mutableStateOf(prefs.textingHabit) }
     var learn by remember { mutableStateOf(prefs.learnWords) }
     var trial by remember { mutableStateOf("") }
@@ -64,8 +65,13 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
         SwitchRow("Big keys", "Taller keys and larger letters.", big) { prefs.bigKeys = it; big = it }
         SwitchRow("Vibrate on each key", null, vibrate) { prefs.vibrate = it; vibrate = it }
         SwitchRow("Sound on each key", null, sound) { prefs.sound = it; sound = it }
-        SwitchRow("Word suggestions", "Offers Twi words above the keys as you type, with ɛ and ɔ in place. Tap one to use it.", suggest) {
+        SwitchRow("Word suggestions", "Offers words above the keys as you type: Twi with ɛ and ɔ in place, and English. " +
+            "Tap one to use it.", suggest) {
             prefs.suggestions = it; suggest = it
+        }
+        SwitchRow("Swipe to type", "Slide your finger from letter to letter and lift: the word goes in, and other " +
+            "words it could be wait above the keys. Slide up from a top-row key for its number.", swipe) {
+            prefs.swipeTyping = it; swipe = it
         }
         SwitchRow("Turn 3 into ɛ and c into ɔ", "In Twi, when you finish a word typed the texting way, like mey3 or wc. " +
             "Press delete straight after to undo it.", habit) { prefs.textingHabit = it; habit = it }
@@ -86,7 +92,8 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
         )
         Note("The keyboard keeps what you type on this phone. It never sends it anywhere and keeps no history. " +
             "Voice typing uses your phone's own speech service, and is off in password and PIN boxes. " +
-            "The suggested Twi words come from Tɛkyerɛma's own Twi and are still being checked by a Twi speaker.")
+            "The suggested Twi words come from Tɛkyerɛma's own Twi and are still being checked by a Twi speaker; the " +
+            "English words are a public list of common words, kept on the phone.")
         Spacer(Modifier.height(24.dp))
     }
 }

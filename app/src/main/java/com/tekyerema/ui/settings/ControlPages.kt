@@ -139,30 +139,30 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             }
         }
         GlassGroup("What it may do for you") {
-            capabilityRow(Capability.MESSAGES, "Texts, WhatsApp messages and replies.", Icons.Outlined.ChatBubbleOutline, Spectrum.Azure)
-            capabilityRow(Capability.CALLS, "Placing calls. Emergency help always works.", Icons.Outlined.Call, Spectrum.Mint)
+            capabilityRow(Capability.MESSAGES, "Texts, WhatsApp messages and replies.", Icons.Outlined.ChatBubbleOutline, Spectrum.Teal)
+            capabilityRow(Capability.CALLS, "Placing calls. Emergency help always works.", Icons.Outlined.Call, Spectrum.Lime)
             capabilityRow(Capability.MONEY, "Mobile Money and payments.", Icons.Outlined.Payments, Spectrum.Gold)
             // Money safety round 2 (money/MoneyLimits): the most a send and a day may be; raising waits 30 minutes.
             SettingRow("Mobile Money limits", value = remember(version) { moneyLimitsSummary() }, icon = Icons.Outlined.Payments,
                 iconTint = Spectrum.Gold, description = "The most you can send at once, and in a day.") { open(Page.MONEY_LIMITS) }
-            capabilityRow(Capability.SETTINGS, "Wi-Fi, Bluetooth, brightness, sound mode and other phone settings.", Icons.Outlined.Tune, Spectrum.Cyan)
-            capabilityRow(Capability.WEB, "Searching the web for answers.", Icons.Outlined.Public, Spectrum.Violet)
+            capabilityRow(Capability.SETTINGS, "Wi-Fi, Bluetooth, brightness, sound mode and other phone settings.", Icons.Outlined.Tune, Spectrum.Aqua)
+            capabilityRow(Capability.WEB, "Searching the web for answers.", Icons.Outlined.Public, Spectrum.Green)
             // D8: per-app rules (AppRulesPage) — never touch an app, or only guide there.
             SettingRow("App rules", value = remember(version) { appRulesSummary() }, icon = Icons.Outlined.Apps,
-                iconTint = Spectrum.Rose, description = "Apps it must stay out of, or only guide you in.", divider = false) { open(Page.APP_RULES) }
+                iconTint = Spectrum.Coral, description = "Apps it must stay out of, or only guide you in.", divider = false) { open(Page.APP_RULES) }
         }
         Note("Whatever you choose here, Tɛkyerɛma always asks before calls, messages and money, and never reads or types a PIN or password.")
         GlassGroup("AI and privacy") {
             SwitchRow("Use the cloud",
                 if (cloud) "On: bigger tasks use the online AI below." else "Off: nothing leaves your phone. Simple commands still work; " +
                     "web search, picture descriptions and bigger tasks don't.",
-                cloud, icon = if (cloud) Icons.Outlined.Cloud else Icons.Outlined.CloudOff, iconTint = Spectrum.Azure) { op.cloudAllowed = it }
+                cloud, icon = if (cloud) Icons.Outlined.Cloud else Icons.Outlined.CloudOff, iconTint = Spectrum.Teal) { op.cloudAllowed = it }
             SettingRow("AI provider and model", value = providers.joinToString(" → ") { Disclosure.name(it) }.ifEmpty { "None" },
-                icon = Icons.Outlined.SmartToy, iconTint = Spectrum.Violet,
+                icon = Icons.Outlined.SmartToy, iconTint = Spectrum.Green,
                 description = "Which online AI is used, in what order, and what each one does with your data.") { open(Page.PROVIDERS) }
             SettingRow("Your API keys", value = if (keys == 0) "Built-in" else "$keys of yours", icon = Icons.Outlined.VpnKey,
                 iconTint = Spectrum.Gold, description = "Use your own account, or your own AI server.") { open(Page.KEYS) }
-            SettingRow("Limits and usage", value = "${usage.first} today", icon = Icons.Outlined.DataUsage, iconTint = Spectrum.Mint,
+            SettingRow("Limits and usage", value = "${usage.first} today", icon = Icons.Outlined.DataUsage, iconTint = Spectrum.Lime,
                 description = "How much online AI was used today, and the most it may use.", divider = false) { open(Page.USAGE) }
         }
         GlassGroup("Runs by itself") {
@@ -170,17 +170,17 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
                 icon = Icons.Outlined.Schedule, iconTint = Spectrum.Gold) { op.schedulesEnabled = it }
             // Phone care: this switch also silences the money and missed-call alerts (phonecare/PhoneAlerts).
             SwitchRow("Message alerts", "Tells you when someone you chose sends a message, and your money and missed-call alerts.", alerts,
-                icon = Icons.Outlined.NotificationsActive, iconTint = Spectrum.Rose) { op.messageAlertsEnabled = it }
+                icon = Icons.Outlined.NotificationsActive, iconTint = Spectrum.Coral) { op.messageAlertsEnabled = it }
             SwitchRow("Routines", "Your own phrases, like “good morning”, that run several steps.", routines,
-                icon = Icons.Outlined.Repeat, iconTint = Spectrum.Violet) { op.routinesEnabled = it }
+                icon = Icons.Outlined.Repeat, iconTint = Spectrum.Green) { op.routinesEnabled = it }
             SwitchRow("Computer connection", "Lets a computer you trust, over a USB cable, ask Tɛkyerɛma to do tasks. Anything " +
                 "important still needs your OK on this phone.", remote, divider = false,
-                icon = Icons.Outlined.Computer, iconTint = Spectrum.Cyan) { op.remoteControlEnabled = it }
+                icon = Icons.Outlined.Computer, iconTint = Spectrum.Aqua) { op.remoteControlEnabled = it }
         }
         GlassGroup("Your data") {
-            SettingRow("Activity log", value = logCount?.let { "$it" }.orEmpty(), icon = Icons.Outlined.History, iconTint = Spectrum.Azure,
+            SettingRow("Activity log", value = logCount?.let { "$it" }.orEmpty(), icon = Icons.Outlined.History, iconTint = Spectrum.Teal,
                 description = "What Tɛkyerɛma proposed, what you allowed and what happened. Any change to it shows.") { open(Page.AUDIT) }
-            SettingRow("What Tɛkyerɛma keeps", icon = Icons.Outlined.Inventory2, iconTint = Spectrum.Mint, divider = false,
+            SettingRow("What Tɛkyerɛma keeps", icon = Icons.Outlined.Inventory2, iconTint = Spectrum.Lime, divider = false,
                 description = "See it, choose how long it's kept, export it or delete it.") { open(Page.DATA) }
         }
         Note("You can also say “offline mode”, “ask me before every step”, “normal mode”, “never touch WhatsApp”, " +
@@ -485,14 +485,14 @@ internal fun DataPage(settings: Settings, onBack: () -> Unit, openAudit: () -> U
         }
         GlassGroup("A copy for you") {
             SwitchRow("Include message text", "Off: your own words and messages are left out — only their length is shown.", includeText) { includeText = it }
-            SettingRow("Export history and activity log", icon = Icons.Outlined.Share, iconTint = Spectrum.Azure,
+            SettingRow("Export history and activity log", icon = Icons.Outlined.Share, iconTint = Spectrum.Teal,
                 description = "Makes one file and opens the share menu, so you choose where it goes.") {
                 scope.launch {
                     val ok = withContext(Dispatchers.IO) { com.tekyerema.audit.AuditExport.share(context, includeText) }
                     message = if (ok) null else "Sorry, I couldn't make the file."
                 }
             }
-            SettingRow("Activity log", icon = Icons.Outlined.History, iconTint = Spectrum.Violet, divider = false,
+            SettingRow("Activity log", icon = Icons.Outlined.History, iconTint = Spectrum.Green, divider = false,
                 description = "Read it here, step by step.") { openAudit() }
         }
         val improve = remember(version) { settings.trajectoryConsent }
@@ -510,7 +510,7 @@ internal fun DataPage(settings: Settings, onBack: () -> Unit, openAudit: () -> U
             }
         }
         GlassGroup {
-            SettingRow("Delete everything", icon = Icons.Outlined.DeleteForever, iconTint = Spectrum.Rose, divider = false,
+            SettingRow("Delete everything", icon = Icons.Outlined.DeleteForever, iconTint = Spectrum.Coral, divider = false,
                 description = "Erases everything listed above. Your settings, keys and emergency contact stay.") { confirmDelete = true }
         }
         message?.let { Note(it, Modifier.semantics { liveRegion = LiveRegionMode.Polite }) }

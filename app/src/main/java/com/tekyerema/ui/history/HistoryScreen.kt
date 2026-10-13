@@ -81,7 +81,7 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                 Modifier.fillMaxWidth().padding(horizontal = CardMargin, vertical = 8.dp).glass(CardShape).padding(20.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconTile(Icons.Outlined.History, Spectrum.Azure)
+                IconTile(Icons.Outlined.History, Spectrum.Teal)
                 Spacer(Modifier.width(16.dp))
                 Column {
                     Text("Nothing yet", style = MaterialTheme.typography.titleLarge, color = Tk.Text)
@@ -150,15 +150,15 @@ private fun kindOf(title: String): Pair<ImageVector, Color> {
     val t = title.lowercase()
     fun has(vararg w: String) = w.any { Regex("\\b$it").containsMatchIn(t) }
     return when {
-        has("call", "phone", "dial") -> Icons.Outlined.Call to Spectrum.Mint
-        has("message", "text", "sms", "whatsapp", "sent", "send", "repl", "email", "telegram") -> Icons.Outlined.ChatBubbleOutline to Spectrum.Azure
+        has("call", "phone", "dial") -> Icons.Outlined.Call to Spectrum.Lime
+        has("message", "text", "sms", "whatsapp", "sent", "send", "repl", "email", "telegram") -> Icons.Outlined.ChatBubbleOutline to Spectrum.Teal
         has("alarm", "timer", "remind", "wake") -> Icons.Outlined.Alarm to Spectrum.Gold
-        has("music", "song", "play", "youtube", "skip") -> Icons.Outlined.MusicNote to Spectrum.Rose
-        has("photo", "selfie", "camera", "picture") -> Icons.Outlined.PhotoCamera to Spectrum.Rose
-        has("install", "download") -> Icons.Outlined.Download to Spectrum.Cyan
-        has("wi-fi", "wifi", "bluetooth", "volume", "bright", "torch", "flashlight", "setting", "sound", "mode") -> Icons.Outlined.Tune to Spectrum.Cyan
-        has("open", "launch", "went to", "go to") -> Icons.Outlined.Apps to Spectrum.Violet
-        else -> Icons.Outlined.AutoAwesome to Spectrum.Violet
+        has("music", "song", "play", "youtube", "skip") -> Icons.Outlined.MusicNote to Spectrum.Coral
+        has("photo", "selfie", "camera", "picture") -> Icons.Outlined.PhotoCamera to Spectrum.Coral
+        has("install", "download") -> Icons.Outlined.Download to Spectrum.Aqua
+        has("wi-fi", "wifi", "bluetooth", "volume", "bright", "torch", "flashlight", "setting", "sound", "mode") -> Icons.Outlined.Tune to Spectrum.Aqua
+        has("open", "launch", "went to", "go to") -> Icons.Outlined.Apps to Spectrum.Green
+        else -> Icons.Outlined.AutoAwesome to Spectrum.Green
     }
 }
 

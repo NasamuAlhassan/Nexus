@@ -276,9 +276,16 @@ class RoutingBrain(
             // Step one of a task about a named app: open it here — deterministic, ~0 ms instead of a round-trip.
             if (!stickyCloud && ctx.history.isEmpty()) appForGoal?.invoke(ctx.goal)?.let { (label, pkg) ->
                 if (ctx.screen.optString("app") != pkg) {
-                    android.util.Log.i("Tekyerema", "[ROUTE] goal names $label → opening it locally first, then the cloud brain")
                     stickyCloud = true
                     if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)
+                    // N-09 (3): "open Settings and go to about phone and tell me …" — straight to the page by its own intent
+                    // (one step, no scroll down the list), and the cloud brain takes over from there.
+                    settingsPageIn(ctx.goal, pkg)?.let { page ->
+                        android.util.Log.i("Tekyerema", "[ROUTE] goal names the ${page.spoken} page of $label → opening it by its own intent first, then the cloud brain")
+                        return AgentDecision.CallTool("open_setting", org.json.JSONObject().put("target", page.target),
+                            "local:goal names the ${page.spoken} page", expects = "foreground_is: ${page.title}")
+                    }
+                    android.util.Log.i("Tekyerema", "[ROUTE] goal names $label → opening it locally first, then the cloud brain")
                     return AgentDecision.CallTool("open_app", org.json.JSONObject().put("app", label), "local:goal names $label",
                         expects = "foreground_is: $pkg")
                 }
@@ -346,6 +353,18 @@ class RoutingBrain(
     }
 
     private val HUNT_ON_HOME = setOf("tap", "long_press", "swipe", "scroll", "drag")
+
+    /** N-09 (3): the Settings page a goal names right after "open Settings" ("… and go to about phone and …"), when Android
+     *  opens that page directly (SettingsPages); null for any other app, no page, or a page without its own intent. Pure. */
+    internal fun settingsPageIn(goal: String, pkg: String): SettingsPages.Page? {
+        if (!pkg.endsWith(".settings")) return null
+        val clauses = LocalBrain.splitClauses(goal) ?: return null
+        val i = clauses.indexOfFirst { OPENS_SETTINGS.containsMatchIn(it) }
+        if (i < 0 || i + 1 >= clauses.size) return null
+        val label = LocalBrain.inAppNavTarget(clauses[i + 1]) ?: return null
+        return SettingsPages.find(label)
+    }
+    private val OPENS_SETTINGS = Regex("(?i)^(?:please\\s+|kindly\\s+)?(?:open|launch|start|go\\s+to|bring\\s+up|bue\\S*)\\b.*\\bsettings\\b")
     /** The default launcher, by package name — every stock and OEM launcher carries the word (nexuslauncher, launcher3,
      *  com.sec.android.app.launcher, …). Android-free on purpose. */
     private fun isHomeScreen(pkg: String?): Boolean = pkg != null && pkg.lowercase().contains("launcher")

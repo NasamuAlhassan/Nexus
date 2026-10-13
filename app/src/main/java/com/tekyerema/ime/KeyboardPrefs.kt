@@ -24,6 +24,10 @@ class KeyboardPrefs(ctx: Context) {
     var suggestions: Boolean
         get() = p.getBoolean("suggestions", true)
         set(v) = p.edit().putBoolean("suggestions", v).apply()
+    /** Slide a finger from letter to letter to type a word (G-05 (2)). On by default; a tap still types one key. */
+    var swipeTyping: Boolean
+        get() = p.getBoolean("swipe_typing", true)
+        set(v) = p.edit().putBoolean("swipe_typing", v).apply()
     /** "3" → ɛ and "c" → ɔ in Twi mode. On by default: the owner asked for it and a backspace undoes each one. */
     var textingHabit: Boolean
         get() = p.getBoolean("texting_habit", true)

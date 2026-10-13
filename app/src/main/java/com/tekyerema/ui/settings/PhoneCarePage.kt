@@ -70,7 +70,7 @@ internal fun PhoneCarePage(settings: Settings, onBack: () -> Unit) {
         Note("Tɛkyerɛma can check that everything it needs is working, and tell you about things that matter as they happen.")
         GlassGroup("Check my phone") {
             SettingRow("Check my phone", value = if (checking) "Checking…" else "", icon = Icons.Outlined.HealthAndSafety,
-                iconTint = Spectrum.Mint, divider = false,
+                iconTint = Spectrum.Lime, divider = false,
                 description = "Permissions, the internet, the AI and speech — and how to fix what isn't working.") {
                 if (!checking) {
                     checking = true
@@ -99,12 +99,12 @@ internal fun PhoneCarePage(settings: Settings, onBack: () -> Unit) {
             SwitchRow("Include my balance", "Money alerts also say your balance. Off: your balance is never said.",
                 balance, icon = Icons.Outlined.AccountBalanceWallet, iconTint = Spectrum.Gold) { settings.alertMoneyBalance = it }
             SwitchRow("Missed calls", "Tells you when someone in your contacts calls and you miss it.",
-                missed, icon = Icons.AutoMirrored.Outlined.PhoneMissed, iconTint = Spectrum.Mint) { settings.alertMissedCalls = it }
+                missed, icon = Icons.AutoMirrored.Outlined.PhoneMissed, iconTint = Spectrum.Lime) { settings.alertMissedCalls = it }
             SwitchRow("Low battery", "Warns you when the battery is low, and again when it's nearly empty.",
-                battery, icon = Icons.Outlined.BatteryAlert, iconTint = Spectrum.Rose) { settings.alertBattery = it }
+                battery, icon = Icons.Outlined.BatteryAlert, iconTint = Spectrum.Coral) { settings.alertBattery = it }
             SwitchRow("Private alerts", "On the loudspeaker, only says that you have an alert — say “read it” to hear it. " +
                 "With earphones or Bluetooth, reads it straight away.", privateAlerts, divider = false,
-                icon = Icons.Outlined.VisibilityOff, iconTint = Spectrum.Violet) { settings.alertsPrivate = it }
+                icon = Icons.Outlined.VisibilityOff, iconTint = Spectrum.Green) { settings.alertsPrivate = it }
         }
         if ((money || missed) && !notifications)
             Note("Money and missed-call alerts need “Read messages”. Turn it on in Settings, Permissions.")

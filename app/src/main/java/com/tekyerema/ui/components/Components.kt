@@ -348,7 +348,7 @@ fun SettingRow(
     value: String? = null,
     divider: Boolean = true,
     icon: ImageVector? = null,
-    iconTint: Color = Spectrum.Azure,
+    iconTint: Color = Spectrum.Teal,
     description: String? = null,
     onClick: () -> Unit
 ) {
@@ -385,7 +385,7 @@ fun SwitchRow(
     checked: Boolean,
     divider: Boolean = true,
     icon: ImageVector? = null,
-    iconTint: Color = Spectrum.Azure,
+    iconTint: Color = Spectrum.Teal,
     onChange: (Boolean) -> Unit
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -564,7 +564,7 @@ fun CommandField(
             onMic != null -> IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to Tɛkyerɛma" }) {
                 Box(
                     Modifier.size(40.dp).clip(CircleShape).background(
-                        Brush.linearGradient(listOf(Spectrum.Cyan, Spectrum.Violet), start = Offset.Zero, end = Offset(90f, 90f))
+                        Brush.linearGradient(listOf(Spectrum.Aqua, Spectrum.Green), start = Offset.Zero, end = Offset(90f, 90f))
                     ),
                     contentAlignment = Alignment.Center
                 ) { MicGlyph(Color.White, Modifier.size(20.dp)) }

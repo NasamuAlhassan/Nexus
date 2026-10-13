@@ -37,6 +37,8 @@ class LocalBrain : AgentBrain {
     private val planSaid = ArrayList<String>()
     /** Indexes of plan clauses that go to a PAGE inside the app opened before them ("go to the battery page") — see [navStep]. */
     private val planNav = HashSet<Int>()
+    /** N-09 (3): plan clauses that open a Settings page DIRECTLY (its own intent) instead of "open Settings, then tap" — see [deepStep]. */
+    private val planDeep = HashMap<Int, SettingsPages.Page>()
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         step++
@@ -355,21 +357,33 @@ class LocalBrain : AgentBrain {
         val clauses = splitClauses(ctx.goal) ?: return null
         val resolved = ArrayList<String>()
         val nav = HashSet<Int>()
+        val deep = HashMap<Int, SettingsPages.Page>()
         var inApp = false
+        var settingsJustOpened = -1     // index of an "open Settings" clause with nothing after it yet
         for (c in clauses) {
             val clause = if (inApp) inAppClause(c) else c
             // After "open <app>", "go to the battery page" / "open about phone" is a PAGE inside that app: a tap on its
             // label, never another open_app — that read "battery page" as an app, failed as "not installed", and the
             // task ended there instead of reaching the page (Pixel emulator, 12 October 2026, B-04).
             val navLabel = if (inApp) inAppNavTarget(clause) else null
-            if (navLabel != null) { resolved.add("tap $navLabel"); nav.add(resolved.size - 1); continue }
+            if (navLabel != null) {
+                // N-09 (3): a Settings page Android opens directly folds into the "open Settings" clause before it — one
+                // intent to the page instead of a launch, a scroll and a tap (emulator, 13 October 2026: 20 s → under 10).
+                val page = if (settingsJustOpened >= 0) SettingsPages.find(navLabel) else null
+                if (page != null) { deep[settingsJustOpened] = page; settingsJustOpened = -1; continue }
+                settingsJustOpened = -1
+                resolved.add("tap $navLabel"); nav.add(resolved.size - 1); continue
+            }
             val d = LocalBrain().decide(ctx.copy(goal = clause, history = emptyList())) as? AgentDecision.CallTool ?: return null
             if (d.name !in PLAN_TOOLS || (inApp && d.name !in IN_APP_TOOLS)) return null
             inApp = when (d.name) { "open_app" -> true; "key_event" -> false; else -> inApp }
             resolved.add(clause)
+            settingsJustOpened = if (d.name == "open_app" && d.args.optString("app").trim().equals("settings", ignoreCase = true))
+                resolved.lastIndex else -1
         }
         plan = resolved; planIdx = 0; planChild = LocalBrain(); planMark = ctx.history.size; planSaid.clear()
         planNav.clear(); planNav.addAll(nav)
+        planDeep.clear(); planDeep.putAll(deep)
         return continuePlan(ctx)
     }
 
@@ -378,7 +392,9 @@ class LocalBrain : AgentBrain {
         val steps = plan ?: return AgentDecision.CannotDo(DEFER, "no plan")
         while (true) {
             val clause = steps[planIdx]
-            val d = if (planIdx in planNav) navStep(clause, ctx.history.drop(planMark), ctx.screen)
+            val deepPage = planDeep[planIdx]
+            val d = if (deepPage != null) deepStep(deepPage, ctx.history.drop(planMark), ctx.screen)
+                else if (planIdx in planNav) navStep(clause, ctx.history.drop(planMark), ctx.screen)
                 else (planChild ?: LocalBrain().also { planChild = it })
                     .decide(ctx.copy(goal = clause, history = ctx.history.drop(planMark)))
             when (d) {
@@ -440,6 +456,26 @@ class LocalBrain : AgentBrain {
         }
         return if (last.contains("→ success") && !last.contains("verified=false")) AgentDecision.Done(opened)
         else AgentDecision.CannotDo(DEFER, "\"$label\" isn't one tap away in this app")
+    }
+
+    /**
+     * N-09 (3) — "open Settings" + "go to the <page>" as ONE step when Android opens that page directly: the open_setting
+     * tool fires the page's own intent and the verifier checks the page's title in front. Opened → done, with the page
+     * named; the shortcut refused, or the page not in front → the rest is the planner's, from wherever Settings landed (a
+     * DEFER with the history), exactly as a page that is not one tap away.
+     */
+    private fun deepStep(page: SettingsPages.Page, stepHistory: List<String>, screen: JSONObject): AgentDecision {
+        val opened = "Settings is open, on ${page.spoken}."
+        val last = stepHistory.lastOrNull { STEP_LINE.containsMatchIn(it) }
+        if (last == null) {
+            // Already there: Settings reopens where it was left.
+            if (screen.optString("app") == "com.android.settings" &&
+                screen.optString("screen").trim().startsWith(page.title, ignoreCase = true)) return AgentDecision.Done(opened)
+            return AgentDecision.CallTool("open_setting", JSONObject().put("target", page.target),
+                "local plan: straight to ${page.spoken} (the page's own intent)", expects = "foreground_is: ${page.title}")
+        }
+        return if (last.contains("→ success") && !last.contains("verified=false")) AgentDecision.Done(opened)
+        else AgentDecision.CannotDo(DEFER, "the ${page.spoken} page didn't open by its shortcut")
     }
 
     private fun finishLine(ctx: BrainContext): AgentDecision {
