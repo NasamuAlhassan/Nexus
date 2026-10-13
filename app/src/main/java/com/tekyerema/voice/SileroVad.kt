@@ -53,7 +53,10 @@ class SileroVad(
             val cfg = VadModelConfig(
                 sileroVadModelConfig = SileroVadModelConfig(
                     model = "vad/silero_vad.onnx",
-                    threshold = 0.5f,
+                    // P4-08 (13 October 2026): the asset is Silero VAD v6.2 (`silero_vad_16k_op15.onnx`, 1,289,603 bytes; the
+                    // bundled file had been the k2-fsa v4 export). v6 can sit lower on quiet speech, so the threshold is a
+                    // tunable (`speech.vad.threshold`, 0.35–0.5); sherpa-onnx 1.13.8 loads v5/v6 as is, windowSize 512 at 16 kHz.
+                    threshold = try { com.tekyerema.core.config.AppConfig.double("speech.vad.threshold", 0.5).toFloat().coerceIn(0.1f, 0.9f) } catch (_: Throwable) { 0.5f },
                     minSilenceDuration = 0.3f,
                     minSpeechDuration = 0.20f,
                     windowSize = 512,
@@ -65,7 +68,9 @@ class SileroVad(
                 debug = false
             )
             Vad(assetManager = appContext.assets, config = cfg).also {
-                Log.i("Tekyerema", "[VAD] Silero VAD loaded (assets/vad/silero_vad.onnx)")
+                // The size names the model (v4 export 643,854 B; v6.2 16k op15 1,289,603 B) — the one check possible without running it.
+                val bytes = try { appContext.assets.openFd("vad/silero_vad.onnx").use { it.length } } catch (_: Throwable) { -1L }
+                Log.i("Tekyerema", "[VAD] Silero VAD loaded (assets/vad/silero_vad.onnx, $bytes bytes, threshold=${cfg.sileroVadModelConfig.threshold})")
             }
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[VAD] Silero unavailable, falling back to energy VAD: ${t.message}"); null
