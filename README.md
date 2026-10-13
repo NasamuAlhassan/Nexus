@@ -87,17 +87,19 @@ Test identity: **Prince / 0552093690 / 0508797323**.
 
 ## Known limitations (honest status)
 
-- **On-device ASR is not bundled.** The validated Twi model is ~698 MB ONNX FP32 — too large to bundle; it needs
-  conversion to sherpa-onnx's Whisper format + the sherpa-onnx AAR + a first-run download, then device
-  validation. Until then, ASR is **online** (proxy); offline speech input returns an honest "you're offline"
-  message. Status: `UNVERIFIED / DEVICE_TEST_PENDING`.
-- **On-device neural TTS** (esp. Twi) is not bundled; English uses the offline system engine, Twi uses online
-  Khaya with a system-engine fallback so the assistant is never silent.
-- **No wake word** — push-to-talk only (tap the visual / floating bubble / accessibility button).
-- **Device testing is pending** — built and unit-tested on desktop; not yet installed/run on a phone (no device
-  on ADB during this build).
-- Offline `LocalBrain` handles single-action and screen-read goals; genuinely multi-step goals are routed to the
-  cloud operator when online, or nudged toward a simpler phrasing when offline.
+- **Twi speech is online.** Twi ASR and the Twi voice go through the UG HCI Lab speech API (the hackathon's required
+  path; ~10 ASR + 15 TTS requests a day on the test token). Offline, Twi speech input returns an honest "you're offline"
+  line; typed Twi still works through the local router.
+- **English speech:** the full APK bundles a fine-tuned Parakeet 0.6B for offline English ASR (≈631 MB; the `-PslimApk`
+  build leaves it out and uses the phone's recogniser); English replies use the phone's own voice. No Ghanaian-English
+  voice exists anywhere yet (our own Piper voice is a Kaggle work in progress).
+- **Wake word:** "Hey Tɛkyerɛma" (openWakeWord heads on ONNX Runtime) is on by default; the orb, the floating bubble, the
+  accessibility button and the assistant gesture also open the mic.
+- **Device status (13 Oct 2026):** verified on the Pixel 4 emulator (API 35) for every flow that needs no SIM — the Mobile
+  Money walk runs against a debug USSD simulator there — and on a Samsung A20e (Android 11, MTN) for the live flows up to
+  the PIN. Nothing is ever automated past the MoMo PIN; the receipt is read from MTN's own screen and SMS.
+- Offline, `LocalBrain` handles single-action and screen-read goals, the device fast path answers time/battery/volume and
+  the like, and genuinely multi-step goals get an honest "I'm offline, so I can't do all of that" with the part it can do.
 
 ## Model licensing / attribution
 
