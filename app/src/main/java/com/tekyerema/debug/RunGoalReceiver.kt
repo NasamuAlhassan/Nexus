@@ -158,6 +158,17 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // Log what the agent's perception sees on the current screen (DEBUG only — may include on-screen text).
         //   --es dump_screen 1
+        // P5-02 test harness (13 October 2026): open the picture reader on a file in the app's own cache. The reader is not
+        // exported, so `am start` from the shell is refused (as it should be); the share sheet is the user's way to it.
+        intent.getStringExtra("read_image")?.let { path ->
+            val f = java.io.File(path)
+            Log.i("Tekyerema", "[IMPORT] debug read_image exists=${f.exists()} bytes=${f.length()}")
+            if (f.exists()) try {
+                context.startActivity(com.tekyerema.camera.CameraReadActivity.imageIntent(context, android.net.Uri.fromFile(f),
+                    com.tekyerema.camera.CameraReadActivity.MODE_TEXT).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (t: Throwable) { Log.w("Tekyerema", "[IMPORT] debug read_image failed: ${t.javaClass.simpleName}") }
+            return
+        }
         intent.getStringExtra("dump_screen")?.let {
             val pending = goAsync()
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {

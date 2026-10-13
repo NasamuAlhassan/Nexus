@@ -201,6 +201,7 @@ object VoiceEngine {
         stage("ownVoice")
         android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}")
         val levels = ArrayList<StateFlow<Float>>()
+        val mics = ArrayList<MicCapture>()   // warmed (neural VAD loaded) on a background thread after start-up — P3-02
         // B-19: contact names + app labels for post-ASR name correction, loaded off the voice path (READ_CONTACTS only
         // if already granted). Refreshed again whenever a listen starts (cheap no-op inside its TTL). Both profiles.
         scope.launch(Dispatchers.IO) { try { SpeechVocabulary.refresh(app) } catch (_: Throwable) {} }
@@ -246,7 +247,7 @@ object VoiceEngine {
                 val mic = MicCapture(appContext = app, defaultStrategy = { VadStrategy.named(settings.vadStrategy) })   // B-03
                 // Yes/no answers: a shorter silence window than a full request.
                 val answerMic = MicCapture(appContext = app, noSpeechTimeoutMs = 6000)
-                levels.add(mic.level); levels.add(answerMic.level)
+                levels.add(mic.level); levels.add(answerMic.level); mics += mic; mics += answerMic
                 // B-18: which voice fills each role comes from config (providers.speech.tts.*), always ending in the phone's
                 // own engine so the assistant is never silent. The language layer builds the network clients (UG HCI Lab or
                 // any REST API) from config + local.properties; with the shipped config there are none, so everything is the
@@ -320,7 +321,7 @@ object VoiceEngine {
                 // dedicated mic (a dictation-length no-speech window; never shared with a turn's mics — Dictation
                 // refuses while a turn runs). Its level joins the living visual like every other microphone.
                 dictationAsr = hybrid
-                dictationMic = MicCapture(appContext = app, noSpeechTimeoutMs = 8000).also { levels.add(it.level) }
+                dictationMic = MicCapture(appContext = app, noSpeechTimeoutMs = 8000).also { levels.add(it.level); mics += it }
                 return com.tekyerema.voice.io.CapturedAudioInput(mic, answerMic, hybrid, sessionLang, forced)
             }
             // gh_mixed (owner, 2026-09-29): English listens → the phone's recognizer; Twi listens → the captured path (UG HCI
@@ -369,7 +370,7 @@ object VoiceEngine {
             systemVoice = if (own != null) englishVoice else systemTts,
             // B-07 barge-in: an echo-cancelled mic that ignores the first 700 ms of each reply and needs ~200 ms of
             // sustained speech, so our own voice doesn't interrupt itself. Flag + config switchable.
-            bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200),
+            bargeMic = MicCapture(appContext = app, toneGuardMs = 700, echoCancelled = true, onsetMs = 200).also { mics += it },
             // …and the reply itself on the voice-communication path while that mic listens, so the echo canceller has
             // our voice as its reference (DuplexAudio). Only when barge-in is on (below).
             duplexBegin = { duplex.begin() },
@@ -405,6 +406,13 @@ object VoiceEngine {
         scope.launch(Dispatchers.IO) { try { com.tekyerema.core.Health.logStartup(app) } catch (_: Throwable) {} }
         applyVoiceSettings(); stage("settings")
         android.util.Log.i("Tekyerema", "[STARTUP] VoiceEngine.init ${android.os.SystemClock.uptimeMillis() - startT0} ms: $startMarks")
+        // The neural VAD of every microphone loads here, off the start-up path, so the first listen still finds it ready.
+        scope.launch(Dispatchers.Default) {
+            kotlinx.coroutines.delay(1_500)
+            val t = android.os.SystemClock.uptimeMillis()
+            mics.forEach { m -> try { m.warm() } catch (_: Throwable) {} }
+            android.util.Log.i("Tekyerema", "[STARTUP] VAD warm for ${mics.size} microphones in ${android.os.SystemClock.uptimeMillis() - t} ms")
+        }
         scope.launch { settings.changes.collect { applyVoiceSettings() } }
         // History: one row per finished task, written on the transition into a terminal status.
         scope.launch {

@@ -41,6 +41,20 @@ class ToolSelectorTest {
         assertTrue(pick("save this number as a new contact").contains("create_contact"))
     }
 
+    @Test fun `earlier turns count only when the request leans on them`() {
+        val turns = listOf("send 50 cedis to 0552093690 with mobile money", "MTN is asking for your PIN — enter it yourself to finish.")
+        // A self-contained new request after a money walk: no comms or money block from the old turns (37 → 19 tools, 13 Oct 2026).
+        val fresh = ToolSelector.select(ToolSelector.contextFor("open settings and go to about phone and tell me the android version", turns), emptySet(), emptySet(), all)
+        assertFalse(fresh.contains("mobile_money")); assertFalse(fresh.contains("make_call"))
+        assertTrue(fresh.contains("open_setting"))
+        // A follow-up that leans on the conversation keeps it: "do the same for Ama" / "send it again" / a four-word ask.
+        assertTrue(ToolSelector.select(ToolSelector.contextFor("do the same for Ama", turns), emptySet(), emptySet(), all).contains("mobile_money"))
+        assertTrue(ToolSelector.select(ToolSelector.contextFor("try that again", turns), emptySet(), emptySet(), all).contains("mobile_money"))
+        assertTrue(ToolSelector.select(ToolSelector.contextFor("and to Kofi", turns), emptySet(), emptySet(), all).contains("mobile_money"))
+        assertEquals("the goal alone, when it stands alone", "turn on bluetooth please now",
+            ToolSelector.contextFor("turn on bluetooth please now", turns))
+    }
+
     @Test fun `the core block comes first and in a fixed order, then the groups`() {
         val t = pick("send 10 cedis to Kofi with mobile money")
         assertEquals(ToolSelector.DEFAULT_CORE, t.take(ToolSelector.DEFAULT_CORE.size))

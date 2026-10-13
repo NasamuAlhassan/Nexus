@@ -46,9 +46,17 @@ class MicCapture(
     private val vad = EnergyVad(sampleRate = sampleRate)
     // §P0 — prefer Silero (neural) VAD; it handles the A20's low-SNR raw mic where an energy threshold can't.
     // Falls back to the energy VAD if the model can't load (or no context).
-    private val silero: SileroVad? = appContext?.let { runCatching { SileroVad(it, sampleRate, startFrames = (onsetMs / 20).coerceAtLeast(2)) }.getOrNull()?.takeIf { s -> s.ready } }
-    private val vadName = if (silero != null) "silero" else "energy"
-    private fun segReset() { if (silero != null) silero.reset() else vad.reset() }
+    // P3-02 (13 October 2026): loaded on first use — or by [warm] on a background thread right after start-up — not in the
+    // constructor: four MicCaptures are built while the app starts, and each model load cost 1–2 s of the main thread on a
+    // busy device (`layer+inputs` 5.4 s + `controller` 5.3 s of a 16.6-s onCreate after an install on the emulator).
+    private val sileroLazy = lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        appContext?.let { runCatching { SileroVad(it, sampleRate, startFrames = (onsetMs / 20).coerceAtLeast(2)) }.getOrNull()?.takeIf { s -> s.ready } }
+    }
+    private val silero: SileroVad? get() = sileroLazy.value
+    private val vadName: String get() = if (silero != null) "silero" else "energy"
+    /** Load the neural VAD now (call from a background thread after start-up) so the first listen doesn't wait for it. */
+    fun warm() { sileroLazy.value }
+    private fun segReset() { val s = silero; if (s != null) s.reset() else vad.reset() }
     private fun segProcess(f: ShortArray): EnergyVad.Event = silero?.process(f) ?: vad.process(f)
     private fun segPause(): Int = silero?.pauseFrames ?: vad.pauseFrames
 

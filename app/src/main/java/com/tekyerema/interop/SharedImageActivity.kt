@@ -27,10 +27,13 @@ class SharedImageActivity : Activity() {
         val stream: Uri? = if (android.os.Build.VERSION.SDK_INT >= 33) i?.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
             else @Suppress("DEPRECATION") i?.getParcelableExtra(Intent.EXTRA_STREAM)
         if (i?.action != Intent.ACTION_SEND || !type.startsWith("image/") || stream == null) {
+            android.util.Log.i("Tekyerema", "[IMPORT] share refused: action=${i?.action} type=$type stream=${stream != null}")   // no content
             say("There was no picture in that for me to read.")
             return
         }
         val copy = ImportedImage.copyIn(this, stream)
+        // One line per share, no content: the Toast was the only feedback and left a failed import undiagnosable (13 Oct 2026).
+        android.util.Log.i("Tekyerema", "[IMPORT] share type=$type scheme=${stream.scheme} copied=${copy != null}")
         if (copy == null) { say("I couldn't open that picture."); return }
         startActivity(CameraReadActivity.imageIntent(this, copy, CameraReadActivity.MODE_TEXT))
     }

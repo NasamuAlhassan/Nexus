@@ -112,6 +112,20 @@ object ToolSelector {
         return base.toList() + extras
     }
 
+    /**
+     * What the selector reads for a step: the goal, plus the last turns of the conversation ONLY when the goal leans on
+     * them — short, or carrying a pronoun / "again" / "the same". A new, self-contained request after a money walk used to
+     * load the comms and money blocks from the previous turns ("open settings and go to about phone…" went out with 37
+     * tools instead of 19, ≈1,100 prompt tokens a step for nothing — emulator, 13 October 2026).
+     */
+    fun contextFor(goal: String, recentTurns: List<String>): String {
+        val g = goal.trim()
+        val words = g.split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val leans = words.size <= 4 || FOLLOW_UP.containsMatchIn(g)
+        return if (leans && recentTurns.isNotEmpty()) g + " " + recentTurns.joinToString(" ") else g
+    }
+    private val FOLLOW_UP = Regex("(?i)\\b(it|that|this|those|these|them|him|her|there|same|again|also|too|another|more|instead|rather|previous|last one)\\b")
+
     /** N-03: a tool schema array rearranged into [names]' order (the registry emits its own order); entries not named
      *  keep their place after the named ones. */
     fun inOrder(schema: org.json.JSONArray, names: List<String>, nameOf: (org.json.JSONObject) -> String?): org.json.JSONArray {

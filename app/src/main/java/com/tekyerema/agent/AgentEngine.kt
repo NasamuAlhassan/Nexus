@@ -843,7 +843,7 @@ object AgentEngine {
 
                 val toolNames = if (directStep) registry.all.map { it.name }
                         .filter { it in DIRECT_TOOLS && (it != "web_search" || RouterTiers.enabled(RouterTiers.RETRIEVAL)) }
-                    else ToolSelector.select(goal + " " + convo.takeLast(2).joinToString(" "), usedTools, discoveredTools, registry.all.map { it.name })
+                    else ToolSelector.select(ToolSelector.contextFor(goal, convo.takeLast(2)), usedTools, discoveredTools, registry.all.map { it.name })
                 // C-21: think harder only when the task is going badly; a direct answer needs little reasoning. gpt-oss
                 // already reasons at "medium" by default, so a struggling task goes straight to "high".
                 val effort = when {
@@ -1996,7 +1996,10 @@ object AgentEngine {
             // a screenshot even when vision isn't requested) and never captures a credential
             // screen. If we land on one we suspend verification; the top-of-loop boundary enters
             // Secure Input Mode on the next iteration. Keeps a PIN/password out of screenshots+OCR.
-            var after = observeForVerify(controller, before.perception.usedVision)
+            // Tree first; vision only when this step began with vision AND the screen is still sparse (wantVisionFor) —
+            // a routine re-look through OCR cost ~17 s a time on the emulator (about-version run 3, 13 October 2026).
+            var after = observeForVerify(controller, false)
+            if (wantVisionFor(before, after)) after = observeForVerify(controller, true)
             if (TargetSemantics.isCredentialScreen(after)) {
                 vr = com.tekyerema.verifier.VerificationResult(true,
                     "reached a secure-input screen — verification suspended, screen not observed")
@@ -2014,7 +2017,7 @@ object AgentEngine {
                 var lastPollSig = after.signature()
                 while (!v.verified && result.success && !Expects.isVacuous(expectation) && polls < maxPolls(after)) {
                     kotlinx.coroutines.delay(500)
-                    after = observeForVerify(controller, before.perception.usedVision)
+                    after = observeForVerify(controller, wantVisionFor(before, after))
                     if (TargetSemantics.isCredentialScreen(after)) break
                     toolDefault = tool.verify(decision.args, toolCtx, before, after, result)
                     v = OutcomeVerifier.verify(expectation, before, after, result.success, toolDefault, tool.verifiesOutcome)
@@ -2031,8 +2034,12 @@ object AgentEngine {
                 if (allowScrollOn && !TargetSemantics.isCredentialScreen(after)) {
                     var prev = after
                     var moved = prev.signature() != before.signature()
+                    // …and within a time budget: three extra scrolls once took 104 s through OCR re-looks (13 October 2026).
+                    val scrollLoopStart = android.os.SystemClock.uptimeMillis()
+                    val scrollLoopMs = com.tekyerema.core.config.AppConfig.long("executor.scroll.autoRepeatMs", 20_000L)
                     while (Progress.keepScrolling(decision.name, result.success, v.verified, sought,
-                            sameApp = prev.appPackage == before.appPackage, moved = moved, repeats = extraScrolls)) {
+                            sameApp = prev.appPackage == before.appPackage, moved = moved, repeats = extraScrolls) &&
+                        android.os.SystemClock.uptimeMillis() - scrollLoopStart < scrollLoopMs) {
                         // Element ids are per snapshot: re-find the SAME list in the fresh one (no target → the tool
                         // takes the first scrollable, as the model's call did).
                         val again = resolved?.element?.let { (TargetResolver.reResolve(it, prev) as? ResolveOutcome.Found)?.target }
@@ -2047,10 +2054,10 @@ object AgentEngine {
                         controller?.waitForChange(mark,
                             com.tekyerema.core.config.AppConfig.long("executor.settle.reactMs", 600L),
                             com.tekyerema.core.config.AppConfig.long("executor.settle.timeoutMs", 1200L))
-                        var next = observeForVerify(controller, before.perception.usedVision)
+                        var next = observeForVerify(controller, wantVisionFor(before, prev))
                         if (!TargetSemantics.isCredentialScreen(next) && next.signature() == prev.signature()) {
                             kotlinx.coroutines.delay(400)   // a slow fling: one more look before calling it the end
-                            next = observeForVerify(controller, before.perception.usedVision)
+                            next = observeForVerify(controller, wantVisionFor(before, next))
                         }
                         after = next
                         if (TargetSemantics.isCredentialScreen(next)) break
@@ -2495,8 +2502,19 @@ object AgentEngine {
     private suspend fun observeForVerify(controller: AccessibilityController?, wantVision: Boolean): com.tekyerema.accessibility.UiSnapshot {
         val rawTree = try { controller?.takeIf { it.ready }?.buildSnapshot() } catch (t: Throwable) { null }
         if (rawTree != null && TargetSemantics.isCredentialScreen(rawTree)) return rawTree
+        // Step latency (13 October 2026): a tree-only look IS this walk — not a second walk inside Perception.observe (each
+        // one up to the 3-s tree budget on the emulator). Vision stays for a screen that exposes nothing to act on
+        // (Perception's own rule) and for a caller that asks for it.
+        if (!wantVision && rawTree != null && !(rawTree.appPackage != null && rawTree.actionableCount == 0))
+            return rawTree.copy(perception = com.tekyerema.accessibility.PerceptionRoute("tree", "tree exposed ${rawTree.actionableCount} actionable elements"))
         return Perception.observe(controller, wantVision)
     }
+
+    /** Vision for a re-look only when this step BEGAN with vision and the screen is still sparse (a canvas / WebView surface,
+     *  `executor.launch.sparseActionable`); a rich tree such as Settings is read from the tree — each OCR pass cost ~17 s
+     *  on the emulator and the goal-directed scroll loop spent 104 s on three scrolls (about-version run 3, 13 Oct 2026). */
+    private fun wantVisionFor(before: UiSnapshot, latest: UiSnapshot): Boolean =
+        before.perception.usedVision && latest.actionableCount <= com.tekyerema.core.config.AppConfig.int("executor.launch.sparseActionable", 5)
 
     /** Voice-UX (2026-09-29): tell the voice layer which app this run's step brought to the front (voice/AppNote.kt).
      *  Outside runTask on purpose — that method sits near the JVM's 64 KB limit. */

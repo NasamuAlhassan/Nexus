@@ -64,7 +64,11 @@ object ImportedImage {
             val input = ctx.contentResolver.openInputStream(uri) ?: return null
             input.use { src -> f.outputStream().use { src.copyTo(it) } }
             if (f.length() == 0L) { f.delete(); null } else Uri.fromFile(f)
-        } catch (_: Throwable) { null }
+        } catch (t: Throwable) {
+            // The class only, never the URI or the bytes: a MediaStore item shared without a usable grant fails here with a
+            // SecurityException (seen when the emulator's shell "shared" one, 13 October 2026).
+            android.util.Log.w("Tekyerema", "[IMPORT] copy failed: ${t.javaClass.simpleName}"); null
+        }
     }
 
     /** Text blocks in reading order (top to bottom, then left to right), the lines of a block as one sentence. */
