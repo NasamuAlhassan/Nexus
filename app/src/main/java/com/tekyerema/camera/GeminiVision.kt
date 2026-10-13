@@ -57,9 +57,20 @@ object GeminiVision {
     /** Shared connection pool; per-call timeouts come from config via newBuilder(). */
     private val shared: OkHttpClient by lazy { OkHttpClient() }
 
-    /** [prompt]: the camera's default, or F-09's screen/picture prompt (DescribeScreenTool). */
-    suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT): VisionResult = withContext(Dispatchers.IO) {
+    /** [prompt]: the camera's default, or F-09's screen/picture prompt (DescribeScreenTool). [structured] (P5-07): ask for
+     *  JSON back, at low media resolution and minimal thinking (`camera.describe.mediaResolution`, `camera.describe.thinking`,
+     *  both config-gated); a 400 from a model that rejects those fields is retried once as a plain request. */
+    suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT, structured: Boolean = false): VisionResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext VisionResult.Failed("no Gemini key")
+        val first = describeOnce(jpeg, apiKey, model, prompt, structured)
+        if (structured && first is VisionResult.Failed && first.reason == "HTTP 400") {
+            Log.w(TAG, "[CAMERA] structured describe refused by the model (HTTP 400) → plain request once")
+            return@withContext describeOnce(jpeg, apiKey, model, prompt, structured = false)
+        }
+        first
+    }
+
+    private suspend fun describeOnce(jpeg: ByteArray, apiKey: String, model: String, prompt: String, structured: Boolean): VisionResult = withContext(Dispatchers.IO) {
         val timeoutSec = AppConfig.long("camera.describe.timeoutSec", 30L).coerceAtLeast(5L)
         val client = shared.newBuilder()
             .connectTimeout(minOf(timeoutSec, 15L), TimeUnit.SECONDS)
@@ -72,8 +83,12 @@ object GeminiVision {
         val body = requestBody(
             prompt,
             Base64.encodeToString(jpeg, Base64.NO_WRAP),
-            AppConfig.double("camera.describe.temperature", 0.2)
+            AppConfig.double("camera.describe.temperature", 0.2),
+            json = structured,
+            mediaResolution = if (structured) AppConfig.string("camera.describe.mediaResolution", "low") else "",
+            thinking = if (structured) AppConfig.string("camera.describe.thinking", "minimal") else ""
         )
+        val t0 = System.nanoTime()
         val request = Request.Builder()
             .url("$base/models/$model:generateContent")
             .header("x-goog-api-key", apiKey)
@@ -97,19 +112,29 @@ object GeminiVision {
             Log.w(TAG, "[CAMERA] describe: no text in response")
             return@withContext VisionResult.Failed("empty")
         }
-        Log.i(TAG, "[CAMERA] described (${description.length} chars, ${jpeg.size / 1024} KB image)")
+        // P5-07: tokens and latency per picture (usageMetadata), never the words.
+        val usage = try { JSONObject(text).optJSONObject("usageMetadata") } catch (_: Throwable) { null }
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        Log.i(TAG, "[CAMERA] described (${description.length} chars, ${jpeg.size / 1024} KB image, ${ms} ms, structured=$structured" +
+            (usage?.let { ", prompt=${it.optInt("promptTokenCount")} out=${it.optInt("candidatesTokenCount")} thought=${it.optInt("thoughtsTokenCount")}" } ?: "") + ")")
         if (BuildConfig.DEBUG) Log.d(TAG, "[CAMERA] description: $description")
         VisionResult.Described(description)
     }
 
-    /** The generateContent body: one user turn holding the prompt and the inline JPEG. */
-    fun requestBody(prompt: String, imageBase64: String, temperature: Double): JSONObject {
+    /** The generateContent body: one user turn holding the prompt and the inline JPEG. [json] asks for a JSON answer;
+     *  [mediaResolution] ("low" | "medium" | "high" | "") and [thinking] ("minimal" | "low" | … | "") add the P5-07 fields. */
+    fun requestBody(prompt: String, imageBase64: String, temperature: Double, json: Boolean = false,
+                    mediaResolution: String = "", thinking: String = ""): JSONObject {
         val parts = JSONArray()
             .put(JSONObject().put("text", prompt))
             .put(JSONObject().put("inline_data", JSONObject().put("mime_type", "image/jpeg").put("data", imageBase64)))
+        val gen = JSONObject().put("temperature", temperature)
+        if (json) gen.put("responseMimeType", "application/json")
+        if (mediaResolution.isNotBlank()) gen.put("mediaResolution", "MEDIA_RESOLUTION_" + mediaResolution.trim().uppercase())
+        if (thinking.isNotBlank()) gen.put("thinkingConfig", JSONObject().put("thinkingLevel", thinking.trim().uppercase()))
         return JSONObject()
             .put("contents", JSONArray().put(JSONObject().put("role", "user").put("parts", parts)))
-            .put("generationConfig", JSONObject().put("temperature", temperature))
+            .put("generationConfig", gen)
     }
 
     /** candidates[0].content.parts → the joined text (thought parts skipped), or null when there is none. */

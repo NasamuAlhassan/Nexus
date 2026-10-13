@@ -40,6 +40,8 @@ import androidx.lifecycle.lifecycleScope
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
+import kotlinx.coroutines.async
+import kotlin.coroutines.resume
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import com.tekyerema.BuildConfig
@@ -241,8 +243,11 @@ class CameraReadActivity : ComponentActivity() {
                     speak(phrase("describing", "Got it, one moment."), flush = false)
                     val jpeg = withContext(Dispatchers.Default) { ImportedImage.jpeg(bmp, AppConfig.int("camera.describe.maxSide", 1024)) }
                     LastCapture.hold(jpeg)   // a follow-up question goes back to the cloud with THIS picture (VisionQa)
-                    when (val r = VisionLadder.describe(jpeg, GeminiVision.PROMPT, settings)) {
-                        is VisionResult.Described -> { deliver(r.text); return@launch }
+                    // P5-07: the model answers in a small JSON contract (what it sees, the text it read, or why it won't answer);
+                    // ML Kit reads the same picture meanwhile, the authority for exact strings (StructuredDescribe).
+                    val ocr = async(Dispatchers.Default) { ocrOf(InputImage.fromBitmap(bmp, 0)) }
+                    when (val r = VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)) {
+                        is VisionResult.Described -> { deliver(StructuredDescribe.spokenFor(r.text, ocr.await(), TAG)); return@launch }
                         is VisionResult.Failed -> {
                             Log.w(TAG, "[IMPORT] describe failed: ${r.reason}")
                             speak(phrase("describeFailed", "I couldn't get a description just now. I'll read any text I see instead."), flush = false)
@@ -252,6 +257,23 @@ class CameraReadActivity : ComponentActivity() {
             }
             readBitmapText(bmp)
         }
+    }
+
+    /** P5-07: the words ML Kit reads in the picture being described — null when OCR fails or takes too long
+     *  (`camera.describe.ocrTimeoutMs`); the description is never held back for it beyond that. */
+    private suspend fun ocrOf(input: InputImage): String? = withContext(Dispatchers.Default) {
+        try {
+            // ML Kit's first call on a cold process can take several seconds; the cloud round trip usually takes longer, and
+            // the result is only awaited after it, so a generous cap costs nothing on the common path (first run: 4 s was
+            // too short on the emulator — the OCR came back null and the divergence rule had nothing to compare).
+            kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.describe.ocrTimeoutMs", 12_000L)) {
+                kotlinx.coroutines.suspendCancellableCoroutine<String?> { cont ->
+                    recognizer.process(input)
+                        .addOnSuccessListener { r -> if (cont.isActive) cont.resume(ImportedImage.readingOrder(r.textBlocks)) }
+                        .addOnFailureListener { if (cont.isActive) cont.resume(null) }
+                }
+            }
+        } catch (_: Throwable) { null }
     }
 
     /** On-device OCR of the whole picture, once; the words as they are, in reading order. */
@@ -614,16 +636,20 @@ class CameraReadActivity : ComponentActivity() {
             val jpeg = withContext(Dispatchers.Default) {
                 FrameConvert.nv21ToJpeg(nv21, width, height, rotation, AppConfig.int("camera.describe.maxSide", 1024), 80)
             }
+            // P5-07: ML Kit reads the same frame while the cloud describes it — the authority for exact strings.
+            val ocr = async(Dispatchers.Default) {
+                try { ocrOf(InputImage.fromByteArray(nv21, width, height, rotation, android.graphics.ImageFormat.NV21)) } catch (_: Throwable) { null }
+            }
             val result = if (jpeg == null) VisionResult.Failed("encode")
             else {
                 // Held (memory only, dropped when this screen closes) so a follow-up question — "what colour is
                 // the shirt?" — can go back to the cloud with THIS photo (VisionQa, the Be My AI pattern).
                 LastCapture.hold(jpeg)
-                VisionLadder.describe(jpeg, GeminiVision.PROMPT, settings)   // N-06; Gemini first, Groq when it fails
+                VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Gemini first, Groq when it fails
             }
             if (closing) return@launch
             when (result) {
-                is VisionResult.Described -> deliver(result.text)
+                is VisionResult.Described -> deliver(StructuredDescribe.spokenFor(result.text, ocr.await(), TAG))
                 is VisionResult.Failed -> {
                     Log.w(TAG, "[CAMERA] describe failed: ${result.reason}")
                     fallBackToText(phrase("describeFailed", "I couldn't get a description just now. I'll read any text I see instead."))

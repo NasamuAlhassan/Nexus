@@ -65,14 +65,15 @@ object VisionLadder {
         if (groqKeys.any { it.isNotBlank() }) add(Rung.GROQ)
     }
 
-    /** Walk the plan until a rung answers. The caller has already checked the user's cloud consent (J-18). */
-    suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings): VisionResult {
+    /** Walk the plan until a rung answers. The caller has already checked the user's cloud consent (J-18).
+     *  [structured] (P5-07): Gemini is asked for the JSON contract at low resolution; Groq gets the same prompt as text. */
+    suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false): VisionResult {
         var last: VisionResult = VisionResult.Failed("no vision key")
         val rungs = plan(settings.geminiApiKey, settings.groqApiKeys)
         for ((i, rung) in rungs.withIndex()) {
             last = when (rung) {
                 Rung.GEMINI -> GeminiVision.describe(jpeg, settings.geminiApiKey,
-                    com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt)   // N-06
+                    com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt, structured)   // N-06
                 Rung.GROQ -> GroqVision.describe(jpeg, settings.groqApiKeys, settings.groqBaseUrl, prompt)
             }
             if (last is VisionResult.Described) return last

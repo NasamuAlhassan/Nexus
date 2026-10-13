@@ -162,10 +162,13 @@ class RunGoalReceiver : BroadcastReceiver() {
         // exported, so `am start` from the shell is refused (as it should be); the share sheet is the user's way to it.
         intent.getStringExtra("read_image")?.let { path ->
             val f = java.io.File(path)
-            Log.i("Tekyerema", "[IMPORT] debug read_image exists=${f.exists()} bytes=${f.length()}")
+            // --es read_image_mode describe (P5-07): the picture goes to the structured describer instead of OCR.
+            val mode = if (intent.getStringExtra("read_image_mode") == "describe") com.tekyerema.camera.CameraReadActivity.MODE_DESCRIBE
+                else com.tekyerema.camera.CameraReadActivity.MODE_TEXT
+            Log.i("Tekyerema", "[IMPORT] debug read_image exists=${f.exists()} bytes=${f.length()} mode=$mode")
             if (f.exists()) try {
                 context.startActivity(com.tekyerema.camera.CameraReadActivity.imageIntent(context, android.net.Uri.fromFile(f),
-                    com.tekyerema.camera.CameraReadActivity.MODE_TEXT).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    mode).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
             } catch (t: Throwable) { Log.w("Tekyerema", "[IMPORT] debug read_image failed: ${t.javaClass.simpleName}") }
             return
         }

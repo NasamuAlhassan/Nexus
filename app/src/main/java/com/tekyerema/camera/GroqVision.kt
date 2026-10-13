@@ -41,6 +41,7 @@ object GroqVision {
             AppConfig.double("camera.describe.temperature", 0.2)
         ).toString()
         var lastReason = "no usable key"
+        val t0 = System.nanoTime()
         for ((i, key) in keys.withIndex()) {
             val request = Request.Builder()
                 .url(baseUrl.trimEnd('/') + "/chat/completions")
@@ -61,7 +62,10 @@ object GroqVision {
                         Log.w(TAG, "[CAMERA] groq describe: no text in response")
                         return@withContext VisionResult.Failed("empty")
                     }
-                    Log.i(TAG, "[CAMERA] groq described (${description.length} chars, ${jpeg.size / 1024} KB image)")
+                    // P5-07: tokens and latency per picture (the response's usage block), never the words.
+                    val usage = try { JSONObject(text).optJSONObject("usage") } catch (_: Throwable) { null }
+                    Log.i(TAG, "[CAMERA] groq described (${description.length} chars, ${jpeg.size / 1024} KB image, ${(System.nanoTime() - t0) / 1_000_000} ms" +
+                        (usage?.let { ", prompt=${it.optInt("prompt_tokens")} out=${it.optInt("completion_tokens")}" } ?: "") + ")")
                     return@withContext VisionResult.Described(description)
                 }
                 // This key is spent or refused; the next one has a budget of its own.
