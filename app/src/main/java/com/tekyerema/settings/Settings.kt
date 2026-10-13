@@ -73,6 +73,10 @@ class Settings(context: Context) {
             else listOf(groqApiKey, BuildConfig.DEFAULT_GROQ_KEY_2, BuildConfig.DEFAULT_GROQ_KEY_3, BuildConfig.DEFAULT_GROQ_KEY_4))
             .map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
+    /** P1-15: keys for the extra planner rungs (`PLANNER_KEY_<ID>` in local.properties → debug builds only), id → key. */
+    val plannerKeys: Map<String, String>
+        get() = com.tekyerema.agent.PlannerProvider.parseKeys(BuildConfig.DEFAULT_PLANNER_KEYS)
+
     /** WS-C: a key built into this copy of the app exists for [provider] ("groq" | "gemini") — shown as "Built-in key". */
     fun hasBuiltInKey(provider: String): Boolean = when (provider) {
         "groq" -> BuildConfig.DEFAULT_GROQ_KEY.isNotBlank()

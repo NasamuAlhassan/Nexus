@@ -256,19 +256,24 @@ class CameraReadActivity : ComponentActivity() {
 
     /** On-device OCR of the whole picture, once; the words as they are, in reading order. */
     private fun readBitmapText(bmp: android.graphics.Bitmap) {
-        try {
-            recognizer.process(InputImage.fromBitmap(bmp, 0))
-                .addOnSuccessListener { result ->
-                    if (closing) return@addOnSuccessListener
-                    val text = ImportedImage.readingOrder(result.textBlocks)
-                    deliver(text.ifBlank { phrase("importNoText", "I couldn't find any text in that picture.") })
-                }
-                .addOnFailureListener { t ->
-                    Log.w(TAG, "[IMPORT] OCR failed: ${t.javaClass.simpleName}")
-                    deliver(phrase("importOcrFailed", "I couldn't read that picture."))
-                }
-        } catch (t: Throwable) {
-            deliver(phrase("importOcrFailed", "I couldn't read that picture."))
+        // Off the main thread: the recogniser's first call initialises ML Kit on the calling thread, which on the emulator
+        // under load held the UI thread past the 5-s input window ("Input dispatching timed out … CameraReadActivity",
+        // 13 October 2026 04:55 — the ANR dialog then took the whole process down). The listeners still run on main.
+        lifecycleScope.launch(Dispatchers.Default) {
+            try {
+                recognizer.process(InputImage.fromBitmap(bmp, 0))
+                    .addOnSuccessListener { result ->
+                        if (closing) return@addOnSuccessListener
+                        val text = ImportedImage.readingOrder(result.textBlocks)
+                        deliver(text.ifBlank { phrase("importNoText", "I couldn't find any text in that picture.") })
+                    }
+                    .addOnFailureListener { t ->
+                        Log.w(TAG, "[IMPORT] OCR failed: ${t.javaClass.simpleName}")
+                        deliver(phrase("importOcrFailed", "I couldn't read that picture."))
+                    }
+            } catch (t: Throwable) {
+                runOnUiThread { deliver(phrase("importOcrFailed", "I couldn't read that picture.")) }
+            }
         }
     }
 

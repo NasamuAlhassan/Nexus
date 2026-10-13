@@ -499,8 +499,13 @@ object AgentEngine {
                     ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set, route))
                     // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
                     ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
-                    else -> Log.w(TAG, "[BRAIN] models.planner.chain: unknown provider '$id' — skipped")
+                    // P1-15: an extra OpenAI-compatible rung named in the chain (config + a key in local.properties).
+                    else -> PlannerProvider.extra(id) { set.plannerKeys[it] }?.let { add(OpenAiCompatBrain(set, route, it)) }
+                        ?: Log.w(TAG, "[BRAIN] models.planner.chain: provider '$id' has no config or no key — skipped")
                 }
+                // …and every keyed extra rung the chain didn't name, after the named ones (a key is the opt-in).
+                for (id in PlannerProvider.extraIds()) if (id !in ModelRoles.plannerChainAllowed() && set.plannerKeys.containsKey(id))
+                    PlannerProvider.extra(id) { set.plannerKeys[it] }?.let { add(OpenAiCompatBrain(set, route, it)) }
             }
             val cloud: AgentBrain? = when (cloudChain.size) {
                 0 -> null; else -> FallbackBrain(cloudChain, route = route)   // even one brain gets the network-blip retry

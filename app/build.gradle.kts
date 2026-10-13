@@ -45,13 +45,22 @@ val speechSecretsJson: String = localProps.stringPropertyNames().filter { it.sta
 // the APK by decompiling it (OWASP MASVS-STORAGE; Android "hardcoded secrets" guidance), so a RELEASE build never carries
 // one: there the user's own key comes from Settings (or, later, a backend proxy holds it). Non-secret defaults (URLs,
 // model names) stay in defaultConfig.
+// P1-15 (13 October 2026): extra planner rungs. Any `PLANNER_KEY_<ID>=…` in local.properties becomes "id=key;id2=key2" in
+// DEFAULT_PLANNER_KEYS (debug builds only, like every secret here); the rung itself is described in assets/config/models.json
+// under models.planner.extra.<id>, so no code changes when the owner signs up for Z.ai, NVIDIA, OpenRouter or OpenAI.
+val defaultPlannerKeys: String = localProps.stringPropertyNames()
+    .filter { it.startsWith("PLANNER_KEY_") && localProps.getProperty(it, "").isNotBlank() }
+    .sorted()
+    .joinToString(";") { it.removePrefix("PLANNER_KEY_").lowercase() + "=" + localProps.getProperty(it, "").trim() }
+
 val secretBuildFields = linkedMapOf(
     "DEFAULT_GEMINI_KEY" to defaultGeminiKey,
     "DEFAULT_GROQ_KEY" to defaultGroqKey,
     "DEFAULT_GROQ_KEY_2" to defaultGroqKey2,
     "DEFAULT_GROQ_KEY_3" to defaultGroqKey3,
     "DEFAULT_GROQ_KEY_4" to defaultGroqKey4,
-    "DEFAULT_ASR_ONLINE_KEY" to defaultAsrOnlineKey
+    "DEFAULT_ASR_ONLINE_KEY" to defaultAsrOnlineKey,
+    "DEFAULT_PLANNER_KEYS" to defaultPlannerKeys
 )
 
 android {

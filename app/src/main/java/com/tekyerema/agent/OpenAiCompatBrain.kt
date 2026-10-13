@@ -27,7 +27,9 @@ internal typealias Reply = Triple<Int, String, okhttp3.Headers>
  */
 class OpenAiCompatBrain(
     private val settings: Settings,
-    private val route: com.tekyerema.agent.routing.TaskRoute? = null
+    private val route: com.tekyerema.agent.routing.TaskRoute? = null,
+    /** P1-15: which OpenAI-compatible endpoint this brain talks to — Groq from Settings unless an extra rung is given. */
+    private val provider: PlannerProvider = PlannerProvider.groq(settings)
 ) : AgentBrain, com.tekyerema.agent.routing.QuotaAware {
 
     /** Models that must not carry a complex task on their own (C-08's fast model is one). */
@@ -35,14 +37,14 @@ class OpenAiCompatBrain(
 
     /** The primary model plus any configured fallback that isn't a weak one. */
     internal fun capableModels(): List<String> =
-        capableOf(settings.groqModel, AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS), weakModels())
+        capableOf(provider.model, provider.fallbacks, weakModels())
 
     override val weakModel: String?
-        get() = weakOf(settings.groqModel, AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS),
+        get() = weakOf(provider.model, provider.fallbacks,
             AppConfig.string("models.planner.fastModel", "openai/gpt-oss-20b"), weakModels())
 
     override fun capableReadyInMs(now: Long): Long? {
-        val keys = settings.groqApiKeys
+        val keys = provider.keys
         if (keys.isEmpty()) return null
         val soonest = capableModels().minOf { m -> keys.minOf { coolUntil["$m|$it"] ?: 0L } } - now
         return when { soonest <= 0L -> 0L; soonest > 90_000L -> null; else -> soonest }
@@ -82,7 +84,7 @@ class OpenAiCompatBrain(
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         // B: a complex step of a routed task never slides onto the weak model here (FallbackBrain decides that, per policy).
         if (route != null && com.tekyerema.agent.routing.ModelRouting.complex(ctx)) return decideCapable(ctx, route)
-        var models = (listOf(settings.groqModel) + AppConfig.stringList("models.planner.fallbacks", FALLBACK_MODELS)).distinct()
+        var models = (listOf(provider.model) + provider.fallbacks).distinct()
         val fast = AppConfig.string("models.planner.fastModel", "openai/gpt-oss-20b")
         // C-08: a simple step (a direct knowledge answer) goes to the fast model first, keeping the deep model's own
         // per-model daily/minute quota for GUI tasks.
@@ -98,7 +100,7 @@ class OpenAiCompatBrain(
         }
         // N-15: Groq limits are per MODEL. If every key is cooling on the first model (per-minute cap) for longer than
         // a short wait, take this step on the next model whose bucket is free now, instead of stalling.
-        val keys = settings.groqApiKeys
+        val keys = provider.keys
         if (models.size > 1 && keys.isNotEmpty() && com.tekyerema.core.config.FeatureFlags.isEnabled("N-15", true)) {
             val now = System.currentTimeMillis()
             fun waitFor(m: String) = keys.minOf { coolUntil["$m|$it"] ?: 0L } - now
@@ -123,9 +125,9 @@ class OpenAiCompatBrain(
 
     private suspend fun decideWith(model: String, ctx: BrainContext, canFallBack: Boolean = false,
                                    maxWaitMs: Long = AppConfig.long("router.quota.maxWaitMs", 1500L)): AgentDecision = withContext(Dispatchers.IO) {
-        val keys = settings.groqApiKeys
-        if (keys.isEmpty()) return@withContext AgentDecision.Fail("No Groq/OpenAI API key configured.")
-        val url = settings.groqBaseUrl.trimEnd('/') + "/chat/completions"
+        val keys = provider.keys
+        if (keys.isEmpty()) return@withContext AgentDecision.Fail("No ${provider.id} API key configured.")
+        val url = provider.chatUrl
 
         val messages = messagesFor(ctx)
 
@@ -179,7 +181,7 @@ class OpenAiCompatBrain(
             var coolKey = "$model|$apiKey"   // limits are per model per org
             // C-21: a debug override wins; else this step's effort (raised by the engine after failures); else the default.
             val effort = settings.reasoningEffortOverride?.takeIf { it.isNotBlank() } ?: ctx.effort ?: settings.groqReasoningEffort
-            val body = requestBody(model, messages, ctx.openAiTools, AppConfig.double("models.planner.temperature", 0.2), effort, completionCap)
+            val body = requestBody(model, messages, ctx.openAiTools, AppConfig.double("models.planner.temperature", 0.2), effort, completionCap, provider)
 
             val payload = body.toString()
             fun requestFor(key: String) = Request.Builder()
@@ -245,7 +247,7 @@ class OpenAiCompatBrain(
             // B / sovereignty: every answered cloud call counts toward the operator's daily budget (OperatorPolicy).
             // N-03: one line per call, so the phone run shows latency and how much of each prompt Groq served from its
             // prefix cache (cached tokens are faster and don't count toward the per-minute cap).
-            android.util.Log.i("Tekyerema", "[LLM] ${usageLine(model, chosen, keys.size, code, System.currentTimeMillis() - t0, usage, effort)}")
+            android.util.Log.i("Tekyerema", "[LLM] ${usageLine(model, chosen, keys.size, code, System.currentTimeMillis() - t0, usage, effort, provider.id)}")
 
             when {
                 // Rate-limited: cool THIS key until its own reset (precise), then the loop picks another or waits.
@@ -346,16 +348,20 @@ class OpenAiCompatBrain(
         /** The chat-completions body. Pure, so the prefix a step shares with the one before it is unit-tested. gpt-oss puts
          *  the reasoning effort at the very top of its prompt, so a step at a different effort starts a cache of its own. */
         fun requestBody(model: String, messages: JSONArray, tools: JSONArray, temperature: Double, effort: String?,
-                        maxCompletion: Int? = null): JSONObject {
+                        maxCompletion: Int? = null, shape: PlannerProvider? = null): JSONObject {
             val body = JSONObject()
                 .put("model", model)
                 .put("messages", messages)
                 .put("tools", tools)
-                .put("tool_choice", "auto")
+                .put("tool_choice", shape?.toolChoice ?: "auto")
                 .put("temperature", temperature)
-            if (!effort.isNullOrBlank()) body.put("reasoning_effort", effort)
+            // P1-15 (R-A6): one tool call per reply where the provider's default is several; no reasoning_effort for a
+            // provider that rejects the field; the reply cap under the field name the provider knows.
+            shape?.parallelToolCalls?.let { body.put("parallel_tool_calls", it) }
+            if (!effort.isNullOrBlank() && (shape == null || shape.reasoningEffort)) body.put("reasoning_effort", effort)
             // After the fields the prompt cache sees, so a cap change never breaks a shared prefix.
-            if (maxCompletion != null && maxCompletion > 0) body.put("max_completion_tokens", maxCompletion)
+            val capField = if (shape == null) "max_completion_tokens" else shape.maxTokensField
+            if (maxCompletion != null && maxCompletion > 0 && capField != null) body.put(capField, maxCompletion)
             return body
         }
 
@@ -479,10 +485,11 @@ class OpenAiCompatBrain(
         }
 
         /** "[LLM] groq/openai/gpt-oss-120b key#2/4 http=200 ms=1834 prompt=4630 cached=3584(77%) completion=212 effort=default". */
-        fun usageLine(model: String, keyIdx: Int, keys: Int, code: Int, ms: Long, u: com.tekyerema.core.telemetry.LlmUsage?, effort: String?): String {
+        fun usageLine(model: String, keyIdx: Int, keys: Int, code: Int, ms: Long, u: com.tekyerema.core.telemetry.LlmUsage?, effort: String?,
+                      providerId: String = "groq"): String {
             val tok = if (u == null) "" else " prompt=${u.prompt} cached=${u.cached}" +
                 (if (u.prompt > 0) "(${u.cached * 100 / u.prompt}%)" else "") + " completion=${u.completion}"
-            return "groq/$model key#${keyIdx + 1}/$keys http=$code ms=$ms$tok effort=${effort?.ifBlank { null } ?: "default"}"
+            return "$providerId/$model key#${keyIdx + 1}/$keys http=$code ms=$ms$tok effort=${effort?.ifBlank { null } ?: "default"}"
         }
 
         /** Tried in order after the configured model when its daily quota is exhausted on every key. */

@@ -22,6 +22,14 @@
       "fastModel": "openai/gpt-oss-20b",
       "weakModels": ["openai/gpt-oss-20b"],
       "chain": ["groq", "gemini"],
+      "_extraNote": "P1-15 (R-A6): extra OpenAI-compatible rungs. Each exists at run time only when local.properties has PLANNER_KEY_<ID> (debug builds). A keyed rung joins the chain after the named ones; name it in `chain` to place it earlier. Request-shape fields: toolChoice (some providers accept only auto), parallelToolCalls (false = one tool call per reply where the default is several), reasoningEffort (false for a provider that rejects the field), maxTokensField (max_completion_tokens | max_tokens | empty = none).",
+      "extra": {
+        "order": ["zai", "nvidia", "openrouter", "openai"],
+        "zai": {"baseUrl": "https://api.z.ai/api/paas/v4", "model": "glm-4.7-flash", "fallbacks": [], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": false, "maxTokensField": "max_tokens"},
+        "nvidia": {"baseUrl": "https://integrate.api.nvidia.com/v1", "model": "openai/gpt-oss-120b", "fallbacks": ["openai/gpt-oss-20b"], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": true, "maxTokensField": "max_tokens"},
+        "openrouter": {"baseUrl": "https://openrouter.ai/api/v1", "model": "openai/gpt-oss-120b", "fallbacks": ["openai/gpt-oss-20b"], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": true, "maxTokensField": "max_tokens"},
+        "openai": {"baseUrl": "https://api.openai.com/v1", "model": "gpt-6-luna", "fallbacks": [], "toolChoice": "auto", "parallelToolCalls": "false", "reasoningEffort": false, "maxTokensField": "max_completion_tokens"}
+      },
       "temperature": 0.2,
       "requestTokens": 4800,
       "timeouts": {"connectSec": 8, "callSec": 35},

@@ -77,4 +77,20 @@ class SecureStepPrivacyTest {
         assertTrue(cloud.called)
         assertEquals("cloud", tr.backend)
     }
+
+    /** S-03 (P2-04, 13 Oct 2026): the money hand-off's SecureStep raises and lowers the privacy flag itself — before, only
+     *  the agent's own credential-screen wait did, so a PIN hand-off through the navigator left logs and the vision gate open. */
+    @Test fun the_money_hand_off_raises_the_privacy_flag_and_lowers_it_on_end_or_expiry() {
+        val t = 1_790_000_000_000L
+        com.tekyerema.voice.SecureStep.end()
+        assertFalse(Privacy.secureStep)
+        com.tekyerema.voice.SecureStep.begin(t)
+        assertTrue(Privacy.secureStep); assertTrue(com.tekyerema.voice.SecureStep.active(t + 1_000))
+        assertEquals("(4 chars)", Privacy.content("1234", logAllowed = true))
+        com.tekyerema.voice.SecureStep.end()
+        assertFalse(Privacy.secureStep)
+        com.tekyerema.voice.SecureStep.begin(t)
+        assertFalse("past MAX_MS the step is over", com.tekyerema.voice.SecureStep.active(t + com.tekyerema.voice.SecureStep.MAX_MS + 1))
+        assertFalse("…and the flag went with it", Privacy.secureStep)
+    }
 }

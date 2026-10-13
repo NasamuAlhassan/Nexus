@@ -12,9 +12,16 @@ object SecureStep {
     const val MAX_MS = 150_000L
     @Volatile private var since = 0L
 
-    fun begin(now: Long = System.currentTimeMillis()) { since = now }
-    fun end() { since = 0L }
-    fun active(now: Long = System.currentTimeMillis()): Boolean = since != 0L && now - since in 0..MAX_MS
+    /** S-03 (P2-04, 13 October 2026): the hand-off also raises [com.tekyerema.core.Privacy.secureStep], so while it lasts the
+     *  log redacts screen content, the screen-describe / vision gate refuses, and the helper treats the step as secret —
+     *  the same blindness the agent's own credential-screen wait has. Lowered by [end], by the window change, or by [MAX_MS]. */
+    fun begin(now: Long = System.currentTimeMillis()) { since = now; com.tekyerema.core.Privacy.secureStep = true }
+    fun end() { since = 0L; com.tekyerema.core.Privacy.secureStep = false }
+    fun active(now: Long = System.currentTimeMillis()): Boolean {
+        if (since == 0L) return false
+        if (now - since !in 0..MAX_MS) { end(); return false }   // timed out: the flag must not outlive the step
+        return true
+    }
 
     /** The screen in front changed: once it's no longer a phone window (a few seconds after the hand-off, so the
      *  hand-off's own window change doesn't end it), the PIN step is over. */
