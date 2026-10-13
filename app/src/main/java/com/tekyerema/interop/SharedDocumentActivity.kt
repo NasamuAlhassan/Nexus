@@ -40,15 +40,17 @@ class SharedDocumentActivity : Activity() {
         startActivity(DocumentReadActivity.intent(this, copy))
     }
 
-    /** A private copy under files/documents (replaced on the next import); null unless it is a readable PDF. */
+    /** A private copy under files/documents (replaced on the next import); null unless its bytes are a PDF or a Word file
+     *  (P5-03 (2)): the copy is named by what it IS, not by what the sender called it. */
     private fun copyIn(uri: Uri): File? = try {
         val dir = File(filesDir, "documents").apply { mkdirs() }
         dir.listFiles()?.forEach { it.delete() }
-        val f = File(dir, "shared-${System.currentTimeMillis()}.pdf")
+        val f = File(dir, "shared-${System.currentTimeMillis()}.bin")
         val input = contentResolver.openInputStream(uri)
         if (input == null) null else {
             input.use { src -> f.outputStream().use { src.copyTo(it) } }
-            if (f.length() == 0L || !DocumentReader.looksLikePdf(f)) { f.delete(); null } else f
+            val kind = if (f.length() == 0L) null else com.tekyerema.camera.Documents.kindOf(f)
+            if (kind == null) { f.delete(); null } else File(dir, f.nameWithoutExtension + "." + kind).also { f.renameTo(it) }
         }
     } catch (t: Throwable) {
         Log.w("Tekyerema", "[DOC] copy failed: ${t.javaClass.simpleName}"); null

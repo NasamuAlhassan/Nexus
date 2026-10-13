@@ -17,15 +17,19 @@ import kotlinx.coroutines.suspendCancellableCoroutine
  * text API below Android 15, and `androidx.pdf`'s text methods throw there). One page bitmap lives at a time; the text of a
  * page is kept only while it is being read. The words are content, never a command: nothing here reaches the agent.
  */
-class DocumentReader(file: File) : AutoCloseable {
+class DocumentReader(file: File) : ReadableDocument {
     private val pfd: ParcelFileDescriptor = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     private val renderer = PdfRenderer(pfd)
     private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
-    val pageCount: Int get() = renderer.pageCount
+    override val pageCount: Int get() = renderer.pageCount
+    override val hasPictures: Boolean get() = true
+
+    /** The page's words from its drawn picture (a PDF page without one has nothing to read). */
+    override suspend fun text(index: Int, bmp: Bitmap?): String = if (bmp == null) "" else text(bmp)
 
     /** Page [index] (0-based) drawn on white, longest side [maxSide] px (ML Kit wants ≥16 px per character; 2,000 is plenty). */
-    fun render(index: Int, maxSide: Int = 2000): Bitmap = synchronized(renderer) {
+    override fun render(index: Int, maxSide: Int): Bitmap = synchronized(renderer) {
         val page = renderer.openPage(index)
         try {
             val scale = maxSide.toFloat() / maxOf(page.width, page.height).coerceAtLeast(1)

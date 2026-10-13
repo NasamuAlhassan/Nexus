@@ -117,9 +117,9 @@ class ManifestHardeningTest {
         assertTrue("no scheme/host/path: not a deep link", data.a("scheme").isEmpty() && data.a("host").isEmpty() && data.a("pathPrefix").isEmpty())
     }
 
-    /** P5-03 (13 October 2026): the PDF target — SEND or VIEW of application/pdf, nothing else; no deep link; no UI of its own;
-     *  the reader it starts is not exported. */
-    @Test fun shared_document_target_takes_only_pdfs() {
+    /** P5-03 (13 October 2026): the document target — SEND or VIEW of a PDF or a Word file (.docx), nothing else; no deep
+     *  link; no UI of its own; the reader it starts is not exported. */
+    @Test fun shared_document_target_takes_only_pdf_and_word_files() {
         val app = xml("src/main/AndroidManifest.xml").children("application").single()
         val target = app.children("activity").single { it.a("name") == DOCUMENT_TARGET }
         assertEquals("true", target.a("exported"))
@@ -131,9 +131,9 @@ class ManifestHardeningTest {
         for (f in filters) {
             assertEquals(1, f.children("action").size)
             assertEquals(listOf("android.intent.category.DEFAULT"), f.children("category").map { it.a("name") })
-            val data = f.children("data").single()
-            assertEquals("application/pdf", data.a("mimeType"))
-            assertTrue("no scheme/host/path: not a deep link", data.a("scheme").isEmpty() && data.a("host").isEmpty() && data.a("pathPrefix").isEmpty())
+            val data = f.children("data")
+            assertEquals(setOf("application/pdf", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"), data.map { it.a("mimeType") }.toSet())
+            for (d in data) assertTrue("no scheme/host/path: not a deep link", d.a("scheme").isEmpty() && d.a("host").isEmpty() && d.a("pathPrefix").isEmpty())
         }
         val reader = app.children("activity").single { it.a("name") == ".camera.DocumentReadActivity" }
         assertEquals("false", reader.a("exported"))

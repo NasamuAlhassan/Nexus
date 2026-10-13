@@ -47,7 +47,9 @@ class DocumentReadActivity : Activity() {
 
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private var reader: DocumentReader? = null
+    private var reader: ReadableDocument? = null
+    /** The previous page's words as read, for the running header/footer check (PageFurniture). */
+    private var lastRaw: String? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
     private val pending = ArrayList<Pair<String, (() -> Unit)?>>()
@@ -71,16 +73,16 @@ class DocumentReadActivity : Activity() {
         tts = TextToSpeech(applicationContext) { status -> main.post { onTtsInit(status == TextToSpeech.SUCCESS) } }
         val path = intent?.getStringExtra(EXTRA_FILE)
         val file = path?.let { File(it) }
-        if (file == null || !file.isFile || !DocumentReader.looksLikePdf(file)) {
-            Log.i(TAG, "[DOC] not a PDF or missing file")
+        if (file == null || !file.isFile || !Documents.looksLikeDocument(file)) {
+            Log.i(TAG, "[DOC] not a PDF or Word file, or missing")
             speak("I couldn't open that document.") { finishQuietly() }
             return
         }
         scope.launch {
-            val r = withContext(Dispatchers.IO) { try { DocumentReader(file) } catch (t: Throwable) { Log.w(TAG, "[DOC] open failed: ${t.javaClass.simpleName}"); null } }
+            val r = withContext(Dispatchers.IO) { try { Documents.open(file) } catch (t: Throwable) { Log.w(TAG, "[DOC] open failed: ${t.javaClass.simpleName}"); null } }
             if (r == null) { speak("I couldn't open that document.") { finishQuietly() }; return@launch }
             reader = r; pages = r.pageCount
-            Log.i(TAG, "[DOC] opened pages=$pages")
+            Log.i(TAG, "[DOC] opened kind=${Documents.kindOf(file)} pages=$pages")
             if (pages == 0) { speak("That document has no pages.") { finishQuietly() }; return@launch }
             speak(DocumentLines.intro(pages), flush = true)
             readPage(0)
@@ -96,14 +98,19 @@ class DocumentReadActivity : Activity() {
             val t0 = SystemClock.uptimeMillis()
             val bmp = withContext(Dispatchers.Default) { try { r.render(index, AppConfig.int("document.render.maxSide", 2000)) } catch (t: Throwable) { null } }
             if (closing) return@launch
-            if (bmp == null) { busy = false; speak("I couldn't draw page ${index + 1}."); return@launch }
+            if (bmp == null && r.hasPictures) { busy = false; speak("I couldn't draw page ${index + 1}."); return@launch }
             show(bmp)
             val tRender = SystemClock.uptimeMillis() - t0
-            val text = prepared.remove(index) ?: withContext(Dispatchers.Default) { r.text(bmp) }
+            val raw = prepared.remove(index) ?: withContext(Dispatchers.Default) { r.text(index, bmp) }
+            // Page numbers and a running header/footer are furniture, not words (P5-03 (2)); the Word reader has none.
+            val text = if (r.hasPictures) PageFurniture.strip(raw, lastRaw) else raw
+            lastRaw = raw
             val tOcr = SystemClock.uptimeMillis() - t0 - tRender
             Log.i(TAG, "[DOC] page ${index + 1}/$pages render=${tRender}ms ocr=${tOcr}ms chars=${text.length}")
             if (closing) return@launch
-            caption.text = if (text.isBlank()) DocumentLines.empty(index, pages) else text.take(400)
+            // A Word page has no picture: its words are the page, shown large; a PDF page shows a few lines under its picture.
+            caption.maxLines = if (bmp == null) 60 else 4
+            caption.text = if (text.isBlank()) DocumentLines.empty(index, pages) else text.take(if (bmp == null) 2000 else 400)
             prefetchNext(index + 1)
             val lines = if (text.isBlank()) listOf(DocumentLines.empty(index, pages))
                 else listOf(DocumentLines.pageStart(index)) + SpeechChunks.split(text, AppConfig.int("document.chunkChars", 180))
@@ -121,18 +128,29 @@ class DocumentReadActivity : Activity() {
         prefetch = scope.launch(Dispatchers.Default) {
             try {
                 val bmp = r.render(index, AppConfig.int("document.render.maxSide", 2000))
-                val text = r.text(bmp)
-                bmp.recycle()
+                val text = r.text(index, bmp)
+                bmp?.recycle()
                 withContext(Dispatchers.Main) { prepared[index] = text }
             } catch (_: Throwable) {}
         }
     }
 
-    private fun show(bmp: Bitmap) {
+    private fun show(bmp: Bitmap?) {
         val old = current
         current = bmp
         image.setImageBitmap(bmp)
         old?.let { if (it !== bmp) it.recycle() }
+        // A Word page has no picture: the words take the whole screen, large, and scroll (P5-03 (2)); a PDF page keeps its
+        // picture with a few lines underneath.
+        val wordsOnly = bmp == null
+        image.visibility = if (wordsOnly) View.GONE else View.VISIBLE
+        (caption.layoutParams as? LinearLayout.LayoutParams)?.let { lp ->
+            if (wordsOnly) { lp.height = 0; lp.weight = 1f } else { lp.height = ViewGroup.LayoutParams.WRAP_CONTENT; lp.weight = 0f }
+            caption.layoutParams = lp
+        }
+        caption.textSize = if (wordsOnly) 26f else 18f
+        caption.gravity = if (wordsOnly) Gravity.CENTER_VERTICAL else Gravity.NO_GRAVITY
+        caption.movementMethod = if (wordsOnly) android.text.method.ScrollingMovementMethod() else null
     }
 
     private fun onNext() {
