@@ -190,7 +190,8 @@ object TelcoUssdTool : Tool {
         } ?: return ToolResult(false, "${flow.netName}'s menu didn't open in time. Nothing was bought.", recoverable = false)
         val kind = BankUssd.kind(first.text, first.hasInput, first.masked)
         TelcoSession.opened(flow, first.text, kind)
-        Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(first.text.take(120).replace("\n", " | "))}")
+        Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(first.text.take(120).replace("\n", " | "),
+            secure = kind == BankUssd.ScreenKind.PIN || kind == BankUssd.ScreenKind.MONEY)}")   // S-03: a PIN / payment screen is never logged in words
         if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) handOver(kind, ctrl, ctx.appContext, flow.netName)
         if (kind == BankUssd.ScreenKind.FINAL) UssdDialog.close(ctrl, first)
         return ToolResult(true, "${flow.netName}: ${BankUssd.spokenScreen(first.text, speakBalance = false).take(120)}",
@@ -242,7 +243,8 @@ object TelcoUssdTool : Tool {
         val kind = BankUssd.kind(next.text, next.hasInput, next.masked)
         TelcoSession.screen(next.text, kind, auto = auto, more = more,
             stepIdx = args.optInt(ARG_STEP, -1), user = !auto, typed = value)
-        Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(next.text.take(120).replace("\n", " | "))}")
+        Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(next.text.take(120).replace("\n", " | "),
+            secure = kind == BankUssd.ScreenKind.PIN || kind == BankUssd.ScreenKind.MONEY)}")   // S-03: a PIN / payment screen is never logged in words
         if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) {
             ledger(app, session.flow, kind)   // first: the watcher that reads the receipt settles THIS entry
             handOver(kind, ctrl, app, session.flow.netName)

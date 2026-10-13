@@ -462,4 +462,29 @@ class BrainLogicTest {
         assertTrue(AgentDecision.fromText("tap(label=\"Send\")") is AgentDecision.Malformed)
         assertTrue(AgentDecision.fromText("The screen shows the home launcher.") is AgentDecision.Done)
     }
+
+    // ---- money controls are never sends (emulator, 13 October 2026: "limit to 20 cedis per send" → "Send 20 cedis to per send") ----
+    private fun isMoneyCall(d: AgentDecision) = d is AgentDecision.CallTool && d.name in setOf("mobile_money", "momo_send", "ussd_navigate")
+
+    @Test fun local_never_turns_a_money_limit_into_a_send() {
+        assertFalse(isMoneyCall(decide(LocalBrain(), "set my mobile money limit to 20 cedis per send")))
+        assertFalse(isMoneyCall(decide(LocalBrain(), "cap my momo at 50 cedis a day")))
+        assertFalse("a measure is not a person", isMoneyCall(decide(LocalBrain(), "send 20 cedis to per send")))
+        assertTrue("a real send still is one", isMoneyCall(decide(LocalBrain(), "send 20 cedis to Kofi")))
+    }
+
+    @Test fun router_answers_a_money_limit_command_itself_before_any_planner() = runBlocking {
+        com.tekyerema.operator.OperatorPolicy.resetForTest(com.tekyerema.operator.MemoryOperatorStore())
+        try {
+            val cloud = FakeBrain(AgentDecision.Done("cloud handled"))
+            val r = RoutingBrain(LocalBrain(), cloud, appForGoal = { null }) { true }
+            val set = r.decide(ctx("set my mobile money limit to 20 cedis per send"))
+            assertTrue("$set", set is AgentDecision.Done && (set as AgentDecision.Done).summary.contains("20 cedis"))
+            val ask = r.decide(ctx("what is my mobile money limit"))
+            assertTrue("$ask", ask is AgentDecision.Done && (ask as AgentDecision.Done).summary.contains("20 cedis"))
+            val gone = r.decide(ctx("remove my mobile money limit"))
+            assertTrue("$gone", gone is AgentDecision.Done)
+            assertEquals("never the planner's business", 0, cloud.calls)
+        } finally { com.tekyerema.operator.OperatorPolicy.resetForTest() }
+    }
 }

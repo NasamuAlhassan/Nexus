@@ -78,7 +78,8 @@ class Navigator(
         repeat(maxSteps) {
             current = screen
             val m = MenuModel.read(screen.text, screen.hasInput, screen.masked)
-            t("READ", "${m.kind} ${m.text.take(80)}")
+            // S-03: the PIN / payment-confirmation screen (the registered name, the amount) is traced by size, never in words.
+            t("READ", if (m.kind == MenuModel.Kind.PIN || m.kind == MenuModel.Kind.CONFIRM) "${m.kind} (${m.text.length} chars)" else "${m.kind} ${m.text.take(80)}")
             when (m.kind) {
                 MenuModel.Kind.PIN, MenuModel.Kind.CONFIRM -> return boundary(m, screen)
                 MenuModel.Kind.ERROR -> { val closed = cancel(screen); return Outcome.Failed(honestError(m.text, closed)) }

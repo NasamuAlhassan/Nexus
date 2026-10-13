@@ -207,6 +207,11 @@ class RoutingBrain(
         com.tekyerema.agent.helper.HelperPlan.decide(ctx.goal, ctx.history)?.let { return it }
         // Money safety round 2 (money/MoneyPlan): "try again" after a *170# timeout, "I sent money to the wrong number" and the
         // guided bank menu are decided on the phone, online or offline — no model picks a money or bank-menu step.
+        // The user's own money controls ("set my mobile money limit to 20 cedis per send", "remove my limit", "what's my
+        // limit") are answered here for every way a request arrives — the voice turn's fast path handles them before the
+        // agent, but a typed request or the debug hook reaches the agent directly, and "limit to 20 cedis per send" was then
+        // read back as "Send 20 cedis to per send" (emulator, 13 October 2026). First step only; never a planner matter.
+        if (ctx.history.isEmpty()) com.tekyerema.money.MoneyCommands.handle(ctx.goal)?.let { return AgentDecision.Done(it.spoken) }
         com.tekyerema.money.MoneyPlan.decide(ctx.goal, ctx.history)?.let { return it }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
 

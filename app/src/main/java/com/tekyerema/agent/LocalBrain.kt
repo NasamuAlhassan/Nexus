@@ -625,6 +625,9 @@ class LocalBrain : AgentBrain {
     /** §A.2 — send money: needs an amount AND a recipient (after "to"/Twi "ma"); opens the menu, user does PIN. */
     private fun sendMoneyDecision(raw: String): AgentDecision? {
         val canon = Normalizer.normalize(raw, if (twi) Lang.TWI else Lang.GH_EN)
+        // A money CONTROL is never a send: "set my mobile money limit to 20 cedis per send" was read back as "Send 20 cedis
+        // to per send" (emulator, 13 October 2026). The limit commands are money/MoneyCommands' (RoutingBrain answers them).
+        if (MONEY_CONTROL.containsMatchIn(canon)) return null
         val marker = Regex("\\b(to|ma)\\b", RegexOption.IGNORE_CASE).find(canon) ?: return null
         var after = canon.substring(marker.range.last + 1).trim().trimEnd('.', '!', '?')
         // The amount is a number BEFORE "to" ("send 5 cedis to …") or one that carries a currency word after it ("to
@@ -671,11 +674,17 @@ class LocalBrain : AgentBrain {
             return call("momo_send", args, "send money (deterministic)")
         }
         // Recipient given by NAME only (no number) → open the network menu; the user completes it. We do NOT
-        // guess a number for a money transfer.
+        // guess a number for a money transfer. A measure ("per send", "a day", "each transfer") is not a person.
+        if (NOT_A_RECIPIENT.containsMatchIn(after)) return null
         val args = JSONObject().put("_kind", "send_money").put("_amount", amountCedis).put("_recipient", after)
         doneLine = if (twi) "Mabue Mobile Money." else "Opened Mobile Money."
         return call("mobile_money", args, "send money")
     }
+
+    /** Words of a money CONTROL — a limit, a cap, a spending rule — never of a send (money/MoneyCommands owns them). */
+    private val MONEY_CONTROL = Regex("(?i)\\blimits?\\b|\\bcap\\b|\\bspending\\b|\\ballowance\\b")
+    /** A recipient that is a measure, not a person: "per send", "a day", "each transfer", "every day", "daily". */
+    private val NOT_A_RECIPIENT = Regex("(?i)^(?:per|each|every|a|one|the)\\s+(?:send|day|transfer|transaction|time|week|month)\\b|^(?:daily|weekly|monthly)\\b")
 
     /** The amount said before the recipient ("send 5 cedis to …"): a number that is not phone-like (no leading 0 on 3+
      *  digits, fewer than 7 digits) — the words and currency around it are kept for [parseCediAmount]. Pure. */
