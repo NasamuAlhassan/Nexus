@@ -71,8 +71,13 @@ object ImportedImage {
         }
     }
 
-    /** Text blocks in reading order (top to bottom, then left to right), the lines of a block as one sentence. */
-    fun readingOrder(blocks: List<com.google.mlkit.vision.text.Text.TextBlock>): String =
-        blocks.sortedWith(compareBy({ it.boundingBox?.top ?: 0 }, { it.boundingBox?.left ?: 0 }))
-            .joinToString("\n") { b -> b.lines.joinToString(" ") { it.text } }.trim()
+    /** Text blocks in reading order — columns whole, full-width titles first (camera/ReadingOrder, the XY-cut), the lines of a
+     *  block as one sentence. Was "top to bottom, then left to right", which interleaves two columns (R-A7, 13 Oct 2026). */
+    fun readingOrder(blocks: List<com.google.mlkit.vision.text.Text.TextBlock>): String {
+        val items = blocks.mapIndexed { i, b ->
+            val r = b.boundingBox
+            ReadingOrder.Item(b.lines.joinToString(" ") { it.text }, r?.left ?: 0, r?.top ?: (i * 10), r?.right ?: 1, r?.bottom ?: (i * 10 + 1))
+        }
+        return ReadingOrder.text(items)
+    }
 }
