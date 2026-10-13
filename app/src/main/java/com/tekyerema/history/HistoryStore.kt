@@ -46,7 +46,9 @@ object HistoryStore {
     private val _entries = MutableStateFlow<List<HistoryEntry>>(emptyList())
     val entries: StateFlow<List<HistoryEntry>> = _entries
 
-    fun init(context: Context) {
+    /** Synchronised: the start-up warm thread loads the file early; a later caller on the main thread finds it done (or waits
+     *  for the one load in progress) instead of loading it a second time (P3-02 round 3, 13 October 2026). */
+    @Synchronized fun init(context: Context) {
         if (appContext != null) return
         appContext = context.applicationContext
         _entries.value = prune(load())

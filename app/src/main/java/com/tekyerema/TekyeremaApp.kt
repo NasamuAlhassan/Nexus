@@ -19,6 +19,9 @@ class TekyeremaApp : Application() {
         // X-02: versioned JSON config (assets/config) + local overrides — loaded before anything reads a tunable.
         com.tekyerema.core.config.AppConfig.load(this); stage("config")
         com.tekyerema.core.config.Registrations.registerAll(); stage("registry")   // X-01: capability registry (flags, API gates, checks)
+        // P3-02 round 3: the heavy singletons (regex tables), the history store and the app list warm on a background thread
+        // from here on, so the stages below find them ready instead of initialising them on the main thread (core/StartupWarm).
+        com.tekyerema.core.StartupWarm.start(this); stage("warm")
         // WS-C: the user's standing choices (execution mode, cloud, providers, budgets, scopes…) — before anything reads them.
         com.tekyerema.operator.OperatorPolicy.init(com.tekyerema.operator.PrefsOperatorStore(this)); stage("policy")
         com.tekyerema.core.DeviceProfile.init(this); stage("device")             // N-08: RAM class → how many models stay resident
@@ -40,11 +43,14 @@ class TekyeremaApp : Application() {
         ModelManager.init(this); stage("models")     // §Part D — single model store; first-run download is the delivery path
         AgentEngine.init(this); stage("agent")
         VoiceEngine.init(this); stage("voice")
-        // D: the computer connection (MCP over adb) — idle until the user turns it on (OperatorPolicy.remoteControlEnabled).
-        com.tekyerema.mcp.RemoteControl.init(this); stage("mcp")
-        // Phone care: the low-battery alert listens to the battery (off unless the user switched it on).
-        try { com.tekyerema.phonecare.PhoneAlerts.init(this) } catch (_: Throwable) {}
-        stage("alerts")
+        // D: the computer connection (MCP over adb) — idle until the user turns it on (OperatorPolicy.remoteControlEnabled) —
+        // and phone care's low-battery listener: neither is needed in the first seconds, and together they took 0.85 s of a
+        // 9.7-s cold start (P3-02 round 3, 13 October 2026). Three seconds later, on the main thread as before.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try { com.tekyerema.mcp.RemoteControl.init(this) } catch (_: Throwable) {}
+            try { com.tekyerema.phonecare.PhoneAlerts.init(this) } catch (_: Throwable) {}
+        }, 3_000L)
+        stage("mcp+alerts(deferred)")
         android.util.Log.i("Tekyerema", "[STARTUP] onCreate ${android.os.SystemClock.uptimeMillis() - t0} ms: $marks")
     }
 

@@ -193,8 +193,6 @@ object AgentEngine {
             val t1 = android.os.SystemClock.uptimeMillis()
             registry = ToolRegistry(defaultTools())
             val t2 = android.os.SystemClock.uptimeMillis()
-            // P3-02 round 3: where the agent's share of the start-up goes (`agent` = 0.4–1.5 s; which part is next to move).
-            Log.i(TAG, "[STARTUP] AgentEngine.init settings=${t1 - t0} registry=${t2 - t1} tools=${registry.installed.size}")
             initialized = true
             // P3-02 (13 October 2026): the conversation file (Keystore + disk) and the journal / effect-ledger load are not
             // needed for the service to bind or the first word to be heard — they cost 1.2 s of the main thread at a warm
@@ -205,6 +203,12 @@ object AgentEngine {
                 // WS-A: the task journal and the effect ledger (a task found still running was cut off → INTERRUPTED).
                 try { com.tekyerema.agent.journal.JournalBoot.start(app) } catch (_: Throwable) {}
             }
+            val t3 = android.os.SystemClock.uptimeMillis()
+            refreshReadiness()
+            // P3-02 round 3: where the agent's share of the start-up goes (`agent` = 0.4–1.5 s; which part is next to move).
+            Log.i(TAG, "[STARTUP] AgentEngine.init settings=${t1 - t0} registry=${t2 - t1} launch=${t3 - t2} " +
+                "readiness=${android.os.SystemClock.uptimeMillis() - t3} tools=${registry.installed.size}")
+            return
         }
         refreshReadiness()
     }

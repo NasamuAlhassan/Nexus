@@ -220,8 +220,8 @@ object VoiceEngine {
         var onLang: (String) -> Unit = {}
         var forced: () -> String? = { plan.pinnedLanguage }
         val built = com.tekyerema.voice.io.VoiceLayer.build(plan, object : com.tekyerema.voice.io.VoiceLayer.Factory<SherpaAsr, com.tekyerema.language.LanguageLayer.Registries> {
-            override fun onDeviceAsr() = SherpaAsr(app).also { sherpa = it; it.hotwords = { SpeechVocabulary.current().entries.map { e -> e.text } } }
-            override fun languageLayer() = com.tekyerema.language.LanguageLayer.build(app)
+            override fun onDeviceAsr() = SherpaAsr(app).also { sherpa = it; it.hotwords = { SpeechVocabulary.current().entries.map { e -> e.text } }; stage("sherpaAsr") }
+            override fun languageLayer() = com.tekyerema.language.LanguageLayer.build(app).also { stage("languageLayer") }
             override fun systemInput(): com.tekyerema.voice.io.VoiceInput {
                 val cfg = { com.tekyerema.voice.io.SystemSpeechConfig.fromConfig() }
                 val main = android.os.Handler(android.os.Looper.getMainLooper())
@@ -322,6 +322,7 @@ object VoiceEngine {
                 // refuses while a turn runs). Its level joins the living visual like every other microphone.
                 dictationAsr = hybrid
                 dictationMic = MicCapture(appContext = app, noSpeechTimeoutMs = 8000).also { levels.add(it.level); mics += it }
+                stage("capturedInput")
                 return com.tekyerema.voice.io.CapturedAudioInput(mic, answerMic, hybrid, sessionLang, forced)
             }
             // gh_mixed (owner, 2026-09-29): English listens → the phone's recognizer; Twi listens → the captured path (UG HCI
