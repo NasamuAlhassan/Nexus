@@ -537,8 +537,30 @@ class OpenAiCompatBrain(
                         ?: JSONObject()
                     return AgentDecision.fromToolCall(name, args, null)
                 }
+                // (c) a whole PLAN as JSON — {"plan":[{"action":"open_app","app":"Settings","expects":"…"}, …]} — which
+                // gpt-oss-120b wrote in `content` instead of calling a tool (13 October 2026: it was SPOKEN as the answer
+                // and the task marked done). The first step becomes the tool call; the rest ride along as the plan.
+                planStep(obj)?.let { return it }
             }
             return null
+        }
+
+        /** The first action of a `plan` / `steps` array as a tool call, the whole plan as its `plan` argument; null if none. */
+        internal fun planStep(obj: JSONObject): AgentDecision? {
+            val steps = obj.optJSONArray("plan") ?: obj.optJSONArray("steps") ?: return null
+            val first = (0 until steps.length()).mapNotNull { steps.optJSONObject(it) }.firstOrNull() ?: return null
+            val name = first.optString("action").ifBlank { first.optString("tool").ifBlank { first.optString("name") } }
+            if (name !in KNOWN_TOOLS) return null
+            val args = JSONObject()
+            for (k in first.keys()) if (k != "action" && k != "tool" && k != "name") args.put(k, first.get(k))
+            val plan = (0 until steps.length()).mapNotNull { steps.optJSONObject(it) }.joinToString("; ") { s ->
+                val a = s.optString("action").ifBlank { s.optString("tool").ifBlank { s.optString("name") } }
+                val what = listOf("app", "label", "text", "key", "direction").mapNotNull { s.optString(it).takeIf { v -> v.isNotBlank() } }.joinToString(" ")
+                val check = s.optString("expects").takeIf { it.isNotBlank() }
+                (if (what.isBlank()) a else "$a $what") + (check?.let { " => $it" } ?: "")
+            }
+            if (plan.isNotBlank() && !args.has("plan")) args.put("plan", plan)
+            return AgentDecision.fromToolCall(name, args, null)
         }
 
         private fun tryJson(s: String): JSONObject? = try { JSONObject(s) } catch (t: Throwable) { null }

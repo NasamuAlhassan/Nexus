@@ -53,6 +53,10 @@ sealed class AgentDecision {
         fun fromText(content: String): AgentDecision {
             val c = content.trim()
             if (c.isEmpty()) return Fail("LLM returned neither a tool call nor text.")
+            // JSON of any shape is never an answer a blind user should hear ("{ "plan": [ …" was spoken as one, emulator
+            // 13 October 2026); the engine's malformed path asks the model for a tool call or one short sentence instead.
+            val bare = c.replace(Regex("```[a-zA-Z]*"), "").replace("```", "").trim()
+            if ((bare.startsWith("{") && bare.endsWith("}")) || (bare.startsWith("[") && bare.endsWith("]"))) return Malformed(c)
             return if (toolShape.containsMatchIn(c)) Malformed(c) else Done(c)
         }
 

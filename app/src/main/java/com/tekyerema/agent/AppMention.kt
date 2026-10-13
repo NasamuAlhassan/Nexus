@@ -28,9 +28,21 @@ object AppMention {
     fun candidates(goal: String): List<String> {
         val g = goal.trim().lowercase().trimEnd('.', '!', '?').replace(Regex("\\s+"), " ")
         return PATTERNS.mapNotNull { it.find(g)?.groupValues?.get(1)?.trim() }
-            .filter { it.isNotEmpty() && it !in NOT_APPS }
+            .filter { it.isNotEmpty() && it !in NOT_APPS && !isTheDevice(g, it) }
             .distinct()
     }
+
+    /** "phone", "device", "tablet" — also "this phone", "your device": the thing in the user's hand unless the words say the
+     *  APP — "how much storage is left on my phone" opened the Phone app and the task was marked done (multi suite, 13 Oct 2026). */
+    private val DEVICE_WORDS = setOf("phone", "device", "tablet", "handset")
+    private val DETERMINERS = Regex("^(?:this|that|my|the|your|our|his|her|their)\\s+")
+    private fun isTheDevice(g: String, candidate: String): Boolean {
+        val head = candidate.replace(DETERMINERS, "")
+        return head in DEVICE_WORDS && !namesTheApp(g, head)
+    }
+    private fun namesTheApp(g: String, word: String): Boolean =
+        Regex("\\b(?:open(?:ing)?|launch(?:ing)?|start(?:ing)?|go\\s+to|switch\\s+to|use|using)\\s+(?:up\\s+)?(?:the\\s+|my\\s+)?${Regex.escape(word)}(?:\\s+app)?\\b").containsMatchIn(g) ||
+            Regex("\\b${Regex.escape(word)}\\s+app\\b").containsMatchIn(g)
 
     private val SINGLE_OPEN = Regex("^$LEADIN$OPEN$NAME(?:\\s+app)?(?:\\s+(?:please|for me))?$")
 
