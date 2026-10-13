@@ -433,11 +433,33 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     // ------------------------------------------------------------------ perception
 
+    /** One walk of the tree, and whether it met a web container that gave nothing back (see [buildSnapshot]). */
+    private class SnapshotPass(val snapshot: UiSnapshot, val bareWeb: Boolean)
+
     override suspend fun buildSnapshot(): UiSnapshot {
+        val first = snapshotOnce()
+        // P1-07 (13 October 2026): a WebView hands out its page tree lazily — five seconds after a cold start, Chrome on the
+        // emulator showed a bare "Web View" with nothing inside while uiautomator, asking a moment later, got the page's
+        // paragraphs. When the only web container on the screen gave nothing back, look once more after a short wait.
+        val retryMs = com.tekyerema.core.config.AppConfig.long("perception.tree.webViewRetryMs", 400L).coerceIn(0L, 1_500L)
+        if (first.bareWeb && retryMs > 0) {
+            kotlinx.coroutines.delay(retryMs)
+            val second = snapshotOnce()
+            if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TREE] bare WebView: second look after $retryMs ms → ${second.snapshot.elements.size} elements (was ${first.snapshot.elements.size})")
+            return second.snapshot
+        }
+        return first.snapshot
+    }
+
+    /** Chrome's not-yet-populated page shows as a FrameLayout described "Web View"; a populated one as a WebView node. */
+    private fun isWebContainer(n: AccessibilityNodeInfo): Boolean =
+        n.className?.toString()?.contains("WebView") == true || n.contentDescription?.toString()?.trim().equals("Web View", true)
+
+    private suspend fun snapshotOnce(): SnapshotPass {
         // The active window's root is sometimes null although a window plainly has focus (seen with our own debug USSD
         // simulator dialog on the Pixel emulator, 13 October 2026: focus on it, root null, every read empty). The window
         // list is the second source: the focused window, else the active one, else the top application window.
-        val root = try { rootInActiveWindow } catch (t: Throwable) { null } ?: rootFromWindowList() ?: return UiSnapshot.EMPTY
+        val root = try { rootInActiveWindow } catch (t: Throwable) { null } ?: rootFromWindowList() ?: return SnapshotPass(UiSnapshot.EMPTY, false)
         nodeMap.clear(); boundsMap.clear()
         val (sw, sh) = screenSize()
         val rootPkg = root.packageName?.toString()
@@ -463,11 +485,15 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // a step for 84 s (13 October 2026). Past the budget the walk stops and the snapshot says it is partial.
         val walkStart = SystemClock.uptimeMillis()
         val budgetMs = com.tekyerema.core.config.AppConfig.long("perception.tree.budgetMs", 3_000L).coerceIn(500L, 20_000L)
+        // P1-07: the first web container met, and how many elements its subtree yielded (0 = a bare page, see buildSnapshot).
+        var webSeen = false; var insideWeb = false; var webDepth = 0; var webCount = 0
         var overBudget = false
         while (stack.isNotEmpty() && visited < maxVisited && elements.size < maxCollected) {
             if (SystemClock.uptimeMillis() - walkStart > budgetMs) { overBudget = true; break }
             val (node, depth, ancestorClickable) = stack.removeLast()
             visited++
+            if (insideWeb && depth <= webDepth) insideWeb = false
+            if (!webSeen && isWebContainer(node)) { webSeen = true; insideWeb = true; webDepth = depth }
             val rawLabel = rawLabelOf(node)
             if (Sanitize.hadHiddenContent(rawLabel)) stripped++
             val label = Sanitize.label(rawLabel) ?: if (node.isClickable && node.isVisibleToUser) captionOf(node) else null
@@ -487,6 +513,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                     Sanitize.label(node.text?.toString()), Sanitize.label(node.contentDescription?.toString()))
                 if (onScreen && unseen != Perceivability.TINY) {
                     val id = idCounter++
+                    if (insideWeb && depth > webDepth) webCount++
                     nodeMap[id] = node
                     boundsMap[id] = b
                     val ri = try { node.rangeInfo } catch (t: Throwable) { null }
@@ -548,7 +575,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             android.view.accessibility.AccessibilityWindowInfo.TYPE_SPLIT_SCREEN_DIVIDER -> "split-screen divider"
             else -> null
         }
-        return UiSnapshot(
+        return SnapshotPass(UiSnapshot(
             appPackage = pkg,
             screenTitle = title,
             elements = elements,
@@ -560,7 +587,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             windowType = wtype,
             truncated = visited >= maxVisited || elements.size >= maxCollected || overBudget,   // F-01
             announcements = recentAnnouncements()                                  // F-17
-        )
+        ), bareWeb = webSeen && webCount == 0)
     }
 
     private fun isHeading(n: AccessibilityNodeInfo): Boolean =

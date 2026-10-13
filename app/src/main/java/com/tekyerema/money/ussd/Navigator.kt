@@ -61,7 +61,7 @@ class Navigator(
                     cancel(UssdDialog.read(ctrl) ?: s)
                     kotlinx.coroutines.delay(1_200)
                     UssdDialog.read(ctrl)?.let { cancel(it) }
-                } catch (_: Throwable) {}
+                } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[NAV] could not close the network screen after the cancel: ${t.javaClass.simpleName}") }   // P3-04: a USSD box left open is a behaviour change
             }
             throw c
         }
@@ -197,11 +197,11 @@ class Navigator(
     /** Press the dialog's Cancel (Back when it has none) and check the dialog went. Cancelling a USSD session never
      *  moves money. True when it is gone. */
     private suspend fun cancel(screen: UssdDialog.Screen): Boolean {
-        try { screen.cancelId?.let { ctrl.clickElement(it) } ?: ctrl.globalAction("back") } catch (_: Throwable) {}
+        try { screen.cancelId?.let { ctrl.clickElement(it) } ?: ctrl.globalAction("back") } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[NAV] cancel press failed: ${t.javaClass.simpleName}") }
         kotlinx.coroutines.delay(900)
         var now = UssdDialog.read(ctrl)
         if (now != null && now.text == screen.text) {
-            try { ctrl.globalAction("back") } catch (_: Throwable) {}
+            try { ctrl.globalAction("back") } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[NAV] back after cancel failed: ${t.javaClass.simpleName}") }
             kotlinx.coroutines.delay(900)
             now = UssdDialog.read(ctrl)
         }

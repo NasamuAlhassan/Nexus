@@ -43,7 +43,7 @@ object KnownRecipients {
         val b = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val s = b.joinToString("") { "%02x".format(it.toInt() and 0xff) }
         salt = s
-        try { store?.put(K_SALT, s) } catch (_: Throwable) {}
+        try { store?.put(K_SALT, s) } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[RECIPIENTS] salt not stored: ${t.javaClass.simpleName}") }   // P3-04: unsaved = every recipient is "new" again
         s
     }
 
@@ -67,7 +67,7 @@ object KnownRecipients {
         val h = hash(saltNow(), number) ?: return
         hashes.remove(h); hashes.add(h)
         while (hashes.size > MAX) hashes.remove(hashes.first())
-        try { store?.put(K_KNOWN, hashes.joinToString(",")) } catch (_: Throwable) {}
+        try { store?.put(K_KNOWN, hashes.joinToString(",")) } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[RECIPIENTS] not stored: ${t.javaClass.simpleName}") }
     }
 
     /** The salted hash of [number] for another money store to keep instead of the number (money/TxLedger): with
@@ -82,7 +82,7 @@ object KnownRecipients {
         val h = key?.takeIf { it.length == 64 } ?: return
         hashes.remove(h); hashes.add(h)
         while (hashes.size > MAX) hashes.remove(hashes.first())
-        try { store?.put(K_KNOWN, hashes.joinToString(",")) } catch (_: Throwable) {}
+        try { store?.put(K_KNOWN, hashes.joinToString(",")) } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[RECIPIENTS] not stored: ${t.javaClass.simpleName}") }
     }
 
     @Synchronized fun count(): Int = hashes.size
@@ -90,7 +90,7 @@ object KnownRecipients {
     /** "Delete everything": forget them all (and the salt, so nothing old can be matched). */
     @Synchronized fun clear() {
         hashes.clear(); salt = null
-        try { store?.put(K_KNOWN, null); store?.put(K_SALT, null) } catch (_: Throwable) {}
+        try { store?.put(K_KNOWN, null); store?.put(K_SALT, null) } catch (t: Throwable) { android.util.Log.w("Tekyerema", "[RECIPIENTS] not cleared: ${t.javaClass.simpleName}") }
     }
 
     /** The read-back line for a first-time recipient. */

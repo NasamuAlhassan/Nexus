@@ -148,7 +148,7 @@ object AgentEngine {
             val arr = org.json.JSONArray(synchronized(conversation) { conversation.toList() })
             if (arr.length() == 0) { f.delete(); return }
             com.tekyerema.core.SecureStore.write(f, org.json.JSONObject().put("lastTurnMs", lastTurnMs).put("turns", arr).toString())
-        } catch (_: Throwable) {}
+        } catch (t: Throwable) { Log.w(TAG, "[CONVERSATION] save failed: ${t.javaClass.simpleName}") }   // P3-04: a silent failure here means no resume after a process death
     }
 
     /** H-12: how many lines of conversation are remembered right now. */
@@ -182,7 +182,7 @@ object AgentEngine {
                 for (i in 0 until arr.length()) conversation.addLast(arr.optString(i))
                 lastTurnMs = last
             }
-        } catch (_: Throwable) {}
+        } catch (t: Throwable) { Log.w(TAG, "[CONVERSATION] load failed: ${t.javaClass.simpleName}") }
     }
 
     fun init(context: Context) {
@@ -2306,7 +2306,7 @@ object AgentEngine {
                 com.tekyerema.audit.UndoLog.push(com.tekyerema.audit.UndoGroup(System.currentTimeMillis(), r.goal, inverses))
             }
             if (ctx != null) r.trajectory?.let { com.tekyerema.core.telemetry.Trajectories.save(ctx, it, status.name, summary) }
-        } catch (_: Throwable) {}
+        } catch (t: Throwable) { Log.w(TAG, "[UNDO] undo group / trajectory not saved: ${t.javaClass.simpleName}") }   // P3-04
         _state.update { it.copy(status = status, lastStats = stats.summary(), lastResult = result.toString()) }
     }
 
@@ -2555,7 +2555,7 @@ object AgentEngine {
             val body = text.replace("\n", " ")
             val line = if (com.tekyerema.core.Privacy.redactTraces()) com.tekyerema.core.TraceRedact.line(kind.name, body, UNTRUSTED_MARK) else body
             traceFile?.appendText("[+${entry.timeMs - traceStartMs}ms ${kind.name}] $line\n")
-        } catch (t: Throwable) {}
+        } catch (t: Throwable) { Log.w(TAG, "[TRACE] trace line not written: ${t.javaClass.simpleName}") }   // P3-04
     }
 
     /** Fresh trace file per task under filesDir/traces; pull with `adb ... run-as`/`cat` or the
