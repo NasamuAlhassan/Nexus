@@ -17,7 +17,6 @@ import com.tekyerema.tools.Tool
 import com.tekyerema.tools.ToolContext
 import com.tekyerema.tools.ToolResult
 import com.tekyerema.tools.str
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 /**
@@ -198,10 +197,10 @@ object UssdNavigatorTool : Tool {
                     if (intent == TxIntent.SEND_MONEY) com.tekyerema.money.TxLedger.What.SEND else com.tekyerema.money.TxLedger.What.AIRTIME,
                     com.tekyerema.money.MoneyLimits.parseAmount(tx.amount), tx.recipient, contact ?: out.registeredName, sim.provider,
                     registered = out.registeredName)
-                // A balance is only an answer once it is HEARD: the network shows it on the screen after the PIN, where
-                // a blind user cannot read it (2 October 2026: the walk reached the PIN, the owner entered it, and
-                // nothing was said). The PIN prompt itself is never kept — see [readAfterPin].
-                else readAfterPin(ctrl, sim.provider)
+                // The network's last word after the PIN — the balance, the receipt, a failure — is read out (AfterPin):
+                // it is shown on the screen, where a blind user cannot read it (2 October 2026: the walk reached the PIN,
+                // the owner entered it, and nothing was said; 13 October: the same for a send's receipt).
+                AfterPin.watch(ctrl, ctx.appContext, sim.provider)
                 ToolResult(true, out.line, data = JSONObject().put("boundary", true), channel = "native")
             }
             is Navigator.Outcome.Final -> ToolResult(true, out.line, data = JSONObject().put("final", true), channel = "native")
@@ -224,40 +223,6 @@ object UssdNavigatorTool : Tool {
                 ToolResult(true, out.ask, data = JSONObject().put("ask", true), channel = "native")
             }
             is Navigator.Outcome.Failed -> ToolResult(false, out.line, recoverable = false)
-        }
-    }
-
-    private val after = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
-    @Volatile private var reader: kotlinx.coroutines.Job? = null
-
-    /**
-     * After the PIN hand-off of a balance check: wait for the network's ANSWER — the first phone dialog with no entry
-     * box — and say it. While the dialog still has an entry box (the PIN prompt, or a "wrong PIN, try again") nothing
-     * about it is kept, logged or spoken; what is typed into it never reaches a snapshot at all (TelephonyWindows). Gives
-     * up when the dialog has been gone for a while (cancelled) or after the secure step's own limit.
-     */
-    private fun readAfterPin(ctrl: com.tekyerema.accessibility.AccessibilityController, network: String?) {
-        reader?.cancel()
-        reader = after.launch {
-            val deadline = android.os.SystemClock.uptimeMillis() + com.tekyerema.voice.SecureStep.MAX_MS
-            var gone = 0
-            while (android.os.SystemClock.uptimeMillis() < deadline) {
-                kotlinx.coroutines.delay(900)
-                val s = try { UssdDialog.read(ctrl) } catch (_: Throwable) { null }
-                if (s == null) { if (++gone > 25) return@launch; continue }      // no dialog for ~22 s: closed or cancelled
-                gone = 0
-                if (s.hasInput || s.masked) continue                              // still asking for something: not ours to read
-                val name = network?.let { com.tekyerema.agent.NumberSpeech.networkName(it) }
-                // In a Twi conversation the balance is said in Twi; an answer with no balance in it is read as written.
-                val twi = if (com.tekyerema.voice.VoiceEngine.speaksTwi())
-                    com.tekyerema.money.UssdSpeech.twiBalance(s.text, name ?: "Network no") else null
-                Log.i(TAG, "[NAV] the network's answer after the PIN is read out (${s.text.length} chars${if (twi != null) ", in Twi" else ""})")
-                com.tekyerema.voice.VoiceEngine.announceAnswer(
-                    com.tekyerema.money.UssdSpeech.forEar(s.text, intro = "${name ?: "The network"} says"), twi)
-                // The answer has been taken; close the dialog so the user isn't left to find its OK button.
-                try { s.cancelId?.let { ctrl.clickElement(it) } } catch (_: Throwable) {}
-                return@launch
-            }
         }
     }
 

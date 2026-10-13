@@ -174,6 +174,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             ?.root?.packageName?.toString()
     } catch (_: Throwable) { null }
 
+    override fun windowCount(): Int = try { windows?.size ?: 0 } catch (_: Throwable) { -1 }
     override fun activeWindowPackage(): String? =
         try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null } ?: foregroundPackage()
 
@@ -357,6 +358,18 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         } catch (t: Throwable) { Log.w("Tekyerema", "[TRIGGER] fingerprint gestures unavailable: ${t.message}") }
     }
 
+    /** The focused / active / top application window's root from the window list (needs flagRetrieveInteractiveWindows,
+     *  set), or null. Logged in debug builds so an empty read says which windows the system listed. */
+    private fun rootFromWindowList(): AccessibilityNodeInfo? = try {
+        val ws = windows.orEmpty()
+        val pick = ws.firstOrNull { it.isFocused } ?: ws.firstOrNull { it.isActive }
+            ?: ws.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
+        if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TREE] active root null; windows=" + ws.joinToString(" | ") { w ->
+            "${w.root?.packageName ?: "?"}/${w.title ?: "-"} type=${w.type} focused=${w.isFocused} active=${w.isActive}" }.take(400) +
+            " → " + (pick?.root?.packageName ?: "none"))
+        pick?.root
+    } catch (_: Throwable) { null }
+
     /** J-08: app overlays (TYPE_APPLICATION_OVERLAY, drawn via SYSTEM_ALERT_WINDOW) are reported to accessibility as
      *  TYPE_SYSTEM windows owned by the drawing app's package. Anything not the system UI, the platform, the keyboard
      *  or Tɛkyerɛma itself that covers (x,y) is foreign. Window list requires flagRetrieveInteractiveWindows (set). */
@@ -408,7 +421,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     // ------------------------------------------------------------------ perception
 
     override suspend fun buildSnapshot(): UiSnapshot {
-        val root = try { rootInActiveWindow } catch (t: Throwable) { null } ?: return UiSnapshot.EMPTY
+        // The active window's root is sometimes null although a window plainly has focus (seen with our own debug USSD
+        // simulator dialog on the Pixel emulator, 13 October 2026: focus on it, root null, every read empty). The window
+        // list is the second source: the focused window, else the active one, else the top application window.
+        val root = try { rootInActiveWindow } catch (t: Throwable) { null } ?: rootFromWindowList() ?: return UiSnapshot.EMPTY
         nodeMap.clear(); boundsMap.clear()
         val (sw, sh) = screenSize()
         val rootPkg = root.packageName?.toString()
@@ -429,7 +445,14 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // known without walking parent chains (every getParent() is an IPC round trip).
         val stack = ArrayDeque<Triple<AccessibilityNodeInfo, Int, Boolean>>()
         stack.addLast(Triple(root, 0, false))
+        // A TIME budget as well as a node budget: every node is an IPC round trip into the app in front, and a dense screen
+        // (Settings' search page with the keyboard up) took ~25 s per read on the Pixel emulator — three verify re-reads froze
+        // a step for 84 s (13 October 2026). Past the budget the walk stops and the snapshot says it is partial.
+        val walkStart = SystemClock.uptimeMillis()
+        val budgetMs = com.tekyerema.core.config.AppConfig.long("perception.tree.budgetMs", 3_000L).coerceIn(500L, 20_000L)
+        var overBudget = false
         while (stack.isNotEmpty() && visited < maxVisited && elements.size < maxCollected) {
+            if (SystemClock.uptimeMillis() - walkStart > budgetMs) { overBudget = true; break }
             val (node, depth, ancestorClickable) = stack.removeLast()
             visited++
             val rawLabel = rawLabelOf(node)
@@ -522,7 +545,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             strippedHiddenText = stripped,
             appName = pkg?.let { appNameOf(it) },
             windowType = wtype,
-            truncated = visited >= maxVisited || elements.size >= maxCollected,   // F-01
+            truncated = visited >= maxVisited || elements.size >= maxCollected || overBudget,   // F-01
             announcements = recentAnnouncements()                                  // F-17
         )
     }

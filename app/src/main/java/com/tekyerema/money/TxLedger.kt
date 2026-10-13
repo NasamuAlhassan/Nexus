@@ -161,17 +161,23 @@ object TxLedger {
      * [now] is the real time (the daily total rolls over on it — never on a message's own, possibly yesterday's, time).
      */
     @Synchronized fun settle(msg: MoMoOutcome.Msg, receivedAt: Long = System.currentTimeMillis(), withBalance: Boolean = false,
-                             now: Long = System.currentTimeMillis()): Settled? {
+                             now: Long = System.currentTimeMillis(), eachItsOwn: Boolean = false, onlyAt: Long? = null): Settled? {
         val failed = msg.kind == MoMoOutcome.Kind.FAILED
         if (!failed && !msg.outgoingDone) return null
         val shown = decimal(msg.amount) ?: return null
+        // [onlyAt]: the caller KNOWS which hand-off this answer belongs to (the screen after the PIN belongs to the hand-off
+        // just made). Without it a message settles the first open entry of that amount — and a wrong PIN on a second send
+        // of 0.10 marked the FIRST, still-open 0.10 entry failed while the second kept waiting (emulator, 13 Oct 2026, 03:29).
+        fun candidate(t: Tx) = onlyAt == null || t.at == onlyAt
         // The same message again? By its transaction ID when both copies carry one; otherwise by what it says (kind,
-        // amount, party) within the window — the app's push may not carry the ID the SMS does.
+        // amount, party) within the window — the app's push may not carry the ID the SMS does. [eachItsOwn]: the
+        // network's SCREEN after the PIN (money/ussd/AfterPin) is one answer to one hand-off, never a copy of an
+        // earlier one — a second wrong PIN on the same amount within ten minutes is a second failure.
         val sig = "m:${msg.kind.name}|${plain(shown)}|${msg.party.orEmpty().trim().lowercase()}"
         val id = msg.txnId?.takeIf { it.isNotBlank() }
-        if (entries.any { e -> e.sig != null && ((id != null && e.txnId == id) ||
+        if (!eachItsOwn && entries.any { e -> e.sig != null && ((id != null && e.txnId == id) ||
                 ((id == null || e.txnId == null) && e.sig == sig && kotlin.math.abs(e.settledAt - receivedAt) <= windowMs())) }) return null
-        fun ours(t: Tx) = receivedAt - t.at in 0..windowMs() && same(decimal(t.amount), shown) && fits(t, msg) && partyFits(t, msg)
+        fun ours(t: Tx) = candidate(t) && receivedAt - t.at in 0..windowMs() && same(decimal(t.amount), shown) && fits(t, msg) && partyFits(t, msg)
         val tx = entries.firstOrNull { (it.state == State.AT_PIN || it.state == State.UNKNOWN) && ours(it) }
             ?: (if (failed) null else entries.firstOrNull { it.state == State.FAILED && ours(it) })
             ?: return null

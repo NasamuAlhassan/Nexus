@@ -93,6 +93,8 @@ sealed class FastIntent(val name: String) {
     // ---- W6 ----
     /** P-03 / P-06 / P-01: "text" | "color" | "describe". */
     data class Camera(val mode: String) : FastIntent("CAMERA")
+    /** P5-02: a picture the user already has — the phone's photo picker, then read ("text") or describe. */
+    data class ReadPhoto(val mode: String) : FastIntent("READ_PHOTO")
     /** K-15: what changed on the screen since it was last described. */
     object WhatChanged : FastIntent("WHAT_CHANGED")
     /** K-09: "in" | "out" | "reset". */
@@ -292,6 +294,9 @@ object FastIntentClassifier {
 
             // H-08 preferences by voice (before the phone actions: "talk slower" is not a call).
             preference(g) != null -> preference(g)
+            // P5-02: a picture the user already has (gallery, files, a screenshot) — before the camera forms, which "read
+            // this photo" would otherwise take to the live camera.
+            RE_READ_PHOTO.containsMatchIn(g) -> FastIntent.ReadPhoto(if (RE_DESCRIBE_WORD.containsMatchIn(g)) "describe" else "text")
             // W6: camera, screen changes, magnification, emergency set-up.
             RE_CAMERA_MONEY.containsMatchIn(g) -> FastIntent.Camera("currency")
             RE_CAMERA_COLOR.containsMatchIn(g) -> FastIntent.Camera("color")
@@ -563,6 +568,16 @@ object FastIntentClassifier {
             "\\bhow many cedis? is (?:this|that|it)\\b|\\bwhich note is (?:this|that|it)\\b|" +
             "\\bwhat kind of (?:note|money) is (?:this|that|it)\\b")
 
+    // P5-02: a picture that already exists — named with where it is (gallery, photos, files, downloads, "I took"), or "the
+    // last / latest photo / screenshot", or an explicit "pick a picture and read it". A bare "read this photo" stays with
+    // the camera (the thing in front of the user).
+    private const val PICK_PIC = "(?:picture|photo|image|screenshot|pic|photograph)"
+    private val RE_READ_PHOTO = Regex("\\b(?:read|describe|open)\\b[^.]{0,24}?\\b$PICK_PIC\\b[^.]{0,30}?\\b(?:gallery|photos app|my photos|my pictures|my files|" +
+        "album|camera roll|downloads|i took|i saved|i downloaded|i have|on my phone)\\b|" +
+        "^(?:pick|choose|select) (?:a |the )?$PICK_PIC(?: (?:from|in) (?:my )?(?:gallery|photos|files))?(?: and (?:read|describe) it)?$|" +
+        "\\b(?:read|describe) (?:the |my )?(?:last|latest|most recent|newest) $PICK_PIC\\b|" +
+        "\\bwhat(?:'s| is| does) (?:in|on|written in|written on|it say in) (?:the |my )?(?:last|latest|most recent|newest) $PICK_PIC\\b")
+    private val RE_DESCRIBE_WORD = Regex("\\b(?:describe|what(?:'s| is) (?:in|on)|what does it show)\\b")
     private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")
     private val RE_CAMERA_DESCRIBE = Regex("\\bwhat(?:'s| is) in front of me\\b|\\bwhat am i holding\\b|\\bdescribe what (?:you see|is in front of me)\\b|" +
         "\\blook at this for me\\b|\\bwhat is this (?:thing|object)\\b")

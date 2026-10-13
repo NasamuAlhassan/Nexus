@@ -89,6 +89,22 @@ class BacktrackerTest {
         assertEquals(1, ops.presses)
     }
 
+    @Test fun replaying_to_the_home_screen_presses_home_instead_of_opening_an_app_called_the_home_screen() = runBlocking {
+        // Pixel emulator, 13 October 2026: the only checkpoint was the launcher, Back never reached it, and the replay
+        // was open_app("the home screen") — "I couldn't find an app called home screen on this phone".
+        val b = Backtracker(maxPresses = 2, maxDepth = 8)
+        val home = screen("com.google.android.apps.nexuslauncher", null, "Phone", "Chrome")
+        b.base(home)
+        val lost = screen("com.google.android.settings.intelligence", "Search settings", "Search", "Recent")
+        val r = b.run(lost, FakeOps(listOf(lost, lost)))
+        assertTrue(r.toString(), r is Backtracker.Result.Replay)
+        r as Backtracker.Result.Replay
+        assertEquals(1, r.steps.size)
+        assertEquals("key_event", r.steps[0].name)
+        assertEquals("home", r.steps[0].args.getString("key"))
+        assertEquals(Backtracker.REPLAY_TAG, r.steps[0].rationale)
+    }
+
     @Test fun a_route_with_an_id_only_tap_is_not_replayed() = runBlocking {
         val b = Backtracker(maxPresses = 1)
         b.onVerifiedNavigation(settingsHome, open("Settings"))

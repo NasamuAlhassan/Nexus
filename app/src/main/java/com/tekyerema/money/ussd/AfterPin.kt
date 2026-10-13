@@ -1,0 +1,118 @@
+package com.tekyerema.money.ussd
+
+import android.content.Context
+import android.util.Log
+import com.tekyerema.accessibility.AccessibilityController
+import com.tekyerema.agent.NumberSpeech
+import com.tekyerema.money.MoMoOutcome
+import com.tekyerema.money.PinPad
+import com.tekyerema.money.TxLedger
+import com.tekyerema.money.UssdDialog
+import com.tekyerema.money.UssdSpeech
+import com.tekyerema.voice.SecureStep
+import com.tekyerema.voice.VoiceEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+
+/**
+ * The network's LAST WORD after a hand-off at the PIN, read out — whatever the walk was for.
+ *
+ * Until 13 October 2026 only a balance check's answer was read from the screen (UssdNavigatorTool); a send relied on
+ * MTN's text message (phonecare/PhoneAlerts → TxLedger). But the receipt is on the screen the moment the PIN goes
+ * through — "Payment made for GHS 5.00 to KOFI MENSAH …" — where a blind user cannot read it; the text can be minutes
+ * behind, and on the emulator's simulator it never comes (the first full walk, audit/emu-2026-10-13/momo-sim/021238:
+ * the volume-key PIN went in, the receipt sat on the screen, nothing was said). So after EVERY hand-off — the
+ * navigator's and the guided tool's — the phone's dialog is watched:
+ *  - while it still has an entry box (the PIN prompt, a retry) nothing about it is kept, logged or spoken; what is
+ *    typed there never reaches a snapshot at all (accessibility/TelephonyWindows);
+ *  - the first screen without one is the answer. A payment's outcome for a hand-off still open in the ledger SETTLES it
+ *    (TxLedger.settle: today's total, the known-recipient mark, the repeat guard) and the ledger's own short receipt is
+ *    spoken — "MTN confirms 5 cedis sent to Kofi Mensah." The balance is in it only when the user has balances switched
+ *    on (and, with private alerts, not to the room). The same outcome arriving later by text is the same message to the
+ *    ledger (its transaction ID, else kind + amount + party): it is not said twice;
+ *  - anything else — a balance, "Wrong PIN. You have 2 attempts left.", a failure the parser doesn't know — is read as
+ *    written, paced for the ear (UssdSpeech.forEar), in Twi when it is a balance and the conversation is in Twi.
+ * Then the dialog's OK is pressed for the user and the secure step ends. It gives up quietly when the dialog has been
+ * gone for a while (cancelled) or after the secure step's own limit.
+ */
+object AfterPin {
+    private const val TAG = "Tekyerema"
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Volatile private var job: Job? = null
+
+    /** What is said for the network's answer; [settled] when it closed a hand-off in the ledger. */
+    data class Spoken(val english: String, val twi: String?, val settled: TxLedger.Settled?)
+
+    /**
+     * The line for [text] — the network's screen with no entry box — after a hand-off at [network]'s PIN. Pure apart
+     * from the ledger it settles. [withBalance]: the user hears balances (phonecare/PhoneAlerts.balanceAloud).
+     */
+    fun lineFor(text: String, network: String?, withBalance: Boolean, twiConversation: Boolean,
+                now: Long = System.currentTimeMillis()): Spoken {
+        val name = network?.let { NumberSpeech.networkName(it) }
+        val intro = "${name ?: "The network"} says"
+        // The screen after the PIN belongs to the hand-off just made — the newest one still waiting — and to no other.
+        val mine = TxLedger.waiting(now).lastOrNull()
+        val open = mine != null || TxLedger.unsettled(now).isNotEmpty()
+        // (isSecret: a one-time code is never a receipt; it also fires on the word "PIN", so it guards the parse only.)
+        val settled = if (open && !MoMoOutcome.isSecret(text))
+            MoMoOutcome.parse(text)?.let { TxLedger.settle(it, now, withBalance, now, eachItsOwn = true, onlyAt = mine?.at) } else null
+        if (settled != null) return Spoken(settled.line, null, settled)
+        // A wrong or blocked PIN, "Not enough funds", a declined transfer: the session ended with nothing sent. The open
+        // hand-off is settled as FAILED here (today's total gets the amount back, the 150-s follow-up has nothing to chase)
+        // and the network's own words are read. (The SMS parser's failure rule needs an amount in the text; the screen
+        // rarely has one — the ledger entry's amount is used.)
+        if (mine != null && UNPAID_END.containsMatchIn(text)) {
+            val failed = mine.amount?.let {
+                TxLedger.settle(MoMoOutcome.Msg(MoMoOutcome.Kind.FAILED, it, null, null, null, null, null, null), now, false, now,
+                    eachItsOwn = true, onlyAt = mine.at)
+            }
+            return Spoken(UssdSpeech.forEar(text, intro = intro) + " Nothing left your wallet.", null, failed)
+        }
+        val twi = if (twiConversation) UssdSpeech.twiBalance(text, name ?: "Network no") else null
+        return Spoken(UssdSpeech.forEar(text, intro = intro), twi, null)
+    }
+
+    /** "Wrong PIN. You have 2 attempts left." / "Your PIN has been blocked" / "Not enough funds to perform this transaction."
+     *  (MTN's own final, A20e 3 October 2026) / "Transaction failed": the session ended with nothing sent. */
+    private val UNPAID_END = Regex("(?i)\\b(?:wrong|incorrect|invalid)\\s+(?:mm\\s+|momo\\s+)?pin\\b|" +
+        "\\bpin\\s+(?:is\\s+|was\\s+)?(?:wrong|incorrect|invalid)\\b|\\bpin\\s+(?:has\\s+been\\s+|is\\s+)?blocked\\b|" +
+        "\\bnot\\s+enough\\s+(?:funds|money|balance)\\b|\\binsufficient\\s+(?:funds|balance|money)\\b|" +
+        "\\b(?:transaction|transfer|payment|request)\\s+(?:has\\s+)?(?:failed|declined|was\\s+declined|cancelled|canceled|unsuccessful)\\b|" +
+        "\\bcould\\s+not\\s+be\\s+(?:completed|processed)\\b|\\blimit\\s+exceeded\\b")
+
+    /** Watch the phone's dialog after a hand-off at [network]'s PIN (or payment confirmation) and say its last word. */
+    fun watch(ctrl: AccessibilityController, app: Context?, network: String?) {
+        job?.cancel()
+        job = scope.launch {
+            val deadline = android.os.SystemClock.uptimeMillis() + SecureStep.MAX_MS
+            var gone = 0
+            while (android.os.SystemClock.uptimeMillis() < deadline) {
+                delay(900)
+                val s = try { UssdDialog.read(ctrl) } catch (_: Throwable) { null }
+                if (s == null) { if (++gone > 25) return@launch; continue }      // no dialog for ~22 s: closed or cancelled
+                gone = 0
+                if (s.hasInput || s.masked) continue                              // still asking for something: not ours to read
+                val withBalance = app?.let { a -> try { com.tekyerema.phonecare.PhoneAlerts.balanceAloud(a) } catch (_: Throwable) { false } } ?: false
+                val twiConversation = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
+                val spoken = lineFor(s.text, network, withBalance, twiConversation)
+                Log.i(TAG, if (spoken.settled != null)
+                    "[MONEY] outcome ${spoken.settled.tx.state.name.lowercase()} from the network's screen after the PIN"
+                    else "[NAV] the network's answer after the PIN is read out (${s.text.length} chars${if (spoken.twi != null) ", in Twi" else ""})")
+                VoiceEngine.announceAnswer(spoken.english, spoken.twi)
+                // The answer has been taken: the dialog is closed so the user isn't left to find its OK button, and the
+                // secure step (no self-opened microphone, the volume keys as a PIN pad) is over.
+                try { s.cancelId?.let { ctrl.clickElement(it) } } catch (_: Throwable) {}
+                PinPad.disarm(); SecureStep.end()
+                return@launch
+            }
+        }
+    }
+
+    /** The walk was cancelled or a new one started: nothing more is read from this dialog. */
+    fun cancel() { job?.cancel(); job = null }
+}

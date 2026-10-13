@@ -307,6 +307,7 @@ class LocalFastRouter(
         FastIntent.LockQuery -> lockState()
         is FastIntent.Preference -> preference(intent)
         is FastIntent.Camera -> openCameraReader(intent.mode)
+        is FastIntent.ReadPhoto -> openPhotoReader(intent.mode)
         FastIntent.WhatChanged -> whatChanged()
         is FastIntent.Magnify -> magnify(intent.action)
         is FastIntent.SetEmergencyContact -> setEmergencyContact(intent.contact)
@@ -582,6 +583,16 @@ class LocalFastRouter(
             appContext.startActivity(com.tekyerema.camera.CameraReadActivity.intent(appContext, mode))
             // The reader announces itself; nothing extra to say here.
             FastOutcome("CAMERA_${mode.uppercase()}", "", systemVoice = true)
+        } catch (t: Throwable) { null }
+    }
+
+    /** P5-02: a picture the user already has — the phone's photo picker, then the same reader (OCR, or describe). The
+     *  reader announces itself ("Choose the picture you want me to read."). */
+    private fun openPhotoReader(mode: String): FastOutcome? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(if (mode == "describe") "P-01" else "P-03", true)) return null
+        return try {
+            appContext.startActivity(com.tekyerema.camera.CameraReadActivity.pickIntent(appContext, mode))
+            FastOutcome("READ_PHOTO_${mode.uppercase()}", "", systemVoice = true)
         } catch (t: Throwable) { null }
     }
 

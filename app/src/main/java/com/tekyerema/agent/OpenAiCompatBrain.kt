@@ -191,6 +191,14 @@ class OpenAiCompatBrain(
             // SEC-P1-4: the request body carries the full screen snapshot (private messages, contacts, notif
             // text). Log it ONLY in debug builds — never in the shared/release APK.
             if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-REQ] ${payload.take(4000)}")
+            // Prompt-cache forensics (13 October 2026): a fingerprint of the parts Groq's prefix cache sees before the step's
+            // own message — the same two hashes on consecutive steps with cached=0 means the miss is on the provider's side
+            // (per-organisation caching), a changed hash means our prefix moved. Debug builds only; hashes, never content.
+            if (com.tekyerema.BuildConfig.DEBUG) try {
+                fun md5(s: String) = java.security.MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }.take(10)
+                android.util.Log.d("Tekyerema", "[LLM-FP] key#${chosen + 1} model=$model sys=${md5(messages.optJSONObject(0)?.toString().orEmpty())} " +
+                    "tools=${md5(ctx.openAiTools.toString())} ntools=${ctx.openAiTools.length()} body=${payload.length} effort=${effort ?: "default"}")
+            } catch (_: Throwable) {}
             // D-02: the request log is cut before the tool list, so name the tools this step offered (names only).
             if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-TOOLS] " + (0 until ctx.openAiTools.length())
                 .joinToString(",") { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() })

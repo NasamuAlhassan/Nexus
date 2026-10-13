@@ -23,12 +23,21 @@ object MessageBody {
     private val MARKER = Regex("(?i)\\b(?:saying|that says|which says|and say|and tell (?:him|her|them)|telling (?:him|her|them)|" +
         "with the message|the message is|message is|that(?!\\s+(?:number|person|contact|one|guy|man|woman|lady)\\b))\\b|[:\"“]")
 
+    /** No marker word at all — "tell Ama I'm on my way", "text Kofi we are leaving", "message Ama please call me": the body
+     *  is the first-person (or politeness) clause after the name (B-03). Tried only when no explicit marker exists. */
+    private val FIRST_PERSON = Regex("(?i)\\s(?=(?:i|i'm|i'll|i've|i'd|i\\s+am|i\\s+will|we|we're|we'll|we\\s+are|please|thanks|thank\\s+you|hello|hi|good\\s+(?:morning|afternoon|evening|night))\\b)")
+
     fun isMessaging(text: String): Boolean = MESSAGING.containsMatchIn(text)
 
     /** (head, body): the body from its marker on, exactly as given; ("text", "") when [text] isn't a message or has no marker. */
     fun split(text: String): Pair<String, String> {
         val verb = MESSAGING.find(text) ?: return text to ""
-        val m = MARKER.find(text, verb.range.last + 1) ?: return text to ""
-        return text.substring(0, m.range.first) to text.substring(m.range.first)
+        val from = verb.range.last + 1
+        MARKER.find(text, from)?.let { m -> return text.substring(0, m.range.first) to text.substring(m.range.first) }
+        val fp = FIRST_PERSON.find(text, from) ?: return text to ""
+        // a name must stand between the verb and the clause ("tell Ama I'm …", not "tell I'm …")
+        if (text.substring(from, fp.range.first).trim().isEmpty()) return text to ""
+        // the head keeps its trailing space, as with a marker word: callers re-join head + body as they were
+        return text.substring(0, fp.range.first + 1) to text.substring(fp.range.first + 1)
     }
 }

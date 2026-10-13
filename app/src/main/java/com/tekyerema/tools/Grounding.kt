@@ -65,12 +65,48 @@ object Grounding {
         (strongPass(clickable) ?: strongPass(elements))?.let { return MatchOutcome.Found(it) }
         // G-07: the visible label didn't match — try the element's other attributes before giving up.
         attributeMatch(elements, q)?.let { return MatchOutcome.Found(it) }
+        // The thing in the user's hand goes by many names — "About phone" (Samsung, Pixel), "About emulated device" (the
+        // emulator, 13 October 2026), "About tablet", "About device" — so a multi-word query with a device word in it is
+        // tried once more with that word made canonical on both sides. Never for the bare word: "Phone" is the Phone app.
+        deviceWordPass(elements, q)?.let { return MatchOutcome.Found(it) }
 
         val weak = elements.mapNotNull { it.label }
             .filter { it.contains(q, true) }
             .distinct()
         return if (weak.isNotEmpty()) MatchOutcome.OnlyWeak(weak.take(2)) else MatchOutcome.None
     }
+
+    private val DEVICE_WORDS = Regex("(?i)\\b(?:emulated\\s+device|device|phone|tablet|handset|mobile)\\b")
+    private fun canonDevice(s: String) = DEVICE_WORDS.replace(s.lowercase(), "device").replace(Regex("\\s+"), " ").trim()
+
+    /** "About phone" ↔ "About emulated device" / "About tablet" / "About device": equal or a strong prefix once the device
+     *  word is canonical on both sides, on a short label, clickable first. Null for a one-word query. */
+    private fun deviceWordPass(elements: List<UiElement>, q: String): UiElement? {
+        if (!DEVICE_WORDS.containsMatchIn(q) || q.trim().split(Regex("\\s+")).size < 2) return null
+        val qc = canonDevice(q)
+        fun ok(e: UiElement): Boolean {
+            val l = e.label ?: return false
+            if (l.length > MAX_INCIDENTAL_LABEL_LENGTH || !DEVICE_WORDS.containsMatchIn(l)) return false
+            val lc = canonDevice(l)
+            return lc == qc || (lc.startsWith(qc) && qc.length.toDouble() / lc.length >= MIN_MATCH_RATIO)
+        }
+        return elements.filter { it.clickable }.firstOrNull(::ok) ?: elements.firstOrNull(::ok)
+    }
+
+    /**
+     * Labels that share a real word with [query] (four letters or more, not a filler word) — the hint when nothing matched,
+     * so the planner is told "no 'About phone' here; the nearest labels are 'About emulated device'" instead of guessing
+     * (A20e/emulator, 13 October 2026: it tapped 'System' instead). Shortest first, at most [max].
+     */
+    fun nearLabels(elements: List<UiElement>, query: String, max: Int = 3): List<String> {
+        val words = query.lowercase().split(WORD_BREAK).filter { it.length >= 4 && it !in FILLER }.toSet()
+        if (words.isEmpty()) return emptyList()
+        return elements.mapNotNull { it.label?.trim() }
+            .filter { it.length <= MAX_INCIDENTAL_LABEL_LENGTH && it.lowercase().split(WORD_BREAK).any { w -> w in words } }
+            .distinct().sortedBy { it.length }.take(max)
+    }
+    private val WORD_BREAK = Regex("[^\\p{L}\\p{N}]+")
+    private val FILLER = setOf("the", "this", "that", "with", "from", "your", "into", "onto", "button", "item", "option", "menu", "page", "screen")
 
     /**
      * G-07 weighted multi-attribute locator — the fallback cascade after the label passes: resource id (an icon

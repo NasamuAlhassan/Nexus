@@ -65,6 +65,22 @@ object FinalActionGuard {
 
     private val MENU_CODES = setOf("00", "98", "99")
 
+    /**
+     * S-05 — a planner text whose words are not the ones the user dictated goes out with the user's words
+     * ([MessageFidelity]); the read-back then quotes what is really sent. The planner's own capitalisation or
+     * punctuation of the same words is kept. Pure.
+     */
+    internal fun withUsersWords(proposed: AgentDecision.CallTool, goal: String): AgentDecision {
+        if (proposed.name !in MessageFidelity.TEXT_TOOLS) return proposed
+        val key = if (proposed.args.has("message")) "message" else if (proposed.args.has("text")) "text" else return proposed
+        val own = proposed.args.optString(key).takeIf { it.isNotBlank() } ?: return proposed
+        val kept = MessageFidelity.enforced(proposed.name, own, goal) ?: return proposed
+        if (kept == own) return proposed
+        android.util.Log.i("Tekyerema", "[GUARD] ${proposed.name}: the planner's message was not the user's words — sending the words as dictated")
+        val args = JSONObject(proposed.args.toString()).put(key, kept)
+        return proposed.copy(args = args, rationale = (proposed.rationale ?: "") + " [message text replaced by the user's own words]")
+    }
+
     private fun whoQuestion(tool: String) = when (tool) {
         "make_call" -> "Who do you want to call? Say the name as it's saved, or the phone number."
         "send_sms", "reply_to_notification" -> "Who should the message go to? Say the name as it's saved, or the phone number."
@@ -82,7 +98,7 @@ object FinalActionGuard {
         if (!com.tekyerema.core.config.AppConfig.bool("agent.finalActionGuard", true)) return proposed
         val facts = TaskFacts(goal, history, screenText)
         val v = if (typedInMenu) typed(proposed.args.optString("text"), facts) else check(proposed.name, proposed.args, facts)
-        if (v !is Verdict.Missing) return proposed
+        if (v !is Verdict.Missing) return withUsersWords(proposed, goal)
         val asked = history.count { it.startsWith("ask_user(\"${v.question}\")") }
         android.util.Log.i("Tekyerema", "[GUARD] ${proposed.name}: the ${v.what} isn't from this request — " +
             if (asked >= 2) "stopping" else "asking")

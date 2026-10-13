@@ -35,6 +35,8 @@ class LocalBrain : AgentBrain {
     private var planChild: LocalBrain? = null
     private var planMark = 0                         // history size when the current clause started
     private val planSaid = ArrayList<String>()
+    /** Indexes of plan clauses that go to a PAGE inside the app opened before them ("go to the battery page") — see [navStep]. */
+    private val planNav = HashSet<Int>()
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         step++
@@ -303,7 +305,10 @@ class LocalBrain : AgentBrain {
             // failed search for an app called "app" first.
             if (RE_NO_APP_NAME.matches(app.lowercase())) return defer("no app named: \"$app\"")
             // Twi confirmation stays generic ("I've opened it") — the ASR-rendered app name may be rough.
-            if (app.isNotEmpty()) { doneLine = if (twi) "Mabue no." else "$app is open."; return call("open_app", JSONObject().put("app", app), "launch app") }
+            if (app.isNotEmpty()) {
+                doneLine = if (twi) "Mabue no." else app.replaceFirstChar { it.uppercase() } + " is open."
+                return call("open_app", JSONObject().put("app", app), "launch app")
+            }
         }
 
         // --- tap a visible label (only if it's actually on the current screen) ---
@@ -349,15 +354,22 @@ class LocalBrain : AgentBrain {
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("N-09", true)) return null
         val clauses = splitClauses(ctx.goal) ?: return null
         val resolved = ArrayList<String>()
+        val nav = HashSet<Int>()
         var inApp = false
         for (c in clauses) {
             val clause = if (inApp) inAppClause(c) else c
+            // After "open <app>", "go to the battery page" / "open about phone" is a PAGE inside that app: a tap on its
+            // label, never another open_app — that read "battery page" as an app, failed as "not installed", and the
+            // task ended there instead of reaching the page (Pixel emulator, 12 October 2026, B-04).
+            val navLabel = if (inApp) inAppNavTarget(clause) else null
+            if (navLabel != null) { resolved.add("tap $navLabel"); nav.add(resolved.size - 1); continue }
             val d = LocalBrain().decide(ctx.copy(goal = clause, history = emptyList())) as? AgentDecision.CallTool ?: return null
             if (d.name !in PLAN_TOOLS || (inApp && d.name !in IN_APP_TOOLS)) return null
             inApp = when (d.name) { "open_app" -> true; "key_event" -> false; else -> inApp }
             resolved.add(clause)
         }
         plan = resolved; planIdx = 0; planChild = LocalBrain(); planMark = ctx.history.size; planSaid.clear()
+        planNav.clear(); planNav.addAll(nav)
         return continuePlan(ctx)
     }
 
@@ -366,8 +378,9 @@ class LocalBrain : AgentBrain {
         val steps = plan ?: return AgentDecision.CannotDo(DEFER, "no plan")
         while (true) {
             val clause = steps[planIdx]
-            val d = (planChild ?: LocalBrain().also { planChild = it })
-                .decide(ctx.copy(goal = clause, history = ctx.history.drop(planMark)))
+            val d = if (planIdx in planNav) navStep(clause, ctx.history.drop(planMark), ctx.screen)
+                else (planChild ?: LocalBrain().also { planChild = it })
+                    .decide(ctx.copy(goal = clause, history = ctx.history.drop(planMark)))
             when (d) {
                 is AgentDecision.CallTool -> return d.copy(rationale = "local plan ${planIdx + 1}/${steps.size}: ${d.rationale}")
                 is AgentDecision.Done -> {
@@ -405,6 +418,30 @@ class LocalBrain : AgentBrain {
      * instead of the optimistic doneLine; otherwise the doneLine stands. (Success-but-unverified is handled
      * separately by the engine's completion gating → "…but I couldn't confirm it", §1.7.)
      */
+    /**
+     * A plan step that goes to a page INSIDE the app opened before it ("tap Battery" from "go to the battery page"): the
+     * label is tapped (the tap tool scrolls down to find a label that isn't listed yet). Tapped and the screen moved on →
+     * done; the label wasn't found, or the tap changed nothing → the page is not one tap away (it sits under a sub-menu,
+     * or is named differently on this phone), and the rest of the task is the planner's, from inside the open app —
+     * a DEFER, so the router escalates with the history instead of ending the task (B-04, 12 October 2026).
+     */
+    private fun navStep(clause: String, stepHistory: List<String>, screen: JSONObject): AgentDecision {
+        val label = clause.removePrefix("tap ").trim()
+        val opened = label.replaceFirstChar { it.uppercase() } + " is open."
+        val last = stepHistory.lastOrNull { STEP_LINE.containsMatchIn(it) }
+        if (last == null) {
+            // Already on that page: an app reopens where it was left (Settings came back on Battery, and the tap on the
+            // page's own title changed nothing — Pixel emulator, 13 October 2026).
+            if (screen.optString("screen").trim().equals(label, ignoreCase = true)) return AgentDecision.Done(opened)
+            // A concrete claim for the verifier: the page's own window title carries its name (Settings → "Battery"). Without
+            // it the tap had only the weak "screen changed" signal — judged unverified on a slow start (EMU run 12, 13 Oct 2026).
+            return AgentDecision.CallTool("tap", JSONObject().put("label", label), "local plan: go to $label (scroll to find)",
+                expects = "foreground_is: $label")
+        }
+        return if (last.contains("→ success") && !last.contains("verified=false")) AgentDecision.Done(opened)
+        else AgentDecision.CannotDo(DEFER, "\"$label\" isn't one tap away in this app")
+    }
+
     private fun finishLine(ctx: BrainContext): AgentDecision {
         val last = lastStep(ctx.history)
         if (!last.contains("→ fail")) return AgentDecision.Done(doneLine)
@@ -745,16 +782,30 @@ class LocalBrain : AgentBrain {
          */
         fun parseSms(raw: String): Sms? {
             val s = raw.trim().trimEnd('.', '!').replace(Regex("\\s+"), " ")
+            // A marker word first; then the "send <words> to X" and relay shapes; the first-person mark LAST — it would
+            // otherwise swallow "text Prince to send the pdf, I'm waiting for him" (a relay) as a message to "Prince to send
+            // the pdf," and return nothing.
             val m = SMS_STRONG.firstNotNullOfOrNull { it.find(s) } ?: SMS_WEAK.firstNotNullOfOrNull { it.find(s) }
-                ?: return parseSendWords(s) ?: parseRelay(s)
+                ?: return parseSendWords(s) ?: parseRelay(s) ?: SMS_FIRST_PERSON.firstNotNullOfOrNull { it.find(s) }?.let { fromMatch(s, it) }
+            return fromMatch(s, m)
+        }
+
+        /** The recipient and the words out of a matched send-a-text shape ([smsPatterns]: group 1 = who, 2 = message). */
+        private fun fromMatch(s: String, m: MatchResult): Sms? {
             var who = m.groupValues[1].trim().removePrefix("to ").trim()
             // "… to Richmond on Telegram saying …": an app this parser doesn't send through — the planner works in that app's
             // own screens (the A20e, 6 October 2026: it became an SMS to a contact "Richmond on Telegram")
             if (RE_OTHER_APP.containsMatchIn(who)) return null
             var whatsApp = RE_VIA_WHATSAPP.containsMatchIn(s.substring(0, m.groups[2]!!.range.first))
             RE_VIA_TAIL.find(who)?.let { t -> whatsApp = whatsApp || t.groupValues[1].lowercase() == "whatsapp"; who = who.substring(0, t.range.first).trim() }
-            val msg = m.groupValues[2].trim().trim('"', '\'', '“', '”').replaceFirst(Regex("^(?i)that\\s+"), "").trim()
+            var msg = m.groupValues[2].trim().trim('"', '\'', '“', '”').replaceFirst(Regex("^(?i)that\\s+"), "").trim()
             if (who.isEmpty() || msg.isEmpty() || who.split(' ').size > 4) return null
+            // "tell me …" / "tell us …" is never a message to someone (the first-person mark could otherwise take "me" as a name)
+            if (who.lowercase() in setOf("me", "us", "myself", "ourselves")) return null
+            // The words between the name and the message (the mark itself): a tell-form speaks ABOUT the recipient.
+            val mark = s.substring(m.groups[1]!!.range.last + 1, m.groups[2]!!.range.first)
+            if (RE_TELL_FORM.containsMatchIn(mark) || RE_TELL_FORM.containsMatchIn(s.substring(0, m.groups[1]!!.range.first + 1)))
+                msg = adaptForRecipient(msg)
             // "the last message" / "the sender" is whoever texted last (send_sms resolves "last sender"); "it", "him",
             // "that message" are not people at all — the planner works out who is meant (audit C17).
             if (RE_LAST_SENDER.matches(who.lowercase())) return Sms(LAST_SENDER, null, msg, false)
@@ -858,7 +909,26 @@ class LocalBrain : AgentBrain {
             "make_call", "send_sms", "search_contacts")
         /** After "open <app>", only steps whose meaning doesn't change inside that app. */
         private val IN_APP_TOOLS = setOf("open_app", "key_event", "scroll", "swipe", "volume_up", "volume_down", "set_volume",
-            "read_screen", "read_state", "set_alarm", "set_timer", "open_setting")
+            "read_screen", "read_state", "set_alarm", "set_timer", "open_setting", "tap")
+
+        /**
+         * N-09 — after "open <app>", a clause like "go to the battery page", "open about phone", "take me to the Wi-Fi settings"
+         * names a PAGE inside that app, not another app: the label to tap ("battery", "about phone", "Wi-Fi"), with the page
+         * words dropped. Null when the clause really opens another app — a bare known app ("open Chrome"), or a one-word name
+         * after an open verb ("open Jiji") — or names nothing. Pure (SettingsNavigationTest).
+         */
+        internal fun inAppNavTarget(clause: String): String? {
+            val m = RE_OPEN.find(clause.trim()) ?: return null
+            val verb = m.groupValues[1].lowercase().replace(Regex("\\s+"), " ")
+            val target = m.groupValues[3].trim().trimEnd('.', '!', '?')
+            if (target.isEmpty() || RE_NO_APP_NAME.matches(target.lowercase()) || RE_APP_HAS_VERB.containsMatchIn(target)) return null
+            if (RE_BARE_APP.matches(target)) return null
+            val navVerb = verb.startsWith("go") || verb.startsWith("take") || verb.startsWith("show")
+            val pageLike = RE_PAGE_WORD.containsMatchIn(target)
+            if (!navVerb && !pageLike && !target.contains(' ')) return null
+            return target.replace(RE_PAGE_WORD, "").trim().trimEnd(',').takeIf { it.isNotEmpty() }
+        }
+        private val RE_PAGE_WORD = Regex("(?i)\\s+(?:page|screen|tab|section|menu|option|options|setting|settings|panel)$")
 
         /** N-09: "what can you do?" — answered on the phone, the same online or off (no round trip for a fixed answer). */
         fun capabilityAnswer(): String =
@@ -1063,8 +1133,14 @@ class LocalBrain : AgentBrain {
         private val RE_MSG_APP = Regex("\\b(whatsapp|telegram|messenger|signal|instagram|facebook|gmail|email|imo)\\b", RegexOption.IGNORE_CASE)
         // N-09 send-a-text phrasings. Groups: 1 = recipient as heard, 2 = the message.
         private const val SMS_NOUN = "(?:whatsapp\\s+)?(?:text(?:\\s+message)?|sms|message)"
-        private const val MARK_STRONG = "(?:\\s(?:saying|that\\s+says|which\\s+says|to\\s+say|and\\s+say|telling\\s+(?:him|her|them))\\s|:)"
+        // "send a message to Prince AND TELL HIM THAT he should call me": the message starts after "tell him (that)" — without
+        // it, the weak "that" split made the recipient "Prince and tell him" and the task went to the planner (B-01, handover
+        // 7 October 2026). The tell-forms also carry the recipient's pronouns, adapted by [adaptForRecipient] (B-02).
+        private const val MARK_STRONG = "(?:\\s(?:saying|that\\s+says|which\\s+says|to\\s+say|and\\s+say|(?:and\\s+)?tell(?:ing)?\\s+(?:him|her|them)(?:\\s+that)?)\\s|:)"
         private const val MARK_WEAK = "\\sthat\\s"
+        /** "tell Ama I'm on my way" / "text Kofi we are leaving" / "message Ama please call me": no marker word at all — the
+         *  message is the first-person (or politeness) clause that follows the name (B-03). A zero-width mark. */
+        private const val MARK_FIRST_PERSON = "\\s(?=(?:i|i'm|i'll|i've|i'd|i\\s+am|i\\s+will|we|we're|we'll|we\\s+are|please|thanks|thank\\s+you|hello|hi|good\\s+(?:morning|afternoon|evening|night))\\b)"
         private fun smsPatterns(mark: String) = listOf(
             Regex("^\\s*$LEADIN(?:send|write)\\s+(?:an?\\s+)?$SMS_NOUN\\s+to\\s+(.+?)\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
             Regex("^\\s*$LEADIN(?:send|write)\\s+(.+?)\\s+an?\\s+$SMS_NOUN\\s*$mark\\s*(.+)$", RegexOption.IGNORE_CASE),
@@ -1076,6 +1152,30 @@ class LocalBrain : AgentBrain {
         )
         private val SMS_STRONG = smsPatterns(MARK_STRONG)
         private val SMS_WEAK = smsPatterns(MARK_WEAK)
+        private val SMS_FIRST_PERSON = smsPatterns(MARK_FIRST_PERSON)
+        /** The mark between the recipient and the message was a tell-form ("tell him that", "and tell her", "telling them"),
+         *  or the request itself began with "tell": the words were put TO the recipient in the third person. */
+        private val RE_TELL_FORM = Regex("\\btell(?:ing)?\\s+(?:him|her|them)\\b|^\\s*$LEADIN\\s*tell\\s", RegexOption.IGNORE_CASE)
+        private val RE_LEADING_THIRD = Regex("^(he|she|they)\\s+(should|must|needs?\\s+to|has\\s+to|have\\s+to|can|could|will|would|is|are|was|were|has|have)\\b", RegexOption.IGNORE_CASE)
+        private val RE_LEADING_POSSESSIVE = Regex("^(his|her|their)\\b", RegexOption.IGNORE_CASE)
+
+        /**
+         * B-02 — "tell Ama that she should come early" is sent to Ama as "you should come early"; "tell Kofi that his package
+         * arrived" as "your package arrived". Only a LEADING third-person subject or possessive is turned — the recipient is
+         * the one being spoken about there; anything else ("Kofi said he is coming", "I will be late") is kept word for word,
+         * and the read-back quotes the final text either way. Pure, tested.
+         */
+        internal fun adaptForRecipient(message: String): String {
+            RE_LEADING_THIRD.find(message)?.let { m ->
+                val verb = when (m.groupValues[2].lowercase().replace(Regex("\\s+"), " ")) {
+                    "is", "was" -> "are"; "has" -> "have"; "needs to" -> "need to"; "has to" -> "have to"
+                    else -> m.groupValues[2]
+                }
+                return "you $verb" + message.substring(m.range.last + 1)
+            }
+            RE_LEADING_POSSESSIVE.find(message)?.let { m -> return "your" + message.substring(m.range.last + 1) }
+            return message
+        }
         private val RE_VIA_WHATSAPP = Regex("\\bwhatsapp\\b", RegexOption.IGNORE_CASE)
         /** A chat app this parser doesn't send through, named with the person ("Richmond on Telegram"). */
         private val RE_OTHER_APP = Regex("\\b(?:on|via|through|in|using)\\s+(?:telegram|messenger|signal|instagram|facebook|imo)\\b",

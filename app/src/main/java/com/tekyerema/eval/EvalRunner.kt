@@ -77,6 +77,10 @@ object EvalRunner {
 
     private fun spokeDigit(o: Observed) = o.spoken.any { it.isDigit() }
     private fun fg(o: Observed, vararg n: String) = n.any { o.foreground.lowercase().contains(it) }
+    /** The run did not end as a failure or an honest refusal (a fast-path task has no agent status at all). */
+    private fun endedWell(o: Observed) = !o.timedOut &&
+        o.agentStatus !in setOf(AgentStatus.CANNOT_DO, AgentStatus.FAILED, AgentStatus.STOPPED)
+    private val BATTERY_PAGE = Regex("battery (?:saver|usage|percentage|health|manager|share)|adaptive battery")
     private fun musicVol(ctx: Context) =
         (ctx.getSystemService(Context.AUDIO_SERVICE) as AudioManager).getStreamVolume(AudioManager.STREAM_MUSIC)
     /** The phone's default launcher package — "home" on any OEM (nexuslauncher, sec.android.app.launcher, miui.home…). */
@@ -159,8 +163,15 @@ object EvalRunner {
         EvalTask("volume_down", "turn the volume down", "fast", 20_000,
             setup = { setMusicVol(it, 8) }) { ctx, _ -> if (musicVol(ctx) < 8) 1f else 0f },
         // SIMPLE AGENT — needs the reasoning loop (not a single deterministic op).
+        // The Settings front page itself lists "Battery", so the screen text alone proved nothing: on 12 October 2026 this
+        // task "passed" while the agent had ended CANNOT_DO ("no app called battery page"). The task must end well AND the
+        // Battery page itself must be showing.
         EvalTask("settings_battery", "open settings and go to the battery page", "simple_agent", 90_000) { _, o ->
-            if (fg(o, "settings") && o.screenText.contains("battery")) 1f else 0f },
+            if (endedWell(o) && fg(o, "settings") && BATTERY_PAGE.containsMatchIn(o.screenText)) 1f else 0f },
+        // Open an app, navigate inside it, read a value back: the general-purpose multi-step task (mission Gate D). The spoken
+        // answer must carry this phone's real Android version.
+        EvalTask("settings_about_version", "open settings and go to about phone and tell me the android version", "simple_agent", 150_000) { _, o ->
+            if (endedWell(o) && o.spoken.contains(android.os.Build.VERSION.RELEASE)) 1f else 0f },
         EvalTask("read_screen", "read what's on my screen", "simple_agent", 60_000) { _, o ->
             if (!o.timedOut && o.spoken.length > 10) 1f else 0f },
         // NEGATIVE — must fail honestly, quickly, without looping.

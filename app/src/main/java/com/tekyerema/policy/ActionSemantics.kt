@@ -103,7 +103,9 @@ object ActionSemantics {
      *  for a phone number (null = not known / no permission). */
     fun confirmation(
         primitive: String, target: UiElement?, requestedLabel: String?, before: UiSnapshot?,
-        submit: Boolean = false, typedText: String? = null, nameOfNumber: ((String) -> String?)? = null
+        submit: Boolean = false, typedText: String? = null, nameOfNumber: ((String) -> String?)? = null,
+        /** The user's request, so a Send whose composer holds OTHER words than the ones dictated says so (S-05). */
+        goal: String? = null
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
@@ -122,7 +124,11 @@ object ActionSemantics {
                 .firstOrNull { it == "bot" || it == "channel" || Regex("^[\\d\\s,.]+ (?:subscribers?|members?)$").matches(it) }
                 ?.let { if (it == "bot") "a bot" else "a channel or group" }
             val who = (recipient?.let { " to $it" } ?: "") + (notAPerson?.let { " — this chat is $it, not a person in your contacts" } ?: "")
+            // The composer holds words the user did not dictate (the planner rephrased, or a draft was already there): both
+            // are read, and the user decides — never a silent send of other words (S-05).
+            val differs = goal?.let { com.tekyerema.agent.MessageFidelity.composerNotice(msg, it) }
             return when {
+                !msg.isNullOrBlank() && differs != null -> "$differs Send it$who anyway?"
                 !msg.isNullOrBlank() -> "Send this message$who?\n“$msg”"
                 // nothing composed — don't claim "this message": name the control as it reads ("Send to 5554?")
                 isTapSend && labelRecipient != null -> "${text.trim().take(60).trimEnd('?', '.')}?"

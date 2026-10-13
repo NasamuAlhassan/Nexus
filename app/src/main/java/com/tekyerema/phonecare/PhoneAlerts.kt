@@ -120,6 +120,8 @@ object PhoneAlerts {
     /** A balance goes into a spoken payment outcome only when the user switched balances on AND it would not be read to
      *  the room: with "private alerts" on, only over earphones or Bluetooth. */
     private fun balanceAloud(app: Context, s: Settings): Boolean = s.alertMoneyBalance && (!s.alertsPrivate || privateAudio(app))
+    /** The same rule for the receipt read from the network's own screen after the PIN (money/ussd/AfterPin). */
+    fun balanceAloud(app: Context): Boolean = balanceAloud(app, Settings(app))
 
     private fun outcome(app: Context, rec: NotificationRecord, s: Settings): List<Alert> {
         if (com.tekyerema.money.TxLedger.unsettled().isEmpty()) return emptyList()

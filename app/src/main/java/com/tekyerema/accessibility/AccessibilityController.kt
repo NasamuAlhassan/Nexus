@@ -54,6 +54,9 @@ interface AccessibilityController {
      *  (systemui) OVER an activity. What a UiSnapshot reflects, so it's what the stale-screen check compares.
      *  May do a binder round-trip: call off the main thread. */
     fun activeWindowPackage(): String? = foregroundPackage()
+    /** How many windows the service can see right now (-1 = not a live service). A bound service that sees none reads every
+     *  screen as empty ("active root null; windows= → none", emulator 13 October 2026) — the ping shows it. */
+    fun windowCount(): Int = -1
     /**
      * Close the notification shade / Quick Settings COMPLETELY. One Back collapses only one level on some shells:
      * Samsung One UI (A20e, API 30) went from Quick Settings to the notification list and stayed there, so every

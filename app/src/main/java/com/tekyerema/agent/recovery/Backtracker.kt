@@ -137,9 +137,9 @@ class Backtracker(
     internal fun replayTo(target: Checkpoint): List<AgentDecision.CallTool>? {
         val end = stack.indexOf(target).takeIf { it >= 0 } ?: return null
         val start = (end downTo 0).firstOrNull { stack[it].via?.name == "open_app" && stack[it].key.pkg == target.key.pkg }
-            ?: return (if (end == 0 && target.appName != null) listOf(openApp(target.appName, target.key.pkg)) else null)
+            ?: return (if (end == 0 && target.appName != null) listOf(launch(target.appName, target.key.pkg)) else null)
         val out = ArrayList<AgentDecision.CallTool>()
-        out.add(openApp(stack[start].via!!.args.optString("app").ifBlank { target.appName ?: return null }, target.key.pkg))
+        out.add(launch(stack[start].via!!.args.optString("app").ifBlank { target.appName ?: return null }, target.key.pkg))
         for (i in start + 1..end) {
             val v = stack[i].via ?: return null
             if (!replayable(v)) return null
@@ -150,6 +150,15 @@ class Backtracker(
 
     private fun openApp(app: String, pkg: String?) =
         AgentDecision.CallTool("open_app", JSONObject().put("app", app), REPLAY_TAG, pkg?.let { "foreground_is: $it" })
+
+    /** The step that brings [app] back: the Home key for the launcher — "open_app(the home screen)" is no app and failed as
+     *  "not installed" on the Pixel emulator (13 October 2026) — else open_app by name. */
+    private fun launch(app: String, pkg: String?): AgentDecision.CallTool =
+        if (isHome(app, pkg)) AgentDecision.CallTool("key_event", JSONObject().put("key", "home"), REPLAY_TAG, pkg?.let { "foreground_is: $it" })
+        else openApp(app, pkg)
+
+    private fun isHome(app: String, pkg: String?): Boolean =
+        app.equals("the home screen", ignoreCase = true) || app.equals("home screen", ignoreCase = true) || pkg?.lowercase()?.contains("launcher") == true
 
     companion object {
         const val REPLAY_TAG = "engine:replay"

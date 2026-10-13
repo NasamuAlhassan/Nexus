@@ -33,8 +33,15 @@ object ToolSelector {
             listOf("make_call", "reply_to_notification", "read_notifications", "search_contacts", "find_contact",
                 "search_messages", "send_sms", "call_control", "call_log", "read_sms", "notification_action",
                 "open_intent", "create_contact", "share_text", "share_screenshot"),
-            Regex("(?i)\\b(call|calls|called|phone|ring|dial|answer|hang ?up|text|sms|message|messages|reply|whatsapp|chat|" +
-                "notification|notifications|contact|contacts|number|send|tell|missed|inbox|telegram|share|screenshot|frɛ|fre|nkra)\\b")
+            // "phone" and "number" alone loaded all 15 comms schemas for "open settings and go to about phone" and "tell me the
+            // android version" (P1-05, 13 October 2026): a call, a text or a contact is named by its own word; "tell" counts
+            // only when someone is told, not "tell me".
+            Regex("(?i)\\b(call|calls|called|ring|dial|answer|hang ?up|text|sms|message|messages|reply|whatsapp|chat|" +
+                "notification|notifications|contact|contacts|send|missed|inbox|telegram|share|screenshot|frɛ|fre|nkra)\\b|" +
+                "\\btell\\b(?!\\s+(?:me|us)\\b)|\\bphone\\s+(?:call|number)\\b|\\bthis\\s+number\\b|\\bthat\\s+number\\b|" +
+                // "phone Kofi" / "please phone my mum": the verb, at the start of a request or after a joining word — not
+                // "about phone" or "phone settings" (PromptCacheTest: "phone Kofi" loads the same block as "call Ama").
+                "(?:^|\\n|\\b(?:please|can you|could you|and|then|now)\\s+)phone\\s+(?!(?:settings?|app|storage|info|information|status|is|was)\\b)\\w")
         ),
         "money" to Group(
             listOf("mobile_money", "momo_send", "run_ussd"),
@@ -43,13 +50,34 @@ object ToolSelector {
             Regex("(?i)(\\bmomo\\b|mobile money|\\bmoney\\b|\\bcash\\b|\\bcedis?\\b|\\bghs\\b|pesewa|transfer|\\bpay\\b|airtime|bundle|" +
                 "balance|ussd|\\*\\d|sika)")
         ),
-        "device" to Group(
-            listOf("set_alarm", "cancel_alarm", "set_timer", "set_volume", "volume_up", "volume_down", "open_setting", "play_music",
-                "show_alarms", "calendar", "create_contact", "location", "clipboard", "share_text", "open_intent"),
-            Regex("(?i)\\b(alarm|alarms|timer|wake me|remind|reminder|volume|louder|quieter|sound|mute|wi-?fi|bluetooth|" +
-                "data|airplane|location|where am i|setting|settings|music|song|play|calendar|event|meeting|appointment|" +
-                "schedule|copy|paste|clipboard|share|save (?:the )?(?:number|contact)|add (?:a )?contact|directions|navigate|" +
-                "map|maps|dial|email|e-mail|youtube|google|link)\\b")
+        // P1-05 token diet (13 October 2026): the old single "device" group carried 15 schemas and loaded WHOLE on any word
+        // from "settings" to "song" — "open settings and go to about phone" sent 29 tools (~5,000 prompt tokens a step).
+        // Split by what a request is about; a tool outside the loaded groups is still one find_tool away.
+        "settings" to Group(
+            listOf("open_setting", "location"),
+            Regex("(?i)\\b(setting|settings|wi-?fi|bluetooth|mobile data|airplane|flight mode|location|where am i|brightness|" +
+                "dark mode|dark theme|theme|font|text size|battery saver|do not disturb|dnd|hotspot|nfc|rotation|auto-?rotate)\\b")
+        ),
+        "alarm" to Group(
+            listOf("set_alarm", "cancel_alarm", "set_timer", "show_alarms"),
+            Regex("(?i)\\b(alarm|alarms|timer|timers|wake me|remind|reminder|countdown|stopwatch)\\b")
+        ),
+        "volume" to Group(
+            listOf("set_volume", "volume_up", "volume_down"),
+            Regex("(?i)\\b(volume|louder|quieter|softer|sound|mute|unmute|silent)\\b")
+        ),
+        "media" to Group(
+            listOf("play_music"),
+            Regex("(?i)\\b(music|song|songs|play|playlist|podcast|radio|youtube|spotify|boomplay|audiomack)\\b")
+        ),
+        "calendar" to Group(
+            listOf("calendar"),
+            Regex("(?i)\\b(calendar|event|events|meeting|meetings|appointment|appointments|schedule|agenda)\\b")
+        ),
+        "share" to Group(
+            listOf("create_contact", "clipboard", "share_text", "open_intent"),
+            Regex("(?i)\\b(copy|paste|clipboard|share|save (?:the )?(?:number|contact)|add (?:a )?contact|new contact|directions|" +
+                "navigate|map|maps|dial|email|e-mail|google|link|website|url)\\b")
         ),
         "gesture" to Group(
             listOf("drag", "pinch", "set_range", "scroll_to_find", "wait_for_element", "node_action", "read_all"),

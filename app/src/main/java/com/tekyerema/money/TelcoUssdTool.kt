@@ -191,7 +191,7 @@ object TelcoUssdTool : Tool {
         val kind = BankUssd.kind(first.text, first.hasInput, first.masked)
         TelcoSession.opened(flow, first.text, kind)
         Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(first.text.take(120).replace("\n", " | "))}")
-        if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) handOver(kind)
+        if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) handOver(kind, ctrl, ctx.appContext, flow.netName)
         if (kind == BankUssd.ScreenKind.FINAL) UssdDialog.close(ctrl, first)
         return ToolResult(true, "${flow.netName}: ${BankUssd.spokenScreen(first.text, speakBalance = false).take(120)}",
             data = JSONObject().put("kind", kind.name.lowercase()), channel = "native")
@@ -227,7 +227,7 @@ object TelcoUssdTool : Tool {
             session.pending?.kind == com.tekyerema.money.ussd.MenuBrain.Kind.CONFIRM && session.pending.options["yes"] == value
         if ((kindNow != BankUssd.ScreenKind.MENU && !saidYes) || (auto && now.text != session.screen)) {
             TelcoSession.screen(now.text, kindNow, auto = true, more = false)   // a re-read, nobody pressed: not user-driven
-            if (kindNow != BankUssd.ScreenKind.MENU && kindNow != BankUssd.ScreenKind.FINAL) handOver(kindNow)
+            if (kindNow != BankUssd.ScreenKind.MENU && kindNow != BankUssd.ScreenKind.FINAL) handOver(kindNow, ctrl, app, session.flow.netName)
             return ToolResult(true, "${session.flow.netName}'s screen needs a look first.", data = JSONObject().put("kind", kindNow.name.lowercase()), channel = "native")
         }
         Log.i(TAG, if (auto && args.str(ARG_ROW) == null) "[TELCO] confirmed value entered (${value.length} chars)"
@@ -244,8 +244,8 @@ object TelcoUssdTool : Tool {
             stepIdx = args.optInt(ARG_STEP, -1), user = !auto, typed = value)
         Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(next.text.take(120).replace("\n", " | "))}")
         if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) {
-            handOver(kind)
-            ledger(app, session.flow, kind)
+            ledger(app, session.flow, kind)   // first: the watcher that reads the receipt settles THIS entry
+            handOver(kind, ctrl, app, session.flow.netName)
         }
         // The network's last word has been taken: its OK box is closed, so the user isn't left to find it.
         if (kind == BankUssd.ScreenKind.FINAL) UssdDialog.close(ctrl, next)
@@ -270,11 +270,14 @@ object TelcoUssdTool : Tool {
 
     @Volatile private var ledgerFor = 0L
 
-    /** A payment confirmation or a PIN: no self-opened microphone, no helper at the PIN. */
-    private fun handOver(kind: BankUssd.ScreenKind) {
+    /** A payment confirmation or a PIN: no self-opened microphone, no helper at the PIN, the volume keys as the PIN pad —
+     *  and the network's last word after it read out (money/ussd/AfterPin): the receipt a blind user cannot see. */
+    private fun handOver(kind: BankUssd.ScreenKind, ctrl: com.tekyerema.accessibility.AccessibilityController,
+                         app: android.content.Context?, network: String?) {
         if (kind == BankUssd.ScreenKind.PIN) PinPad.arm()
         com.tekyerema.voice.SecureStep.begin()
         com.tekyerema.agent.helper.HelperGate.atPin()
+        com.tekyerema.money.ussd.AfterPin.watch(ctrl, app, network?.lowercase())
     }
 
     override fun confirmationPrompt(args: JSONObject): String {

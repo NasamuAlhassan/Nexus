@@ -98,7 +98,7 @@ class RunGoalReceiver : BroadcastReceiver() {
             // voice= / voiceBusy= let scripts/device_suite.py wait until a reply has been read aloud (a request typed
             // while the voice layer is busy is dropped). "?" when the voice layer isn't initialised yet.
             val voice = try { "${com.tekyerema.voice.VoiceEngine.state.value.state} voiceBusy=${com.tekyerema.voice.VoiceEngine.isRunning}" } catch (_: Throwable) { "? voiceBusy=?" }
-            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()} voice=$voice twi='${try { com.tekyerema.voice.TwiVoiceStatus.shared.status() } catch (_: Throwable) { "?" }}'")
+            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()} windows=${AgentEngine.currentController()?.windowCount()} voice=$voice twi='${try { com.tekyerema.voice.TwiVoiceStatus.shared.status() } catch (_: Throwable) { "?" }}'")
             return
         }
         // Deterministic infrastructure scenario, zero LLM cost — see TestBrain.
@@ -231,6 +231,21 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // Signal completion of Secure Input Mode (MoMo PIN entered) over ADB, for testing the boundary.
         intent.getStringExtra("secure_done")?.let { AgentEngine.secureInputDone(); return }
+        // P2-02: a volume key delivered to the PIN pad as the accessibility key filter would deliver it — `down` (count one),
+        // `up` (enter the digit), `hold_down` / `hold_up` (a long press). Injected key events (`input keyevent`, the emulator
+        // console) never reach the key filter on the Pixel emulator (13 October 2026), so this is how the pad's counting,
+        // typing and Send are exercised against the USSD simulator; the physical-key delivery is the phone's test.
+        //   adb ... --es pinpad_key down|up|hold_down|hold_up
+        intent.getStringExtra("pinpad_key")?.let { which ->
+            val ctrl = AgentEngine.currentController() ?: run { Log.i("Tekyerema", "[PINPAD] no accessibility controller"); return }
+            val code = if (which.endsWith("down")) android.view.KeyEvent.KEYCODE_VOLUME_DOWN else android.view.KeyEvent.KEYCODE_VOLUME_UP
+            val hold = which.startsWith("hold")
+            val t0 = android.os.SystemClock.uptimeMillis()
+            val took = com.tekyerema.money.PinPad.onKey(ctrl, code, android.view.KeyEvent.ACTION_DOWN, t0)
+            com.tekyerema.money.PinPad.onKey(ctrl, code, android.view.KeyEvent.ACTION_UP, t0 + if (hold) 900L else 80L)
+            Log.i("Tekyerema", "[PINPAD] debug key $which → ${if (took) "taken by the pad" else "not the pad's (not armed / no secure step)"}")
+            return
+        }
         // Simulate a wake-word detection (no audio) → activation path. --es wake_test 1
         intent.getStringExtra("wake_test")?.let { com.tekyerema.voice.WakeWordService.simulate(context.applicationContext); return }
         // QA: audition the "thinking" filler clips of a language, one after another. --es play_fillers twi|en

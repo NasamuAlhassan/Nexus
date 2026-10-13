@@ -26,13 +26,17 @@ internal object UssdDialog {
     suspend fun read(ctrl: AccessibilityController): Screen? {
         val snap = try { ctrl.buildSnapshot() } catch (_: Throwable) { return null }
         // Only the phone app's own window is the USSD dialog — the app underneath must never be read (or typed
-        // into) as if it were the bank's menu (audit 2026-09-30, half 2 #2).
-        if (!TelephonyWindows.matches(snap.appPackage)) {
+        // into) as if it were the bank's menu (audit 2026-09-30, half 2 #2). (Debug builds with the switch on: the
+        // simulator's own dialog too — money/ussd/UssdSim.)
+        if (!isUssdWindow(snap.appPackage, snap.screenTitle)) {
             if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[USSD] not a phone window: ${snap.appPackage}")
             return null
         }
         val labels = ArrayList<String>()
-        snap.screenTitle?.takeIf { it.isNotBlank() }?.let { labels += it }
+        // The simulator's dialog carries its own title ("USSD simulator") as the window title and as a title view; the
+        // phone's USSD dialog has neither, so neither is part of what the network said (it was read out twice, 13 Oct 2026).
+        val sim = com.tekyerema.money.ussd.UssdSim.isSimWindow(snap.appPackage, snap.screenTitle)
+        snap.screenTitle?.takeIf { it.isNotBlank() && !sim }?.let { labels += it }
         var inputId: Int? = null
         var sendId: Int? = null
         var cancelId: Int? = null
@@ -43,7 +47,7 @@ internal object UssdDialog {
                 e.editable -> if (inputId == null) inputId = e.id
                 e.clickable && SUBMIT.matches(l) -> { if (sendId == null) sendId = e.id; if (CLOSE_OK.matches(l) && okOnly == null) okOnly = e.id }
                 e.clickable && CANCEL.matches(l) -> { if (cancelId == null) cancelId = e.id; if (CLOSE_OK.matches(l) && okOnly == null) okOnly = e.id }
-                l.isNotBlank() -> labels += l
+                l.isNotBlank() && !(sim && l == com.tekyerema.money.ussd.UssdSim.TITLE) -> labels += l
             }
         }
         val text = labels.joinToString("\n").trim()
@@ -52,9 +56,13 @@ internal object UssdDialog {
         if (inputId != null) return Screen(text, inputId, sendId, cancelId, masked)
         // No entry box: only the phone's own window with an OK/Close button is a last message ("Request received"); the
         // launcher or the running spinner is not.
-        if (!TelephonyWindows.matches(snap.appPackage) || okOnly == null || RUNNING.containsMatchIn(text)) return null
+        if (!isUssdWindow(snap.appPackage, snap.screenTitle) || okOnly == null || RUNNING.containsMatchIn(text)) return null
         return Screen(text, null, null, cancelId ?: okOnly, masked)
     }
+
+    /** The phone's own USSD window — or, in a debug build with the simulator switched on, the simulator's dialog. */
+    private fun isUssdWindow(pkg: String?, title: String?): Boolean =
+        TelephonyWindows.matches(pkg) || com.tekyerema.money.ussd.UssdSim.isSimWindow(pkg, title)
 
     /** The first dialog after [prevText]'s cleared (or with new words), within [timeoutMs]; null = nothing came. */
     suspend fun awaitNext(ctrl: AccessibilityController, prevText: String, timeoutMs: Long): Screen? {
@@ -121,7 +129,9 @@ internal object UssdDialog {
     suspend fun dial(app: android.content.Context, ctrl: AccessibilityController, code: String, timeoutMs: Long = 25_000L): Screen? {
         var prev = clearStale(ctrl) ?: ""
         repeat(2) { attempt ->
-            app.startActivity(android.content.Intent(android.content.Intent.ACTION_CALL,
+            // Debug builds with the simulator on: the recorded MTN screens instead of the network (money/ussd/UssdSim).
+            if (com.tekyerema.money.ussd.UssdSim.enabled()) com.tekyerema.money.ussd.UssdSim.start(app, code)
+            else app.startActivity(android.content.Intent(android.content.Intent.ACTION_CALL,
                 android.net.Uri.parse("tel:" + android.net.Uri.encode(code))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
             // MTN's "Connection problem or invalid MMI code" can come AFTER its own ~30 s: a short grace past the wait
             // catches it, so it is closed and redialled instead of popping up behind "didn't open in time" (A20e,

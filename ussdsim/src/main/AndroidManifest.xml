@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- A test harness for the emulator: no permissions, no network, no launcher entry. Tɛkyerɛma (debug) starts the
+         dialog by explicit component when its `money.ussd.simulator` switch is on; the dialog looks to the accessibility
+         service exactly like the phone's MMI dialog (text, one entry box — masked on PIN screens — Send / Cancel / OK). -->
+    <application
+        android:allowBackup="false"
+        android:label="USSD simulator"
+        android:theme="@android:style/Theme.Material.Light.Dialog">
+        <activity
+            android:name=".SimActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:label="USSD simulator"
+            android:theme="@android:style/Theme.Material.Light.Dialog" />
+    </application>
+</manifest>

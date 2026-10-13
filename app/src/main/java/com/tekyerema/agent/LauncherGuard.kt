@@ -12,6 +12,9 @@ object LauncherGuard {
     /** The user asked for the gesture or the home-screen thing itself ("swipe left", "open the app drawer", "my widgets"). */
     private val USER_GESTURE = Regex("(?i)\\b(swipe|scroll|page|pages|widgets?|app drawer|all apps|home ?screen|wallpaper|folders?|drag|rearrange|move (?:the |an? )?(?:icon|app))\\b")
     private val HUNT_TOOLS = setOf("swipe", "scroll", "scroll_to_find", "drag", "fling")
+
+    /** The goal itself asks for a home-screen gesture or thing — then nothing here is "hunting". */
+    fun userAskedGesture(goal: String): Boolean = USER_GESTURE.containsMatchIn(goal)
     private val TAP_TOOLS = setOf("tap", "long_press")
 
     /**

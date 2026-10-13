@@ -16,6 +16,9 @@ object Provider {
     data class Sim(val provider: String?, val carrier: String?, val slot: Int?, val dualSim: Boolean)
 
     fun current(ctx: Context): Sim {
+        // Debug builds with the USSD simulator on: the SIM the simulator pretends to be (the emulator's fake carrier has no
+        // Mobile Money code, so nothing would ever be dialled).
+        UssdSim.carrier()?.let { c -> return Sim(GhanaMobileMoney.network(c), c, null, dualSim = false) }
         try {
             val sm = ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
             val active = try { sm?.activeSubscriptionInfoList.orEmpty() } catch (_: SecurityException) { emptyList() }

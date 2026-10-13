@@ -18,5 +18,7 @@
                 <action android:name="com.tekyerema.RUN_GOAL" />
             </intent-filter>
         </receiver>
+        <!-- P2-01 (13 October 2026): the USSD simulator lives in its own APK (the `:ussdsim` module) — an accessibility
+             service is shown no windows of its own package. money/ussd/UssdSim starts it when `money.ussd.simulator` is on. -->
     </application>
 </manifest>

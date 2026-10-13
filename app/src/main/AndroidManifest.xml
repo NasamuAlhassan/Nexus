@@ -164,6 +164,22 @@
             </intent-filter>
         </activity>
 
+        <!-- P5-02 (13 October 2026): a PICTURE shared to Tɛkyerɛma is read aloud (on-device OCR; describe on request). The image
+             is copied into the app's cache at once and handed to the camera reader; it is content, never a command. -->
+        <activity
+            android:name=".interop.SharedImageActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter android:label="Read with Tɛkyerɛma">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+
         <!-- A-08 Quick Settings tile: tap to talk; tap again while working to stop (J-14). -->
         <service
             android:name=".voice.TalkTileService"

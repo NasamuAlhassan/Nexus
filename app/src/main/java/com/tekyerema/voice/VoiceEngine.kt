@@ -182,7 +182,13 @@ object VoiceEngine {
         if (initialized) return
         initialized = true
         settings = Settings(app)
-        systemTts = AndroidTts(app)
+        // P3-02 (13 October 2026): this initialiser took 16.6 s of a 24-s Application.onCreate on the emulator (the start-up
+        // ANR that leaves the accessibility service "crashed"); each stage is timed so the heavy ones can be moved off here.
+        val startT0 = android.os.SystemClock.uptimeMillis()
+        var startLast = startT0
+        val startMarks = StringBuilder()
+        fun stage(name: String) { val now = android.os.SystemClock.uptimeMillis(); startMarks.append(name).append('=').append(now - startLast).append(' '); startLast = now }
+        systemTts = AndroidTts(app); stage("systemTts")
         val isOnline = { com.tekyerema.core.NetworkMonitor.isOnline() }
         // The system voice is wrapped so Twi letters (ɛ/ɔ) are read as plain vowels instead of being spelled out;
         // English text passes through unchanged.
@@ -192,6 +198,7 @@ object VoiceEngine {
         // and the phone's engine stays behind it, so a missing or failed model is never silence.
         val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
         englishVoice = if (own != null) FallbackTts(listOf(own, systemVoice)) else systemVoice
+        stage("ownVoice")
         android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}")
         val levels = ArrayList<StateFlow<Float>>()
         // B-19: contact names + app labels for post-ASR name correction, loaded off the voice path (READ_CONTACTS only
@@ -322,6 +329,7 @@ object VoiceEngine {
             override fun mixedInput(english: com.tekyerema.voice.io.VoiceInput, twi: com.tekyerema.voice.io.VoiceInput) =
                 com.tekyerema.voice.io.LanguageRoutedInput(english, twi, language = { forced() ?: sessionLang() }, isOnline = isOnline)
         })
+        stage("layer+inputs")
         // Startup diagnostics: which ASR/TTS stack is wired, verifiable live.
         android.util.Log.i("Tekyerema", "[STARTUP] voice layer=${plan.profile} input=${built.input.id} | " +
             "on-device ASR=${built.onDevice?.let { "${it.name} ready=${it.ready}" } ?: "not built"} | " +
@@ -383,8 +391,9 @@ object VoiceEngine {
             habits = com.tekyerema.agent.habits.Habits(app)
         )
         // The living visual follows whichever microphone is listening (our two MicCaptures, or the phone's recognizer).
+        stage("controller")
         if (levels.isNotEmpty()) scope.launch { combine(levels.toList()) { a -> a.maxOrNull() ?: 0f }.collect { _level.value = it } }
-        HistoryStore.init(app)
+        HistoryStore.init(app); stage("history")
         // The reply panel follows the task: whenever it waits on the user (a confirmation, a question, the secure step)
         // a panel over any app shows what it's waiting for, with buttons that fit (PromptSurface).
         scope.launch(Dispatchers.Main) {
@@ -392,8 +401,10 @@ object VoiceEngine {
                 .distinctUntilChanged()
                 .collect { p -> if (p == null) com.tekyerema.ui.OverlayConfirm.hidePrompt(app) else com.tekyerema.ui.OverlayConfirm.showPrompt(app, p) }
         }
-        com.tekyerema.core.Health.logStartup(app)   // N-16: why the process last ended, current issues
-        applyVoiceSettings()
+        // N-16: why the process last ended, current issues — two binder calls into ActivityManager, off the start-up path (P3-02).
+        scope.launch(Dispatchers.IO) { try { com.tekyerema.core.Health.logStartup(app) } catch (_: Throwable) {} }
+        applyVoiceSettings(); stage("settings")
+        android.util.Log.i("Tekyerema", "[STARTUP] VoiceEngine.init ${android.os.SystemClock.uptimeMillis() - startT0} ms: $startMarks")
         scope.launch { settings.changes.collect { applyVoiceSettings() } }
         // History: one row per finished task, written on the transition into a terminal status.
         scope.launch {

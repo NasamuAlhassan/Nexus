@@ -93,6 +93,14 @@ class CameraReadActivity : ComponentActivity() {
             Intent(ctx, CameraReadActivity::class.java)
                 .putExtra(EXTRA_MODE, mode)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        /** P5-02: a picture the user already has, read (or described) instead of the camera. */
+        const val EXTRA_IMAGE = "image"
+        /** P5-02: open the phone's photo picker first, then read the chosen picture. */
+        const val EXTRA_PICK = "pick"
+        fun imageIntent(ctx: Context, image: android.net.Uri, mode: String): Intent =
+            intent(ctx, mode).putExtra(EXTRA_IMAGE, image.toString())
+        fun pickIntent(ctx: Context, mode: String): Intent = intent(ctx, mode).putExtra(EXTRA_PICK, true)
     }
 
     private class Speech(val line: String, val flush: Boolean, val then: (() -> Unit)?)
@@ -183,8 +191,99 @@ class CameraReadActivity : ComponentActivity() {
         setContentView(buildLayout())
         tts = TextToSpeech(applicationContext) { status -> runOnUiThread { onTtsInit(status) } }
 
+        // P5-02: a picture the user already has needs no camera (and no camera permission).
+        val imported = intent?.getStringExtra(EXTRA_IMAGE)?.let { runCatching { android.net.Uri.parse(it) }.getOrNull() }
+        if (imported != null) { importing = true; readImage(imported); return }
+        if (intent?.getBooleanExtra(EXTRA_PICK, false) == true) {
+            importing = true
+            announce(phrase("pickPhoto", "Choose the picture you want me to read."))
+            resetIdleTimer()
+            try {
+                pickLauncher.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            } catch (t: Throwable) {
+                Log.w(TAG, "[IMPORT] photo picker unavailable: ${t.javaClass.simpleName}")
+                speakThenFinish(phrase("pickUnavailable", "I couldn't open the photo picker on this phone."))
+            }
+            return
+        }
+
         val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
         if (granted) begin() else permissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
+    // ------------------------------------------------------------------------------------------------ P5-02 import
+
+    /** Reading a picture the user already has: the camera is never opened; a tap still closes. */
+    @Volatile private var importing = false
+    private var imageView: android.widget.ImageView? = null
+
+    private val pickLauncher = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri == null) speakThenFinish(phrase("pickCancelled", "Okay, nothing was picked."))
+        else readImage(uri)
+    }
+
+    /** Decode off the main thread, show it, then read it (or describe it when that mode is possible). */
+    private fun readImage(uri: android.net.Uri) {
+        resetIdleTimer()
+        lifecycleScope.launch {
+            val bmp = withContext(Dispatchers.IO) { ImportedImage.decode(contentResolver, uri, AppConfig.int("camera.import.maxSide", 1600)) }
+            if (closing) return@launch
+            if (bmp == null) { speakThenFinish(phrase("importUnreadable", "I couldn't open that picture.")); return@launch }
+            showImage(bmp)
+            if (mode == MODE_DESCRIBE) {
+                val why = when {
+                    !settings.allowGeminiBackup -> phrase("describeDisabled", "Describing photos needs the Gemini backup, which is switched off in Settings.")
+                    settings.geminiApiKey.isBlank() && settings.groqApiKeys.isEmpty() -> phrase("describeNoKey", "Describing needs a key that isn't set up on this phone. I can read any text I see instead.")
+                    !NetworkMonitor.isOnline() -> phrase("describeOffline", "I can't describe it offline, but I can read any text I see.")
+                    else -> null
+                }
+                if (why == null) {
+                    speak(phrase("describing", "Got it, one moment."), flush = false)
+                    val jpeg = withContext(Dispatchers.Default) { ImportedImage.jpeg(bmp, AppConfig.int("camera.describe.maxSide", 1024)) }
+                    LastCapture.hold(jpeg)   // a follow-up question goes back to the cloud with THIS picture (VisionQa)
+                    when (val r = VisionLadder.describe(jpeg, GeminiVision.PROMPT, settings)) {
+                        is VisionResult.Described -> { deliver(r.text); return@launch }
+                        is VisionResult.Failed -> {
+                            Log.w(TAG, "[IMPORT] describe failed: ${r.reason}")
+                            speak(phrase("describeFailed", "I couldn't get a description just now. I'll read any text I see instead."), flush = false)
+                        }
+                    }
+                } else { mode = MODE_TEXT; speak(why, flush = false) }
+            }
+            readBitmapText(bmp)
+        }
+    }
+
+    /** On-device OCR of the whole picture, once; the words as they are, in reading order. */
+    private fun readBitmapText(bmp: android.graphics.Bitmap) {
+        try {
+            recognizer.process(InputImage.fromBitmap(bmp, 0))
+                .addOnSuccessListener { result ->
+                    if (closing) return@addOnSuccessListener
+                    val text = ImportedImage.readingOrder(result.textBlocks)
+                    deliver(text.ifBlank { phrase("importNoText", "I couldn't find any text in that picture.") })
+                }
+                .addOnFailureListener { t ->
+                    Log.w(TAG, "[IMPORT] OCR failed: ${t.javaClass.simpleName}")
+                    deliver(phrase("importOcrFailed", "I couldn't read that picture."))
+                }
+        } catch (t: Throwable) {
+            deliver(phrase("importOcrFailed", "I couldn't read that picture."))
+        }
+    }
+
+    /** The picked picture, for low-vision users, where the camera preview would be. */
+    private fun showImage(bmp: android.graphics.Bitmap) {
+        try {
+            previewView.visibility = View.GONE
+            val iv = imageView ?: android.widget.ImageView(this).apply {
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                (previewView.parent as? ViewGroup)?.addView(this, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                imageView = this
+            }
+            iv.setImageBitmap(bmp)
+        } catch (_: Throwable) {}
     }
 
     override fun onDestroy() {

@@ -81,3 +81,4 @@ phase2/wakeword/*.log
 #      (found by the 3 October audit; purged from history the same day). ----
 *.bak
 local.properties.*
+/ussdsim/build/

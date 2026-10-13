@@ -65,7 +65,8 @@ object TargetResolver {
                         if (m.element.source == ElementSource.VISION) "vision" else "label")
                 )
                 is MatchOutcome.OnlyWeak -> ResolveOutcome.OnlyWeak(m.weakLabels)
-                MatchOutcome.None -> ResolveOutcome.NotFound("no element labelled '${target.label}' on the current screen")
+                MatchOutcome.None -> ResolveOutcome.NotFound("no element labelled '${target.label}' on the current screen" +
+                    nearHint(Grounding.nearLabels(snap.elements, target.label)))
             }
             is Target.ByPoint -> {
                 val hit = snap.elements.firstOrNull { it.source == ElementSource.VISION && it.bounds.contains(target.x, target.y) }
@@ -93,12 +94,14 @@ object TargetResolver {
         val first = resolveStatic(target, snap)
         if (first !is ResolveOutcome.NotFound || target !is Target.ByLabel || !allowScroll) return first to snap
         val plan = ScrollSearch(MAX_SEARCH_SCROLLS)
+        val near = LinkedHashSet<String>()   // the nearest labels seen anywhere in the list, for an honest "not here" reply
         while (true) {
             snap = ctrl.buildSnapshot()
             when (val r = resolveStatic(target, snap)) {
                 is ResolveOutcome.Found, is ResolveOutcome.OnlyWeak -> return r to snap
                 else -> {}
             }
+            snap?.let { near += Grounding.nearLabels(it.elements, target.label) }
             val scrollable = snap?.elements?.firstOrNull { it.scrollable }?.id
                 ?: return ResolveOutcome.NotFound("couldn't find '${target.label}' and nothing is scrollable") to snap
             val direction = plan.next(snap?.signature()) ?: break
@@ -106,8 +109,13 @@ object TargetResolver {
             ctrl.waitForSettle(1500)
         }
         return ResolveOutcome.NotFound("couldn't find an item labelled '${target.label}' anywhere in this list (scrolled to its end" +
-            (if (plan.reversed) " and back up" else "") + ") — it isn't here; try the app's own search or another screen") to snap
+            (if (plan.reversed) " and back up" else "") + ") — it isn't here; try the app's own search or another screen" +
+            nearHint(near.take(3))) to snap
     }
+
+    /** " (the nearest labels were 'About emulated device', 'System')" — or nothing. */
+    private fun nearHint(labels: List<String>): String =
+        if (labels.isEmpty()) "" else " (the nearest labels ${if (labels.size == 1) "was" else "were"} ${labels.joinToString { "'$it'" }})"
 
     private const val MAX_SEARCH_SCROLLS = 12
 

@@ -111,6 +111,10 @@ class RoutingBrain(
             val last = history.lastOrNull { STEP_LINE.containsMatchIn(it) } ?: return null
             if (!last.startsWith("open_app(") || !last.contains("→ fail")) return null
             val app = NOT_INSTALLED.find(last)?.groupValues?.get(1)?.trim() ?: return null
+            // A step already succeeded in this task (an app was opened for it): this open_app was a later step of a plan — a
+            // PAGE taken for an app ("go to the Software information page", Pixel emulator, 12 October 2026). That is a
+            // deviation for the planner, which can find the page from inside the open app; not an app that isn't installed.
+            if (history.any { it !== last && STEP_LINE.containsMatchIn(it) && it.contains("→ success") }) return null
             return "I couldn't find an app called $app on this phone — it isn't installed, or I misheard the name. Say it again if I got it wrong."
         }
 
@@ -305,8 +309,8 @@ class RoutingBrain(
         // …and no call, text or money action stands on a recipient or an amount this task never stated or found
         // (agent/FinalActionGuard: asked for instead — an example in the instructions or an earlier request's person or
         // amount is never used; end-to-end pass, 6 October 2026).
-        val d = FinalActionGuard.apply(com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal, ctx.history),
-            ctx.goal, ctx.history, ctx.screen.toString(), ctx.screen.optString("app").takeIf { it.isNotBlank() })
+        val d = openInsteadOfHunting(ctx, FinalActionGuard.apply(com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal, ctx.history),
+            ctx.goal, ctx.history, ctx.screen.toString(), ctx.screen.optString("app").takeIf { it.isNotBlank() }))
         if (d is AgentDecision.Done && ctx.simple) answers?.put(ctx.goal, d.summary)
         if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && nothingDoneYet(ctx.history)) {
             android.util.Log.i("Tekyerema", "[ROUTE] the cloud couldn't be reached — answering the offline way")
@@ -317,6 +321,29 @@ class RoutingBrain(
     }
 
     private fun nothingDoneYet(history: List<String>): Boolean = history.all { READ_ONLY_STEP.containsMatchIn(it) }
+
+    /**
+     * The planner reaches for the HOME SCREEN (a tap, a long-press, a swipe) while the goal names an installed app that
+     * isn't open: that app is opened by name instead. The engine's LauncherGuard would refuse the gesture and tell the model
+     * to call open_app — which cost two refused steps and ended in "Which app would you like to open?" (Pixel emulator,
+     * 12 October 2026). Deterministic, logged, and never for a gesture the user asked for. Pure given [appForGoal].
+     */
+    internal fun openInsteadOfHunting(ctx: BrainContext, d: AgentDecision): AgentDecision {
+        if (d !is AgentDecision.CallTool || d.name !in HUNT_ON_HOME) return d
+        val screenApp = ctx.screen.optString("app")
+        if (!isHomeScreen(screenApp) || LauncherGuard.userAskedGesture(ctx.goal)) return d
+        val (label, pkg) = try { appForGoal?.invoke(ctx.goal) } catch (_: Throwable) { null } ?: return d
+        if (pkg == screenApp) return d
+        if (ctx.history.any { it.startsWith("open_app(") && it.contains(label, ignoreCase = true) }) return d   // tried already
+        android.util.Log.i("Tekyerema", "[ROUTE] the planner reached for the home screen (${d.name}) — opening $label by name instead")
+        return AgentDecision.CallTool("open_app", org.json.JSONObject().put("app", label),
+            "local:goal names $label (instead of ${d.name} on the home screen)", expects = "foreground_is: $pkg")
+    }
+
+    private val HUNT_ON_HOME = setOf("tap", "long_press", "swipe", "scroll", "drag")
+    /** The default launcher, by package name — every stock and OEM launcher carries the word (nexuslauncher, launcher3,
+     *  com.sec.android.app.launcher, …). Android-free on purpose. */
+    private fun isHomeScreen(pkg: String?): Boolean = pkg != null && pkg.lowercase().contains("launcher")
 
     /** The link's last evidence was bad → probe before waiting on a cloud call (N-10). No evidence → go ahead. */
     private suspend fun linkAnswers(): Boolean {

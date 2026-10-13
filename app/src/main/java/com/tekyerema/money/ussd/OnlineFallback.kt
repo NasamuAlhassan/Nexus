@@ -15,6 +15,16 @@ import org.json.JSONObject
  * navigator then asks the USER (§ LEVEL 5). Offline → null immediately.
  */
 class OnlineFallback(private val keys: List<String>) {
+    companion object {
+        /** The chat-completions endpoint for an OpenAI-compatible base URL, whether or not it already ends in `/v1`:
+         *  `models.json` carries `…/openai/v1`, and this used to append `/v1/chat/completions` to it (B-14, found 7 October
+         *  2026) — every call went to `…/openai/v1/v1/chat/completions` and the fallback could never answer. Pure, tested. */
+        fun chatCompletionsUrl(baseUrl: String): String {
+            val base = baseUrl.trim().trimEnd('/')
+            return (if (base.endsWith("/v1")) base else "$base/v1") + "/chat/completions"
+        }
+    }
+
 
     suspend fun choose(intent: TxIntent, rows: List<Pair<String, String>>): String? {
         if (rows.isEmpty() || keys.isEmpty()) return null
@@ -34,7 +44,7 @@ class OnlineFallback(private val keys: List<String>) {
         for (key in keys.take(2)) {
             try {
                 val req = Request.Builder()
-                    .url(AppConfig.string("providers.groq.baseUrl", "https://api.groq.com/openai") + "/v1/chat/completions")
+                    .url(chatCompletionsUrl(AppConfig.string("providers.groq.baseUrl", "https://api.groq.com/openai/v1")))
                     .header("Authorization", "Bearer $key")
                     .post(body.toString().toRequestBody("application/json".toMediaType()))
                     .build()

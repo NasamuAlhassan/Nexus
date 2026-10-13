@@ -191,9 +191,15 @@ object AgentEngine {
             settings = Settings(context.applicationContext)
             registry = ToolRegistry(defaultTools())
             initialized = true
-            loadConversation()   // H-10: pick the conversation back up after the process was killed mid-session
-            // WS-A: the task journal and the effect ledger (a task found still running was cut off → INTERRUPTED).
-            com.tekyerema.agent.journal.JournalBoot.start(context.applicationContext)
+            // P3-02 (13 October 2026): the conversation file (Keystore + disk) and the journal / effect-ledger load are not
+            // needed for the service to bind or the first word to be heard — they cost 1.2 s of the main thread at a warm
+            // start and 4 s on a busy emulator, part of the start-up ANR that left the accessibility service "crashed".
+            val app = context.applicationContext
+            scope.launch(Dispatchers.IO) {
+                try { loadConversation() } catch (_: Throwable) {}   // H-10: pick the conversation back up after the process was killed mid-session
+                // WS-A: the task journal and the effect ledger (a task found still running was cut off → INTERRUPTED).
+                try { com.tekyerema.agent.journal.JournalBoot.start(app) } catch (_: Throwable) {}
+            }
         }
         refreshReadiness()
     }
@@ -1412,7 +1418,8 @@ object AgentEngine {
                                     decision.name, resolved?.element, requestedLabel, s,
                                     decision.args.boolOrDefault("submit", false), decision.args.str("text"),
                                     // a chat titled by a bare number is read with the saved name (QA M01, 3 October 2026)
-                                    nameOfNumber = { n -> appContext()?.let { c -> com.tekyerema.android.ContactResolver.lookupByNumber(c, n).firstOrNull()?.name } }
+                                    nameOfNumber = { n -> appContext()?.let { c -> com.tekyerema.android.ContactResolver.lookupByNumber(c, n).firstOrNull()?.name } },
+                                    goal = goal   // S-05: a composer holding other words than the user dictated is read with both
                                 )
                                 var semantic = readBack(readBackScreen)
                                 // A bare "Send this message?" (no recipient, no text) usually means the screen is still

@@ -5,6 +5,10 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -220,10 +224,20 @@ class AndroidTts(context: Context) : TtsProvider {
     @Volatile var lastFirstAudioMs: Long = -1; private set
 
     /** 1.0 = the engine's normal pace; the Voice settings page offers slow/normal/fast. */
-    fun setRate(rate: Float) { try { engine.setSpeechRate(rate.coerceIn(0.5f, 2.0f)) } catch (_: Throwable) {} }
+    private val settingsScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    /** B-13: 1.0 = the engine's normal pitch. */
-    fun setPitch(pitch: Float) { try { engine.setPitch(pitch.coerceIn(0.5f, 2.0f)) } catch (_: Throwable) {} }
+    /** The user's rate — applied once the engine is up. Before it is, the engine refuses the call (the setting was lost at
+     *  start-up) and on a slow start the call sat on the main thread while the engine bound (P3-02, 13 October 2026). */
+    fun setRate(rate: Float) {
+        val r = rate.coerceIn(0.5f, 2.0f)
+        settingsScope.launch { if (ready.await()) try { engine.setSpeechRate(r) } catch (_: Throwable) {} }
+    }
+
+    /** B-13: 1.0 = the engine's normal pitch — applied the same way, once the engine is up. */
+    fun setPitch(pitch: Float) {
+        val p = pitch.coerceIn(0.5f, 2.0f)
+        settingsScope.launch { if (ready.await()) try { engine.setPitch(p) } catch (_: Throwable) {} }
+    }
 
     override fun stop() { try { engine.stop() } catch (_: Throwable) {} }
     override fun shutdown() { try { engine.stop(); engine.shutdown() } catch (_: Throwable) {} }
