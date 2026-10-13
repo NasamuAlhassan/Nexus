@@ -29,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -97,7 +98,8 @@ private fun Key(label: String, spoken: String, onClick: () -> Unit) {
     Box(
         Modifier.size(84.dp).clip(CircleShape).border(2.dp, Tk.Hairline, CircleShape)
             .clickable(role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = spoken },
+            // The spoken name replaces the digit's text for TalkBack (else "five. 5. Button"); click and role stay (Gate G, 13 Oct 2026).
+            .clearAndSetSemantics { contentDescription = spoken },
         contentAlignment = Alignment.Center
     ) { Text(label, color = Tk.Text, fontSize = 30.sp, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleLarge) }
 }

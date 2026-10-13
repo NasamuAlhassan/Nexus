@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -168,7 +169,8 @@ fun PermissionsScreen(onDone: () -> Unit) {
 
 @Composable
 private fun Reason(name: String, why: String) {
-    Column(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = "$name, $why" }) {
+    // clearAndSetSemantics, not a description on a merging node: TalkBack would read the texts a second time (Gate G, 13 Oct 2026).
+    Column(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = "$name, $why" }) {
         Column(Modifier.padding(vertical = 14.dp)) {
             Text(name, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
             Text(why, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary, modifier = Modifier.padding(top = 2.dp))

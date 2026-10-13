@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,7 +69,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
-import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -126,11 +126,12 @@ fun BrandMark(size: Dp, modifier: Modifier = Modifier, ear: Color = Tk.Text, pul
     }
 }
 
-/** Mark + wordmark, top-left, read by TalkBack as one heading. */
+/** Mark + wordmark, top-left, read by TalkBack as one heading ("Tɛkyerɛma, heading" — the wordmark is the text; a second
+ *  contentDescription would be read as well, see NavItem). */
 @Composable
 fun BrandRow(modifier: Modifier = Modifier) {
     Row(
-        modifier = modifier.semantics(mergeDescendants = true) { heading(); contentDescription = "Tɛkyerɛma" },
+        modifier = modifier.semantics(mergeDescendants = true) { heading() },
         verticalAlignment = Alignment.CenterVertically
     ) {
         BrandMark(size = 34.dp)
@@ -171,7 +172,10 @@ fun QuietNav(current: Section, onSelect: (Section) -> Unit, modifier: Modifier =
                 .fillMaxWidth()
                 .glass(RoundedCornerShape(34.dp), strong = true, elevation = 18.dp)
                 .padding(horizontal = 6.dp, vertical = 5.dp)
-                .semantics { contentDescription = "Navigation" },
+                // Gate G (TalkBack 15 on the emulator, 13 October 2026): a description on this Row made the bar itself a
+                // TalkBack stop that read "Navigation" and took the screen's first focus; a selectable group is what a tab
+                // row is, and TalkBack then counts the tabs for the user.
+                .selectableGroup(),
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             Section.entries.forEach { s -> NavItem(s, s == current) { onSelect(s) } }
@@ -204,8 +208,10 @@ private fun RowScope.NavItem(section: Section, selected: Boolean, onClick: () ->
                 }
             }
             .then(if (focused) Modifier.border(2.dp, focus, RoundedCornerShape(28.dp)) else Modifier)
+            // No contentDescription here: Compose hands a described, merging node's description to TalkBack as an extra
+            // child next to the label, and TalkBack read "History. History. Tab" (measured, 13 October 2026). The label
+            // Text below is the tab's name; `selectable` already carries the selected state and the Tab role.
             .selectable(selected = selected, interactionSource = interaction, indication = null, role = Role.Tab, onClick = onClick)
-            .semantics { this.selected = selected; contentDescription = section.label }
             .padding(vertical = 7.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -469,7 +475,9 @@ fun BigButton(
             .border(if (focused) 3.dp else 0.dp, if (focused) Tk.Cyan else Color.Transparent, shape)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button,
                 onClick = { view.tkHaptic(haptic); onClick() })
-            .semantics { if (contentDescription != null) this.contentDescription = contentDescription }
+            // A spoken label replaces the visible text for TalkBack ("No, don't do it", not "No, don't do it. No."): the
+            // click and the Button role come from the modifier before this one and stay (Gate G, 13 October 2026).
+            .then(if (contentDescription != null) Modifier.clearAndSetSemantics { this.contentDescription = contentDescription } else Modifier)
             .padding(horizontal = 24.dp, vertical = 17.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -536,7 +544,10 @@ fun CommandField(
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSend = { submit() }),
             decorationBox = { inner ->
                 Box(contentAlignment = Alignment.CenterStart) {
-                    if (text.isEmpty()) Text("Ask Tɛkyerɛma…", style = MaterialTheme.typography.bodyLarge, color = Tk.TextTertiary)
+                    // The placeholder is for the eyes: TalkBack already says "Edit box. Type a command to Tɛkyerɛma" from the
+                    // field's description, and read this on top of it (13 October 2026).
+                    if (text.isEmpty()) Text("Ask Tɛkyerɛma…", style = MaterialTheme.typography.bodyLarge, color = Tk.TextTertiary,
+                        modifier = Modifier.clearAndSetSemantics { })
                     inner()
                 }
             }
@@ -549,7 +560,8 @@ fun CommandField(
                     Icon(Icons.AutoMirrored.Outlined.Send, contentDescription = "Send command", tint = onAccent, modifier = Modifier.size(20.dp))
                 }
             }
-            onMic != null -> IconButton(onClick = onMic, modifier = Modifier.size(48.dp)) {
+            // Gate G audit (emulator accessibility tree, 13 October 2026): this button read as "Button" — the glyph is drawn, not an Icon.
+            onMic != null -> IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to Tɛkyerɛma" }) {
                 Box(
                     Modifier.size(40.dp).clip(CircleShape).background(
                         Brush.linearGradient(listOf(Spectrum.Cyan, Spectrum.Violet), start = Offset.Zero, end = Offset(90f, 90f))
@@ -562,10 +574,11 @@ fun CommandField(
     }
 }
 
-/** A microphone glyph (not in the core icon set), drawn so it needs no extra dependency. */
+/** A microphone glyph (not in the core icon set), drawn so it needs no extra dependency. Silent for TalkBack: the button
+ *  around it carries the label (it used to add "Talk" — "Talk to Tɛkyerɛma. Talk. Button", measured 13 October 2026). */
 @Composable
 private fun MicGlyph(color: Color, modifier: Modifier) {
-    Canvas(modifier.semantics { contentDescription = "Talk" }) {
+    Canvas(modifier.clearAndSetSemantics { }) {
         val w = size.width; val h = size.height
         val stroke = Stroke(width = w * 0.1f, cap = StrokeCap.Round)
         drawRoundRect(color, topLeft = Offset(w * 0.34f, h * 0.06f), size = androidx.compose.ui.geometry.Size(w * 0.32f, h * 0.52f),

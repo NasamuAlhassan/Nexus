@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.traversalIndex
 import com.tekyerema.settings.Settings
 import com.tekyerema.ui.home.HomeContent
 import com.tekyerema.ui.theme.LocalCalmMotion
@@ -186,19 +187,24 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     val outsideInteraction = remember { MutableInteractionSource() }
     val scrimColor = Tk.Ink
     com.tekyerema.ui.SystemBarsFollowTheme()
-    Box(
-        Modifier
-            .fillMaxSize()
-            .drawBehind { drawRect(scrimColor.copy(alpha = scrim)) }     // draw phase: no recomposition per frame
-            // The backdrop is the close control: anywhere outside the circle, any time you are not mid-sentence.
-            .clickable(
-                interactionSource = outsideInteraction, indication = null, role = Role.Button,
-                onClickLabel = if (typing) "Hide keyboard" else "Close Tɛkyerɛma", enabled = !midSentence,
-                // While typing, the first outside tap only puts the keyboard away.
-                onClick = { if (typing) focusManager.clearFocus() else dismiss() }
-            )
-            .semantics { contentDescription = if (typing) "Hide keyboard" else "Close Tɛkyerɛma" }
-    ) {
+    Box(Modifier.fillMaxSize().drawBehind { drawRect(scrimColor.copy(alpha = scrim)) }) {     // draw phase: no recomposition per frame
+        // The backdrop is the close control: anywhere outside the circle, any time you are not mid-sentence. It is a layer of
+        // its own BEHIND the content, not the content's parent: a clickable parent merges every plain text of this screen into
+        // one TalkBack stop that began "Close Tɛkyerɛma" (Gate G, 13 October 2026). As a sibling it is one stop of its own,
+        // "Close Tɛkyerɛma, button", visited last; the greeting, the orb and the field keep theirs. Touch is unchanged: the
+        // content above has no click handling of its own, so a tap outside its controls still lands here.
+        val closeLabel = if (typing) "Hide keyboard" else "Close Tɛkyerɛma"
+        Box(
+            Modifier
+                .matchParentSize()
+                .clickable(
+                    interactionSource = outsideInteraction, indication = null, role = Role.Button,
+                    onClickLabel = closeLabel, enabled = !midSentence,
+                    // While typing, the first outside tap only puts the keyboard away.
+                    onClick = { if (typing) focusManager.clearFocus() else dismiss() }
+                )
+                .semantics { contentDescription = closeLabel; traversalIndex = 1f }
+        )
         Box(Modifier.fillMaxSize().systemBarsPadding().imePadding().graphicsLayer {
             alpha = rise.coerceIn(0f, 1f)
             if (!calm) {

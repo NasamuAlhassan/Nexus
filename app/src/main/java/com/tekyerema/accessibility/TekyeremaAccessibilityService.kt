@@ -70,6 +70,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     } else null
 
     override fun onServiceConnected() {
+        if (com.tekyerema.BuildConfig.DEBUG) try {
+            // Gate G audit tooling: debug builds also hear accessibility-focus events (see onAccessibilityEvent); the manifest's
+            // event list is the release one.
+            serviceInfo = serviceInfo.apply { eventTypes = eventTypes or AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED }
+        } catch (_: Throwable) {}
         super.onServiceConnected()
         connected = true
         lastEventTime = SystemClock.uptimeMillis()
@@ -99,6 +104,14 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         lastEventTime = SystemClock.uptimeMillis()
+        // Gate G audit (debug builds only): where a screen reader puts its focus while it drives our screens — the node's own
+        // text and description, which is what TalkBack speaks (13 October 2026). Never on in a release build.
+        if (com.tekyerema.BuildConfig.DEBUG && event?.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED) {
+            val src = try { event.source } catch (_: Throwable) { null }
+            android.util.Log.i("Tekyerema", "[A11Y-FOCUS] pkg=${event.packageName} cls=${event.className?.toString()?.substringAfterLast('.')} " +
+                "text='${event.text.joinToString("|")}' desc='${event.contentDescription}' src.text='${src?.text}' src.desc='${src?.contentDescription}' " +
+                "src.click=${src?.isClickable} src.children=${src?.childCount}")
+        }
         event?.let { noteAnnouncement(it) }   // F-17: "Message sent", toasts — evidence for verification
         // Hide the trigger while a Tɛkyerɛma screen is in front; show it over everything else.
         // Decided from the window that actually has focus, so our own overlay windows, the

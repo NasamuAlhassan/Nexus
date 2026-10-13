@@ -178,6 +178,40 @@ class RunGoalReceiver : BroadcastReceiver() {
             } catch (t: Throwable) { Log.w("Tekyerema", "[DOC] debug read_document failed: ${t.javaClass.simpleName}") }
             return
         }
+        // Gate G audit (13 October 2026): put the SCREEN READER's focus on a node, so TalkBack speaks it the way it would for a
+        // blind user — the one way to hear TalkBack's reading of a Compose node from the shell (input injected by adb never
+        // reaches TalkBack's touch exploration or key handling).   --es a11y_focus "History" [--es a11y_focus_nth 2] [--es a11y_focus_self 1]
+        // The node is the nth whose text or description contains the words; unless a11y_focus_self is set, focus goes to its
+        // nearest clickable or focusable ancestor (the element TalkBack stops on). Logged as [A11Y-FOCUS-SET].
+        intent.getStringExtra("a11y_focus")?.let { needle ->
+            val self = intent.getStringExtra("a11y_focus_self") == "1"
+            var nth = intent.getStringExtra("a11y_focus_nth")?.toIntOrNull() ?: 1
+            val svc = com.tekyerema.accessibility.TekyeremaAccessibilityService.live
+            val root = try { svc?.rootInActiveWindow } catch (_: Throwable) { null }
+            if (root == null) { Log.i("Tekyerema", "[A11Y-FOCUS-SET] no root (service live=${svc != null})"); return }
+            fun hit(n: android.view.accessibility.AccessibilityNodeInfo): Boolean =
+                n.text?.toString()?.contains(needle, true) == true || n.contentDescription?.toString()?.contains(needle, true) == true
+            var found: android.view.accessibility.AccessibilityNodeInfo? = null
+            val stack = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>(); stack.add(root)
+            while (stack.isNotEmpty() && found == null) {
+                val n = stack.removeFirst()
+                if (hit(n) && --nth <= 0) { found = n; break }
+                for (i in n.childCount - 1 downTo 0) n.getChild(i)?.let { stack.addFirst(it) }
+            }
+            var target = found
+            if (target != null && !self && !(target.isClickable || target.isFocusable)) {
+                var p = target.parent; var up = 0
+                while (p != null && up < 4) {
+                    if (p.isClickable || p.isFocusable) { target = p; break }
+                    p = p.parent; up++
+                }
+            }
+            val ok = target?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS) ?: false
+            Log.i("Tekyerema", "[A11Y-FOCUS-SET] '$needle' -> " + if (target == null) "not found" else
+                "ok=$ok cls=${target.className?.toString()?.substringAfterLast('.')} text='${target.text}' desc='${target.contentDescription}' " +
+                "click=${target.isClickable} focusable=${target.isFocusable} children=${target.childCount}")
+            return
+        }
         intent.getStringExtra("dump_screen")?.let {
             val pending = goAsync()
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {

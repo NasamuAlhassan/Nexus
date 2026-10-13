@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
@@ -119,7 +120,9 @@ private fun HistoryCard(e: HistoryEntry, modifier: Modifier = Modifier) {
             .glass(CardShape, elevation = 8.dp)
             .heightIn(min = 72.dp)
             .padding(horizontal = 16.dp, vertical = 14.dp)
-            .semantics(mergeDescendants = true) {
+            // One sentence replaces the texts for TalkBack: a merging node that also carries a description is read with its
+            // children as well ("10:44 AM, What is on my screen. What is on my screen. 10:44 AM"), see QuietNav (Gate G, 13 Oct 2026).
+            .clearAndSetSemantics {
                 contentDescription = "$time, ${e.title}" + e.outcome.label.let { if (it.isEmpty()) "" else ", $it" }
             },
         verticalAlignment = Alignment.CenterVertically

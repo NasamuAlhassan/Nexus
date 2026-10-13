@@ -31,7 +31,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -103,8 +102,9 @@ private fun TaskCardView(card: AuditView.TaskCard, shape: RoundedCornerShape) {
         else -> Icons.Outlined.AutoAwesome to Spectrum.Violet
     }
     Column(Modifier.fillMaxWidth().padding(horizontal = CardMargin).glass(shape, elevation = 8.dp).padding(horizontal = 16.dp, vertical = 14.dp)) {
-        val header = "${AuditView.sourceLabel(card.source)}, $time: ${card.title}" + (card.status?.let { ". $it" } ?: "")
-        Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) { contentDescription = header }, verticalAlignment = Alignment.CenterVertically) {
+        // Read as one item from its texts (title, then "source · time · status"); a description here would be read on top of
+        // them (Gate G, 13 October 2026).
+        Row(Modifier.fillMaxWidth().semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.CenterVertically) {
             IconTile(icon, tint)
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -122,9 +122,7 @@ private fun TaskCardView(card: AuditView.TaskCard, shape: RoundedCornerShape) {
                 s.provenance.takeIf { it.isNotEmpty() }?.let { "from untrusted text" },
                 s.reason.takeIf { s.outcome == "blocked" || s.outcome == "not run" }
             ).joinToString(" · ")
-            Column(Modifier.fillMaxWidth().padding(start = 54.dp).semantics(mergeDescendants = true) {
-                contentDescription = "Step ${s.step}: ${s.sentence()}" + if (detail.isNotEmpty()) ". $detail" else ""
-            }) {
+            Column(Modifier.fillMaxWidth().padding(start = 54.dp).semantics(mergeDescendants = true) {}) {
                 Text("${s.step}. ${s.sentence()}", style = MaterialTheme.typography.bodyMedium, color = Tk.Text)
                 if (detail.isNotEmpty()) Text(detail, style = MaterialTheme.typography.bodySmall, color = Tk.TextSecondary,
                     modifier = Modifier.padding(top = 2.dp))
