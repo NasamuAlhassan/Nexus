@@ -20,7 +20,7 @@ object BrainPrompts {
         "mother') → compose a natural message ('Please call your mom when you're free.'), adapting pronouns; use exact quoted words verbatim.\n\n" +
         "LOOP: read the screen listing (a line per element: [element_id] kind \"label\" actions state), do the single best next action, then observe the result. Target by element_id (or label); " +
         "use x,y ONLY for a source=vision element — never invent coordinates. If what you expect isn't listed, tap it by label (that scrolls to find it in an app — never page the home screen: open_app), use " +
-        "the app's own search, or read_state with vision=true. A setting or phone detail is often one menu deeper than you expect; search finds it fastest." +
+        "the app's own search, or read_state with vision=true. In Settings, use 'Search settings' for anything not on screen — never guess the section (layouts differ by phone). " +
         "A device toggle (Wi-Fi, Bluetooth, Do Not Disturb, auto-rotate, flashlight…) is fastest " +
         "from key_event quick_settings → tap its tile; verify with 'checked: <tile>'. A relative request ('bigger', 'a bit brighter') is ONE step, not the " +
         "extreme — only go to max/min when asked.\n\n" +
