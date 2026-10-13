@@ -937,6 +937,18 @@ object AgentEngine {
                             log(LogEntry.Kind.RESULT, unsupported.honestLine); pushConvo("Tɛkyerɛma: ${unsupported.honestLine}")
                             finish(AgentStatus.CANNOT_DO, stats); return
                         }
+                        // P1-14 (D-017): a request that names a page ends ON that page. The last step may have verified only
+                        // that the app was in front; the page's name must be in the final screen's heading (title or first
+                        // labels — the Settings list's own "Battery" row does not count). Told once with what the screen
+                        // shows; a second "done" from the wrong screen is reported as unconfirmed (agent/DoneCheck).
+                        val notThere = if (decision.summary.trim().endsWith("?")) null
+                            else DoneCheck.check(runCtx.goal, before.screenTitle, before.elements.take(3).mapNotNull { it.label })
+                        if (notThere != null && runCtx.doneRefusals++ == 0) {
+                            log(LogEntry.Kind.INFO, "completion gate: ${notThere.why} — not done yet")
+                            history.add(notThere.note)
+                            journalCheckpoint()
+                            continue
+                        }
                         val planOpen = (planGate as? com.tekyerema.agent.plan.PlanTracker.Gate.Unverified)?.open
                         // B: if a smaller backup model did part of the task, the spoken result says so (once).
                         // A question must END with its "?" — the voice layer reopens the mic on it, so the disclosure
@@ -965,13 +977,14 @@ object AgentEngine {
                         // (because an earlier step didn't verify) both spoke a wrong "…but I couldn't confirm it"
                         // tail AND stopped the voice layer's ask-card/mic-reopen (which keys off a trailing "?").
                         val isQuestion = decision.summary.trim().endsWith("?")
-                        if (isQuestion || (planOpen == null && !ungroundedRead && (mutatingCount == 0 || substantiveOk))) {
+                        if (isQuestion || (planOpen == null && !ungroundedRead && notThere == null && (mutatingCount == 0 || substantiveOk))) {
                             log(LogEntry.Kind.RESULT, spokenSummary)
                             pushConvo("Tɛkyerɛma: ${decision.summary}")
                             finish(AgentStatus.COMPLETED, stats); return
                         }
                         val why = when {
                             planOpen != null -> "plan subgoal(s) never verified: " + planOpen.joinToString("; ") { "${it.id}. ${it.text.take(50)}" }
+                            notThere != null -> notThere.why
                             ungroundedRead -> "answer asserts detail not present on the observed screen"
                             lastMutatingVerified != true -> "the most recent state-changing action did not verify"
                             else -> "only $mutatingVerified of $assessed state-changing actions verified (ratio ${"%.2f".format(ratio)})"
@@ -2244,6 +2257,8 @@ object AgentEngine {
         val sends = SendReport.Tracker()
         /** [ClaimCheck]: how often a done-reply claimed something no step did. */
         var claimRefusals = 0
+        /** [DoneCheck] (P1-14): how often a done-reply came with the request's page not on the screen. */
+        var doneRefusals = 0
         /** The state's runSeq when this run started — only the run that still owns the status may write it (audit half 1 #5). */
         @Volatile var seq = 0L
     }
