@@ -1100,11 +1100,12 @@ class VoiceController(
                         sayThenIdle("I didn't catch that. The question is still waiting — say it once more, or tap to type.")
                         return
                     }
+                    val twiNow = (forceLanguage() ?: sessionLanguage()) == Lang.TWI
                     if (heard is com.tekyerema.voice.io.Heard.TooShort) {
-                        if (quiet) idle("") else sayThenIdle("That was too short. Tap and try again.")
+                        if (quiet) idle("") else sayThenIdle(if (twiNow) Closers.TWI_NOT_HEARD else "That was too short. Tap and try again.")
                     } else {
                         // Escalating, not word-for-word (Closers.noInput): short, then one example, then quiet.
-                        if (quiet) idle("") else Closers.noInput(++noSpeechRun)?.let { sayThenIdle(it) } ?: idle("")
+                        if (quiet) idle("") else Closers.noInput(++noSpeechRun, twiNow)?.let { sayThenIdle(it) } ?: idle("")
                     }
                     return
                 }

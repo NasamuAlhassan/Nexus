@@ -97,6 +97,14 @@ object TwiSpeechText {
         return s
     }
 
+    /** A cedi figure as the network writes it ("12.50", "1,234.00", "0.00") in Twi words — "sidi dumienu ne pesewa
+     *  aduonum", "sidi zero"; null when it isn't a figure or can't be said. */
+    fun cedis(figure: String): String? {
+        val a = figure.replace(",", "").trim()
+        if (!Regex("\\d+(?:\\.\\d{1,2})?").matches(a)) return null
+        return amount(a.substringBefore('.'), a.substringAfter('.', ""), cedis = true)
+    }
+
     /** "10", "50" → "sidi du ne pesewa aduonum"; pesewas when [cedis] is false. Null when it can't be said. */
     private fun amount(whole: String, frac: String, cedis: Boolean): String? {
         val w = whole.replace(",", "").toBigDecimalOrNull() ?: return null

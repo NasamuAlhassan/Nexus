@@ -38,6 +38,8 @@ object VoiceEngine {
     @Volatile private var ownVoice: SherpaTts? = null
     /** What says an English line outside a voice turn: the own voice first, then the phone's engine (never silent). */
     private lateinit var englishVoice: TtsProvider
+    /** The voice the turns reply with (RoutingTts: English, or Twi with its fall-backs), for lines said outside a turn. */
+    @Volatile private var replyVoice: TtsProvider? = null
     /** B-19: reload contact names / app labels in the background (no-op while fresh). */
     @Volatile private var vocabRefresh: () -> Unit = {}
 
@@ -330,6 +332,7 @@ object VoiceEngine {
         // LOCAL FAST PATH: deterministic device ops (time/battery/volume/open-app/back…) before the LLM. Kept here so the
         // first-run welcome changes the speaking speed through the same H-08 handler.
         val fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() }
+        replyVoice = tts
         controller = VoiceController(
             asr = hybrid,
             tts = tts,
@@ -476,6 +479,24 @@ object VoiceEngine {
         scope.launch {
             val ok = try { englishVoice.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) { false }
             android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok (${text.length} chars)")   // no words in the log
+        }
+    }
+
+    /**
+     * The network's answer after the PIN (a balance), in the conversation's language: [twi] when the conversation is in
+     * Twi and the answer could be put into one Twi sentence, else [english] through the reply voice (which decides what a
+     * Twi conversation hears for an English line). [announce] always used the English voice, so a Twi user heard the
+     * balance in English (A20e, 9 October 2026). Whatever is still being said is stopped first: once the network has
+     * answered, the PIN line is stale (that day the Twi PIN line played AFTER the balance).
+     */
+    fun announceAnswer(english: String, twi: String?) {
+        if (!initialized || !settings.speakAloud || english.isBlank()) return
+        hush()
+        scope.launch {
+            val lang = conversationLanguage()
+            val text = if (lang == Lang.TWI && twi != null) twi else english
+            val ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), lang) } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok lang=$lang (${text.length} chars)")   // no words in the log
         }
     }
 

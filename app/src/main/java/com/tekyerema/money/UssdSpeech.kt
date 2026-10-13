@@ -34,6 +34,28 @@ object UssdSpeech {
         return if (data == null) line else "$line${SpokenText.PAUSE}You also have ${bigMb(data).replace(Regex("\\bMB\\b"), "megabytes")} of data."
     }
 
+    /** The Mobile Money balance in the network's answer after the PIN — the AVAILABLE one when both are shown — as the
+     *  figure ("12.50"), or null when the answer has none (a wrong PIN, an error). */
+    fun momoBalance(reply: String): String? {
+        val all = MOMO_BALANCE.findAll(reply).toList()
+        val m = all.firstOrNull { it.groupValues[1].isNotBlank() } ?: all.firstOrNull() ?: return null
+        return m.groupValues[2].replace(",", "")
+    }
+
+    /**
+     * The answer as ONE Twi sentence for a Twi conversation — "MTN se: wo Momo mu sika a aka yɛ sidi du." — the amount in
+     * Twi words, so the lab's voice says all of it (one voice: owner, 4 October 2026). It was read in English by the
+     * phone's voice in the middle of a Twi conversation (A20e, 9 October 2026). Null when no balance figure is in it — that
+     * answer is read as the network wrote it. [owner: verify the Twi]
+     */
+    fun twiBalance(reply: String, network: String): String? {
+        val words = momoBalance(reply)?.let { com.tekyerema.voice.understand.TwiSpeechText.cedis(it) } ?: return null
+        return "$network se: wo Momo mu sika a aka yɛ $words."
+    }
+
+    private val MOMO_BALANCE = Regex("(?i)\\b(available\\s+)?bal(?:ance)?\\b(?:\\s+is)?\\s*:?\\s*(?:GH₵|GH¢|GHS|GHC|₵|¢)?\\s*" +
+        "(\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:\\.\\d{1,2})?)(?![\\d.,]*\\d)")
+
     private val ACCOUNT = Regex("(?i)\\b(?:a/c|account|airtime|main)\\b[^\\d]{0,24}?(\\d+(?:\\.\\d+)?)")
     private val DATA = Regex("(?i)\\b(?:internet|data)\\s+bundle\\s*:\\s*(\\d+(?:\\.\\d+)?)\\s*MB")
 

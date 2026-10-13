@@ -36,11 +36,18 @@ object Closers {
 
     private val ALREADY_WARM = Regex("^(?:alright|okay|ok\\b|right|yoo|sorry|hm)", RegexOption.IGNORE_CASE)
 
+    /** "I didn't hear. Say it again." — the askByVoice re-ask, recorded in the lab's voice (TwiLabLinesTest). */
+    const val TWI_NOT_HEARD = "Mante. San ka bio."
+
     /**
      * The "I didn't hear anything" line, escalating instead of repeating word for word (Google's error guidance:
      * first a short reprompt, then ONE example, then end quietly — the caller goes silent from the third).
      */
-    fun noInput(consecutive: Int): String? = when {
+    fun noInput(consecutive: Int, twi: Boolean = false): String? = when {
+        // Twi: the app's own recorded line ("I didn't hear. Say it again."), said at once — the English line went to the
+        // translator, waited 3.5 s and was then said in English in a Twi conversation (A20e, 9 October 2026). No Twi
+        // example line is recorded, so the second time rests quietly.
+        twi -> if (consecutive <= 1) TWI_NOT_HEARD else null
         consecutive <= 1 -> "I didn't hear anything. Tap and try again."
         consecutive == 2 -> "Still nothing. You can say, for example, “what time is it” — or type your request."
         else -> null   // rest quietly; the user knows how to reach us by now

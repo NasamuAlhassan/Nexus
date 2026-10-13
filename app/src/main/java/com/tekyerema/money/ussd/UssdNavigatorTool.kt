@@ -247,9 +247,13 @@ object UssdNavigatorTool : Tool {
                 if (s == null) { if (++gone > 25) return@launch; continue }      // no dialog for ~22 s: closed or cancelled
                 gone = 0
                 if (s.hasInput || s.masked) continue                              // still asking for something: not ours to read
-                val who = network?.let { com.tekyerema.agent.NumberSpeech.networkName(it) } ?: "The network"
-                Log.i(TAG, "[NAV] the network's answer after the PIN is read out (${s.text.length} chars)")
-                com.tekyerema.voice.VoiceEngine.announce(com.tekyerema.money.UssdSpeech.forEar(s.text, intro = "$who says"))
+                val name = network?.let { com.tekyerema.agent.NumberSpeech.networkName(it) }
+                // In a Twi conversation the balance is said in Twi; an answer with no balance in it is read as written.
+                val twi = if (com.tekyerema.voice.VoiceEngine.speaksTwi())
+                    com.tekyerema.money.UssdSpeech.twiBalance(s.text, name ?: "Network no") else null
+                Log.i(TAG, "[NAV] the network's answer after the PIN is read out (${s.text.length} chars${if (twi != null) ", in Twi" else ""})")
+                com.tekyerema.voice.VoiceEngine.announceAnswer(
+                    com.tekyerema.money.UssdSpeech.forEar(s.text, intro = "${name ?: "The network"} says"), twi)
                 // The answer has been taken; close the dialog so the user isn't left to find its OK button.
                 try { s.cancelId?.let { ctrl.clickElement(it) } } catch (_: Throwable) {}
                 return@launch

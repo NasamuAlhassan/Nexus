@@ -108,7 +108,8 @@ internal object UssdDialog {
         return old.text
     }
 
-    /** "Connection problem or invalid MMI code." — the request never reached the network (nothing ran): one redial is safe. */
+    /** "Connection problem or invalid MMI code." — the network failed the request before any menu (nothing was chosen):
+     *  one redial is safe. */
     val NEVER_STARTED = Regex("(?i)connection problem|invalid mmi|mmi code|ussd code (?:failed|cancelled)|network (?:busy|not available)")
 
     /**
@@ -128,7 +129,9 @@ internal object UssdDialog {
             val first = awaitNext(ctrl, prev, timeoutMs) ?: awaitNext(ctrl, prev, LATE_GRACE_MS)
                 ?: run { sweepLate(ctrl); return null }
             if (attempt == 1 || first.hasInput || !NEVER_STARTED.containsMatchIn(first.text)) return first
-            android.util.Log.i("Tekyerema", "[USSD] the request never started — dialling once more")
+            // The phone did send it: MTN held "USSD code running…" for ~30 s and then failed it (A20e, 9 October 2026) —
+            // still nothing was chosen, so one redial is safe. The old words, "never started", sent the reader the wrong way.
+            android.util.Log.i("Tekyerema", "[USSD] the network failed the request (connection problem / invalid MMI) — nothing was chosen; dialling once more")
             close(ctrl, first)
             prev = first.text
             delay(2_500)

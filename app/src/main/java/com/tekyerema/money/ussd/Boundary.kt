@@ -16,6 +16,11 @@ import com.tekyerema.tools.MtnConfirm
  * wrong-number send (the registered name is the only thing the network shows before the money moves).
  */
 object Boundary {
+    /** A balance check's PIN line in a Twi conversation: "Put your MoMo PIN in, and I'll tell you the money left in your
+     *  MoMo." One sentence ("brief" keeps the first only), written as the voice gets it after Verbalize ("Momo"), so the
+     *  recorded clip is found. [owner: verify the Twi] */
+    const val TWI_BALANCE_PIN = "Fa wo Momo PIN no hyɛ mu, na mɛka wo Momo mu sika a aka akyerɛ wo."
+
     sealed class Verdict {
         /** Hand the PIN to the user with [line]; [registeredName] = the name the network showed, for the ledger. */
         data class HandOff(val line: String, val registeredName: String?) : Verdict()
@@ -91,6 +96,10 @@ object Boundary {
                     "${net} se: $twiAmt kɔma $registered. Wo ankasa na wobɛhyɛ PIN." else null
                 TxIntent.BUY_AIRTIME -> if (twiAmt != null && plain && tx.recipientName == null)
                     "${net} se: airtime $twiAmt ma wo fɔn yi. Wo ankasa na wobɛhyɛ PIN." else null
+                // A fixed line, recorded once in the lab's voice (assets/voice/twi_lab), so it plays the moment the PIN
+                // screen opens: through the translator and the lab it came 16 s late — after the owner had entered the PIN
+                // and heard the balance (A20e, 9 October 2026).
+                TxIntent.CHECK_BALANCE -> TWI_BALANCE_PIN
                 else -> null
             }
             if (twiLine != null) return Verdict.HandOff(twiLine, registered)

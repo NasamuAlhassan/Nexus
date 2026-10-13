@@ -13,8 +13,13 @@ class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider, VoiceAvai
     override val name = "fallback(" + chain.joinToString(",") { it.name } + ")"
     /** The first reason any voice in the chain gives for being unusable (the network voice's: key, quota, link). */
     override fun whyUnavailable(): String? = chain.firstNotNullOfOrNull { (it as? VoiceAvailability)?.whyUnavailable() }
+    /** The voice that said the last line, null when none did — for the log: "spoke Twi via fallback(lab, system)" named
+     *  both, and read like the lab voice had failed when it had spoken (A20e, 9 October 2026). */
+    @Volatile var lastVoice: String? = null
+        private set
     override suspend fun speak(text: String, language: String): Boolean {
-        for (p in chain) if (p.speak(text, language)) return true
+        for (p in chain) if (p.speak(text, language)) { lastVoice = p.name; return true }
+        lastVoice = null
         return false
     }
     override fun stop() { chain.forEach { it.stop() } }

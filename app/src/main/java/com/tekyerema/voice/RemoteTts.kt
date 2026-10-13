@@ -65,7 +65,9 @@ class RoutingTts(
             }
             // X-06: the Twi voice gets the standard spelling (look-alike ɛ/ɔ mapped, tone marks dropped).
             val twiText = com.tekyerema.language.TwiText.canonical(com.tekyerema.language.EntityTags.display(line))
-            if (twi.speak(twiText, language)) { twiStatus.onSpoke(); Log.i("Tekyerema", "[TTS] spoke Twi via ${twi.name}"); return true }
+            if (twi.speak(twiText, language)) {
+                twiStatus.onSpoke(); Log.i("Tekyerema", "[TTS] spoke Twi via ${(twi as? FallbackTts)?.lastVoice ?: twi.name}"); return true
+            }
             // Never silent, and never unexplained (audit 2026-10-01, L16): the first time a Twi reply has to be read by
             // the English voice the user is told so, once per session; then the reply itself.
             val why = (twi as? VoiceAvailability)?.whyUnavailable()
