@@ -340,7 +340,7 @@ object VoiceEngine {
         val duplex = DuplexAudio(app)   // B-07
         // LOCAL FAST PATH: deterministic device ops (time/battery/volume/open-app/back…) before the LLM. Kept here so the
         // first-run welcome changes the speaking speed through the same H-08 handler.
-        val fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() }
+        val fastRouter = com.tekyerema.agent.LocalFastRouter(app) { AgentEngine.currentController() }; stage("fastRouter")
         replyVoice = tts
         controller = VoiceController(
             asr = hybrid,

@@ -169,6 +169,15 @@ class RunGoalReceiver : BroadcastReceiver() {
             } catch (t: Throwable) { Log.w("Tekyerema", "[IMPORT] debug read_image failed: ${t.javaClass.simpleName}") }
             return
         }
+        // P5-03 test harness: open the document reader on a PDF in the app's own sandbox (the reader is not exported).
+        intent.getStringExtra("read_document")?.let { path ->
+            val f = java.io.File(path)
+            Log.i("Tekyerema", "[DOC] debug read_document exists=${f.exists()} bytes=${f.length()}")
+            if (f.exists()) try {
+                context.startActivity(com.tekyerema.camera.DocumentReadActivity.intent(context, f).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            } catch (t: Throwable) { Log.w("Tekyerema", "[DOC] debug read_document failed: ${t.javaClass.simpleName}") }
+            return
+        }
         intent.getStringExtra("dump_screen")?.let {
             val pending = goAsync()
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {

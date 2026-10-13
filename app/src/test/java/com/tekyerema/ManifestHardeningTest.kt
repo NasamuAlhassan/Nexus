@@ -50,8 +50,9 @@ class ManifestHardeningTest {
             val systemBound = c.a("permission").startsWith("android.permission.BIND_")
             // The one justified exception: the share / text-selection target takes text/plain CONTENT and nothing else
             // (shared_text_target_takes_only_plain_text_content below; its code is pinned by InteropArchitectureTest).
-            // …the picture share target, which takes image/* CONTENT only (shared_image_target_takes_only_pictures)…
-            val contentTarget = name == SHARE_TARGET || name == IMAGE_TARGET
+            // …the picture share target, which takes image/* CONTENT only (shared_image_target_takes_only_pictures), and the
+            // document target, which takes application/pdf by SEND or VIEW only (shared_document_target_takes_only_pdfs)…
+            val contentTarget = name == SHARE_TARGET || name == IMAGE_TARGET || name == DOCUMENT_TARGET
             // …and the assistant gesture's entry: one ASSIST action, no data, no UI (assistant_entry_only_opens_the_voice_screen).
             val assistEntry = name == ASSIST_ENTRY
             assertTrue("$name is exported without a system-only permission", launcher || systemBound || contentTarget || assistEntry)
@@ -116,9 +117,32 @@ class ManifestHardeningTest {
         assertTrue("no scheme/host/path: not a deep link", data.a("scheme").isEmpty() && data.a("host").isEmpty() && data.a("pathPrefix").isEmpty())
     }
 
+    /** P5-03 (13 October 2026): the PDF target — SEND or VIEW of application/pdf, nothing else; no deep link; no UI of its own;
+     *  the reader it starts is not exported. */
+    @Test fun shared_document_target_takes_only_pdfs() {
+        val app = xml("src/main/AndroidManifest.xml").children("application").single()
+        val target = app.children("activity").single { it.a("name") == DOCUMENT_TARGET }
+        assertEquals("true", target.a("exported"))
+        assertEquals("@android:style/Theme.NoDisplay", target.a("theme"))
+        assertEquals("true", target.a("noHistory"))
+        val filters = target.children("intent-filter")
+        assertEquals(2, filters.size)
+        assertEquals(setOf("android.intent.action.SEND", "android.intent.action.VIEW"), filters.flatMap { f -> f.children("action").map { it.a("name") } }.toSet())
+        for (f in filters) {
+            assertEquals(1, f.children("action").size)
+            assertEquals(listOf("android.intent.category.DEFAULT"), f.children("category").map { it.a("name") })
+            val data = f.children("data").single()
+            assertEquals("application/pdf", data.a("mimeType"))
+            assertTrue("no scheme/host/path: not a deep link", data.a("scheme").isEmpty() && data.a("host").isEmpty() && data.a("pathPrefix").isEmpty())
+        }
+        val reader = app.children("activity").single { it.a("name") == ".camera.DocumentReadActivity" }
+        assertEquals("false", reader.a("exported"))
+    }
+
     private companion object {
         const val SHARE_TARGET = ".interop.SharedTextActivity"
         const val IMAGE_TARGET = ".interop.SharedImageActivity"
+        const val DOCUMENT_TARGET = ".interop.SharedDocumentActivity"
         const val ASSIST_ENTRY = ".ui.AssistEntryActivity"
     }
 

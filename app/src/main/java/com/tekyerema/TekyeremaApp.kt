@@ -32,7 +32,9 @@ class TekyeremaApp : Application() {
         com.tekyerema.core.telemetry.Resources.init(this); stage("telemetry")
         com.tekyerema.audit.AuditLog.init(this); stage("audit")
         com.tekyerema.notifications.MessageIndex.init(this); stage("messages")
-        com.tekyerema.core.Privacy.sweepAll(filesDir); stage("sweep")
+        // The retention sweep walks two directories: off the main thread (P3-02 round 3, 13 October 2026 — 0.3 s cold).
+        val dir = filesDir
+        Thread({ try { com.tekyerema.core.Privacy.sweepAll(dir) } catch (_: Throwable) {} }, "tekyerema-sweep").start(); stage("sweep")
         // Coaching tails ("You can say cancel to stop.") shrink after enough hearings — the count survives restarts.
         com.tekyerema.voice.Coaching.store = getSharedPreferences("tekyerema_coaching", MODE_PRIVATE)
         ModelManager.init(this); stage("models")     // §Part D — single model store; first-run download is the delivery path

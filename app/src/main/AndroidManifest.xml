@@ -180,6 +180,33 @@
             </intent-filter>
         </activity>
 
+        <!-- P5-03 v0 (13 October 2026): a PDF shared to, or opened with, Tɛkyerɛma is read aloud page by page (PdfRenderer +
+             on-device OCR). The file is copied into the app's own files at once and checked to be a PDF; it is content, never
+             a command. The reader itself is not exported. -->
+        <activity
+            android:name=".interop.SharedDocumentActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter android:label="Read with Tɛkyerɛma">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+            <intent-filter android:label="Read with Tɛkyerɛma">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name=".camera.DocumentReadActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:screenOrientation="portrait" />
+
         <!-- A-08 Quick Settings tile: tap to talk; tap again while working to stop (J-14). -->
         <service
             android:name=".voice.TalkTileService"
