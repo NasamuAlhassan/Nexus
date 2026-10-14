@@ -91,6 +91,9 @@ data class AgentUiState(
     val origin: String? = null,
     /** Numbers each submitted goal (never reused in the process), so an observer can tell two runs of the same goal apart. */
     val runSeq: Long = 0L,
+    /** The steps run [runSeq] really took, as they start and finish (agent/AgentStep) — the assistant surface's activity
+     *  timeline and its result preview (sources, a map link). Only ever this run's steps. */
+    val steps: List<AgentStep> = emptyList(),
     /** Voice-UX (2026-09-29): the app a step of run [AppSwitch.runSeq] last brought to the front — the voice layer says
      *  "In WhatsApp." once per app per task, a blind user's stand-in for seeing where the phone is (voice/AppNote.kt). */
     val appSwitch: AppSwitch? = null

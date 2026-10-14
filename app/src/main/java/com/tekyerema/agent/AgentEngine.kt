@@ -282,7 +282,7 @@ object AgentEngine {
         // voice turn waits for ITS words (VoiceController.awaitAgent), and with null here it waited out its whole budget
         // and then stopped the task (found in review, 2026-09-29).
         val words = goal.trim()
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = words.takeIf { w -> w != g }, origin = origin, runSeq = it.runSeq + 1) }
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = words.takeIf { w -> w != g }, origin = origin, runSeq = it.runSeq + 1, steps = emptyList()) }
         currentJob = scope.launch { runTask(g, unattended = unattended, origin = origin) }
     }
 
@@ -308,7 +308,7 @@ object AgentEngine {
         steerQueue.clear()
         // (merge A+D: a resumed run is the phone user's and a NEW run — its own runSeq, so a paired computer's
         // RemoteTaskTracker never reads it as the remote task that ran before it.)
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = rec.goal, request = words, origin = null, runSeq = it.runSeq + 1) }
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = rec.goal, request = words, origin = null, runSeq = it.runSeq + 1, steps = emptyList()) }
         currentJob = scope.launch { runTask(rec.goal, resume = rec, request = words) }
     }
 
@@ -369,7 +369,7 @@ object AgentEngine {
         paused.value = false
         steerQueue.clear()
         val g = resume?.goal ?: goal
-        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = request, origin = origin, runSeq = it.runSeq + 1) }
+        _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = request, origin = origin, runSeq = it.runSeq + 1, steps = emptyList()) }
         runTask(g, forcedBrain = brain, forcedLabel = "SCRIPTED", unattended = unattended, resume = resume, request = request,
             journal = journal, origin = origin)
     }
@@ -1192,6 +1192,8 @@ object AgentEngine {
                         if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE) usedRead = true   // §C.3
                         log(LogEntry.Kind.PLAN, "Step $step: ${decision.name}(${shortArgs(decision.args)})" +
                             (decision.expects?.let { " expects[$it]" } ?: "") + (decision.rationale?.let { " $it" } ?: ""))
+                        // The assistant surface's activity timeline: this step, as it really starts (agent/AgentStep; UX-1).
+                        _state.update { it.copy(steps = AgentSteps.started(it.steps, it.runSeq, step, decision.name, AgentSteps.subjectOf(decision.name, decision.args))) }
                         if (Expects.isVacuous(expectation) && mutating)
                             stats = stats.copy(vacuousExpects = stats.vacuousExpects + 1)
 
@@ -1717,6 +1719,8 @@ object AgentEngine {
                         if (result.needsDisambiguation) References.noteOptions(References.optionsFrom(result.message))
                         stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, result.channel))
                         log(LogEntry.Kind.ACTION, "${decision.name} → ${if (result.success) "ok" else "failed"} [${result.channel}]: ${result.message}")
+                        _state.update { it.copy(steps = AgentSteps.finished(it.steps, it.runSeq, step, result.success,
+                            AgentSteps.sourcesOf(result.data), AgentSteps.linkOf(result.data))) }
                         // J-12: every device action in plain words (WS-C: linked to its proposal); J-13: what can't be taken back is named for "undo".
                         stepAudit?.executed(result.success)
                         if ((consequential || effect != null) && result.success) runCtx.irreversible.add(com.tekyerema.audit.ActionWords.noun(decision.name, decision.args))
