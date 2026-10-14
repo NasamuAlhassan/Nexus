@@ -49,6 +49,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -501,7 +502,9 @@ fun CommandField(
     onSubmit: (String) -> Boolean,
     onFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    onMic: (() -> Unit)? = null
+    onMic: (() -> Unit)? = null,
+    /** Lets the assistant surface put the cursor here ("Type" on a question, a typed follow-up). */
+    focusRequester: androidx.compose.ui.focus.FocusRequester? = null
 ) {
     var text by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf("") }
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -528,6 +531,7 @@ fun CommandField(
             modifier = Modifier
                 .weight(1f)
                 .padding(vertical = 16.dp)
+                .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .onFocusChanged { onFocusChanged(it.isFocused) }
                 .semantics { contentDescription = "Type a command to Tɛkyerɛma" },
             interactionSource = interaction,

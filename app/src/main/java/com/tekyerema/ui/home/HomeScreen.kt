@@ -14,6 +14,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -160,10 +161,15 @@ fun HomeContent(
         if (voice.partialHint.isNotBlank()) { delay(IDLE_HINT_MS + 50); now = System.currentTimeMillis() }
     }
     val idleHintFresh = now - hintAt < IDLE_HINT_MS || System.currentTimeMillis() - hintAt < IDLE_HINT_MS
+    // The assistant surface at the top (ui/assistant) shows the task's steps, questions and result; while it is up the line
+    // under the orb doesn't repeat it (it keeps the live words while listening, and the hint).
+    var surfaceVisible by remember { mutableStateOf(false) }
+    val typeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val phrase = Phrases.forState(presence, voice, agent)
         .let { if (presence == Presence.IDLE && !idleHintFresh) "" else it }
         .ifBlank { if (presence == Presence.IDLE && freshReply) voice.spoken else "" }
-    val greet = presence == Presence.IDLE && phrase.isEmpty()
+        .let { if (surfaceVisible && presence != Presence.LISTENING) "" else it }
+    val greet = presence == Presence.IDLE && phrase.isEmpty() && !surfaceVisible
 
     val hint = when {
         notice.isNotEmpty() -> notice
@@ -189,7 +195,8 @@ fun HomeContent(
         Presence.ERROR -> "Try again" to "Something went wrong"
     }
 
-    Column(modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (showBrand) {
             BrandRow(Modifier.fillMaxWidth().padding(start = PageMargin - 6.dp, end = PageMargin, top = 14.dp))
         } else Spacer(Modifier.height(28.dp))
@@ -241,27 +248,8 @@ fun HomeContent(
                     announce = notice.isNotEmpty(),
                     modifier = Modifier.padding(top = if (phrase.isEmpty() && !greet) 0.dp else 10.dp)
                 )
-                // Buttons stay as a quiet parallel path (a helper, TalkBack, a noisy room); voice is primary. Yes / No
-                // only for a real confirmation. They rise into place on a spring (calm: a plain fade) and answer with
-                // the system's confirm / reject haptics.
-                AnimatedVisibility(
-                    visible = (presence == Presence.CONFIRMING || presence == Presence.CONFIRM_LISTENING) &&
-                        agent.status == com.tekyerema.agent.AgentStatus.WAITING_CONFIRMATION,
-                    enter = if (reduceMotion) fadeIn(tween(160))
-                        else fadeIn(tween(200, delayMillis = 80)) + expandVertically(spring(0.8f, 380f, IntSize(1, 1))) +
-                            slideInVertically(spring(0.6f, 800f, IntOffset(1, 1))) { it / 2 },
-                    exit = if (reduceMotion) fadeOut(tween(100))
-                        else fadeOut(tween(120)) + shrinkVertically(spring(1f, 1600f, IntSize(1, 1)))
-                ) {
-                    Row(Modifier.fillMaxWidth().padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        // J-02: the buttons answer the confirmation this card is showing, not whatever is pending at tap time.
-                        val seq = agent.confirmationSeq
-                        BigButton("No", onClick = { AgentEngine.confirm(false, seq) }, modifier = Modifier.weight(1f), filled = false,
-                            contentDescription = "No, don't do it", haptic = TkHaptic.REJECT)
-                        BigButton("Yes, do it", onClick = { AgentEngine.confirm(true, seq) }, modifier = Modifier.weight(1.4f),
-                            haptic = TkHaptic.CONFIRM)
-                    }
-                }
+                // The confirmation's buttons (Cancel + a verb, with this confirmation's own number) live in the assistant surface at
+                // the top now — one place to answer, the same AgentEngine.confirm gate (ui/assistant/AssistantSurface).
             }
         }
         CommandField(
@@ -272,12 +260,20 @@ fun HomeContent(
             },
             onFocusChanged = { focused -> if (focused) VoiceEngine.beginTyping() else VoiceEngine.endTyping() },
             onMic = if (presence == Presence.IDLE || presence == Presence.DONE || presence == Presence.ERROR) startListening else null,
-            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
+            focusRequester = typeFocus
         )
         if (footer != null && presence != Presence.CONFIRMING && presence != Presence.CONFIRM_LISTENING) {
             Text(footer, style = MaterialTheme.typography.bodySmall, color = Tk.TextTertiary, textAlign = TextAlign.Center,
                 modifier = Modifier.padding(top = 6.dp, bottom = 22.dp))
         } else Spacer(Modifier.height(6.dp))
+    }
+        com.tekyerema.ui.assistant.AssistantSurfaceHost(
+            voice = voice, agent = agent, twi = twi,
+            onTypeRequest = { try { typeFocus.requestFocus() } catch (_: Throwable) {} },
+            onVisible = { surfaceVisible = it },
+            modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp)
+        )
     }
 }
 

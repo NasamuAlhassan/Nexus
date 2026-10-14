@@ -76,6 +76,12 @@ object OverlayConfirm {
 
     fun canDraw(ctx: Context): Boolean = Settings.canDrawOverlays(ctx)
 
+    /** The status bar's height in pixels (a LAYOUT_IN_SCREEN window at the top must start below it). */
+    private fun topInset(ctx: Context): Int {
+        val id = ctx.resources.getIdentifier("status_bar_height", "dimen", "android")
+        return if (id > 0) ctx.resources.getDimensionPixelSize(id) else (24 * ctx.resources.displayMetrics.density).toInt()
+    }
+
     /** A panel can be shown at all: the accessibility service is connected, or overlays are allowed. */
     fun canShow(ctx: Context): Boolean = TekyeremaAccessibilityService.live != null || canDraw(ctx)
 
@@ -200,13 +206,14 @@ object OverlayConfirm {
                     onClick(); if (hides) hideNow()
                 }
             }
-            val (left, right) = PromptSurface.buttons(kind, twi)
+            val (left, right) = if (kind == PromptSurface.Kind.CONFIRM) com.tekyerema.ui.assistant.ConfirmWords.buttons(prompt, twi)
+                else PromptSurface.buttons(kind, twi).let { it[0] to it[1] }
             val leftBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(left, if (twi) "Daabi, nnyɛ" else "No, don't do it", filled = false, hides = true, haptic = TkHaptic.REJECT) { AgentEngine.confirm(false, seq) }
+                PromptSurface.Kind.CONFIRM -> btn(left, if (twi) "Daabi, nnyɛ" else "$left — don't do it", filled = false, hides = true, haptic = TkHaptic.REJECT) { AgentEngine.confirm(false, seq) }
                 else -> btn(left, if (twi) "Gyae adwuma no" else "Stop the task", filled = false, hides = true, haptic = TkHaptic.REJECT) { VoiceEngine.cancel() }
             }
             val rightBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(right, if (twi) "Aane, yɛ" else "Yes, do it", filled = true, hides = true, guarded = true, haptic = TkHaptic.CONFIRM) { AgentEngine.confirm(true, seq) }
+                PromptSurface.Kind.CONFIRM -> btn(right, if (twi) "Aane, yɛ" else "$right — do it", filled = true, hides = true, guarded = true, haptic = TkHaptic.CONFIRM) { AgentEngine.confirm(true, seq) }
                 // Reopens the microphone for this question; the panel stays until it is answered.
                 PromptSurface.Kind.QUESTION -> btn(right, if (twi) "Bua wɔ kasa mu" else "Answer by voice", filled = true, hides = false) { VoiceEngine.respond() }
                 PromptSurface.Kind.SECURE -> btn(right, if (twi) "Mawie" else "Done — I've finished the secure step", filled = true, hides = true, haptic = TkHaptic.CONFIRM) { AgentEngine.secureInputDone() }
@@ -220,6 +227,15 @@ object OverlayConfirm {
                 btn(if (twi) "Twerɛ" else "Type", if (twi) "Twerɛ wo mmuae" else "Type your answer instead of saying it", filled = false, hides = false) { startTyping() },
                 LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply { marginStart = dp(2); marginEnd = dp(2) })
             buttons.addView(rightBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginStart = dp(6) })
+            val choices = if (kind == PromptSurface.Kind.QUESTION) com.tekyerema.ui.assistant.QuestionChoices.of(prompt) else emptyList()
+            if (choices.isNotEmpty()) {
+                val list = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
+                choices.forEach { c ->
+                    list.addView(btn(c, (if (twi) "Bua: " else "Answer: ") + c, filled = false, hides = false) { VoiceEngine.submitTyped(c) },
+                        LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
+                }
+                card.addView(list)
+            }
             card.addView(buttons)
 
             val wrapper = LinearLayout(host).apply {
@@ -244,8 +260,10 @@ object OverlayConfirm {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 android.graphics.PixelFormat.TRANSLUCENT
             ).apply {
-                gravity = if (secure) Gravity.TOP else Gravity.CENTER
-                if (secure) y = dp(36)
+                // Every prompt at the TOP, under the status bar — where the in-app assistant surface lives, clear of the soft
+                // keyboard (the reason it had been centred) and of a PIN pad (docs/assistant-ux, Stage 5).
+                gravity = Gravity.TOP
+                y = topInset(host) + dp(8)
             }
             // Entrance: the card grows into place from 90 % and settles with a slight overshoot (scale, not a slide:
             // the window is exactly the card's size, so a slide would be clipped at its edge). The secure step grows
@@ -253,10 +271,7 @@ object OverlayConfirm {
             // delay (ConfirmGate), so the button is still by the time a tap can count. Alpha starts just above 0: a
             // view at alpha 0 is not "visible to user", and TalkBack could skip the panel's first moment.
             card.alpha = 0.02f
-            if (!calm) {
-                card.scaleX = 0.9f; card.scaleY = 0.9f
-                if (secure) card.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ -> v.pivotY = 0f }
-            }
+            if (!calm) card.translationY = -dp(24).toFloat()
             startTyping = typing@{
                 if (view !== wrapper) return@typing
                 VoiceEngine.quietForTyping()     // stop reading, close the answer microphone; the prompt stays waiting
@@ -302,7 +317,7 @@ object OverlayConfirm {
                         try { imm?.hideSoftInputFromWindow(field.windowToken, 0) } catch (_: Throwable) {}
                         card.removeView(typeRow); buttons.visibility = View.VISIBLE
                         lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        lp.gravity = Gravity.CENTER; lp.y = 0
+                        lp.gravity = Gravity.TOP; lp.y = topInset(host) + dp(8)
                         try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
                         true
                     } else false
@@ -311,7 +326,7 @@ object OverlayConfirm {
                 // small screen.
                 lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
                 lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
-                lp.gravity = Gravity.TOP; lp.y = dp(36)
+                lp.gravity = Gravity.TOP; lp.y = topInset(host) + dp(8)
                 try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
                 setCaption(typeHint(kind))
                 field.requestFocus()
@@ -319,9 +334,11 @@ object OverlayConfirm {
             }
             try {
                 wm.addView(wrapper, lp); view = wrapper; wmUsed = wm; presence = mini; caption = cap
-                card.animate().alpha(1f).scaleX(1f).scaleY(1f)
-                    .setDuration(if (calm) 150L else 380L)
-                    .setInterpolator(if (calm) android.view.animation.DecelerateInterpolator() else android.view.animation.OvershootInterpolator(1.1f))
+                // Down from the top edge and settled — no bounce (HIG Motion: enter and leave on one axis). 320 ms, inside the
+                // Yes button's 600 ms arming delay (ConfirmGate), so the button is still when a tap can count.
+                card.animate().alpha(1f).translationY(0f)
+                    .setDuration(if (calm) 150L else 320L)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
                     .start()
                 bindToVoice()
                 // TalkBack users hear the panel arrive; with replies read aloud the question is already being spoken.
