@@ -181,7 +181,7 @@ object MoneyFlow {
         val ask = try { MoneyAsk.parse(goal) } catch (_: Throwable) { null }
             ?: return if (history.isEmpty()) notYet(goal)?.let { AgentDecision.Done(it) } else null
         return when (ask.kind) {
-            MoneyAsk.Kind.SEND -> send(ask, history)
+            MoneyAsk.Kind.SEND -> send(ask, history, goal)
             MoneyAsk.Kind.AIRTIME -> airtime(ask, history)
             MoneyAsk.Kind.BALANCE_UNCLEAR -> balance(history)
             MoneyAsk.Kind.BALANCE_MOMO -> if (walked(history)) null else momoBalance()
@@ -193,9 +193,25 @@ object MoneyFlow {
     }
 
     // ------------------------------------------------------------------ send
-    private fun send(first: MoneyAsk.Ask, history: List<String>): AgentDecision? {
+    /**
+     * Demo step 3 (owner, 14 Oct 2026): "send money to him" right after a message asked for money — the amount, the number IN
+     * THE CHAT and the name come from that message ([MoneyRequest]); the read-back then reads the number in full and says it
+     * came from the message. A "him" with no such message is the person just talked about (References).
+     */
+    private fun fromRequest(first: MoneyAsk.Ask, goal: String): Pair<MoneyAsk.Ask, Boolean> {
+        if (first.number != null || (first.name != null && !com.tekyerema.android.ContactResolver.isPronoun(first.name))) return first to false
+        MoneyRequest.fresh()?.let { r ->
+            return first.copy(number = r.number, name = r.name, amount = first.amount ?: r.amount, forSelf = false) to (r.number != null)
+        }
+        val person = if (PRONOUN_TO.containsMatchIn(goal)) com.tekyerema.agent.References.recentPerson() else null
+        return (if (person != null) first.copy(name = person, forSelf = false) else first) to false
+    }
+    private val PRONOUN_TO = Regex("(?i)\\b(?:to|for)\\s+(?:him|her|them)\\b|\\bsend\\s+(?:him|her|them)\\b")
+
+    private fun send(first: MoneyAsk.Ask, history: List<String>, goal: String = ""): AgentDecision? {
         if (walked(history)) return null                               // the walk's own end (MoneyPlan.end) takes it from here
-        val a = withAnswers(first, history)
+        val (filled, fromMessage) = fromRequest(first, goal)
+        val a = withAnswers(filled, history)
         a.badNumber?.let { return AgentDecision.Done(badNumberLine(it)) }
         val to = a.name ?: a.number?.let { "the number ending ${it.takeLast(3).toList().joinToString(" ")}" }
         val amount = a.amount
@@ -209,8 +225,14 @@ object MoneyFlow {
         if (a.number == null && a.name == null)
             return question(history, WHO_PREFIX, listOf("$WHO_PREFIX the ${cedis(amount)} to? Say a name from your contacts, or the phone number.",
                 "$WHO_PREFIX it to? Say the name as it is saved, or the ten digits of the number."))
+        // The reference is ALWAYS asked by voice, before the read-back (owner, 14 Oct 2026: "always asks for the reference by
+        // voice") — so it is read back with the money and typed by the walk without a second question.
+        if (a.reference == null && AppConfig.bool("money.flow.askReference", true)) return question(history, REF_PREFIX, REF_WORDINGS)
         val args = JSONObject().put("amount", amount)
         if (a.number != null) args.put("number", a.number) else args.put(UssdNavigatorTool.ARG_CONTACT, a.name)
+        if (a.number != null && a.name != null && !com.tekyerema.android.ContactResolver.isPronoun(a.name)) args.put(UssdNavigatorTool.ARG_CONTACT, a.name)
+        // The number came from the message, not from the user: read in full, with a "from the message" warning.
+        if (fromMessage && a.number == filled.number) args.put(UssdNavigatorTool.ARG_FROM_MESSAGE, true)
         a.reference?.let { args.put("reference", it) }
         return AgentDecision.CallTool(NAV, args, R_SEND)
     }
@@ -279,6 +301,16 @@ object MoneyFlow {
     // ------------------------------------------------------------------ slots from the user's answers
     private const val AMOUNT_PREFIX = "How much"
     private const val WHO_PREFIX = "Who should I send"
+    const val REF_PREFIX = "What should the reference say"
+    private val REF_WORDINGS = listOf("$REF_PREFIX? For example, say “transport” or “school fees”.",
+        "$REF_PREFIX, in a word or two? Or say “no reference”.")
+    /** The answer to [REF_PREFIX]: "no reference" / "none" / "skip" → "Payment" (MTN wants something there). */
+    internal fun referenceOf(answer: String): String? {
+        val t = answer.trim().trim('.', '!', '"', '“', '”').trim()
+        if (t.isEmpty()) return null
+        if (Regex("(?i)^(?:no(?:ne| reference)?|nothing|skip(?: it)?|leave it(?: empty| blank)?|no need|any(?:thing)?)$").matches(t)) return "Payment"
+        return t.removePrefix("the reference is ").removePrefix("reference ").removePrefix("it's ").removePrefix("it is ").trim().take(30)
+    }
     /** "I want you to buy" and nothing more: what, how much, for whom — asked once, answered as a whole request. */
     const val WHAT_PREFIX = "What should I buy"
     private val WHAT_WORDINGS = listOf(
@@ -303,6 +335,7 @@ object MoneyFlow {
     internal fun withAnswers(first: MoneyAsk.Ask, history: List<String>): MoneyAsk.Ask {
         var a = first
         for ((q, ans) in answers(history)) when {
+            q.startsWith(REF_PREFIX) -> referenceOf(ans)?.let { a = a.copy(reference = it) }
             q.contains(AMOUNT_PREFIX) -> MoneyAsk.amount(ans)?.let { a = a.copy(amount = it) }
             q.startsWith(WHO_PREFIX) || q.startsWith(NUMBER_PREFIX) -> MoneyAsk.recipient(ans)?.let { r ->
                 val lost = r.name?.takeIf { com.tekyerema.voice.understand.SpokenNumbers.looksLikeLostDigits(it) }

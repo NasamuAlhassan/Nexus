@@ -96,8 +96,12 @@ object ConfirmWords {
         val verb = buttons(text, twi).second
         if (twi || verb == "Yes, do it") return verb
         val plain = ScreenText.of(text).trim().trimStart('“', '"')
-        val name = (LEAD_NAME.find(plain)?.groupValues?.get(1) ?: TO_NAME.find(plain)?.groupValues?.get(1))
-            ?.trim()?.trimEnd('.', ',')?.takeIf { n -> n.isNotEmpty() && n.none { it.isDigit() } && n.split(' ').size <= 3 }
+        // "to <Name>" only in the action line (up to its "?"), and a name starts with a capital: "…stop at the PIN for you to
+        // enter." further down made the pill "Send to enter" (emulator, 14 Oct 2026).
+        val action = plain.substringBefore('?').substringBefore('\n')
+        val name = (LEAD_NAME.find(plain)?.groupValues?.get(1) ?: TO_NAME.find(action)?.groupValues?.get(1))
+            ?.trim()?.trimEnd('.', ',')
+            ?.takeIf { n -> n.isNotEmpty() && n.first().isUpperCase() && n.none { it.isDigit() } && n.split(' ').size <= 3 }
             ?: return verb
         val words = when (verb) {
             "Send", "Text", "Reply", "Share", "Transfer", "Pay" -> "$verb to $name"

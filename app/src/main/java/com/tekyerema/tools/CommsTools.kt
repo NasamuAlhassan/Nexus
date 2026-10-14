@@ -72,6 +72,8 @@ object MakeCallTool : Tool {
             } catch (t: Throwable) { ToolResult(false, "Couldn't open the dialer: ${t.message}") }
         }
         val intent = Intent(Intent.ACTION_CALL, Uri.parse("tel:$number")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Demo step 6 (owner, 14 Oct 2026): "now call him" — on the loudspeaker once it connects (phone/IncomingCall).
+        com.tekyerema.phone.IncomingCall.speakerForNextCall()
         return try {
             ctx.appContext.startActivity(intent)
             ToolResult(true, "Calling ${name ?: number} ($number).", channel = "native")

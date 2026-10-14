@@ -130,6 +130,8 @@ sealed class FastIntent(val name: String) {
     /** E-15 / H-09: "what did I miss?" — [scope] "last" (since the last catch-up), "recent" (the last hours) or "today". */
     /** [messagesOnly]: the user said "messages" (chats and texts), not "notifications" / "what did I miss" (everything). */
     data class Digest(val scope: String, val messagesOnly: Boolean = false) : FastIntent("DIGEST")
+    /** Demo step 2: "read my message" — the newest message (from the person just talked to, when there is one), in full. */
+    data class ReadMessage(val from: String? = null) : FastIntent("READ_MESSAGE")
     /** C-03 / H-08: "remember that Ama Mensah is my mother" ([said] = the word used, [explicit] = asked in so many words). */
     data class SetRelation(val relation: String, val said: String, val contact: String, val explicit: Boolean) : FastIntent("SET_RELATION")
     /** "who is my mother" ([relation]); "" = every relation. */
@@ -352,6 +354,8 @@ object FastIntentClassifier {
         com.tekyerema.android.Relations.parseForget(g)?.let { return FastIntent.ForgetRelation(it) }
         com.tekyerema.android.Relations.parseQuery(g)?.let { return FastIntent.RelationQuery(it) }
         com.tekyerema.android.Relations.parseSet(raw)?.let { r -> return FastIntent.SetRelation(r.relation, r.said, r.name, r.explicit) }
+        // Demo step 2 (owner, 14 Oct 2026): ONE message, read in full — before the catch-up, which takes "messages".
+        RE_READ_ONE.find(g)?.let { m -> return FastIntent.ReadMessage(m.groupValues[1].trim().ifEmpty { null }) }
         // E-15 / H-09 the catch-up.
         digestScope(g)?.let { return FastIntent.Digest(it, RE_ASKED_MESSAGES.containsMatchIn(g) && "notification" !in g) }
         // K-01 / K-10 help, H-10 resume.
@@ -385,6 +389,9 @@ object FastIntentClassifier {
     private val RE_DIGEST_RECENT = Regex("^(?:please )?(?:(?:read|check|go through|tell me|give me) (?:all )?(?:of )?my (?:new |latest |recent |unread )?" +
         "(?:messages|notifications)|summari[sz]e my (?:messages|notifications)|what are my notifications|(?:my )?notifications? summary|" +
         "who (?:has )?(?:messaged|written to|contacted) me)(?: please)?$")
+    private val RE_READ_ONE = Regex("^(?:(?:please|now|okay|ok|so|can you|could you)\\s+)*(?:read|open|play|check)\\s+(?:me\\s+)?" +
+        "(?:my|the|his|her|their|that|this)\\s+(?:new\\s+|latest\\s+|last\\s+|recent\\s+)?message(?:\\s+from\\s+(.+?))?(?:\\s+please)?$|" +
+        "^what\\s+(?:does|did)\\s+(?:the|his|her|my)\\s+(?:new\\s+|last\\s+)?message\\s+say()$")
     private val RE_DIGEST_TODAY = Regex("^(?:what did i miss|what(?:'s| has) come in|who messaged me|what messages did i get) today$")
 
     // "read my messages" means chats and texts — A20e 2026-09-30 it read "33 notifications", YouTube first, for ~50 s.

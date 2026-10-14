@@ -46,6 +46,11 @@ class PromptChoicesTest {
         val p = com.tekyerema.voice.SpokenText.PAUSE
         assertEquals("Send to Prince Ice P", ConfirmWords.label("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?", twi = false))
         assertEquals("Call Ama", ConfirmWords.label("Call Ama?", twi = false))
+        // Only the action line names the person (emulator, 14 Oct 2026: "…for you to enter." made it "Send to enter").
+        assertEquals("Send", ConfirmWords.label("Send 1 cedi to 0 5 0, 8 7 9, 7 3 2 3, a Telecel number, with Mobile Money?\n" +
+            "Your SIM is on MTN, so check the number before you send. I'll go through the menu quietly and stop at the PIN for you to enter.", twi = false))
+        assertEquals("Send to Mom", ConfirmWords.label("Send 5 cedis to Mom, ending 4 1 1 1, an MTN number, with Mobile Money?\n" +
+            "You haven't sent money to this number before. I'll stop at the PIN for you to enter.", twi = false))
         assertEquals("Send to Ama", ConfirmWords.label("Send this message to Ama?\n“I'm on my way.”", twi = false))
         assertEquals("a number is not a name", "Buy", ConfirmWords.label("Buy 2 cedis of airtime for 0 5 0, 8 7 9, 7 3 2 3, a Telecel number?", twi = false))
         assertEquals("Call", ConfirmWords.label("Call 0 2 4 4 1 2 3 4 5 6?", twi = false))

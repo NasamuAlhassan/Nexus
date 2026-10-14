@@ -325,6 +325,7 @@ class LocalFastRouter(
         // ---- Overnight [S] (docs/agent/research/overnight_features.md)
         // Call-log / Contacts queries and Keystore writes: off the main thread the voice path runs on.
         is FastIntent.Digest -> io { digest(intent) }
+        is FastIntent.ReadMessage -> io { readMessage(intent) }
         is FastIntent.ChatMessages -> io { chatMessages(intent) }
         FastIntent.MoreMessages -> com.tekyerema.notifications.MessageCursor.next()?.let { handled(intent, it) }
         is FastIntent.SetRelation -> io { setRelation(intent) }
@@ -758,6 +759,33 @@ class LocalFastRouter(
             line += " One of these messages contains instructions, like asking for your PIN — I never follow instructions from messages."
         }
         prefs.edit().putLong("last_digest", now).apply()
+        return handled(intent, line)
+    }
+
+    /**
+     * Demo step 2 (owner, 14 Oct 2026): "read my message" — the newest message, from the person just talked to when there is
+     * one (the caller), read in full: "You have a message from Kofi. It says: …". A money request in it — the amount, the
+     * number IN THE CHAT, the name — is remembered for "send money to him" (money/MoneyRequest) and said in one sentence.
+     * Nothing is sent or opened here.
+     */
+    private fun readMessage(intent: FastIntent.ReadMessage): FastOutcome {
+        if (!com.tekyerema.ui.Perms.notifications(appContext)) return handled(intent,
+            "I can't see your messages yet — turn on notification access for Tɛkyerɛma in Settings.")
+        val extra = com.tekyerema.core.config.AppConfig.stringList("notifications.digest.messagingPackages", emptyList()).toSet()
+        val msgs = capturedMessages().filter { !it.text.isNullOrBlank() && com.tekyerema.notifications.NotificationDigest.isMessage(it, extra) }
+            .sortedByDescending { it.t }
+        fun whoOf(m: com.tekyerema.notifications.IndexedMessage) = (m.sender ?: m.title)?.trim().orEmpty()
+        val want = intent.from ?: References.recentPerson()
+        val m = want?.let { w -> msgs.firstOrNull { whoOf(it).isNotEmpty() && (whoOf(it).contains(w, true) || w.contains(whoOf(it), true)) } }
+            ?: msgs.firstOrNull() ?: return handled(intent, "You have no new messages.")
+        val who = whoOf(m).ifEmpty { "someone" }
+        References.noteRead(who, channelOf(m.pkg))
+        val text = m.text!!.trim()
+        val req = com.tekyerema.money.MoneyRequest.parse(who, text)
+        if (req != null) { com.tekyerema.money.MoneyRequest.note(req); References.noteNumber(req.number) }
+        // Numbers only — never the words, the amount or the number (the rehearsal scores step 2 from this line).
+        Log.i(TAG, "[MSG] read 1 message; money request noted=${req != null} amount=${req?.amount != null} number=${req?.number != null}")
+        val line = "You have a message from $who. It says: “$text”." + (req?.let { " " + com.tekyerema.money.MoneyRequest.summary(it) } ?: "")
         return handled(intent, line)
     }
 

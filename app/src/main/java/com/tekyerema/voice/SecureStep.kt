@@ -15,8 +15,14 @@ object SecureStep {
     /** S-03 (P2-04, 13 October 2026): the hand-off also raises [com.tekyerema.core.Privacy.secureStep], so while it lasts the
      *  log redacts screen content, the screen-describe / vision gate refuses, and the helper treats the step as secret —
      *  the same blindness the agent's own credential-screen wait has. Lowered by [end], by the window change, or by [MAX_MS]. */
-    fun begin(now: Long = System.currentTimeMillis()) { since = now; com.tekyerema.core.Privacy.secureStep = true }
-    fun end() { since = 0L; com.tekyerema.core.Privacy.secureStep = false }
+    fun begin(now: Long = System.currentTimeMillis()) {
+        since = now; com.tekyerema.core.Privacy.secureStep = true
+        com.tekyerema.phone.PinCurtain.show()   // the screen is covered while the PIN is entered (demo step 4)
+    }
+    fun end() {
+        since = 0L; com.tekyerema.core.Privacy.secureStep = false
+        com.tekyerema.phone.PinCurtain.hideWhenDialogGone()   // …and until the network's answer (a balance) has left the screen
+    }
     fun active(now: Long = System.currentTimeMillis()): Boolean {
         if (since == 0L) return false
         if (now - since !in 0..MAX_MS) { end(); return false }   // timed out: the flag must not outlive the step

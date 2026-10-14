@@ -238,7 +238,9 @@ class AndroidTts(context: Context) : TtsProvider {
 
     private val utterances = Utterances()
 
-    private val focus = AudioFocus(context, onLost = { stop() })   // a call rings → the reply stops
+    // A call rings → the reply stops — except the line that ANNOUNCES that call (phone/IncomingCall, demo step 1), which is
+    // spoken while it rings: the ringtone's focus stopped it after half a second on the emulator (14 Oct 2026).
+    private val focus = AudioFocus(context, onLost = { if (!com.tekyerema.phone.IncomingCall.isRinging) stop() })
 
     /** Q-01: time from speak() to the first audible chunk of the last utterance (ms), or -1. */
     @Volatile var lastFirstAudioMs: Long = -1; private set

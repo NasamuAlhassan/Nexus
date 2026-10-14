@@ -19,7 +19,8 @@ import org.junit.Test
  * sweep on the A20e that night (audit/finance-2026-10-01/sweep1.out) — what each one did THEN is in the comment.
  */
 class MoneyFlowTest {
-    @Before fun setUp() = AppConfig.loadFrom(emptyList())
+    // These pin the walk itself; the reference question the owner asked for (14 Oct 2026) is pinned in DemoStepsTest.
+    @Before fun setUp() = AppConfig.loadFrom(listOf("money.json" to """{"money":{"flow":{"askReference":false}}}"""))
     @After fun tearDown() = AppConfig.loadFrom(emptyList())
 
     private fun call(goal: String, history: List<String> = emptyList()) = MoneyFlow.decide(goal, history) as AgentDecision.CallTool

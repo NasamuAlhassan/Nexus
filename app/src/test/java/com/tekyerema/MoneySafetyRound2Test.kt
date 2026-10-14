@@ -532,7 +532,10 @@ class MoneySafetyRound2Test {
         assertNull(MoneyPlan.decide("open whatsapp", emptyList()))
         // Finance audit (2026-10-01): a plain send is planned on the phone now (money/MoneyFlow) — it used to fall through
         // to whichever brain was in charge.
-        assertEquals("ussd_navigate", (MoneyPlan.decide("send 5 cedis to 0553238011", emptyList()) as AgentDecision.CallTool).name)
+        // (Since 14 Oct 2026 it first asks the reference by voice — the owner's demo rule — then walks.)
+        val first = MoneyPlan.decide("send 5 cedis to 0553238011", emptyList()) as AgentDecision.CallTool
+        assertEquals("ask_user", first.name)
+        assertTrue(first.args.getString("question").startsWith(com.tekyerema.money.MoneyFlow.REF_PREFIX))
         assertNull(MoneyPlan.decide("try again", emptyList()))
         assertNull(MoneyPlan.rewrite("try again"))
     }

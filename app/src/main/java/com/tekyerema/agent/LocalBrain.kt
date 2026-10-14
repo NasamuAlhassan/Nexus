@@ -856,6 +856,8 @@ class LocalBrain : AgentBrain {
                 msg = adaptForRecipient(msg)
             // "the last message" / "the sender" is whoever texted last (send_sms resolves "last sender"); "it", "him",
             // "that message" are not people at all — the planner works out who is meant (audit C17).
+            // "Tell him I've sent it" right after a send: the words say what was sent (demo step 5, money/LastSend).
+            msg = com.tekyerema.money.LastSend.expand(msg, who) ?: msg
             if (RE_LAST_SENDER.matches(who.lowercase())) return Sms(LAST_SENDER, null, msg, false)
             if (RE_NOT_A_RECIPIENT.matches(who.lowercase())) return null
             val digits = who.filter { it.isDigit() }

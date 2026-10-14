@@ -24,6 +24,7 @@ class TekyeremaApp : Application() {
         com.tekyerema.core.StartupWarm.start(this); stage("warm")
         // WS-C: the user's standing choices (execution mode, cloud, providers, budgets, scopes…) — before anything reads them.
         com.tekyerema.operator.OperatorPolicy.init(com.tekyerema.operator.PrefsOperatorStore(this)); stage("policy")
+        com.tekyerema.money.MoneyLimits.seedDefaultCap()   // GHS 10 per send until the user changes it (owner's live demo)
         com.tekyerema.core.DeviceProfile.init(this); stage("device")             // N-08: RAM class → how many models stay resident
         NetworkMonitor.init(this); stage("network")   // online/offline detection for hybrid routing (§32)
         // A-13 safety net: re-arm the user's schedules (an alarm can be lost to a force-stop or a clock change).

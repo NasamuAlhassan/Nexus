@@ -22,8 +22,9 @@ object References {
     /** How long a remembered person stays the answer to "him"/"her" (A20e audit 2026-10-01: a recipient from an earlier,
      *  unrelated request was substituted for "him" long after, and across a conversation reset). */
     internal fun personTtlMs(): Long = try {
-        com.tekyerema.core.config.AppConfig.int("references.personTtlSeconds", 300) * 1000L
-    } catch (_: Throwable) { 300_000L }
+        // 15 minutes (owner's demo, 14 Oct 2026): the call, the message, a send with its PIN and the reply all mean the same "him".
+        com.tekyerema.core.config.AppConfig.int("references.personTtlSeconds", 900) * 1000L
+    } catch (_: Throwable) { 900_000L }
 
     /** The remembered person, only while still recent. */
     fun recentPerson(now: Long = System.currentTimeMillis()): String? =

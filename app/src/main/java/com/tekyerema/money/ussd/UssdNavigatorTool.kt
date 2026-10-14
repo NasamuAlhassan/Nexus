@@ -65,6 +65,10 @@ object UssdNavigatorTool : Tool {
     const val ARG_UNSAID = "_unsaid"
     private const val UNSAID_LINE = "You didn't say this number — I chose it myself, so check it."
     const val ARG_UNSAID_AMOUNT = "_unsaidAmount"
+    /** The number was copied from a message (MoneyRequest — demo step 3): read in full, with [FROM_MESSAGE_LINE]. */
+    const val ARG_FROM_MESSAGE = "_fromMessage"
+    private const val FROM_MESSAGE_LINE = "I took this number from the message, so check it."
+    private const val FROM_MESSAGE_OTHER_NET_LINE = "I took this number from the message, and it's on another network, so check it."
     private const val UNSAID_AMOUNT_LINE = "You didn't say this amount in this request — it's from earlier, so check it."
     const val BALANCE_PROMPT = "Check your Mobile Money balance? I'll go through the menu; you'll enter your PIN."
 
@@ -175,6 +179,8 @@ object UssdNavigatorTool : Tool {
         )
         Log.i(TAG, "[NAV] opened $root (${sim.provider}${if (sim.dualSim) ", dual-SIM: default voice slot ${sim.slot}" else ""}) intent=${tx.intent}")
         if (!balance) com.tekyerema.money.MoMoRetry.clear()   // a balance check doesn't cancel a send waiting to be retried
+        // "Tell him I've sent it" (demo step 5) fills in the amount and the reference from this send (money/LastSend).
+        if (intent == TxIntent.SEND_MONEY) com.tekyerema.money.LastSend.note(contact, tx.recipient, tx.amount, tx.reference)
         // A PIN or payment prompt from an EARLIER request still in front is the user's to finish or cancel — never dialled over
         // (the new session's first screen would be that prompt, read as this request's; A20e, 14 Oct 2026).
         UssdDialog.promptInFront(ctrl)?.let { p ->
@@ -276,7 +282,7 @@ object UssdNavigatorTool : Tool {
         // 6 October 2026: "do NOT read out the entire phone number unless necessary").
         val spoken = com.tekyerema.agent.NumberSpeech.spoken(raw)
         val ending = com.tekyerema.agent.NumberSpeech.ending(raw)
-        val needsWhole = netWarn != null || !to.startsWith(spoken) || args.optBoolean(ARG_UNSAID)
+        val needsWhole = netWarn != null || !to.startsWith(spoken) || args.optBoolean(ARG_UNSAID) || args.optBoolean(ARG_FROM_MESSAGE)
         if (name != null && !needsWhole && ending.isNotEmpty()) return "$name, $ending${to.removePrefix(spoken)}" to null
         return (name?.let { "$it, on $to" } ?: to) to netWarn
     }
@@ -338,7 +344,10 @@ object UssdNavigatorTool : Tool {
         val ref = GhanaMobileMoney.referencePhrase(args.str("reference"))
         who ?: return "Send $amt with Mobile Money$ref? I'll go through the menu and stop at the PIN for you to enter."
         val warn = listOfNotNull(UNSAID_AMOUNT_LINE.takeIf { args.optBoolean(ARG_UNSAID_AMOUNT) },
-            UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who.second, args.str(ARG_REPEAT),
+            UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) },
+            // From the message AND on another network: one sentence, not two "check it"s (demo read-back, 14 Oct 2026).
+            if (args.optBoolean(ARG_FROM_MESSAGE)) (if (who.second != null) FROM_MESSAGE_OTHER_NET_LINE else FROM_MESSAGE_LINE) else who.second,
+            args.str(ARG_REPEAT),
             MoMoSendTool.firstTimeWarning(args), call).joinToString(" ").ifEmpty { null }
         return "Send $amt to ${who.first}, with Mobile Money$ref?\n" + (warn?.let { "$it " } ?: "") + tail
     }

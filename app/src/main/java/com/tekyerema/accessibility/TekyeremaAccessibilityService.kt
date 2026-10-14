@@ -80,6 +80,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         lastEventTime = SystemClock.uptimeMillis()
         live = this
         AgentEngine.attachController(this)
+        com.tekyerema.phone.IncomingCall.start(this)   // demo step 1: the caller announced, Volume Up answers
         // System accessibility button (navigation bar / floating shortcut) → the voice experience.
         if (Build.VERSION.SDK_INT >= 26) {
             try {
@@ -132,7 +133,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 // The phone's PIN dialog closed → the PIN step is over. Decided only here, from a REAL app window: the
                 // keyboard, the shade and overlays also send window-state events, and the keyboard opening over the USSD
                 // box used to end Secure Input while the user was typing the PIN (audit 2026-09-30, half 2 #4).
-                com.tekyerema.voice.SecureStep.onForeground(pkg)
+                // …and only once no phone / network dialog is left among the windows: a home-screen widget's update (the
+                // Google search bar) came as an app window mid-PIN, ended the step and disarmed the PIN pad (emulator,
+                // 14 Oct 2026).
+                if (!(com.tekyerema.voice.SecureStep.active() && phoneWindowPresent())) com.tekyerema.voice.SecureStep.onForeground(pkg)
                 fgActivityPkg = pkg
                 refreshTriggerVisibility(pkg)
                 // A-11: a user-configured offer for this app (flag off by default; cheap no-op for the same package).
@@ -153,6 +157,15 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
 
     override fun onInterrupt() {}
 
+    /** Debug builds: a volume key delivered to [onKeyEvent] exactly as the key filter would (injected key events never reach
+     *  it on the emulator) — RunGoalReceiver `volume_key up|down`. */
+    fun debugKey(keyCode: Int) {
+        if (!com.tekyerema.BuildConfig.DEBUG) return
+        val t = android.os.SystemClock.uptimeMillis()
+        onKeyEvent(android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, keyCode, 0))
+        onKeyEvent(android.view.KeyEvent(t, t + 80, android.view.KeyEvent.ACTION_UP, keyCode, 0))
+    }
+
     companion object {
         /** The connected service, for windows it must own: the reply panel is a TYPE_ACCESSIBILITY_OVERLAY (no
          *  "display over other apps" permission, and not hidden by Settings or permission screens). */
@@ -164,6 +177,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         connected = false
         if (live === this) live = null
         AgentEngine.detachController()
+        com.tekyerema.phone.IncomingCall.stop(this)
         triggerJob?.cancel()
         TriggerBubble.hide(this)
         com.tekyerema.voice.WakeWordService.stop(this)
@@ -188,6 +202,16 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     } catch (_: Throwable) { null }
 
     override fun windowCount(): Int = try { windows?.size ?: 0 } catch (_: Throwable) { -1 }
+
+    /** A phone / network dialog (the USSD or PIN box, or the debug simulator's) is among the windows on screen now. */
+    fun phoneWindowPresent(): Boolean = try {
+        windows.orEmpty().any { w ->
+            val root = w.root ?: return@any false
+            val p = root.packageName?.toString()
+            @Suppress("DEPRECATION") root.recycle()
+            com.tekyerema.accessibility.TelephonyWindows.matches(p) || p == com.tekyerema.money.ussd.UssdSim.SIM_PACKAGE
+        }
+    } catch (_: Throwable) { false }
     override fun activeWindowPackage(): String? =
         try { rootInActiveWindow?.packageName?.toString() } catch (t: Throwable) { null } ?: foregroundPackage()
 
@@ -245,6 +269,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // On the network's PIN screen the volume keys are the PIN pad (money/PinPad): consumed, both down and up, so
         // the volume doesn't move and no other gesture reads them.
         if (com.tekyerema.money.PinPad.onKey(this, e.keyCode, e.action, e.eventTime)) return true
+        // Demo step 1 (owner, 14 Oct 2026): the phone is ringing — Volume Up answers, on the loudspeaker (phone/IncomingCall).
+        if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP && com.tekyerema.phone.IncomingCall.isRinging &&
+            com.tekyerema.core.config.AppConfig.bool("phone.volumeUpAnswers", true)) {
+            return if (e.action == android.view.KeyEvent.ACTION_DOWN) true else com.tekyerema.phone.IncomingCall.answerByKey(this)
+        }
         if (e.action != android.view.KeyEvent.ACTION_UP) return false
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-01", true) ||
             !com.tekyerema.core.config.AppConfig.bool("activation.keys.enabled", true)) return false

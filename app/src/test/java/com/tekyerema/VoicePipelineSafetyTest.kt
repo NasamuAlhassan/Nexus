@@ -45,8 +45,9 @@ class VoicePipelineSafetyTest {
     private val vocab = EntityCorrector.Vocab.of(phoneNames, emptyList())
     private lateinit var saved: () -> EntityCorrector.Vocab
 
-    @Before fun setUp() { saved = LanguagePipeline.vocabulary; LanguagePipeline.vocabulary = { vocab }; com.tekyerema.voice.HeardAs.clear() }
-    @After fun tearDown() { LanguagePipeline.vocabulary = saved; com.tekyerema.voice.HeardAs.clear() }
+    @Before fun setUp() { saved = LanguagePipeline.vocabulary; LanguagePipeline.vocabulary = { vocab }; com.tekyerema.voice.HeardAs.clear()
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("money.json" to """{"money":{"flow":{"askReference":false}}}""")) }
+    @After fun tearDown() { LanguagePipeline.vocabulary = saved; com.tekyerema.voice.HeardAs.clear(); com.tekyerema.core.config.AppConfig.loadFrom(emptyList()) }
 
     private fun call(name: String, vararg kv: Pair<String, String>) = AgentDecision.CallTool(name, JSONObject().apply { kv.forEach { put(it.first, it.second) } }, "planner")
     private fun asked(q: String, a: String) = "ask_user(\"$q\") → the user answered: \"$a\""

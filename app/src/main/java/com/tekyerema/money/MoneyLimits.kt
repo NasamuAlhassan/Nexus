@@ -58,6 +58,19 @@ object MoneyLimits {
     /** Load from [s] (OperatorPolicy.init, so it shares the operator's store and its audit trail). */
     @Synchronized fun init(s: OperatorStore) { store = s; load(s) }
 
+    /** The live-demo default (owner, 14 Oct 2026): a first-run cap of GHS 10 per send, written once as if the user had set it
+     *  — from then on it is the user's to raise (after the cooling-off) or remove, and it never comes back by itself. Called
+     *  by the app at start-up (not by [init], which unit tests use for a store with no limits). */
+    @Synchronized fun seedDefaultCap() {
+        val s = store ?: return
+        if (s.get(K_DEFAULT_SEEDED) == null) {
+            val d = amount(AppConfig.string("money.limits.defaultPerSend", "10"))
+            if (d != null && d.signum() > 0 && limits[Kind.PER_SEND] == null) { limits[Kind.PER_SEND] = d; persistLimit(Kind.PER_SEND) }
+            put(K_DEFAULT_SEEDED, "1")
+        }
+    }
+    private const val K_DEFAULT_SEEDED = "op.momo.limitPerSend.defaultSeeded"
+
     /** No limits, nothing persisted (unit tests); with [s], load from it and persist again. */
     @Synchronized fun resetForTest(s: OperatorStore? = null) {
         store = null; limits.clear(); pending.clear(); spentDay = Long.MIN_VALUE; spent = BigDecimal.ZERO

@@ -82,3 +82,5 @@ phase2/wakeword/*.log
 *.bak
 local.properties.*
 /ussdsim/build/
+/demo-package/recordings/
+/scripts/.local/

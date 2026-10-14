@@ -354,6 +354,13 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // Show/hide the confirmation overlay directly, to verify it appears (Telegram-confirm-bug repro).
         //   --es overlay_test 1   |   --es overlay_test off
+        //   adb ... --es volume_key up|down   — a volume key through the accessibility key filter (demo step 1: answer a call)
+        intent.getStringExtra("volume_key")?.let { k ->
+            val svc = com.tekyerema.accessibility.TekyeremaAccessibilityService.live
+            if (svc == null) { android.util.Log.w("Tekyerema", "[KEYS] debug volume_$k: no accessibility service"); return@let }
+            svc.debugKey(if (k == "up") android.view.KeyEvent.KEYCODE_VOLUME_UP else android.view.KeyEvent.KEYCODE_VOLUME_DOWN)
+            android.util.Log.i("Tekyerema", "[KEYS] debug volume_$k delivered to the key filter")
+        }
         intent.getStringExtra("overlay_test")?.let { v ->
             when {
                 v.equals("off", true) -> com.tekyerema.ui.OverlayConfirm.hide(context.applicationContext)
