@@ -65,6 +65,9 @@
 
     <!-- Needed to resolve/launch other apps and read foreground package on Android 11+.
          Sideload/dev only; a production build would use a scoped <queries> list instead. -->
+    <!-- Offline voice (owner, 14 Oct 2026): before the on-device English model loads on a phone short of memory, other apps'
+         background processes are closed (voice/SherpaAsr.closeBackgroundApps) — a normal permission. -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 

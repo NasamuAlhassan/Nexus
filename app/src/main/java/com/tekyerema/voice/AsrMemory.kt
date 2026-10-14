@@ -25,7 +25,13 @@ object AsrMemory {
     const val MB = 1024L * 1024L
 
     /** What the user hears instead of the app dying. */
-    const val SPOKEN = "I can't listen offline on this phone right now — memory is too low. It works when you're online."
+    const val SPOKEN = "I can't listen offline on this phone right now — memory is too low, even after closing other apps. " +
+        "Restart the phone or type your request; it works when you're online."
+
+    /** The installed apps whose background processes may be closed to make room: the user's own apps (not system apps),
+     *  never one in [keep] (the app in front, the home screen, the keyboard, Tɛkyerɛma). [installed] = (package, isSystem). */
+    fun appsToClose(installed: List<Pair<String, Boolean>>, keep: Set<String>): List<String> =
+        installed.filter { (p, system) -> !system && p !in keep }.map { it.first }.distinct()
 
     enum class Verdict { LOAD, RELEASE_THEN_LOAD, REFUSE }
 

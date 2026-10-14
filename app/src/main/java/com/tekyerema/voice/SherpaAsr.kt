@@ -125,7 +125,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         java.util.Optional.ofNullable(
             try {
                 appContext.assets.open("models/ondevice/$lang/asr/${ModelSpec.FILE}").use { ModelSpec.parse(it.readBytes().decodeToString()) }
-                    ?.takeIf { it.fromAssets && it.type != ModelSpec.WHISPER }
+                    ?.takeIf { it.fromAssets }
             } catch (_: Throwable) { null }
         )
     }.orElse(null)
@@ -176,10 +176,13 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     /** whisper has no Twi token — the fine-tune decoded through a Latin proxy (en for English, sw else). */
     private fun tokenLang(lang: String) = if (lang == "eng") "en" else "sw"
     private fun langKey(force: String?) = if (force == Lang.TWI) "twi" else "eng"
+    /** The small offline English backup's key: assets/models/ondevice/eng-lite/asr/ ([recWithFallback]). */
+    private val LITE = "eng-lite"
 
     override val ready: Boolean
         get() = Build.SUPPORTED_ABIS.any { it.equals("arm64-v8a", true) || it.startsWith("armeabi") } &&
-                (assetSpec("eng") != null || modelDir("eng")?.let(::hasModel) == true || modelDir("twi")?.let(::hasModel) == true)
+                (assetSpec("eng") != null || modelDir("eng")?.let(::hasModel) == true || modelDir("twi")?.let(::hasModel) == true ||
+                    assetSpec(LITE) != null)
 
     /** The on-device Twi model is trusted only when it carries its own model.json (the clean whisper-base export of
      *  2 October 2026); the legacy tiny-twi layout (trained on the GOLD clips) never is. Other languages: ready. */
@@ -260,6 +263,14 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             ModelSpec.OMNILINGUAL_CTC -> OfflineModelConfig(
                 omnilingual = OfflineOmnilingualAsrCtcModelConfig(model = path("model")),
                 tokens = file(spec.tokens), numThreads = threads)
+            // The small English backup (Whisper base.en, int8 — as scored in the 2026-09-30 bake-off) read from the APK.
+            // `speech.asr.tailPaddings.eng-lite` tunes its trailing silence on the phone (sherpa's 1000 frames by default —
+            // the setting it was scored with; fewer frames decode faster).
+            ModelSpec.WHISPER -> OfflineModelConfig(
+                whisper = OfflineWhisperModelConfig(encoder = path("encoder"), decoder = path("decoder"),
+                    language = spec.language ?: tokenLang(lang), task = "transcribe")
+                    .let { w -> tailPaddingsFor(lang)?.let { w.copy(tailPaddings = it) } ?: w },
+                tokens = file(spec.tokens), numThreads = threads, modelType = "whisper")
             else -> { Log.w("Tekyerema", "[ASR] unknown model type '${spec.type}' in ${d?.name ?: "assets"}/model.json"); return null }
         }
         val cfg = OfflineRecognizerConfig(modelConfig = model,
@@ -323,10 +334,13 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             val others = releaseLocked { it != lang }
             val hooks = AsrMemory.release()
             try { System.gc() } catch (_: Throwable) {}
+            // Then the phone's memory itself (owner, 14 Oct 2026: "free up the memory space"): other apps' background
+            // processes are closed — what Android's own low-memory killer would do — before deciding.
+            val closed = closeBackgroundApps()
             memoryNow().let { avail = it.first; low = it.second }
             decision = AsrMemory.decide(avail, low, bytes, alreadyReleased = true, limits = limits)
-            Log.i("Tekyerema", "[ASR] memory short for ${spec.label}: released $others other recogniser(s) and $hooks cache(s) → " +
-                "${avail / AsrMemory.MB} MB available, ${decision.neededBytes / AsrMemory.MB} MB needed")
+            Log.i("Tekyerema", "[ASR] memory short for ${spec.label}: released $others other recogniser(s) and $hooks cache(s), " +
+                "closed $closed background app(s) → ${avail / AsrMemory.MB} MB available, ${decision.neededBytes / AsrMemory.MB} MB needed")
         }
         if (decision.verdict == AsrMemory.Verdict.REFUSE) {
             Log.w("Tekyerema", "[ASR] NOT loading ${spec.label} ($lang, ${bytes / AsrMemory.MB} MB): ${avail / AsrMemory.MB} MB available" +
@@ -336,6 +350,33 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         }
         ResidentModels.unloadAfterUse[lang] = decision.unloadAfterUse
         if (decision.unloadAfterUse) Log.i("Tekyerema", "[ASR] ${spec.label} fits only just (${avail / AsrMemory.MB} MB available) — it will be unloaded after this use")
+    }
+
+    /**
+     * Ask Android to close the background processes of the apps the user installed (KILL_BACKGROUND_PROCESSES, a normal
+     * permission): the same as its low-memory killer reclaiming them, and they restart when opened. Never the app in front,
+     * the home screen, the keyboard, us, or a system app ([AsrMemory.appsToClose]); anything showing or running in the
+     * foreground is untouched by Android itself. `speech.asr.closeBackgroundApps` = false turns it off. Returns how many.
+     */
+    private fun closeBackgroundApps(): Int {
+        if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.closeBackgroundApps", true)) return 0
+        return try {
+            val am = appContext.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val pm = appContext.packageManager
+            val keep = buildSet {
+                add(appContext.packageName)
+                try { com.tekyerema.accessibility.TekyeremaAccessibilityService.live?.foregroundPackage()?.let(::add) } catch (_: Throwable) {}
+                pm.resolveActivity(android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_HOME), 0)
+                    ?.activityInfo?.packageName?.let(::add)
+                android.provider.Settings.Secure.getString(appContext.contentResolver, android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+                    ?.substringBefore('/')?.let(::add)
+            }
+            val installed = pm.getInstalledApplications(0).map { it.packageName to ((it.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) != 0) }
+            val go = AsrMemory.appsToClose(installed, keep)
+            for (p in go) try { am.killBackgroundProcesses(p) } catch (_: Throwable) {}
+            if (go.isNotEmpty()) Thread.sleep(400)   // the processes go and their memory comes back
+            go.size
+        } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] couldn't close background apps: ${t.message}"); 0 }
     }
 
     /** Release every loaded recogniser whose language passes [which]; returns how many. Monitor held by the caller. */
@@ -386,7 +427,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     /** @throws AsrLowMemoryException when the model isn't loaded and the phone has no room for it right now. */
     override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? =
         withContext(Dispatchers.Default) {
-            lock.withLock { try { decodeLocked(wav, forceLanguage) } finally { unloadIfTight(langKey(forceLanguage)) } }
+            lock.withLock { try { decodeLocked(wav, forceLanguage) } finally { unloadIfTight(langKey(forceLanguage)); unloadIfTight(LITE) } }
         }
 
     /** Drop every loaded recognizer (N-08 low-memory: onTrimMemory). They reload on the next request. */
@@ -423,15 +464,33 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     }
 
     /** One decode of [raw] (the post-processed text, "" when nothing was recognised), or null if the model can't run. */
+    /**
+     * The recogniser for [lang] and the key it is cached under. English falls back to the small bundled model
+     * ([LITE], Whisper base.en, ~160 MB) when the big one is missing or the phone has no room for it even after freeing
+     * memory — offline voice answers, less accurately, instead of going silent (owner on the A20e, 14 Oct 2026: 650 MB
+     * free, the 630 MB model needs ~1.5 GB to load). Still no room → the big model's [AsrLowMemoryException].
+     */
+    private fun recWithFallback(lang: String): Pair<String, OfflineRecognizer>? {
+        val big = try { rec(lang) } catch (e: AsrLowMemoryException) {
+            if (lang != "eng" || assetSpec(LITE) == null) throw e
+            val lite = try { rec(LITE) } catch (_: AsrLowMemoryException) { throw e } ?: throw e
+            Log.i("Tekyerema", "[ASR] no room for the big English model — the small one (${loaded[LITE]}) is listening")
+            return LITE to lite
+        }
+        if (big != null) return lang to big
+        if (lang != "eng" || assetSpec(LITE) == null) return null
+        return rec(LITE)?.let { LITE to it }
+    }
+
     private fun decodeSamples(lang: String, raw: FloatArray, sr: Int): String? {
-        val r = rec(lang) ?: return null
-        val samples = padFor(lang, raw, sr)                       // §3.9 per-model padding (not a fixed 30 s)
-        val words = if (beams[lang] == true) ModelSpec.hotwordLine(try { hotwords() } catch (_: Throwable) { emptyList() }) else ""
+        val (key, r) = recWithFallback(lang) ?: return null
+        val samples = padFor(key, raw, sr)                        // §3.9 per-model padding (not a fixed 30 s)
+        val words = if (beams[key] == true) ModelSpec.hotwordLine(try { hotwords() } catch (_: Throwable) { emptyList() }) else ""
         val s = if (words.isNotEmpty()) r.createStream(words) else r.createStream()
         return try {
             s.acceptWaveform(samples, sr)
             r.decode(s)
-            guardRepetition(trimRestart(ctcWords(lang, depua(r.getResult(s).text)).trim()))   // §3.10 / B-19 stop runaway loops and restarts
+            guardRepetition(trimRestart(ctcWords(key, depua(r.getResult(s).text)).trim()))   // §3.10 / B-19 stop runaway loops and restarts
         } catch (t: Throwable) {
             Log.w("Tekyerema", "[ASR] sherpa decode failed: ${t.message}"); null
         } finally {
