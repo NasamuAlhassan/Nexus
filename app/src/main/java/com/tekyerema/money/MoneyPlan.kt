@@ -41,6 +41,9 @@ object MoneyPlan {
         if (idx < 0) return null
         val (q, ans) = MoneyFlow.answerOf(history[idx]) ?: return null
         val ours = q.startsWith(MoneyFlow.WHAT_PREFIX)
+        // Only an answer to a question ABOUT money: "What should the message say?" answered "tell him I'll send 5 cedis to Ama"
+        // is a message, never a walk into *170#.
+        if (!ours && !MONEY_QUESTION.containsMatchIn(q.lowercase())) return null
         val ask = try { MoneyAsk.parse(ans) } catch (_: Throwable) { null }
         val complete = ask != null && (ask.kind == MoneyAsk.Kind.SEND || ask.kind == MoneyAsk.Kind.AIRTIME) && ask.amount != null &&
             (ask.number != null || ask.name != null || ask.badNumber != null || ask.forSelf)
@@ -49,6 +52,8 @@ object MoneyPlan {
         android.util.Log.i("Tekyerema", "[MONEY] the answer to “${q.take(40)}” is a money request — decided on the phone, not by the planner")
         return d
     }
+
+    private val MONEY_QUESTION = Regex("\\b(?:airtime|credit|money|momo|mobile money|cedis?|pesewas?|amount|how much|send|buy|transfer|top ?up|recharge)\\b")
 
     fun end(history: List<String>): Pair<AgentStatus, String>? {
         BankGuide.end(history)?.let { return it }

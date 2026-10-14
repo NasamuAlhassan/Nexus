@@ -49,8 +49,10 @@ class MoneyAnswersTest {
             assertEquals("0508797323", args.getString("number"))
             assertEquals("2", args.getString("amount"))
         }
-        // An answer that is not a money request leaves the planner's task alone.
+        // An answer that is not a money request leaves the planner's task alone…
         assertNull(MoneyPlan.decide("open WhatsApp", listOf(answered("Which chat?", "Ama"))))
+        // …and so does a money-shaped answer to a question that isn't about money (a message's words).
+        assertNull(MoneyPlan.decide("text Kofi", listOf(answered("What should the message say?", "send 5 cedis to 0244123456 tomorrow"))))
         // After a walk, nothing is re-proposed from an old answer.
         assertNull(MoneyPlan.decide("I want you to buy", listOf(answered("How much?", answer), "${UssdNavigatorTool.NAME}({\"amount\":\"2\"}) → ok")))
     }
