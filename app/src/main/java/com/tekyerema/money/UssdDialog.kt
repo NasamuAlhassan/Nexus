@@ -22,6 +22,8 @@ internal object UssdDialog {
     /** The dialer's own "USSD code running…" progress — the gap between two screens, not a screen. */
     private val RUNNING = Regex("(?i)ussd code running|running ussd|please wait|sending request")
 
+    @Volatile private var lastNotPhone: String? = null
+
     /** The USSD dialog on screen now, or null (none, the progress spinner, or not a phone window). */
     suspend fun read(ctrl: AccessibilityController): Screen? {
         val snap = try { ctrl.buildSnapshot() } catch (_: Throwable) { return null }
@@ -29,9 +31,15 @@ internal object UssdDialog {
         // into) as if it were the bank's menu (audit 2026-09-30, half 2 #2). (Debug builds with the switch on: the
         // simulator's own dialog too — money/ussd/UssdSim.)
         if (!isUssdWindow(snap.appPackage, snap.screenTitle)) {
-            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[USSD] not a phone window: ${snap.appPackage}")
+            // Once per window, not on every poll: the pushed-PIN and receipt watches poll every 0.7 s and filled the phone's log
+            // with the same line (A20e, 14 Oct 2026), pushing the useful lines out of its 5 MB buffer.
+            if (com.tekyerema.BuildConfig.DEBUG && snap.appPackage != lastNotPhone) {
+                lastNotPhone = snap.appPackage
+                android.util.Log.d("Tekyerema", "[USSD] not a phone window: ${snap.appPackage}")
+            }
             return null
         }
+        lastNotPhone = null
         val labels = ArrayList<String>()
         // The simulator's dialog carries its own title ("USSD simulator") as the window title and as a title view; the
         // phone's USSD dialog has neither, so neither is part of what the network said (it was read out twice, 13 Oct 2026).

@@ -372,6 +372,11 @@ object TelcoGuide {
             return com.tekyerema.money.ussd.PushedPin.waitingLine(s.flow.netName)
         // A FINAL screen (a balance, a receipt) is the ANSWER: paced, in words, one item per breath (UssdSpeech).
         if (s.kind == BankUssd.ScreenKind.FINAL) return UssdSpeech.forEar(s.screen, intro = "${s.flow.netName} says")
+        // A navigator hand-over's PIN / payment screen, checked against what the user approved (TelcoUssdTool → Boundary):
+        // the amount, the fee, the registered name — never only "enter your PIN" (14 Oct 2026).
+        s.handOffLine?.takeIf { s.kind == BankUssd.ScreenKind.PIN || s.kind == BankUssd.ScreenKind.MONEY }?.let { line ->
+            return line + if (s.kind == BankUssd.ScreenKind.PIN) PinPad.handOffTip() else ""
+        }
         val said = "${s.flow.netName}'s screen says: “${BankUssd.spokenScreen(s.screen)}”."
         return when (s.kind) {
             BankUssd.ScreenKind.MONEY -> "$said If that's right, confirm it on the screen and enter your PIN yourself; if not, press Cancel. " +

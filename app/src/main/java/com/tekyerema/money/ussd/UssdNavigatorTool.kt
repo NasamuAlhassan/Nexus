@@ -305,7 +305,7 @@ object UssdNavigatorTool : Tool {
     }
 
     /** Said in the read-back of airtime for another network. */
-    const val IRREVERSIBLE_LINE = "Airtime for another network can't be reversed."
+    const val IRREVERSIBLE_LINE = "Airtime to another network can't be reversed, so check the number."
 
     /** The SIM's network key ("mtn"), or null when it can't be read (unit tests, no SIM). */
     private fun simKey(): String? = try {
@@ -326,8 +326,11 @@ object UssdNavigatorTool : Tool {
             val to = com.tekyerema.agent.NumberSpeech.networkKey(args.str("number"))
             val sim = args.str(MoMoSendTool.ARG_SIM)?.lowercase() ?: simKey()
             val irreversible = IRREVERSIBLE_LINE.takeIf { intent == TxIntent.SEND_AIRTIME && to != null && sim != null && to != sim }
+            // One sentence for both warnings: "Your SIM is on MTN, so check the number before you send." and the
+            // irreversibility said together, shorter ("Airtime to another network can't be reversed, so check the number.").
+            val netWarn = who?.second.takeIf { intent == TxIntent.SEND_AIRTIME && irreversible == null }
             val warn = listOfNotNull(UNSAID_AMOUNT_LINE.takeIf { args.optBoolean(ARG_UNSAID_AMOUNT) },
-                UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who?.second.takeIf { intent == TxIntent.SEND_AIRTIME }, irreversible, call)
+                UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, netWarn, irreversible, call)
                 .joinToString(" ").ifEmpty { null }
             return "Buy $amt of airtime for $whom, from your Mobile Money wallet?\n" + (warn?.let { "$it " } ?: "") + tail
         }

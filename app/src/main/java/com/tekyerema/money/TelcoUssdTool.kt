@@ -31,7 +31,10 @@ object TelcoSession {
                      *  to CONFIRM it, instead of making them say all ten digits twice (live A20e 2026-09-30). */
                     val lastNumber: String? = null,
                     /** The menu brain's question on THIS screen, waiting for the user's answer (cleared by the next screen). */
-                    val pending: com.tekyerema.money.ussd.MenuBrain.Move.Ask? = null)
+                    val pending: com.tekyerema.money.ussd.MenuBrain.Move.Ask? = null,
+                    /** The checked line for THIS PIN / payment screen of a navigator hand-over (money/ussd/Boundary: the
+                     *  amount, the fee, the registered name or "check the number") — said instead of a bare "enter your PIN". */
+                    val handOffLine: String? = null)
 
     const val MAX_MS = 10 * 60_000L
     @Volatile private var view: View? = null
@@ -42,6 +45,9 @@ object TelcoSession {
 
     /** The brain asked the user something about the current screen. */
     fun ask(q: com.tekyerema.money.ussd.MenuBrain.Move.Ask?) { view = view?.copy(pending = q) }
+
+    /** The checked hand-off line for the screen now in front (set after [screen], which clears it). */
+    fun handOff(line: String?) { view = view?.copy(handOffLine = line) }
 
     /** The user's answer taught the walk a price or a preference — later screens are chosen with it. */
     fun learn(amount: String? = null, prefer: com.tekyerema.money.ussd.MenuBrain.Prefer? = null) {
@@ -58,7 +64,7 @@ object TelcoSession {
                 userDrove = it.userDrove || user,
                 lastNumber = if (user && typed != null && typed.count(Char::isDigit) >= 7) typed.filter(Char::isDigit)
                     else it.lastNumber,
-                pending = null)
+                pending = null, handOffLine = null)
         }
     }
 
@@ -252,6 +258,23 @@ object TelcoUssdTool : Tool {
             stepIdx = args.optInt(ARG_STEP, -1), user = !auto, typed = value)
         Log.i(TAG, "[TELCO] screen: ${kind.name.lowercase()} ${com.tekyerema.core.Privacy.content(next.text.take(120).replace("\n", " | "),
             secure = kind == BankUssd.ScreenKind.PIN || kind == BankUssd.ScreenKind.MONEY)}")   // S-03: a PIN / payment screen is never logged in words
+        // A navigator hand-over that reaches the PIN or a payment confirmation through the guide (after the user answered the
+        // reference question): the navigator's own boundary check — the amount and number on the screen against the approved
+        // ones (a mismatch is cancelled here, never handed to the PIN), and the fee and the registered name said before the
+        // PIN. The emulator walk of 14 Oct 2026 (money to a Telecel number) said only "MTN is asking for your PIN".
+        if ((kind == BankUssd.ScreenKind.PIN || kind == BankUssd.ScreenKind.MONEY) && session.flow.confirmed) navTx(session.flow)?.let { tx ->
+            val twi = try { com.tekyerema.voice.VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
+            when (val v = com.tekyerema.money.ussd.Boundary.decide(tx, com.tekyerema.money.ussd.MenuModel.read(next.text, next.hasInput, next.masked), twi = twi)) {
+                is com.tekyerema.money.ussd.Boundary.Verdict.Stop -> {
+                    Log.i(TAG, "[TELCO] the network's screen doesn't match what was approved — cancelling it")
+                    val closed = UssdDialog.close(ctrl, next)
+                    TelcoSession.end()
+                    return ToolResult(false, com.tekyerema.tools.MtnConfirm.cancelledLine(v.why, closed), recoverable = false)
+                }
+                // After the user's own yes to a confirmation the details were just heard: the short line stays (TelcoGuide).
+                is com.tekyerema.money.ussd.Boundary.Verdict.HandOff -> if (!saidYes) TelcoSession.handOff(v.line)
+            }
+        }
         if (kind != BankUssd.ScreenKind.MENU && kind != BankUssd.ScreenKind.FINAL) {
             ledger(app, session.flow, kind)   // first: the watcher that reads the receipt settles THIS entry
             handOver(kind, ctrl, app, session.flow.netName)
@@ -288,6 +311,14 @@ object TelcoUssdTool : Tool {
 
     /** A payment confirmation or a PIN: no self-opened microphone, no helper at the PIN, the volume keys as the PIN pad —
      *  and the network's last word after it read out (money/ussd/AfterPin): the receipt a blind user cannot see. */
+    /** The transaction a navigator hand-over carries (what the user approved), or null for a guided menu of our own. */
+    internal fun navTx(flow: TelcoUssd.Flow): com.tekyerema.money.ussd.TxContext? {
+        if (!flow.confirmed) return null
+        val intent = flow.intent?.let { n -> com.tekyerema.money.ussd.TxIntent.values().firstOrNull { it.name == n } } ?: return null
+        return com.tekyerema.money.ussd.TxContext(intent, flow.sim, recipient = flow.number?.filter { it.isDigit() },
+            recipientName = flow.name, amount = flow.amount, reference = flow.reference, confirmedUpFront = true)
+    }
+
     private fun handOver(kind: BankUssd.ScreenKind, ctrl: com.tekyerema.accessibility.AccessibilityController,
                          app: android.content.Context?, network: String?) {
         if (kind == BankUssd.ScreenKind.PIN) PinPad.arm()

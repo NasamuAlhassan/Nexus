@@ -104,6 +104,15 @@ object UssdSim {
                 input = true, masked = true, final = false)
             "wallet" -> Shown(WALLET, input = true, masked = false, final = false)
             "walletpin" -> Shown("Enter MM PIN", input = true, masked = true, final = false)
+            // Money to another network (A20e, 2–3 October 2026). The PIN screen is MODELLED: the real one after "Enter Reference
+            // ID" was never captured (the wallet was empty, MTN answered "Not enough funds") — a fee, the number, no name.
+            "onet" -> Shown(TRANSFER_OTHER, input = true, masked = false, final = false)
+            "onumber" -> Shown("Enter mobile number", input = true, masked = false, final = false)
+            "oconfirm" -> Shown("Confirm Mobile Number", input = true, masked = false, final = false)
+            "oamount" -> Shown("Enter Amount to Transfer", input = true, masked = false, final = false)
+            "oref" -> Shown("Enter Reference ID", input = true, masked = false, final = false)
+            "opin" -> Shown("Transfer GHS ${money(amount)} to $number on $otherNet with Reference: $reference. Fee is GHS $OTHER_NET_FEE. Enter MM PIN",
+                input = true, masked = true, final = false)
             // Airtime & Bundles → Airtime, screen for screen as the A20e showed them (3 and 14 October 2026).
             "airtimehub" -> Shown(AIRTIME_HUB, input = true, masked = false, final = false)
             "airtime" -> Shown(AIRTIME, input = true, masked = false, final = false)
@@ -163,7 +172,20 @@ object UssdSim {
                 "apin" -> state = if (t == "2") end("Transaction cancelled.") else if (t != pin) wrongPin()
                     else if (amount.toBigDecimal() > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                     else end("Y'ello! Airtime purchase of GHS ${money(amount)} successful. Your MoMo balance is GHS ${leftAfter(amount)}.")
-                "transfer" -> state = when (t) { "1" -> "number"; else -> end(INCORRECT) }
+                "transfer" -> state = when (t) { "1" -> "number"; "5" -> "onet"; else -> end(INCORRECT) }
+                // ---- Money to another network's wallet (A20e, 2–3 October 2026, up to the reference)
+                "onet" -> state = when (t) { "1" -> { otherNet = "AT"; "onumber" }; "2" -> { otherNet = "Telecel"; "onumber" }; "0" -> "transfer"; else -> end(INCORRECT) }
+                "onumber" -> state = if (t.length == 10 && t.all { it.isDigit() }) { number = t; "oconfirm" } else end("Invalid number.")
+                "oconfirm" -> state = if (t == number) "oamount" else end("The numbers do not match.")
+                "oamount" -> state = when (val v = t.toBigDecimalOrNull()) {
+                    null -> end("Invalid amount.")
+                    else -> if (v.signum() <= 0) end("Invalid amount.") else { amount = t; "oref" }
+                }
+                "oref" -> { reference = t.ifBlank { "-" }; state = "opin" }
+                "opin" -> state = if (t != pin) wrongPin()
+                    else if (amount.toBigDecimal() + OTHER_NET_FEE.toBigDecimal() > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
+                    else end("Payment made for GHS ${money(amount)} to $number ($otherNet). Fee charged: GHS $OTHER_NET_FEE. " +
+                        "Current Balance: GHS ${leftAfter((amount.toBigDecimal() + OTHER_NET_FEE.toBigDecimal()).toPlainString())}. Reference: $reference.")
                 "number" -> state = if (t.length in 9..13 && t.all { it.isDigit() }) { number = t; "confirm" } else end("Invalid number.")
                 "confirm" -> state = if (t == number) "amount" else end("The numbers do not match.")
                 "amount" -> state = when (val v = t.toBigDecimalOrNull()) {
@@ -261,6 +283,9 @@ object UssdSim {
             const val AIRTIME_HUB = "Enjoy exclusive 100% bonus airtime only on the MoMo App\n1) Airtime\n2) Internet Bundle\n3) Fixed Broadband\n5) Just4U"
             const val AIRTIME = "Airtime\n1) Self\n2) Others\n3) Welcome Pack\n4) Other Networks\n0) Back"
             const val OTHER_NET = "Other Network\n1) AT\n2) Telecel\n3) E-zwich\n4) G-Money\n5) Zeepay\n6) Ghana Pay\n0) Back"
+            const val TRANSFER_OTHER = "Transfer Money to Other Network\n1) AT\n2) Telecel\n3) E-zwich\n4) G-Money\n5) Zeepay\n6) Ghana Pay\n0) Back"
+            /** MODELLED: the fee on a transfer to another network (the real figure was never captured). */
+            const val OTHER_NET_FEE = "0.50"
             const val NOTICE_OTHER = "Airtime purchased for other networks cannot be reversed\n1. Proceed\n2. Cancel"
             const val APP_ONLY = "Dear Valued Customer, this bundle option is only available on MyMTN App. Kindly check your SMS and click the link to complete your purchase."
             /** How long after its last word the network pushes the PIN dialog ("within seconds" in the field; R-A9). */
