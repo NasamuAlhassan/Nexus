@@ -1,14 +1,6 @@
 package com.tekyerema.ui
 
-import android.animation.ValueAnimator
 import android.content.Context
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
-import android.graphics.RectF
-import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -16,35 +8,35 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.LinearLayout
-import android.widget.TextView
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.ComposeView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.tekyerema.accessibility.TekyeremaAccessibilityService
 import com.tekyerema.agent.AgentEngine
-import com.tekyerema.ui.theme.TkHaptic
-import com.tekyerema.ui.theme.tkHaptic
-import com.tekyerema.ui.voice.Follower
-import com.tekyerema.ui.voice.StrobeGuard
-import com.tekyerema.voice.ConfirmPhase
+import com.tekyerema.ui.assistant.ChoiceGate
+import com.tekyerema.ui.assistant.PromptPanel
+import com.tekyerema.ui.theme.TekyeremaTheme
 import com.tekyerema.voice.Confirmation
 import com.tekyerema.voice.PromptSurface
 import com.tekyerema.voice.VoiceEngine
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.math.PI
-import kotlin.math.sin
 
 /**
- * The reply panel drawn OVER whatever app is in front while a task waits on the user: a confirmation (Yes / No), a
- * question (Answer / Stop) or the secure step (Done / Stop). Voice first — the question is spoken and the mic listens
- * ([com.tekyerema.voice.VoiceController]) — and this panel is what makes sure there is always something to answer on
- * (owner, 2026-09-28: "when it needs feedback, sometimes the thing doesn't appear for you to talk back").
+ * The reply panel drawn OVER whatever app is in front while a task waits on the user: a confirmation (No / the verb), a
+ * question (its choices, Stop / Type / Speak) or the secure step (Stop / Done). Voice first — the question is spoken and the
+ * mic listens ([com.tekyerema.voice.VoiceController]) — and this panel is what makes sure there is always something to answer
+ * on (owner, 2026-09-28: "when it needs feedback, sometimes the thing doesn't appear for you to talk back").
+ *
+ * It is the in-app surface's glass ([PromptPanel], DECISIONS V2-12): Compose in this window, on a lifecycle of its own.
  *
  * It follows the agent's state ([showPrompt]/[hidePrompt], driven from VoiceEngine via
  * [com.tekyerema.voice.PromptSurface]). While the accessibility service is connected it is a
@@ -58,20 +50,10 @@ object OverlayConfirm {
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var view: View? = null
     @Volatile private var wmUsed: WindowManager? = null
+    @Volatile private var owner: PanelOwner? = null
     /** True while the panel is really on screen: the in-app assistant surface then doesn't draw the same prompt under it
      *  (it sits in the same place, and TalkBack would read the prompt twice). False when it couldn't be drawn. */
     val onScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
-    private var presence: MiniPresenceView? = null
-    private var caption: TextView? = null
-    private var scope: CoroutineScope? = null
-
-    private const val INK2 = "#0F1628"
-    private const val INK3 = "#2A3558"
-    private const val TEXT = "#F4F6FB"
-    private const val TEXT2 = "#9AA6C4"
-    private const val ATTENTION = "#F5C26B"
-    private const val ATTENTION_EDGE = "#59F5C26B"   // 35 % amber
-    @Volatile private var calm = false
 
     @Volatile private var kind = PromptSurface.Kind.CONFIRM
     /** The panel on screen was put there by the agent's state (so a state change may take it down). */
@@ -146,265 +128,109 @@ object OverlayConfirm {
     /** [render]'s body, run now on the main thread: callers already on it ([showPrompt], [setAppSurface]) keep their order
      *  against [hidePrompt] — a posted render could otherwise draw a prompt the task had already resolved. */
     private fun renderNow(ctx: Context, prompt: String, kind: PromptSurface.Kind, engine: Boolean, seq: Long) {
-        run {
-            hideNow()
-            // J-02 tapjacking guard: the Yes only counts once the panel has been up for a moment (ConfirmGate.armed).
-            val shownAt = android.os.SystemClock.uptimeMillis()
-            val svc = TekyeremaAccessibilityService.live
-            if (svc == null && !canDraw(ctx)) return@run
-            val host: Context = svc ?: ctx
-            this.kind = kind
-            this.byEngine = engine
-            val wm = host.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-            val d = host.resources.displayMetrics.density
-            fun dp(v: Int) = (v * d).toInt()
-            // ONE language, the user's (owner, 5 October 2026): in a Twi conversation the panel's own words are Twi too.
-            val twi = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
-            twiPanel = twi
-            val header = PromptSurface.header(kind, twi)
-            val secure = kind == PromptSurface.Kind.SECURE
-            // Reduce motion (in the app) or "Remove animations" (the phone): the panel fades in and holds still.
-            calm = com.tekyerema.settings.Settings(ctx).reduceMotion || com.tekyerema.ui.theme.systemAnimatorScale(ctx) <= 0f
-
-            val card = LinearLayout(host).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(20), dp(if (secure) 12 else 18), dp(20), dp(14))
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor(INK2))
-                    cornerRadius = dp(28).toFloat()
-                    // A faint amber edge ties the panel to "needs your OK" (the colour the living visual turns).
-                    setStroke(dp(1), Color.parseColor(ATTENTION_EDGE))
-                }
-                contentDescription = if (twi) when (kind) {   // [owner: verify the Twi]
-                    PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma pɛ wo kwan. $prompt. Ka aane anaa daabi."
-                    PromptSurface.Kind.QUESTION -> "Tɛkyerɛma rebisa. $prompt. Bua, anaa ka gyae."
-                    PromptSurface.Kind.SECURE -> "Ahotoso adeyɛ. $prompt. Sɛ wowie a, ka sɛ 'awie'."
-                } else when (kind) {
-                    PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
-                    PromptSurface.Kind.QUESTION -> "Tɛkyerɛma is asking. $prompt. Say your answer, or double-tap Answer. Say stop to cancel."
-                    PromptSurface.Kind.SECURE -> "Secure step. $prompt. When you've finished, say done or double-tap Done."
-                }
-            }
-
-            // Top row: the small presence + the question.
-            // The words and the choices (they scroll when large text makes them tall; the buttons below never do).
-            val words = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-            val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-            val mini = MiniPresenceView(host, calm)
-            val miniSize = if (secure) 40 else 64
-            row.addView(mini, LinearLayout.LayoutParams(dp(miniSize), dp(miniSize)).apply { marginEnd = dp(14) })
-            val texts = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
-            texts.addView(TextView(host).apply {
-                text = header
-                setTextColor(Color.parseColor(ATTENTION))
-                typeface = Typeface.DEFAULT_BOLD
-                textSize = 11f
-                letterSpacing = 0.12f
-            })
-            texts.addView(TextView(host).apply {
-                // The voice's pause marks are line breaks on screen ("…ending 3 6 1 1." / "The message: …" / "Send it?").
-                text = com.tekyerema.ui.assistant.ScreenText.of(prompt)
-                setTextColor(Color.parseColor(TEXT))
-                textSize = if (secure) 15f else 18f
-                setLineSpacing(0f, 1.12f)
-                setPadding(0, dp(4), 0, 0)
-            })
-            val cap = TextView(host).apply {
-                text = captionFor(kind, listening = false)
-                setTextColor(Color.parseColor(ATTENTION))
-                textSize = 15f
-                typeface = Typeface.DEFAULT_BOLD
-                setPadding(0, dp(6), 0, 0)
-                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
-            }
-            texts.addView(cap)
-            row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            words.addView(row)
-
-            // The buttons: a parallel path to the voice (a helper, TalkBack, a noisy room), always there to answer on.
-            val buttons = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
-            fun btn(label: String, description: String, filled: Boolean, hides: Boolean, guarded: Boolean = false,
-                    haptic: TkHaptic = TkHaptic.TAP, onClick: () -> Unit) = Button(host).apply {
-                text = label
-                contentDescription = description
-                isAllCaps = false
-                textSize = 15f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.parseColor(if (filled) "#070A15" else TEXT2))
-                minHeight = dp(48); minimumHeight = dp(48)
-                background = GradientDrawable().apply {
-                    cornerRadius = dp(24).toFloat()
-                    if (filled) setColor(Color.parseColor(TEXT)) else { setColor(Color.TRANSPARENT); setStroke(dp(1), Color.parseColor(INK3)) }
-                }
-                // A press squashes the button a little and it springs back on release (calm: no movement). Returns
-                // false, so the Button's own click and accessibility handling are untouched.
-                if (!calm) setOnTouchListener { v, e ->
-                    when (e.actionMasked) {
-                        android.view.MotionEvent.ACTION_DOWN ->
-                            v.animate().scaleX(0.95f).scaleY(0.95f).setDuration(90L).setInterpolator(android.view.animation.DecelerateInterpolator()).start()
-                        android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL ->
-                            v.animate().scaleX(1f).scaleY(1f).setDuration(260L).setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
-                    }
-                    false
-                }
-                setOnClickListener {
-                    // A guarded (approving) button ignores a tap that lands before the panel has been up for a moment.
-                    if (guarded && !com.tekyerema.policy.ConfirmGate.armed(shownAt, android.os.SystemClock.uptimeMillis())) return@setOnClickListener
-                    it.tkHaptic(haptic)
-                    onClick(); if (hides) hideNow()
-                }
-            }
-            val (left, right) = if (kind == PromptSurface.Kind.CONFIRM) com.tekyerema.ui.assistant.ConfirmWords.buttons(prompt, twi)
-                else PromptSurface.buttons(kind, twi).let { it[0] to it[1] }
-            val leftBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(left, if (twi) "Daabi, nnyɛ" else "$left — don't do it", filled = false, hides = true, haptic = TkHaptic.REJECT) { AgentEngine.confirm(false, seq) }
-                else -> btn(left, if (twi) "Gyae adwuma no" else "Stop the task", filled = false, hides = true, haptic = TkHaptic.REJECT) { VoiceEngine.cancel() }
-            }
-            val rightBtn = when (kind) {
-                PromptSurface.Kind.CONFIRM -> btn(right, if (twi) "Aane, yɛ" else "$right — do it", filled = true, hides = true, guarded = true, haptic = TkHaptic.CONFIRM) { AgentEngine.confirm(true, seq) }
-                // Reopens the microphone for this question; the panel stays until it is answered.
-                PromptSurface.Kind.QUESTION -> btn(right, if (twi) "Bua wɔ kasa mu" else "Answer by voice", filled = true, hides = false) { VoiceEngine.respond() }
-                PromptSurface.Kind.SECURE -> btn(right, if (twi) "Mawie" else "Done — I've finished the secure step", filled = true, hides = true, haptic = TkHaptic.CONFIRM) { AgentEngine.secureInputDone() }
-            }
-            buttons.addView(leftBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(6) })
-            // Type: the answer by keyboard, on the panel itself (owner, 2 October 2026: "when it needs feedback, you
-            // can't type" — the only text box was on Tɛkyerɛma's own screen, which is not in front while a task runs).
-            // Never at the secure step: a box there could be mistaken for where the PIN goes.
-            var startTyping: () -> Unit = {}
-            if (PromptSurface.canType(kind)) buttons.addView(
-                btn(if (twi) "Twerɛ" else "Type", if (twi) "Twerɛ wo mmuae" else "Type your answer instead of saying it", filled = false, hides = false) { startTyping() },
-                LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 0.9f).apply { marginStart = dp(2); marginEnd = dp(2) })
-            buttons.addView(rightBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.3f).apply { marginStart = dp(6) })
-            val choices = if (kind == PromptSurface.Kind.QUESTION) com.tekyerema.ui.assistant.QuestionChoices.of(prompt) else emptyList()
-            if (choices.isNotEmpty()) {
-                val list = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
-                choices.forEach { c ->
-                    // The choice is that answer only while the question is still asked (ChoiceGate) — never a confirmation's
-                    // yes/no or change — and once: the choices go inactive after the first tap (review, 14 Oct 2026).
-                    list.addView(btn(c, (if (twi) "Bua: " else "Answer: ") + c, filled = false, hides = false) {
-                        if (com.tekyerema.ui.assistant.ChoiceGate.accepts(AgentEngine.state.value.status, engineQuestion = engine)) {
-                            for (i in 0 until list.childCount) list.getChildAt(i).isEnabled = false
-                            VoiceEngine.submitTyped(c)
-                        }
-                    }
-                        .apply { setTextColor(Color.parseColor(TEXT)) },   // an answer, brighter than Stop / Type
-                        LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
-                }
-                words.addView(list)
-            }
-            // At most 65 % of the screen for the words and choices, so the buttons always stay on it: at 200 % text a
-            // three-choice question filled the whole screen and pushed them to its bottom edge (emulator, 14 Oct 2026).
-            card.addView(CappedScrollView(host, (host.resources.displayMetrics.heightPixels * 0.65f).toInt()).apply {
-                overScrollMode = View.OVER_SCROLL_NEVER
-                addView(words, android.widget.FrameLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-            card.addView(buttons)
-
-            val wrapper = LinearLayout(host).apply {
-                setPadding(dp(12), 0, dp(12), 0)
-                addView(card, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-                if (Build.VERSION.SDK_INT >= 28) accessibilityPaneTitle = header.lowercase().replaceFirstChar { it.uppercase() }
-            }
-
-            val type = when {
-                svc != null -> WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
-                Build.VERSION.SDK_INT >= 26 -> WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                else -> @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
-            }
-            val lp = WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.WRAP_CONTENT,
-                type,
-                // NOT_FOCUSABLE keeps the buttons touchable without stealing IME focus (and never makes the panel the
-                // active window the agent observes); LAYOUT_IN_SCREEN so our position is absolute (not inset by the
-                // IME). Where it sits: below (a bottom card once hid behind the soft keyboard — the Telegram confirm bug).
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                android.graphics.PixelFormat.TRANSLUCENT
-            ).apply {
-                // Every prompt at the TOP, under the status bar — where the in-app assistant surface lives, clear of the soft
-                // keyboard (the reason it had been centred) and of a PIN pad (docs/assistant-ux, Stage 5).
-                gravity = Gravity.TOP
-                y = topInset(host) + dp(8)
-            }
-            // Entrance: the card slides down 24 dp into place as it fades in (the window is the card's size, so it is
-            // revealed from the window's top edge); calm = a fade only. Alpha starts just above 0: a view at alpha 0 is
-            // not "visible to user", and TalkBack could skip the panel's first moment.
-            card.alpha = 0.02f
-            if (!calm) card.translationY = -dp(24).toFloat()
-            startTyping = typing@{
-                if (view !== wrapper) return@typing
-                VoiceEngine.quietForTyping()     // stop reading, close the answer microphone; the prompt stays waiting
-                buttons.visibility = View.GONE
-                val field = android.widget.EditText(host).apply {
-                    hint = typeHint(kind)
-                    contentDescription = hint
-                    setTextColor(Color.parseColor(TEXT)); setHintTextColor(Color.parseColor(TEXT2))
-                    textSize = 17f
-                    isSingleLine = true
-                    inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                    imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
-                    minHeight = dp(48); minimumHeight = dp(48)
-                    setPadding(dp(14), 0, dp(14), 0)
-                    background = GradientDrawable().apply { cornerRadius = dp(24).toFloat(); setColor(Color.TRANSPARENT); setStroke(dp(1), Color.parseColor(INK3)) }
-                }
-                val imm = host.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-                fun submit() {
-                    val text = field.text?.toString().orEmpty().trim()
-                    if (text.isEmpty()) return
-                    val r = VoiceEngine.submitTyped(text)
-                    if (r.accepted) {
-                        try { imm?.hideSoftInputFromWindow(field.windowToken, 0) } catch (_: Throwable) {}
-                        field.isEnabled = false
-                        if (r.notice.isNotBlank()) setCaption(r.notice)
-                    } else {
-                        // Not an answer this prompt can take ("Type yes or no — or use the buttons"): say why, keep the box.
-                        setCaption(r.notice.ifBlank { "I couldn't use that — try again" })
-                        wrapper.announceForAccessibility(r.notice.ifBlank { "I couldn't use that — try again" })
-                    }
-                }
-                field.setOnEditorActionListener { _, action, _ ->
-                    if (action == android.view.inputmethod.EditorInfo.IME_ACTION_SEND || action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) { submit(); true } else false
-                }
-                val send = btn("Send", "Send what you typed", filled = true, hides = false, haptic = TkHaptic.CONFIRM) { submit() }
-                val typeRow = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(10), 0, 0) }
-                typeRow.addView(field, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { marginEnd = dp(8) })
-                typeRow.addView(send, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-                card.addView(typeRow)
-                // Back closes the box and brings the buttons back (the panel is focusable only while it is typed into).
-                field.setOnKeyListener { _, code, ev ->
-                    if (code == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP) {
-                        try { imm?.hideSoftInputFromWindow(field.windowToken, 0) } catch (_: Throwable) {}
-                        card.removeView(typeRow); buttons.visibility = View.VISIBLE
-                        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        lp.gravity = Gravity.TOP; lp.y = topInset(host) + dp(8)
-                        try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
-                        true
-                    } else false
-                }
-                // Focusable now (so the keyboard can attach), and at the TOP: a centred card sits under the keyboard on a
-                // small screen.
-                lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-                lp.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
-                lp.gravity = Gravity.TOP; lp.y = topInset(host) + dp(8)
-                try { wm.updateViewLayout(wrapper, lp) } catch (_: Throwable) {}
-                setCaption(typeHint(kind))
-                field.requestFocus()
-                field.postDelayed({ try { imm?.showSoftInput(field, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT) } catch (_: Throwable) {} }, 120L)
-            }
-            try {
-                wm.addView(wrapper, lp); view = wrapper; wmUsed = wm; presence = mini; caption = cap
-                onScreen.value = true
-                // Down from the top edge and settled — no bounce (HIG Motion: enter and leave on one axis). 320 ms, inside the
-                // Yes button's 600 ms arming delay (ConfirmGate), so the button is still when a tap can count.
-                card.animate().alpha(1f).translationY(0f)
-                    .setDuration(if (calm) 150L else 320L)
-                    .setInterpolator(android.view.animation.DecelerateInterpolator(2f))
-                    .start()
-                bindToVoice()
-                // TalkBack users hear the panel arrive; with replies read aloud the question is already being spoken.
-                if (!com.tekyerema.settings.Settings(ctx).speakAloud) wrapper.announceForAccessibility(card.contentDescription)
-            } catch (t: Throwable) { view = null; wmUsed = null }
+        hideNow()
+        val svc = TekyeremaAccessibilityService.live
+        if (svc == null && !canDraw(ctx)) return
+        val host: Context = svc ?: ctx
+        this.kind = kind
+        this.byEngine = engine
+        val wm = host.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val d = host.resources.displayMetrics.density
+        fun dp(v: Int) = (v * d).toInt()
+        // ONE language, the user's (owner, 5 October 2026): in a Twi conversation the panel's own words are Twi too.
+        val twi = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
+        twiPanel = twi
+        val header = PromptSurface.header(kind, twi)
+        // What TalkBack hears as the panel arrives (unless our own voice is already reading the question aloud).
+        val summary = if (twi) when (kind) {   // [owner: verify the Twi]
+            PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma pɛ wo kwan. $prompt. Ka aane anaa daabi."
+            PromptSurface.Kind.QUESTION -> "Tɛkyerɛma rebisa. $prompt. Bua, anaa ka gyae."
+            PromptSurface.Kind.SECURE -> "Ahotoso adeyɛ. $prompt. Sɛ wowie a, ka sɛ 'awie'."
+        } else when (kind) {
+            PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
+            PromptSurface.Kind.QUESTION -> "Tɛkyerɛma is asking. $prompt. Say your answer, or double-tap Speak. Say stop to cancel."
+            PromptSurface.Kind.SECURE -> "Secure step. $prompt. When you've finished, say done or double-tap Done."
         }
+
+        val type = when {
+            svc != null -> WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+            Build.VERSION.SDK_INT >= 26 -> WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            else -> @Suppress("DEPRECATION") WindowManager.LayoutParams.TYPE_PHONE
+        }
+        val lp = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            type,
+            // NOT_FOCUSABLE keeps the buttons touchable without stealing IME focus (and never makes the panel the
+            // active window the agent observes); LAYOUT_IN_SCREEN so our position is absolute (not inset by the
+            // IME). Where it sits: below (a bottom card once hid behind the soft keyboard — the Telegram confirm bug).
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            // Every prompt at the TOP, under the status bar — where the in-app assistant surface lives, clear of the soft
+            // keyboard (the reason it had been centred) and of a PIN pad (docs/assistant-ux, Stage 5). The glass keeps its
+            // own small margin (room for its soft shadow in light mode).
+            gravity = Gravity.TOP
+            y = topInset(host) + dp(2)
+        }
+
+        val panel = ComposeView(host)
+        val life = PanelOwner()
+        val typing = mutableStateOf(false)
+        val notice = mutableStateOf<String?>(null)
+        fun hideSoon() { main.post { if (view === panel) hideNow() } }
+        // Type: the answer by keyboard, on the panel itself (owner, 2 October 2026: "when it needs feedback, you can't type" —
+        // the only text box was on Tɛkyerɛma's own screen, which is not in front while a task runs). The window takes focus
+        // only while it is typed into, and never at the secure step: a box there could be mistaken for where the PIN goes.
+        fun setTyping(on: Boolean) {
+            if (view !== panel || typing.value == on || !PromptSurface.canType(kind)) return
+            if (on) VoiceEngine.quietForTyping()     // stop reading, close the answer microphone; the prompt stays waiting
+            typing.value = on
+            notice.value = null
+            lp.flags = if (on) lp.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                else lp.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            lp.softInputMode = if (on) WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE
+                else WindowManager.LayoutParams.SOFT_INPUT_STATE_UNSPECIFIED
+            try { wm.updateViewLayout(panel, lp) } catch (_: Throwable) {}
+        }
+        fun submitTyped(text: String): Boolean {
+            val r = VoiceEngine.submitTyped(text)
+            // Not an answer this prompt can take ("Type yes or no — or use the buttons"): say why, keep the box.
+            notice.value = if (r.accepted) r.notice.takeIf { it.isNotBlank() } else r.notice.ifBlank { "I couldn't use that — try again" }
+            if (!r.accepted) panel.announceForAccessibility(notice.value)
+            return r.accepted
+        }
+        val p = PromptSurface.Prompt(kind, prompt, seq)
+        panel.setViewTreeLifecycleOwner(life)
+        panel.setViewTreeSavedStateRegistryOwner(life)
+        if (Build.VERSION.SDK_INT >= 28) panel.accessibilityPaneTitle = header.lowercase().replaceFirstChar { it.uppercase() }
+        panel.setContent {
+            TekyeremaTheme {
+                PromptPanel(
+                    prompt = p, twi = twi, typing = typing.value, notice = notice.value, typeHint = typeHint(kind),
+                    // J-02: the answers are for THIS confirmation's number (a panel not drawn for a pending confirmation has
+                    // NO_CONFIRMATION, so its verb can approve nothing); the verb counts only once ConfirmGate has armed it.
+                    onConfirm = { approved, s -> AgentEngine.confirm(approved, s); hideSoon() },
+                    // A choice is that answer only while the question is still asked (ChoiceGate), and once (the set locks).
+                    onChoice = { c -> if (ChoiceGate.accepts(AgentEngine.state.value.status, engineQuestion = engine)) VoiceEngine.submitTyped(c) },
+                    // Reopens the microphone for this question; the panel stays until it is answered.
+                    onAnswerByVoice = { VoiceEngine.respond() },
+                    onType = { setTyping(true) },
+                    onSecureDone = { AgentEngine.secureInputDone(); hideSoon() },
+                    onStopTask = { VoiceEngine.cancel(); hideSoon() },
+                    onSubmitTyped = { submitTyped(it) },
+                    onCloseTyping = { setTyping(false) }
+                )
+            }
+        }
+        try {
+            life.start()
+            wm.addView(panel, lp); view = panel; wmUsed = wm; owner = life
+            onScreen.value = true
+            // TalkBack users hear the panel arrive; with replies read aloud the question is already being spoken.
+            if (!com.tekyerema.settings.Settings(ctx).speakAloud) panel.post { panel.announceForAccessibility(summary) }
+        } catch (t: Throwable) { life.destroy(); view = null; wmUsed = null; owner = null }
     }
 
     @Volatile private var twiPanel = false
@@ -412,53 +238,6 @@ object OverlayConfirm {
     private fun typeHint(kind: PromptSurface.Kind): String = if (twiPanel) {   // [owner: verify]
         if (kind == PromptSurface.Kind.CONFIRM) "Twerɛ aane anaa daabi" else "Twerɛ wo mmuae"
     } else if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer"
-
-    private fun captionFor(kind: PromptSurface.Kind, listening: Boolean): String = if (twiPanel) when (kind) {   // [owner: verify]
-        PromptSurface.Kind.CONFIRM -> "Ka aane anaa daabi"
-        PromptSurface.Kind.QUESTION -> if (listening) "Meretie… ka “gyae” na yɛagyae" else "Mia Bua, anaa ka “Hey Tɛkyerɛma”"
-        PromptSurface.Kind.SECURE -> "Sɛ wowie a, ka sɛ “awie”, anaa mia Mawie"
-    } else when (kind) {
-        PromptSurface.Kind.CONFIRM -> Confirmation.LISTEN_HINT
-        // The way out is taught where it's needed (Abena study, 3 October 2026: "say … bye bye" in its dialogs) — both
-        // words work in either language (voice/ControlVerbs).
-        PromptSurface.Kind.QUESTION -> if (listening) "Listening… say “stop” or “gyae” to cancel" else "Tap Answer, or say “Hey Tɛkyerɛma”"
-        PromptSurface.Kind.SECURE -> "Say “done”, or tap Done, when you've finished"
-    }
-
-    /** Follow the voice phases so the panel reads truthfully. */
-    private fun bindToVoice() {
-        val s = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate).also { scope = it }
-        s.launch {
-            VoiceEngine.state.collect { v ->
-                when (kind) {
-                    PromptSurface.Kind.CONFIRM -> {
-                        val phase = v.confirmPhase
-                        presence?.phase = phase
-                        setCaption(when (phase) {
-                            ConfirmPhase.ASKING -> "Asking…"
-                            ConfirmPhase.LISTENING -> if (v.speechDetected) "Listening…" else Confirmation.LISTEN_HINT
-                            ConfirmPhase.HEARD -> "Got it"
-                            ConfirmPhase.NONE -> Confirmation.LISTEN_HINT
-                        })
-                    }
-                    else -> {
-                        val listening = VoiceEngine.isRunning && !VoiceEngine.canRespond
-                        presence?.phase = if (listening) ConfirmPhase.LISTENING else ConfirmPhase.ASKING
-                        setCaption(captionFor(kind, listening))
-                    }
-                }
-            }
-        }
-        s.launch { VoiceEngine.level.collect { presence?.level = it } }
-    }
-
-    /** A new caption fades up instead of swapping in a single frame (calm: it just changes). */
-    private fun setCaption(text: String) {
-        val c = caption ?: return
-        if (c.text?.toString() == text) return
-        c.text = text
-        if (!calm) { c.alpha = 0.25f; c.animate().alpha(1f).setDuration(200L).start() }
-    }
 
     fun hide(ctx: Context) { main.post { hideNow() } }
 
@@ -471,138 +250,21 @@ object OverlayConfirm {
     }
 
     private fun hideNow() {
-        scope?.cancel(); scope = null
-        presence = null; caption = null
         byEngine = false
         onScreen.value = false
         val v = view ?: return
         try { wmUsed?.removeView(v) } catch (t: Throwable) {}
-        view = null; wmUsed = null
-    }
-
-
-    /**
-     * A 64 dp echo of the living visual in amber, on the same spring physics ([com.tekyerema.ui.voice.Spring]):
-     * a soft amber glow beating slowly (0.5 Hz — "waiting for you"), three rings that turn while asking, open and
-     * ripple with the microphone (inner ring first) while listening, and close with a small ring of light when the
-     * answer is heard. Calm motion: the same shapes, held still.
-     */
-    private class MiniPresenceView(ctx: Context, private val calm: Boolean) : View(ctx) {
-        var phase: ConfirmPhase = ConfirmPhase.ASKING
-            set(v) {
-                if (v != field && v == ConfirmPhase.HEARD) heardAt = t
-                field = v; openS.target = openFor(v); invalidate()
-            }
-        var level: Float = 0f
-            set(v) { field = v; if (calm) return; invalidate() }
-
-        private fun openFor(p: ConfirmPhase) = when (p) { ConfirmPhase.LISTENING -> 0.45f; ConfirmPhase.HEARD -> 0f; else -> 0.18f }
-
-        private var t = 0f
-        private var lastNs = 0L
-        private var heardAt = -10f
-        private val angles = floatArrayOf(0f, 61f, 122f)
-        private val openS = com.tekyerema.ui.voice.Spring(openFor(ConfirmPhase.ASKING), 160f, 0.72f)
-        private val rings = arrayOf(com.tekyerema.ui.voice.Spring(0f, 520f, 0.45f), com.tekyerema.ui.voice.Spring(0f, 330f, 0.45f),
-            com.tekyerema.ui.voice.Spring(0f, 200f, 0.45f))
-        private val voice = Follower(0.03f, 0.18f)
-        private val voiceGlow = Follower(StrobeGuard.GLOW_ATTACK_SEC, StrobeGuard.GLOW_RELEASE_SEC)
-        private val animator = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = 4000L; repeatCount = ValueAnimator.INFINITE
-            addUpdateListener { tick() }
-        }
-        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
-        private val glowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        private val threadPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND }
-        private val rect = RectF()
-        private val thread = Path()
-        private val amber = Color.parseColor("#F5C26B")
-
-        init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
-        override fun onAttachedToWindow() { super.onAttachedToWindow(); if (!calm) animator.start() }
-        override fun onDetachedFromWindow() { animator.cancel(); super.onDetachedFromWindow() }
-
-        override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
-            // Gradients are built once per size and reused every frame.
-            val cx = w / 2f; val cy = h / 2f
-            val glowR = minOf(w, h) * 0.49f
-            glowPaint.shader = android.graphics.RadialGradient(cx, cy, glowR,
-                intArrayOf(Color.argb(110, 245, 194, 107), Color.argb(40, 245, 194, 107), Color.TRANSPARENT),
-                floatArrayOf(0f, 0.55f, 1f), android.graphics.Shader.TileMode.CLAMP)
-            val r = minOf(w, h) * 0.36f
-            val tw = r * 2.6f; val x0 = cx - tw / 2f
-            threadPaint.shader = android.graphics.LinearGradient(x0, 0f, x0 + tw, 0f,
-                intArrayOf(Color.TRANSPARENT, amber, amber, Color.TRANSPARENT), floatArrayOf(0f, 0.2f, 0.8f, 1f),
-                android.graphics.Shader.TileMode.CLAMP)
-        }
-
-        private fun tick() {
-            val now = System.nanoTime()
-            val dt = if (lastNs == 0L) 0f else ((now - lastNs) / 1e9f).coerceAtMost(0.05f)
-            lastNs = now
-            t += dt
-            val drive = if (phase == ConfirmPhase.LISTENING) level.coerceIn(0f, 1f) else 0f
-            voice.step(drive, dt); voiceGlow.step(drive, dt)
-            openS.step(dt)
-            rings[0].target = voice.value
-            for (i in 1 until rings.size) rings[i].target = rings[i - 1].value
-            for (s in rings) s.step(dt)
-            val speed = if (phase == ConfirmPhase.LISTENING) 34f else 22f
-            for (i in angles.indices) angles[i] = (angles[i] + (if (i % 2 == 0) 1f else -1f) * speed * dt) % 360f
-            invalidate()
-        }
-
-        override fun onDraw(c: Canvas) {
-            val d = resources.displayMetrics.density
-            val cx = width / 2f; val cy = height / 2f
-            val r = minOf(width, height) * 0.36f
-            val open = if (calm) openFor(phase) else openS.value.coerceIn(0f, 1f)
-            val heard = if (calm) 0f else (1f - (t - heardAt) / 0.7f).coerceIn(0f, 1f)
-            val twoPi = 2f * PI.toFloat()
-            // glow: a slow heartbeat, brighter (strobe-guarded) with the voice and when the answer lands
-            val beat = if (calm) 0.5f else 0.5f + 0.5f * sin(twoPi * StrobeGuard.CONFIRM_BEAT_HZ * t)
-            glowPaint.alpha = (150 + 50 * beat + 55 * voiceGlow.value + 60 * heard).toInt().coerceIn(0, 255)
-            c.drawCircle(cx, cy, minOf(width, height) * 0.49f, glowPaint)
-            // thread, faded at both ends
-            threadPaint.strokeWidth = 1.6f * d; threadPaint.alpha = 210
-            thread.reset()
-            val w = r * 2.6f; val x0 = cx - w / 2
-            val lvl = voice.value
-            for (j in 0..40) {
-                val u = j / 40f; val x = x0 + u * w
-                val win = sin(PI.toFloat() * u)
-                val y = cy + win * (r * 0.45f * lvl) * sin(twoPi * (u * 5f - t * 2.5f)) + d * 0.6f * sin(twoPi * (u + t / 6f))
-                if (j == 0) thread.moveTo(x, y) else thread.lineTo(x, y)
-            }
-            c.drawPath(thread, threadPaint)
-            // rings (index 0 = outermost), each pushed out by its link of the voice chain
-            val factors = floatArrayOf(1.0f, 0.82f, 0.64f)
-            val widths = floatArrayOf(1.6f, 2.4f, 3.6f)
-            val alphas = intArrayOf(110, 170, 240)
-            for (i in factors.indices) {
-                val chain = rings[2 - i].value
-                val rr = r * factors[i] * (1f + chain * 0.10f + 0.03f * heard)
-                val sweep = (360f * (1f - open * (0.45f + 0.15f * (2 - i)))).coerceIn(0f, 360f)
-                paint.strokeWidth = widths[i] * d; paint.color = amber; paint.alpha = (alphas[i] + 15 * heard).toInt().coerceAtMost(255)
-                rect.set(cx - rr, cy - rr, cx + rr, cy + rr)
-                c.drawArc(rect, angles[i] + i * 61f, sweep, false, paint)
-            }
-            // heard: a ring of light released outward
-            if (heard > 0f) {
-                val e = 1f - heard
-                paint.strokeWidth = 1.5f * d; paint.color = Color.WHITE; paint.alpha = (200 * heard * heard).toInt()
-                val rr = r * (0.7f + 0.65f * (1f - (1f - e) * (1f - e)))
-                c.drawCircle(cx, cy, rr, paint)
-            }
-        }
+        owner?.destroy()
+        view = null; wmUsed = null; owner = null
     }
 }
 
-/** A ScrollView no taller than [maxPx]: the panel's words and choices scroll in it, and the buttons below stay on screen. */
-private class CappedScrollView(ctx: Context, private val maxPx: Int) : android.widget.ScrollView(ctx) {
-    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val size = MeasureSpec.getSize(heightMeasureSpec)
-        val capped = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) maxPx else minOf(size, maxPx)
-        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(capped, MeasureSpec.AT_MOST))
-    }
+/** The panel's own lifecycle (Compose in a window no Activity owns): resumed while it is on screen, destroyed after. */
+private class PanelOwner : LifecycleOwner, SavedStateRegistryOwner {
+    private val registry = LifecycleRegistry(this)
+    private val saved = SavedStateRegistryController.create(this)
+    override val lifecycle: Lifecycle get() = registry
+    override val savedStateRegistry: SavedStateRegistry get() = saved.savedStateRegistry
+    fun start() { saved.performRestore(null); registry.currentState = Lifecycle.State.RESUMED }
+    fun destroy() { if (registry.currentState != Lifecycle.State.INITIALIZED) registry.currentState = Lifecycle.State.DESTROYED }
 }

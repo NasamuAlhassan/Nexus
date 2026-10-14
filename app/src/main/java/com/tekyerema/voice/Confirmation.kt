@@ -80,6 +80,30 @@ object Confirmation {
         "ten|twenty|thirty|forty|fifty|hundred)\\s*(?:cedis?|pesewas?|ghs|ghc)\\b")
     private val STOPPING = Regex("\\b(?:cancel|stop|never mind|nevermind|forget it|leave it|gyae)\\b")
 
+    // The owner's live test (A20e, 14 October 2026): "I said you should send it to Mom and then 2019" corrected the number,
+    // but it held "send it" and was taken as YES — the read-back's number (ending 4 1 1 1) went into the MTN menu and only
+    // the PIN stopped it. A reply that brings what the read-back doesn't hold is a change of plan, never a yes: a number it
+    // doesn't say, "I said …" with more than a bare yes or no after it, or a send/call "to" someone it doesn't name.
+    private val I_SAID = Regex("\\b(?:i|i've|i have)\\s+(?:already\\s+)?(?:said|told you)\\b\\s*(.*)$")
+    private val TO_SOMEONE = Regex("\\b(?:send|sending|call|calling|pay|paying|give|transfer|text|message)\\b.*?\\b(?:to|for)\\s+" +
+        "(?:my\\s+|the\\s+|our\\s+|your\\s+)?([\\p{L}ɛɔ']+)")
+    /** "…call Ama" / "text Kofi": for these the person comes straight after the verb. */
+    private val CALL_SOMEONE = Regex("\\b(?:call|phone|ring|text|message)\\s+(?:my\\s+|the\\s+|our\\s+)?([\\p{L}ɛɔ']+)")
+    private val NOT_SOMEONE = setOf("me", "him", "her", "them", "us", "it", "that", "this", "there", "here", "do", "go", "be",
+        "send", "call", "pay", "give", "transfer", "text", "message", "now", "sure")
+    private val DIGITS = Regex("\\d+")
+    /** A decline that stops ("no, don't send the 50") stays a decline, whatever number it mentions. */
+    private val DECLINING = Regex("\\b(?:don'?t|do not|cancel|stop|never ?mind|forget it|leave it|abort|gyae)\\b")
+
+    /** The numbers a reply says that the read-back doesn't (spoken digits counted: "two zero one nine" is 2019). A part of a
+     *  longer number the read-back says ("ending 4567" of 0241234567) is not new; a short one must match exactly (5 ≠ 50). */
+    internal fun newNumbers(reply: String, prompt: String): List<String> {
+        val said = DIGITS.findAll(com.tekyerema.agent.NumberCorrection.digitize(prompt)).map { it.value }.toSet()
+        return DIGITS.findAll(com.tekyerema.agent.NumberCorrection.digitize(reply)).map { it.value }
+            .filter { r -> r !in said && !(r.length >= 3 && said.any { it.length > r.length && it.contains(r) }) }
+            .toList()
+    }
+
     /**
      * A spoken reply during confirmation that is neither a clean yes/no nor mere noise, but a coherent
      * instruction referencing the pending action ("send it to Kofi instead", "make it shorter",
@@ -87,8 +111,11 @@ object Confirmation {
      * re-plan (§8/§9/§13/§14) rather than discarded as UNCLEAR — this object does NOT interpret the
      * instruction, only decides it is worth routing there. A short filler ("what", "huh", "hmm") is
      * NOT a revision, so the safe "ask once more, then leave it" path still handles genuine mishearing.
+     *
+     * [prompt] is the read-back being answered: a number or a person the reply adds to it makes the reply a change of plan,
+     * whatever yes-word it also holds (null: those two checks are skipped).
      */
-    fun looksLikeRevision(text: String): Boolean {
+    fun looksLikeRevision(text: String, prompt: String? = null): Boolean {
         val norm = text.lowercase()
             .replace(Regex("[^\\p{L}\\p{N}ɛɔ'’\\s]"), " ")
             .replace(Regex("\\s+"), " ").trim()
@@ -96,6 +123,17 @@ object Confirmation {
         val redirect = REDIRECT.any { norm.contains(it) }
         // An explicit redirect overrides even a (possibly spurious) yes/no verdict — safety first.
         if (redirect) return true
+        // "I said …": a bare "I said yes" / "I said no" is that answer; anything longer re-states the request — a change.
+        I_SAID.find(norm)?.let { m ->
+            val rest = m.groupValues[1].trim()
+            if (rest.split(" ").count { it.isNotBlank() } > 3 || (rest.isNotEmpty() && interpret(rest) == Answer.UNCLEAR)) return true
+        }
+        if (prompt != null && !DECLINING.containsMatchIn(norm)) {
+            if (newNumbers(text, prompt).isNotEmpty()) return true
+            val named = prompt.lowercase().replace(Regex("[^\\p{L}\\p{N}ɛɔ'\\s]"), " ").split(Regex("\\s+")).toSet()
+            if ((TO_SOMEONE.findAll(norm) + CALL_SOMEONE.findAll(norm)).any { val w = it.groupValues[1]; w !in NOT_SOMEONE && w !in named })
+                return true
+        }
         // Money safety (2026-09-29): a digit fix ("the middle is 4 5 6", "no, it's 0 5 5 3 2 3 8 0 1 2") is a revision even
         // after a "no" or a "yes" — the corrected action is proposed again and confirmed again, never run on this reply
         // (agent/NumberCorrection). A "no" that stops ("no, cancel") stays a decline.

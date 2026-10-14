@@ -142,6 +142,7 @@ fun VoiceCueRow(cue: VoiceReflect.Cue, level: () -> Float, twi: Boolean, modifie
 @Composable
 private fun Waveform(live: Boolean, level: () -> Float, modifier: Modifier = Modifier) {
     var smooth by remember { mutableFloatStateOf(0f) }
+    val idleBar = LocalGlass.current.idleBar
     val currentLevel by rememberUpdatedState(level)
     LaunchedEffect(live) {
         if (!live) { smooth = 0f; return@LaunchedEffect }
@@ -156,7 +157,7 @@ private fun Waveform(live: Boolean, level: () -> Float, modifier: Modifier = Mod
         for (i in 0 until n) {
             val h = (minH + (size.height - minH) * (smooth * weights[i])).coerceAtMost(size.height)
             val x = i * (bw + gap)
-            val color = if (live) Spectrum.Aqua.copy(alpha = 0.55f + 0.45f * smooth) else Color.White.copy(alpha = 0.35f)
+            val color = if (live) Spectrum.Aqua.copy(alpha = 0.55f + 0.45f * smooth) else idleBar
             drawRoundRect(color, topLeft = Offset(x, (size.height - h) / 2f), size = Size(bw, h), cornerRadius = CornerRadius(bw / 2f))
         }
     }

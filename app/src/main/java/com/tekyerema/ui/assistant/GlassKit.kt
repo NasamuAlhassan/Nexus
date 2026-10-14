@@ -8,6 +8,9 @@ import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.CornerRadius
@@ -77,16 +80,56 @@ internal fun continuousPath(size: Size, radiusPx: Float, path: Path = Path()): P
 
 // ------------------------------------------------------------------ colours
 
-/** Dark tinted glass, in both themes: white text on it keeps strong contrast over any background (VISUAL_REFERENCE §1). */
+/**
+ * The glass follows the phone's light or dark mode (owner on the A20e, 14 Oct 2026: "it doesn't change colors based on the mode
+ * of the whole system"; DECISIONS V2-11): dark tinted glass with light text in dark mode, frosted light glass with dark text in
+ * light mode. Both keep strong contrast for low-vision users.
+ */
+data class GlassPalette(
+    val dark: Boolean,
+    val top: Color, val bottom: Color,
+    val text: Color, val textSecondary: Color, val textTertiary: Color,
+    val accent: Color, val warm: Color, val fail: Color,
+    /** Pills: the quiet fill, the primary tint (two stops), the chosen tint, the label on the primary. */
+    val quietFill: Color, val primaryA: Color, val primaryB: Color, val chosenA: Color, val chosenB: Color, val onPrimary: Color,
+    val highlight: Color, val bloom: Color, val field: Color, val idleBar: Color,
+    /** Light glass over a light screen needs a soft shadow to separate; dark glass doesn't. */
+    val shadow: Boolean
+)
+
+val DarkGlass = GlassPalette(
+    dark = true,
+    top = Color(0xF0182B2D), bottom = Color(0xF50B1517),
+    text = Color(0xFFF2F7F6), textSecondary = Color(0xC7F2F7F6), textTertiary = Color(0x85F2F7F6),
+    accent = Color(0xFF7FE6D8), warm = Color(0xFFFFB77A), fail = Spectrum.Coral,
+    quietFill = Color(0x13FFFFFF), primaryA = Spectrum.Teal.copy(alpha = 0.42f), primaryB = Spectrum.Aqua.copy(alpha = 0.34f),
+    chosenA = Spectrum.Teal.copy(alpha = 0.70f), chosenB = Spectrum.Aqua.copy(alpha = 0.62f), onPrimary = Color(0xFFF2F7F6),
+    highlight = Color(0x52FFFFFF), bloom = Color.White, field = Color(0x14FFFFFF), idleBar = Color(0x59FFFFFF),
+    shadow = false
+)
+
+val LightGlass = GlassPalette(
+    dark = false,
+    top = Color(0xF7FFFFFF), bottom = Color(0xF2EEF7F4),
+    text = Color(0xFF0E1B1C), textSecondary = Color(0xC20E1B1C), textTertiary = Color(0x8A0E1B1C),
+    accent = Color(0xFF0B7F71), warm = Color(0xFFB0560C), fail = Color(0xFFC4441C),
+    quietFill = Color(0x0F0E1B1C), primaryA = Spectrum.Teal.copy(alpha = 0.24f), primaryB = Spectrum.Aqua.copy(alpha = 0.20f),
+    chosenA = Spectrum.Teal.copy(alpha = 0.45f), chosenB = Spectrum.Aqua.copy(alpha = 0.40f), onPrimary = Color(0xFF053F38),
+    highlight = Color(0xE6FFFFFF), bloom = Spectrum.Teal, field = Color(0x0D0E1B1C), idleBar = Color(0x660E1B1C),
+    shadow = true
+)
+
+/** The palette of the glass being drawn (provided by the surface; dark by default). */
+val LocalGlass = staticCompositionLocalOf { DarkGlass }
+
+/** Shorthands for the current glass's colours, for composables (draw lambdas read a hoisted [GlassPalette] instead). */
 object GlassColors {
-    val Top = Color(0xF0182B2D)
-    val Bottom = Color(0xF50B1517)
-    val Text = Color(0xFFF2F7F6)
-    val TextSecondary = Color(0xC7F2F7F6)
-    val TextTertiary = Color(0x85F2F7F6)
-    val Accent = Color(0xFF7FE6D8)
-    val Warm = Color(0xFFFFB77A)
-    val Fail = Spectrum.Coral
+    val Text: Color @Composable @ReadOnlyComposable get() = LocalGlass.current.text
+    val TextSecondary: Color @Composable @ReadOnlyComposable get() = LocalGlass.current.textSecondary
+    val TextTertiary: Color @Composable @ReadOnlyComposable get() = LocalGlass.current.textTertiary
+    val Accent: Color @Composable @ReadOnlyComposable get() = LocalGlass.current.accent
+    val Warm: Color @Composable @ReadOnlyComposable get() = LocalGlass.current.warm
+    val Fail: Color @Composable @ReadOnlyComposable get() = LocalGlass.current.fail
 }
 
 // ------------------------------------------------------------------ quality tier
@@ -152,6 +195,7 @@ enum class LightMood { CALM, WORKING, LISTENING, SUCCESS, FAILURE }
  */
 fun Modifier.glassBody(
     radius: Dp,
+    palette: GlassPalette,
     mood: () -> LightMood,
     light: () -> Float,
     sweep: () -> Float,
@@ -162,7 +206,7 @@ fun Modifier.glassBody(
 ): Modifier = this.drawWithCache {
     val r = radius.toPx()
     val path = continuousPath(size, r)
-    val body = Brush.verticalGradient(0f to GlassColors.Top, 1f to GlassColors.Bottom)
+    val body = Brush.verticalGradient(0f to palette.top, 1f to palette.bottom)
     val inner = Brush.radialGradient(
         0f to Spectrum.Teal.copy(alpha = 0.20f), 0.55f to Spectrum.Aqua.copy(alpha = 0.06f), 1f to Color.Transparent,
         center = Offset(size.width * 0.5f, 0f), radius = size.width * 0.62f
@@ -181,8 +225,8 @@ fun Modifier.glassBody(
             Spectrum.Aqua.toArgbInt()), null)
     val sweepBrush = ShaderBrush(sweepShader)
     val matrix = android.graphics.Matrix()
-    val warm = Brush.linearGradient(listOf(GlassColors.Warm, Spectrum.Green), Offset.Zero, Offset(size.width, size.height))
-    val fail = androidx.compose.ui.graphics.SolidColor(GlassColors.Fail)
+    val warm = Brush.linearGradient(listOf(palette.warm, Spectrum.Green), Offset.Zero, Offset(size.width, size.height))
+    val fail = androidx.compose.ui.graphics.SolidColor(palette.fail)
     val bandW = size.width * 0.28f
     val band = Brush.horizontalGradient(0f to Color.Transparent, 0.5f to Color.White.copy(alpha = 0.55f), 1f to Color.Transparent,
         startX = 0f, endX = bandW)
@@ -228,12 +272,12 @@ fun Modifier.fadeBottom(fadeDp: Dp = 24.dp, enabled: Boolean = true): Modifier =
     }
 
 /** The small handle at the bottom of a finished result: "pull me". Drawn, not a node (the gestures have semantic actions). */
-fun Modifier.handle(visible: () -> Boolean): Modifier = this.drawWithCache {
+fun Modifier.handle(color: Color, visible: () -> Boolean): Modifier = this.drawWithCache {
     val w = 36.dp.toPx(); val h = 4.dp.toPx()
     val tl = Offset((size.width - w) / 2f, size.height - h - 7.dp.toPx())
     onDrawWithContent {
         drawContent()
-        if (visible()) drawRoundRect(Color.White.copy(alpha = 0.28f), tl, Size(w, h), CornerRadius(h / 2f))
+        if (visible()) drawRoundRect(color, tl, Size(w, h), CornerRadius(h / 2f))
     }
 }
 

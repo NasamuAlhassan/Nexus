@@ -738,7 +738,8 @@ class VoiceController(
         return when (agent.state.value.status) {
             AgentStatus.ASKING -> { askJob?.cancel(); hideAsking(); cues.captured(); agent.answer(englishReply(t)); TypedResult(route, accepted = true) }
             AgentStatus.WAITING_CONFIRMATION -> when {
-                Confirmation.looksLikeRevision(englishReply(t)) -> { confirmJob?.cancel(); cues.captured(); agent.revise(englishReply(t)); TypedResult(route, accepted = true) }
+                Confirmation.looksLikeRevision(englishReply(t), agent.state.value.pendingConfirmation.orEmpty()) -> {
+                    confirmJob?.cancel(); cues.captured(); agent.revise(englishReply(t)); TypedResult(route, accepted = true) }
                 else -> when (Confirmation.interpret(englishReply(t))) {
                     Confirmation.Answer.YES -> if (t.split(Regex("\\s+")).size > 2)
                         TypedResult(route, accepted = false, notice = "Something is waiting for your OK. Type yes or no — or use the buttons")
@@ -896,7 +897,7 @@ class VoiceController(
                         // "make it shorter", "actually call Ama") is a CORRECTION, not a decline. Hand the
                         // words to the brain, which re-plans against the pending proposal; the run continues
                         // and the next proposal (if any) is confirmed again. Buttons/plain yes-no are unchanged.
-                        if (Confirmation.looksLikeRevision(heard)) {
+                        if (Confirmation.looksLikeRevision(heard, prompt)) {
                             agent.revise(heard)
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE, speechDetected = false) }
                             try { tts.speak(if (lang == Lang.TWI) "Yoo, ma mensesa." else "Okay, let me change that.", lang) }

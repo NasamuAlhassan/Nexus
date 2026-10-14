@@ -77,6 +77,7 @@ fun GlassPill(
     compact: Boolean = false
 ) {
     val calm = LocalCalmMotion.current
+    val g = LocalGlass.current
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
     val scale = remember { Animatable(1f) }
@@ -110,17 +111,16 @@ fun GlassPill(
             .clip(shape)
             .drawWithCache {
                 val r = size.height / 2f
-                val quiet = Color.White.copy(alpha = 0.075f)
+                val quiet = g.quietFill
                 val quietBrush = androidx.compose.ui.graphics.SolidColor(quiet)
-                val primary = Brush.horizontalGradient(listOf(Spectrum.Teal.copy(alpha = 0.42f), Spectrum.Aqua.copy(alpha = 0.34f)))
-                val chosenFill = Brush.horizontalGradient(listOf(Spectrum.Teal.copy(alpha = 0.70f), Spectrum.Aqua.copy(alpha = 0.62f)))
+                val primary = Brush.horizontalGradient(listOf(g.primaryA, g.primaryB))
+                val chosenFill = Brush.horizontalGradient(listOf(g.chosenA, g.chosenB))
                 val highlight = Brush.horizontalGradient(
-                    0f to Color.Transparent, 0.25f to Color.White.copy(alpha = 0.32f), 0.75f to Color.White.copy(alpha = 0.32f),
-                    1f to Color.Transparent)
-                val inner = Brush.radialGradient(listOf(Color.White.copy(alpha = 0.10f), Color.Transparent),
+                    0f to Color.Transparent, 0.25f to g.highlight, 0.75f to g.highlight, 1f to Color.Transparent)
+                val inner = Brush.radialGradient(listOf(Color.White.copy(alpha = if (g.dark) 0.10f else 0.35f), Color.Transparent),
                     center = Offset(size.width / 2f, 0f), radius = size.width * 0.55f)
-                val fillBand = Color.White.copy(alpha = 0.16f)
-                val bloomColor = Color.White
+                val fillBand = if (g.dark) Color.White.copy(alpha = 0.16f) else Spectrum.Teal.copy(alpha = 0.14f)
+                val bloomColor = g.bloom
                 val hair = 1.dp.toPx()
                 onDrawBehind {
                     val cr = CornerRadius(r)
@@ -157,7 +157,7 @@ fun GlassPill(
         contentAlignment = Alignment.Center
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = if (tone == PillTone.PRIMARY || chosen) GlassColors.Text else GlassColors.TextSecondary,
+            color = if (tone == PillTone.PRIMARY || chosen) g.onPrimary.takeIf { tone == PillTone.PRIMARY } ?: g.text else g.textSecondary,
             textAlign = TextAlign.Center, maxLines = 2)
     }
 }

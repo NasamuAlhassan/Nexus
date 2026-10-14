@@ -94,6 +94,18 @@ class AssistantSurfaceModelTest {
         assertEquals(Mode.HIDDEN, SurfaceModel.reduce(after, idle, SurfaceModel.Local(dismissedReplyKey = s1.key, dismissedAt = now - 200), now = now).mode)
     }
 
+    @Test fun a_finished_run_marked_stopped_afterwards_keeps_what_it_really_did() {
+        // Stop pressed with nothing running set STOPPED on a run that had already answered (emulator, 14 Oct 2026).
+        val agent = AgentUiState(status = AgentStatus.STOPPED, runSeq = 4, goal = "explain osmosis",
+            lastResult = result(AgentStatus.COMPLETED, "Water moves across a membrane.", "x", 4),
+            log = listOf(resultLog("Water moves across a membrane.")))
+        val s = SurfaceModel.reduce(idleVoice, agent, now = now)
+        assertEquals(Mode.PRESENTING, s.mode)
+        assertEquals("Water moves across a membrane.", (s.preview as Preview.Answer).summary)
+        // a run stopped before it finished (no result of its own) still says it stopped
+        assertEquals(Mode.CANCELLED, SurfaceModel.reduce(idleVoice, agent.copy(runSeq = 5), now = now).mode)
+    }
+
     @Test fun a_stopped_run_never_shows_the_previous_runs_words() {
         // The emulator, 14 Oct 2026: run 5 answered; run 6 (the same request) was stopped before any result. A stopped run
         // writes no result, so lastResult still held run 5's — and the card showed run 5's words under "Stopped".

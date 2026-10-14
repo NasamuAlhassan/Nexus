@@ -99,10 +99,17 @@ object SurfaceModel {
         // 0 = no log yet.
         val resultAt = (agent.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.RESULT } ?: agent.log.lastOrNull())?.timeMs ?: 0L
         val runFresh = resultAt == 0L || now - resultAt <= FRESH_MS
-        if (agent.status in TERMINAL && run > 0 && run != local.dismissedRun && runFresh) {
-            val preview = previewOf(agent, steps, voice) ?: return State(run, Mode.HIDDEN)
+        // A run that finished and was marked STOPPED afterwards (Stop pressed with nothing running) keeps what it really did:
+        // its own result, carrying this run's number, says how it ended (emulator, 14 Oct 2026: a finished answer read "Stopped").
+        val ownStatus = (try { agent.lastResult?.let { JSONObject(it) } } catch (_: Throwable) { null })
+            ?.takeIf { it.optLong("runSeq", -1L) == run }?.optString("status")
+            ?.let { s -> AgentStatus.values().firstOrNull { it.name == s } }
+        val a = if (agent.status == AgentStatus.STOPPED && ownStatus != null && ownStatus != AgentStatus.STOPPED && ownStatus in TERMINAL)
+            agent.copy(status = ownStatus) else agent
+        if (a.status in TERMINAL && run > 0 && run != local.dismissedRun && runFresh) {
+            val preview = previewOf(a, steps, voice) ?: return State(run, Mode.HIDDEN)
             val mode = when (preview) {
-                is Preview.Problem -> if (agent.status == AgentStatus.STOPPED) Mode.CANCELLED else Mode.FAILED
+                is Preview.Problem -> if (a.status == AgentStatus.STOPPED) Mode.CANCELLED else Mode.FAILED
                 else -> Mode.PRESENTING
             }
             val title = when (preview) { is Preview.Answer -> preview.title; is Preview.Action -> preview.title; is Preview.Problem -> preview.title }
@@ -199,7 +206,7 @@ object SurfaceModel {
         return cut.replaceFirstChar { it.uppercaseChar() }
     }
 
-    private fun titleOfWaiting(kind: PromptSurface.Kind): String = when (kind) {
+    internal fun titleOfWaiting(kind: PromptSurface.Kind): String = when (kind) {
         PromptSurface.Kind.CONFIRM -> "Please confirm"
         PromptSurface.Kind.QUESTION -> "One question"
         PromptSurface.Kind.SECURE -> "Your PIN — I'm not looking"

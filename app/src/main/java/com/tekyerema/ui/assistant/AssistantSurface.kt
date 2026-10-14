@@ -27,7 +27,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -51,6 +53,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -68,6 +71,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -118,6 +122,7 @@ import com.tekyerema.ui.assistant.SurfaceGesture.Settle
 import com.tekyerema.ui.assistant.SurfaceModel.Mode
 import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Spectrum
+import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.theme.TkHaptic
 import com.tekyerema.voice.PromptSurface
 import com.tekyerema.voice.VoiceEngine
@@ -152,7 +157,7 @@ private class PrevFrame(var lastRaw: String, var voiceState: VoiceState, var run
 private class LastPrompt(var state: SurfaceModel.State? = null, var since: Long = 0L, var choices: List<String> = emptyList())
 
 /** What the engine decided about the prompt that was just on screen — read from its own next state, never assumed. */
-private data class Reaction(val decision: VoiceReflect.Decision? = null, val chosen: String? = null)
+internal data class Reaction(val decision: VoiceReflect.Decision? = null, val chosen: String? = null)
 
 @Composable
 fun AssistantSurfaceHost(
@@ -320,6 +325,8 @@ private fun GlassSurface(
     var dragging by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
     var crossed by remember { mutableStateOf(false) }
+    // One gesture, one release: the nested fill callbacks and the drag's own stop could each report the same release.
+    var gestureLive by remember { mutableStateOf(false) }
     var settleJob by remember { mutableStateOf<Job?>(null) }
     LaunchedEffect(state.key) { leaving = false; dragPx.floatValue = 0f }
 
@@ -351,10 +358,12 @@ private fun GlassSurface(
     }
     fun dismiss(velocity: Float = 0f) {
         if (!allow.dismiss || leaving) return
+        android.util.Log.i("Tekyerema", "[SURFACE] dismiss (${if (velocity == 0f) "tap or action" else "swipe"})")
         leaving = true
         animateDrag(-(heightPx + with(density) { 48.dp.toPx() }), velocity) { commitDismiss() }
     }
     fun onDelta(delta: Float) {
+        gestureLive = true
         dragPx.floatValue += delta
         val now = SurfaceGesture.crossed(rest, toDp(dragPx.floatValue), toDp(heightPx), allow)
         if (now && !crossed) try {
@@ -366,7 +375,12 @@ private fun GlassSurface(
     fun onRelease(velocity: Float) {
         dragging = false
         crossed = false
+        if (!gestureLive) return
+        gestureLive = false
         val s = SurfaceGesture.settle(rest, toDp(dragPx.floatValue), toDp(velocity), toDp(heightPx), allow)
+        // Numbers only (no words): how a release was read — the emulator and phone tests check gestures against it.
+        android.util.Log.i("Tekyerema", "[SURFACE] release drag=${toDp(dragPx.floatValue).toInt()}dp v=${toDp(velocity).toInt()}dp/s " +
+            "h=${toDp(heightPx).toInt()}dp rest=$rest dismiss=${allow.dismiss} → $s")
         if (s == Settle.DISMISS) { dismiss(velocity); return }
         rest = SurfaceGesture.next(rest, s)
         animateDrag(0f, velocity)
@@ -444,11 +458,25 @@ private fun GlassSurface(
     // ---------------------------------------------------------------- the object
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
     val radius = 34.dp
+    // The glass follows the phone's light or dark mode (owner, A20e, 14 Oct 2026; DECISIONS V2-11).
+    val glass = if (Tk.palette.dark) DarkGlass else LightGlass
     Box(modifier.fillMaxSize()) {
         // Tap outside a FINISHED result dismisses it, and the tap stops there (the orb or field underneath doesn't also get
         // it; DECISIONS V2-3). Invisible to TalkBack, which has the surface's "Dismiss" action instead.
         if (state.visible && allow.dismiss && !leaving) Box(
-            Modifier.matchParentSize().pointerInput(state.key) { detectTapGestures(onTap = { dismissNow() }) }.clearAndSetSemantics { }
+            Modifier.matchParentSize().pointerInput(state.key) {
+                // A real TAP only: a press that lifts within touch slop. A swipe that starts outside is not a tap (detectTap…
+                // counted any press lifted inside the layer, so a drag across Home dismissed the result — emulator, 14 Oct).
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    val up = waitForUpOrCancellation()
+                    if (up != null) {
+                        up.consume()
+                        if ((up.position - down.position).getDistance() < viewConfiguration.touchSlop) dismissNow()
+                    }
+                }
+            }.clearAndSetSemantics { }
         )
         AnimatedVisibility(
             visible = state.visible,
@@ -459,74 +487,87 @@ private fun GlassSurface(
             exit = if (leaving) ExitTransition.None else if (calm) fadeOut(tween(120))
                 else fadeOut(tween(180)) + slideOutVertically(SurfaceMotion.Leave) { -it / 2 }
         ) {
-            val summary = spokenSummary(state)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = maxHeight)
-                    .onSizeChanged { heightPx = it.height.toFloat().coerceAtLeast(1f) }
-                    .graphicsLayer {
-                        val off = visualPx()
-                        translationY = off
-                        val up = (-off / heightPx).coerceIn(0f, 1f)
-                        alpha = 1f - up * 0.7f
-                        val swell = (off / heightPx).coerceIn(0f, 1f) * 0.018f
-                        scaleX = 1f + swell; scaleY = 1f + swell
-                        transformOrigin = TransformOrigin(0.5f, 0f)
-                    }
-                    .glassBody(radius, mood = { currentMood }, light = lightLevel, sweep = { sweep?.value ?: 0f },
-                        glowShift = { visualPx() * 0.25f }, tier = tier, arrival = { arrival.value })
-                    .clip(ContinuousShape(radius))
-                    .nestedScroll(nested)
-                    .draggable(
-                        state = rememberDraggableState { d -> onDelta(d) },
-                        orientation = Orientation.Vertical,
-                        // A touch during a settle catches the glass at once, mid-flight (no touch slop to wait out).
-                        startDragImmediately = settleJob?.isActive == true,
-                        onDragStarted = { settleJob?.cancel(); dragging = true },
-                        onDragStopped = { v -> onRelease(v) }
-                    )
-                    .semantics {
-                        paneTitle = "Tɛkyerɛma"
-                        stateDescription = when (rest) { Rest.COMPACT -> "Compact"; Rest.EXPANDED -> "Expanded"; Rest.INPUT -> "Expanded, with a text field" }
-                    }
-                    .handleIf { allow.followUp && rest == Rest.COMPACT }
-            ) {
-                Column(
+            CompositionLocalProvider(LocalGlass provides glass) {
+                val summary = spokenSummary(state)
+                // OUTER, still: it reads the finger (draggable + nested scroll) in coordinates that don't move with the glass.
+                // Measured inside the moving glass, a 100 dp flick read as 41 dp at 0 dp/s and never dismissed (emulator log).
+                Box(
                     Modifier
                         .fillMaxWidth()
-                        .animateContentSize(if (calm) tween(0) else SurfaceMotion.Grow)
-                        .graphicsLayer { translationY = -visualPx() * 0.05f }   // the content trails the glass a touch
-                        .padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = if (allow.followUp && rest == Rest.COMPACT) 22.dp else 18.dp)
+                        .heightIn(max = maxHeight)
+                        .onSizeChanged { heightPx = it.height.toFloat().coerceAtLeast(1f) }
+                        .nestedScroll(nested)
+                        .draggable(
+                            state = rememberDraggableState { d -> onDelta(d) },
+                            orientation = Orientation.Vertical,
+                            // A touch during a settle catches the glass at once, mid-flight (no touch slop to wait out).
+                            startDragImmediately = settleJob?.isActive == true,
+                            onDragStarted = { settleJob?.cancel(); dragging = true; gestureLive = true },
+                            onDragStopped = { v -> onRelease(v) }
+                        )
+                        .semantics {
+                            paneTitle = "Tɛkyerɛma"
+                            stateDescription = when (rest) { Rest.COMPACT -> "Compact"; Rest.EXPANDED -> "Expanded"; Rest.INPUT -> "Expanded, with a text field" }
+                        }
                 ) {
-                    Header(state, resolving, summary, announce, twi, allow, expandable, rest,
-                        onRest = { rest = it }, onDismiss = { dismiss() }, onStopTask = onStopTask, onStopSpeaking = onStopSpeaking, tier = tier)
-                    val bodyScroll = remember(state.key, state.mode, rest) { ScrollState(0) }
-                    AnimatedContent(
-                        targetState = state,
-                        modifier = Modifier.weight(1f, fill = false).verticalScroll(bodyScroll),
-                        contentKey = { "${it.key}|${it.mode}|${it.waiting?.seq}" },
-                        transitionSpec = {
-                            val wasPrompt = initialState.mode == Mode.WAITING
-                            (if (calm) fadeIn(tween(160)) togetherWith fadeOut(tween(90))
-                            else (fadeIn(tween(240, delayMillis = if (wasPrompt) 160 else 60)) +
-                                slideInVertically(tween(280)) { it / 10 }) togetherWith fadeOut(tween(if (wasPrompt) 320 else 120))) using
-                                SizeTransform(clip = false) { _, _ -> if (calm) tween(0) else SurfaceMotion.Grow }
-                        },
-                        label = "surface body"
-                    ) { s ->
-                        Body(s, voice, resolving && s.key == state.key, reaction, rest, twi, tier,
-                            onToggle = { if (expandable && !s.mode.isPrompt()) rest = if (rest == Rest.COMPACT) Rest.EXPANDED else Rest.COMPACT },
-                            onConfirm = onConfirm, onChoice = onChoice, onAnswerByVoice = onAnswerByVoice,
-                            onType = { rest = Rest.INPUT }, onSecureDone = onSecureDone, onStopTask = onStopTask,
-                            onRetry = onRetry, onOpenUrl = onOpenUrl, onOpenMaps = onOpenMaps)
+                    // INNER: the glass itself, moved by the finger offset (layer phase only: a drag never recomposes it).
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer {
+                                val off = visualPx()
+                                translationY = off
+                                val up = (-off / heightPx).coerceIn(0f, 1f)
+                                alpha = 1f - up * 0.7f
+                                val swell = (off / heightPx).coerceIn(0f, 1f) * 0.018f
+                                scaleX = 1f + swell; scaleY = 1f + swell
+                                transformOrigin = TransformOrigin(0.5f, 0f)
+                            }
+                            .then(if (glass.shadow) Modifier.shadow(10.dp, ContinuousShape(radius), clip = false,
+                                ambientColor = Color(0x33103B37), spotColor = Color(0x40103B37)) else Modifier)
+                            .glassBody(radius, glass, mood = { currentMood }, light = lightLevel, sweep = { sweep?.value ?: 0f },
+                                glowShift = { visualPx() * 0.25f }, tier = tier, arrival = { arrival.value })
+                            .clip(ContinuousShape(radius))
+                            .handle(glass.idleBar) { allow.followUp && rest == Rest.COMPACT }
+                    ) {
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .animateContentSize(if (calm) tween(0) else SurfaceMotion.Grow)
+                                .graphicsLayer { translationY = -visualPx() * 0.05f }   // the content trails the glass a touch
+                                .padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = if (allow.followUp && rest == Rest.COMPACT) 22.dp else 18.dp)
+                        ) {
+                            Header(state, resolving, summary, announce, twi, allow, expandable, rest,
+                                onRest = { rest = it }, onDismiss = { dismiss() }, onStopTask = onStopTask, onStopSpeaking = onStopSpeaking, tier = tier)
+                            val bodyScroll = remember(state.key, state.mode, rest) { ScrollState(0) }
+                            AnimatedContent(
+                                targetState = state,
+                                // Scrolls only when the text really overflows; otherwise every drag goes to the still outer box.
+                                modifier = Modifier.weight(1f, fill = false).verticalScroll(bodyScroll, enabled = bodyScroll.maxValue > 0),
+                                contentKey = { "${it.key}|${it.mode}|${it.waiting?.seq}" },
+                                transitionSpec = {
+                                    val wasPrompt = initialState.mode == Mode.WAITING
+                                    (if (calm) fadeIn(tween(160)) togetherWith fadeOut(tween(90))
+                                    else (fadeIn(tween(240, delayMillis = if (wasPrompt) 160 else 60)) +
+                                        slideInVertically(tween(280)) { it / 10 }) togetherWith fadeOut(tween(if (wasPrompt) 320 else 120))) using
+                                        SizeTransform(clip = false) { _, _ -> if (calm) tween(0) else SurfaceMotion.Grow }
+                                },
+                                label = "surface body"
+                            ) { s ->
+                                Body(s, voice, resolving && s.key == state.key, reaction, rest, twi, tier,
+                                    onToggle = { if (expandable && !s.mode.isPrompt()) rest = if (rest == Rest.COMPACT) Rest.EXPANDED else Rest.COMPACT },
+                                    onConfirm = onConfirm, onChoice = onChoice, onAnswerByVoice = onAnswerByVoice,
+                                    onType = { rest = Rest.INPUT }, onSecureDone = onSecureDone, onStopTask = onStopTask,
+                                    onRetry = onRetry, onOpenUrl = onOpenUrl, onOpenMaps = onOpenMaps)
+                            }
+                            if (rest == Rest.INPUT && (allow.followUp || typingAnswer)) FollowUpField(
+                                placeholder = if (typingAnswer) (if (twi) "Twerɛ wo mmuae" else "Type your answer") else "Ask a follow-up",
+                                twi = twi, tier = tier,
+                                onSubmit = { text -> onSubmitText(text).also { ok -> if (ok) rest = Rest.COMPACT } },
+                                onSpeak = { if (typingAnswer) onAnswerByVoice() else onSpeak() }
+                            )
+                        }
                     }
-                    if (rest == Rest.INPUT && (allow.followUp || typingAnswer)) FollowUpField(
-                        placeholder = if (typingAnswer) (if (twi) "Twerɛ wo mmuae" else "Type your answer") else "Ask a follow-up",
-                        twi = twi, tier = tier,
-                        onSubmit = { text -> onSubmitText(text).also { ok -> if (ok) rest = Rest.COMPACT } },
-                        onSpeak = { if (typingAnswer) onAnswerByVoice() else onSpeak() }
-                    )
                 }
             }
         }
@@ -535,7 +576,6 @@ private fun GlassSurface(
 
 private fun Mode.isPrompt() = this == Mode.WAITING
 
-private fun Modifier.handleIf(visible: () -> Boolean): Modifier = this.handle(visible)
 
 // ------------------------------------------------------------------ header
 
@@ -589,7 +629,7 @@ private fun Header(
 /** The small mark before the title: a soft dot whose tone says the state (its meaning is also in the words). Only a working
  *  surface's dot breathes, and only in full motion. */
 @Composable
-private fun StateMark(s: SurfaceModel.State, modifier: Modifier) {
+internal fun StateMark(s: SurfaceModel.State, modifier: Modifier) {
     val calm = LocalCalmMotion.current
     val working = (s.mode == Mode.WORKING || s.mode == Mode.PROCESSING) && !s.paused
     val color = when (s.mode) {
@@ -654,6 +694,7 @@ private fun Steps(steps: List<SurfaceModel.StepView>, expanded: Boolean) {
 private fun StepLine(step: SurfaceModel.StepView) {
     val done = step.state == AgentStep.State.DONE
     val failed = step.state == AgentStep.State.FAILED
+    val accent = GlassColors.Accent; val fail = GlassColors.Fail; val tertiary = GlassColors.TextTertiary
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.semantics(mergeDescendants = true) {
         stateDescription = when { step.active -> "in progress"; done -> "done"; failed -> "didn't work"; else -> "" }
     }) {
@@ -662,11 +703,11 @@ private fun StepLine(step: SurfaceModel.StepView) {
             when {
                 done -> {
                     val w = r * 0.42f
-                    drawLine(GlassColors.Accent, Offset(r * 0.25f, r), Offset(r * 0.8f, r * 1.55f), w, StrokeCap.Round)
-                    drawLine(GlassColors.Accent, Offset(r * 0.8f, r * 1.55f), Offset(r * 1.8f, r * 0.4f), w, StrokeCap.Round)
+                    drawLine(accent, Offset(r * 0.25f, r), Offset(r * 0.8f, r * 1.55f), w, StrokeCap.Round)
+                    drawLine(accent, Offset(r * 0.8f, r * 1.55f), Offset(r * 1.8f, r * 0.4f), w, StrokeCap.Round)
                 }
-                failed -> drawCircle(GlassColors.Fail, r * 0.55f)
-                else -> drawCircle(GlassColors.TextTertiary, r * 0.5f, style = Stroke(r * 0.3f))
+                failed -> drawCircle(fail, r * 0.55f)
+                else -> drawCircle(tertiary, r * 0.5f, style = Stroke(r * 0.3f))
             }
         }
         Spacer(Modifier.width(10.dp))
@@ -678,10 +719,12 @@ private fun StepLine(step: SurfaceModel.StepView) {
 // ------------------------------------------------------------------ waiting on the user
 
 @Composable
-private fun Waiting(
+internal fun Waiting(
     w: SurfaceModel.Waiting, voice: VoiceUiState, resolving: Boolean, reaction: Reaction, twi: Boolean, tier: GlassTier,
     onConfirm: (Boolean, Long) -> Unit, onChoice: (String) -> Unit, onAnswerByVoice: () -> Unit, onType: () -> Unit,
-    onSecureDone: () -> Unit, onStopTask: () -> Unit
+    onSecureDone: () -> Unit, onStopTask: () -> Unit,
+    /** The panel over other apps also lets a confirmation be typed (owner, 2 October 2026); null: no Type pill. */
+    onTypeConfirm: (() -> Unit)? = null
 ) {
     val choices = remember(w.text) { if (w.kind == PromptSurface.Kind.QUESTION) QuestionChoices.of(w.text) else emptyList() }
     val cue = if (resolving) VoiceReflect.Cue.None else VoiceReflect.cue(w.kind, voice, choices.isNotEmpty(), twi)
@@ -691,12 +734,10 @@ private fun Waiting(
             val shown = ScreenText.of(w.text)
             Text(shown, style = MaterialTheme.typography.bodyLarge, color = GlassColors.Text, modifier = Modifier.semantics { contentDescription = shown })
         }
-        // Listening, heard, asking again — only what the voice pipeline is really doing; voice and touch reach the same decision.
-        VoiceCueRow(cue, level = { VoiceEngine.level.value }, twi = twi)
         Spacer(Modifier.padding(top = 12.dp))
         Reveal(1, w.seq to w.text) {
             when (w.kind) {
-                PromptSurface.Kind.CONFIRM -> {
+                PromptSurface.Kind.CONFIRM -> Column {
                     val (no, _) = ConfirmWords.buttons(w.text, twi)
                     val verb = ConfirmWords.label(w.text, twi)
                     // The verb counts only once the confirmation has been up for ConfirmGate.armMs(): the pill fills as that
@@ -718,6 +759,11 @@ private fun Waiting(
                             chosen = reaction.decision == VoiceReflect.Decision.APPROVED,
                             dimmed = reaction.decision == VoiceReflect.Decision.DECLINED,
                             contentDescription = if (twi) "Aane, yɛ" else "$verb — do it", haptic = TkHaptic.CONFIRM, tier = tier)
+                    }
+                    // Over other apps the answer can also be typed: a small quiet pill under the two that decide.
+                    if (onTypeConfirm != null) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                        GlassPill(if (twi) "Twerɛ" else "Type", onClick = onTypeConfirm, compact = true, available = !resolving,
+                            contentDescription = if (twi) "Twerɛ wo mmuae" else "Type your answer instead of saying it", tier = tier)
                     }
                 }
                 PromptSurface.Kind.QUESTION -> Column {
@@ -748,6 +794,10 @@ private fun Waiting(
                 }
             }
         }
+        // Listening, heard, asking again — only what the voice pipeline is really doing; voice and touch reach the same decision.
+        // Below the pills, so they never move when the microphone opens or closes: a tap aimed at one must not land on its
+        // neighbour (emulator, 14 Oct 2026 — the line appearing above pushed the pills down and a tap meant for Type hit Cancel).
+        VoiceCueRow(cue, level = { VoiceEngine.level.value }, twi = twi)
     }
 }
 
@@ -835,15 +885,16 @@ private fun ProblemBody(key: String, p: SurfaceModel.Preview.Problem, cancelled:
 /** Revealed by a pull down (or "Ask a follow-up" for TalkBack): a glass field and a mic. It submits through the same entry as
  *  the field at the foot of Home (VoiceEngine.submitTyped); an answer to the agent's question goes the same way. */
 @Composable
-private fun FollowUpField(placeholder: String, twi: Boolean, tier: GlassTier, onSubmit: (String) -> Boolean, onSpeak: () -> Unit) {
+internal fun FollowUpField(placeholder: String, twi: Boolean, tier: GlassTier, onSubmit: (String) -> Boolean, onSpeak: () -> Unit) {
     var text by remember { mutableStateOf("") }
+    val fieldColor = LocalGlass.current.field
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { try { focus.requestFocus() } catch (_: Throwable) {} }
     fun send() { val t = text.trim(); if (t.isNotEmpty() && onSubmit(t)) text = "" }
     Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(
             Modifier.weight(1f).heightIn(min = 48.dp).clip(RoundedCornerShape(percent = 50))
-                .drawBehind { drawRect(Color.White.copy(alpha = 0.08f)) }
+                .drawBehind { drawRect(fieldColor) }
                 .padding(horizontal = 18.dp, vertical = 12.dp),
             contentAlignment = Alignment.CenterStart
         ) {
