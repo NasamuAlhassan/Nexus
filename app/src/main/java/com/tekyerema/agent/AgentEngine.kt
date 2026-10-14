@@ -681,7 +681,7 @@ object AgentEngine {
             // Like a dropped connection (A20e 2026-09-29), a pause is about THAT moment — not remembered as "the internet is down".
             pushConvo("Tɛkyerɛma: (paused “$goal” — ${com.tekyerema.agent.journal.PauseRules.because(reason)}; this says nothing " +
                 "about the connection now. \"carry on\" resumes it.)")
-            finish(AgentStatus.CANNOT_DO, s, paused = reason)
+            finish(AgentStatus.CANNOT_DO, s, paused = reason, run = runCtx)
         }
         // ---- B (agenticness: planning, recovery, routing) — per-task state; logic lives in agent/plan/* and agent/recovery/*.
         // (merge A+B: ONE journal record per run — WS-A's `taskRun` above; B's plan and pinned model ride on it.)
@@ -714,7 +714,7 @@ object AgentEngine {
             research?.open?.let { planned.add(it) }
             research?.end?.let { e ->
                 log(LogEntry.Kind.RESULT, e.line); pushConvo("Tɛkyerɛma: ${e.line}")
-                finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats); return
+                finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats, run = runCtx); return
             }
             // G-15; WS-C: the user's "steps per task" (Settings › Control) replaces the configured limit once they pick one
             // (merge: C's stepLimit replaces B's smaller-of — OperatorPolicy owns the per-task budget).
@@ -738,7 +738,7 @@ object AgentEngine {
                     if (resumed == null) {
                         paused.value = false
                         log(LogEntry.Kind.RESULT, "I was paused for a long time, so I stopped. Ask me again when you're ready.")
-                        finish(AgentStatus.STOPPED, stats); return
+                        finish(AgentStatus.STOPPED, stats, run = runCtx); return
                     }
                     setStatus(AgentStatus.THINKING)
                 }
@@ -815,7 +815,7 @@ object AgentEngine {
                     log(LogEntry.Kind.POLICY, "SENSITIVE_INPUT_DETECTED ($reason) — Secure Input Mode: pausing observation, brain and logging until you finish.")
                     com.tekyerema.money.GuidedSend.atPin(goal, reason, app = ctxApp)   // money safety round 2: a guided send reached its PIN
                     val resumed = awaitSecureInput(reason)
-                    if (!resumed) { finish(AgentStatus.STOPPED, stats); return }
+                    if (!resumed) { finish(AgentStatus.STOPPED, stats, run = runCtx); return }
                     continue   // re-observe a FRESH screen; the boundary re-checks it before any brain call
                 }
                 // J-11: an app on the user's deny list is never shown to the cloud model and never operated.
@@ -935,7 +935,7 @@ object AgentEngine {
                         if (unsupported != null) {
                             log(LogEntry.Kind.INFO, "CANNOT DO [unsupported_claim] the reply claimed '${unsupported.said}' twice with no step that did it")
                             log(LogEntry.Kind.RESULT, unsupported.honestLine); pushConvo("Tɛkyerɛma: ${unsupported.honestLine}")
-                            finish(AgentStatus.CANNOT_DO, stats); return
+                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         // P1-14 (D-017): a request that names a page ends ON that page. The last step may have verified only
                         // that the app was in front; the page's name must be in the final screen's heading (title or first
@@ -980,7 +980,7 @@ object AgentEngine {
                         if (isQuestion || (planOpen == null && !ungroundedRead && notThere == null && (mutatingCount == 0 || substantiveOk))) {
                             log(LogEntry.Kind.RESULT, spokenSummary)
                             pushConvo("Tɛkyerɛma: ${decision.summary}")
-                            finish(AgentStatus.COMPLETED, stats); return
+                            finish(AgentStatus.COMPLETED, stats, run = runCtx); return
                         }
                         val why = when {
                             planOpen != null -> "plan subgoal(s) never verified: " + planOpen.joinToString("; ") { "${it.id}. ${it.text.take(50)}" }
@@ -995,12 +995,12 @@ object AgentEngine {
                         log(LogEntry.Kind.INFO, "unverified completion: $why (outcome not backed by observation)")
                         log(LogEntry.Kind.RESULT, spokenSummary)
                         pushConvo("Tɛkyerɛma: ${decision.summary}")
-                        finish(AgentStatus.COMPLETED_UNVERIFIED, stats); return
+                        finish(AgentStatus.COMPLETED_UNVERIFIED, stats, run = runCtx); return
                     }
                     is AgentDecision.CannotDo -> {
                         // The task itself cut the connection ("turn on airplane mode", verified) — done, not "paused" (ConnectivityGoal).
                         if (lastMutatingVerified == true && (decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST))
-                            ConnectivityGoal.doneLine(goal, ctxApp)?.let { line -> log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.COMPLETED, stats); return }
+                            ConnectivityGoal.doneLine(goal, ctxApp)?.let { line -> log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.COMPLETED, stats, run = runCtx); return }
                         // WS-A: the network dropped, or no capable model / quota / budget is left (Workstream B's reason
                         // classes) — that is not "can't do it": the task PAUSES with a checkpoint (journaled tasks only).
                         val pauseFor = if (taskRun != null) com.tekyerema.agent.journal.PauseRules.forCannotDo(decision.reasonClass) else null
@@ -1020,7 +1020,7 @@ object AgentEngine {
                         val netDrop = decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST
                         pushConvo(if (netDrop) "Tɛkyerɛma: (that request didn't run — the connection dropped for a moment; " +
                             "this says nothing about the connection now)" else "Tɛkyerɛma: $detail")
-                        finish(AgentStatus.CANNOT_DO, stats); return
+                        finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                     }
                     is AgentDecision.Fail -> {
                         log(LogEntry.Kind.ERROR, decision.reason)
@@ -1040,7 +1040,7 @@ object AgentEngine {
                             "phone commands like the time, calls or opening an app still work now."
                             else "Something went wrong on my side, so I stopped. You can try again, or say it another way.")
                         pushConvo("Tɛkyerɛma: I couldn't do that.")
-                        finish(AgentStatus.FAILED, stats); return
+                        finish(AgentStatus.FAILED, stats, run = runCtx); return
                     }
                     is AgentDecision.Malformed -> {
                         stats = stats.copy(malformedResponses = stats.malformedResponses + 1)
@@ -1078,14 +1078,14 @@ object AgentEngine {
                                 twiWording = decision.args.optString("question_twi").takeIf { it.isNotBlank() })
                             if (ans == null) {
                                 log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
-                                finish(AgentStatus.CANNOT_DO, stats); return
+                                finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                             }
                             // "never mind" / "cancel" / "gyae" as the whole answer ends the task here — the device suite
                             // (2026-09-29) saw the model ask the same question again. A plain "no" may be a real answer.
                             if (com.tekyerema.voice.ControlVerbs.classify(ans) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
                                 log(LogEntry.Kind.RESULT, "Okay, I've left it.")
                                 pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
-                                finish(AgentStatus.STOPPED, stats); return
+                                finish(AgentStatus.STOPPED, stats, run = runCtx); return
                             }
                             val picked = (com.tekyerema.agent.research.OptionAnswer.parse(ans, options) as?
                                 com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.let { options[it.index] }
@@ -1108,7 +1108,7 @@ object AgentEngine {
                             if (ans == null || LoopGuard.wantsStop(ans)) {
                                 log(LogEntry.Kind.RESULT, "Okay, I stopped.")
                                 pushConvo("Tɛkyerɛma: I stopped because it wasn't working.")
-                                finish(AgentStatus.STOPPED, stats); return
+                                finish(AgentStatus.STOPPED, stats, run = runCtx); return
                             }
                             history.add(if (missing != null) "open_app found no app called '$missing'. The user was asked which app they " +
                                     "meant and said: \"$ans\". Open that with open_app; if it's still not installed, tell them (cannot_do)."
@@ -1192,8 +1192,10 @@ object AgentEngine {
                         if (tool.scope == com.tekyerema.policy.CapabilityScope.PERCEIVE) usedRead = true   // §C.3
                         log(LogEntry.Kind.PLAN, "Step $step: ${decision.name}(${shortArgs(decision.args)})" +
                             (decision.expects?.let { " expects[$it]" } ?: "") + (decision.rationale?.let { " $it" } ?: ""))
-                        // The assistant surface's activity timeline: this step, as it really starts (agent/AgentStep; UX-1).
-                        _state.update { it.copy(steps = AgentSteps.started(it.steps, it.runSeq, step, decision.name, AgentSteps.subjectOf(decision.name, decision.args))) }
+                        // The assistant surface's activity timeline: this step, as it really starts (agent/AgentStep; UX-1). Only
+                        // while this run still owns the state: a stopped run still unwinding never writes into a newer run's list.
+                        _state.update { if (it.runSeq != runCtx.seq) it else it.copy(steps = AgentSteps.started(it.steps, runCtx.seq, step,
+                            decision.name, AgentSteps.subjectOf(decision.name, decision.args))) }
                         if (Expects.isVacuous(expectation) && mutating)
                             stats = stats.copy(vacuousExpects = stats.vacuousExpects + 1)
 
@@ -1262,12 +1264,12 @@ object AgentEngine {
                                     val a = askUser(ask, ask, twiWording = askTwi)
                                     if (a == null) {
                                         log(LogEntry.Kind.RESULT, "I didn't get an answer, so I stopped. Ask me again when you're ready.")
-                                        finish(AgentStatus.CANNOT_DO, stats); return
+                                        finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                     }
                                     if (com.tekyerema.voice.ControlVerbs.classify(a) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
                                         log(LogEntry.Kind.RESULT, "Okay, I've left it.")
                                         pushConvo("Tɛkyerɛma: stopped — the user said \"$a\".")
-                                        finish(AgentStatus.STOPPED, stats); return
+                                        finish(AgentStatus.STOPPED, stats, run = runCtx); return
                                     }
                                     ans = a
                                     val idx = (com.tekyerema.agent.research.OptionAnswer.parse(a, choices) as?
@@ -1278,7 +1280,7 @@ object AgentEngine {
                                         newName = other.groupValues[1].trim().trim(',', '.', ' ').takeIf { it.isNotEmpty() }
                                         if (newName == null) {
                                             log(LogEntry.Kind.RESULT, "Who should it be? Say the name as it's saved, or the phone number.")
-                                            finish(AgentStatus.CANNOT_DO, stats); return
+                                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                         }
                                         break
                                     }
@@ -1287,7 +1289,7 @@ object AgentEngine {
                                 }
                                 if (!chosen && newName == null) {
                                     log(LogEntry.Kind.RESULT, "I couldn't tell which one you meant, so nothing was done. Say the full name as it's saved, or the phone number.")
-                                    finish(AgentStatus.CANNOT_DO, stats); return
+                                    finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                 }
                                 if (!chosen) { args2.put("contact", newName); args2.remove("number") }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → several contacts matched; the user was asked " +
@@ -1351,7 +1353,7 @@ object AgentEngine {
                             log(LogEntry.Kind.POLICY, "INJECTION_STOP: ${decision.name} with a payload from untrusted content that contained instructions (${payloadInjection ?: injectionSource})")
                             log(LogEntry.Kind.RESULT, "I stopped: $src contained instructions trying to direct me, so I didn't act on it. Nothing was sent.")
                             pushConvo("Tɛkyerɛma: I stopped because $src tried to give me instructions.")
-                            finish(AgentStatus.CANNOT_DO, stats); return
+                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         // ---- WS-A effect ledger (replaces D-09 / G-21): the CONSEQUENCE of this step — a tap on Send, type +
                         // submit into a chat, send_sms… keyed on kind + target + payload hash — is looked up across tasks and
@@ -1390,7 +1392,7 @@ object AgentEngine {
                                 // WS-C: a capability the user switched off ends the task with their reason (spoken as is);
                                 // Guide only lets the model explain first (operator/OperatorStops).
                                 com.tekyerema.operator.OperatorStops.afterBlock(runCtx.auditTask, pd.operatorRule)?.let { line ->
-                                    log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.CANNOT_DO, stats); return }
+                                    log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → BLOCKED by policy: ${pd.reason}. Do not retry it; if the goal needs it, call cannot_do.")
                                 // A blocked substantive action did not happen: a Done right after must not read as verified.
                                 // (WS-C: not when the user's own mode blocked it — a guide-only explanation is a complete answer.)
@@ -1544,7 +1546,7 @@ object AgentEngine {
                                         log(LogEntry.Kind.POLICY, "Declined by user.")
                                         // J-12 planned; WS-C: with the confirmation number the user answered.
                                         stepAudit?.declined(seq, prompt) ?: com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)
-                                        finish(AgentStatus.STOPPED, stats); return
+                                        finish(AgentStatus.STOPPED, stats, run = runCtx); return
                                     }
                                     is ConfirmReply.Revise -> {
                                         stepAudit?.declined(seq, prompt, revised = true) ?: com.tekyerema.audit.AuditLog.record(source, com.tekyerema.audit.AuditLog.DECLINED, prompt, runCtx.auditTask)
@@ -1693,7 +1695,7 @@ object AgentEngine {
                                 log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled steps) — stopping honestly.")
                                 log(LogEntry.Kind.RESULT, "I kept trying but the screen wasn't changing, so I stopped.")
                                 pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
-                                finish(AgentStatus.CANNOT_DO, stats); return
+                                finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                             }
                             continue
                         }
@@ -1719,8 +1721,8 @@ object AgentEngine {
                         if (result.needsDisambiguation) References.noteOptions(References.optionsFrom(result.message))
                         stats = stats.copy(actions = stats.actions + 1, channels = bump(stats.channels, result.channel))
                         log(LogEntry.Kind.ACTION, "${decision.name} → ${if (result.success) "ok" else "failed"} [${result.channel}]: ${result.message}")
-                        _state.update { it.copy(steps = AgentSteps.finished(it.steps, it.runSeq, step, result.success,
-                            AgentSteps.sourcesOf(result.data), AgentSteps.linkOf(result.data))) }
+                        _state.update { if (it.runSeq != runCtx.seq) it else it.copy(steps = AgentSteps.finished(it.steps, runCtx.seq, step,
+                            result.success, AgentSteps.sourcesOf(result.data), AgentSteps.linkOf(result.data))) }
                         // J-12: every device action in plain words (WS-C: linked to its proposal); J-13: what can't be taken back is named for "undo".
                         stepAudit?.executed(result.success)
                         if ((consequential || effect != null) && result.success) runCtx.irreversible.add(com.tekyerema.audit.ActionWords.noun(decision.name, decision.args))
@@ -1814,7 +1816,7 @@ object AgentEngine {
                                     log(LogEntry.Kind.INFO, "futility: '$lookedFor' never appeared after repeated attempts — stopping honestly.")
                                     log(LogEntry.Kind.RESULT, "I looked, but I couldn't find “${lookedFor.take(50)}” on this phone.")
                                     pushConvo("Tɛkyerɛma: I couldn't find ${lookedFor.take(50)}.")
-                                    finish(AgentStatus.CANNOT_DO, stats); return
+                                    finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                 }
                                 Futility.Signal.NONE -> {}
                             }
@@ -1838,7 +1840,7 @@ object AgentEngine {
                                     log(LogEntry.Kind.INFO, "loop guard: the same screen cycle repeated — stopping honestly.")
                                     log(LogEntry.Kind.RESULT, "I kept going round in circles, so I stopped.")
                                     pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
-                                    finish(AgentStatus.CANNOT_DO, stats); return
+                                    finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                 }
                                 LoopGuard.Cycle.NONE -> {}
                             }
@@ -1849,7 +1851,7 @@ object AgentEngine {
                                 log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled mutating steps) — stopping honestly.")
                                 log(LogEntry.Kind.RESULT, "I kept trying but the screen wasn't changing, so I stopped.")
                                 pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
-                                finish(AgentStatus.CANNOT_DO, stats); return
+                                finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                             }
                         }
 
@@ -1959,7 +1961,7 @@ object AgentEngine {
                 }
             }
             log(LogEntry.Kind.ERROR, "Reached the step limit without completing the task.")
-            finish(AgentStatus.FAILED, stats)
+            finish(AgentStatus.FAILED, stats, run = runCtx)
         } catch (ce: CancellationException) {
             log(LogEntry.Kind.STATS, stats.summary())
             runCtx.journal?.finish(com.tekyerema.agent.journal.TaskState.CANCELLED)   // WS-A: stopped by the user — not resumable
@@ -1970,7 +1972,7 @@ object AgentEngine {
             throw ce
         } catch (t: Throwable) {
             log(LogEntry.Kind.ERROR, "Error: ${t.message}")
-            finish(AgentStatus.FAILED, stats)
+            finish(AgentStatus.FAILED, stats, run = runCtx)
         }
     }
 
@@ -2286,14 +2288,17 @@ object AgentEngine {
     }
 
     /** @param paused WS-A: the run ended because the task PAUSED (kept, resumable) — recorded in the typed result. */
-    private fun finish(status: AgentStatus, stats: RunStats, paused: com.tekyerema.agent.journal.PauseReason? = null) {
+    /** @param run the run that is finishing (runTask passes its own): a stopped run still unwinding when a newer one has begun
+     *  must not end the newer run's journal, take its place in [activeRun], or write its status/result (review, 14 Oct 2026). */
+    private fun finish(status: AgentStatus, stats: RunStats, paused: com.tekyerema.agent.journal.PauseReason? = null,
+                       run: RunCtx? = activeRun) {
         log(LogEntry.Kind.STATS, stats.summary())
         // Trust (2026-09-29, agent/helper/TrustFast.kt): remember this task for "tell my helper what you did", end its PIN mark,
         // and after a second failure in a row add "If you'd like, say “call my helper”" (once) to the spoken result.
-        com.tekyerema.agent.helper.HelperHooks.taskEnded(appContext, activeRun?.goal ?: _state.value.goal, status, paused != null,
-            activeRun?.auditTask, _state.value.log)?.let { withOffer -> _state.update { it.copy(log = withOffer) } }
+        com.tekyerema.agent.helper.HelperHooks.taskEnded(appContext, run?.goal ?: _state.value.goal, status, paused != null,
+            run?.auditTask, _state.value.log)?.let { withOffer -> _state.update { it.copy(log = withOffer) } }
         val summary = _state.value.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text ?: ""
-        val r = activeRun.also { activeRun = null }
+        val r = run.also { if (activeRun === it) activeRun = null }
         // WS-A: the journal record ends with the run (a paused one stays PAUSED — it ended the loop, not the task).
         r?.journal?.finish(when (status) {
             AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED -> com.tekyerema.agent.journal.TaskState.COMPLETED
@@ -2313,6 +2318,9 @@ object AgentEngine {
             .put("decideMs", stats.decideLatencyMs)
             .put("goal", _state.value.goal ?: "")
             .put("paused", paused?.name ?: org.json.JSONObject.NULL)   // WS-A: History says "Paused", not "Couldn't do that"
+            // Which run this result is: a stopped run never writes one, so the previous run's stays in lastResult — the
+            // assistant surface showed its words under the new run's "Stopped" (emulator, 14 Oct 2026; docs/assistant-ux).
+            .put("runSeq", r?.seq ?: _state.value.runSeq)
         if (r != null) try {
             com.tekyerema.core.telemetry.Telemetry.update { this.tier = tier; this.steps = stats.steps }
             com.tekyerema.core.telemetry.Telemetry.mark("action_done")
@@ -2326,7 +2334,9 @@ object AgentEngine {
             }
             if (ctx != null) r.trajectory?.let { com.tekyerema.core.telemetry.Trajectories.save(ctx, it, status.name, summary) }
         } catch (t: Throwable) { Log.w(TAG, "[UNDO] undo group / trajectory not saved: ${t.javaClass.simpleName}") }   // P3-04
-        _state.update { it.copy(status = status, lastStats = stats.summary(), lastResult = result.toString()) }
+        // Only while this run still owns the state (as the cancellation path already does): a late finish of an older run
+        // never overwrites the newer run's status or result.
+        _state.update { if (r != null && it.runSeq != r.seq) it else it.copy(status = status, lastStats = stats.summary(), lastResult = result.toString()) }
     }
 
     private fun bump(m: Map<String, Int>, k: String): Map<String, Int> = m + (k to ((m[k] ?: 0) + 1))

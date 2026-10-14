@@ -272,6 +272,7 @@ fun HomeContent(
             voice = voice, agent = agent, twi = twi,
             onTypeRequest = { try { typeFocus.requestFocus() } catch (_: Throwable) {} },
             onVisible = { surfaceVisible = it },
+            readsAloud = speakAloud,
             modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp)
         )
     }

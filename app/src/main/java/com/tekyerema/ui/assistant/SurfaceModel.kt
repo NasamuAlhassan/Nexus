@@ -49,6 +49,8 @@ object SurfaceModel {
         val waiting: Waiting? = null,
         /** The reply is being read aloud now (the stop control stops the reading, never an action). */
         val speaking: Boolean = false,
+        /** The task is paused (nothing is moving: the sign holds still and TalkBack hears "Paused", not "Working on it"). */
+        val paused: Boolean = false,
         /** What this surface is about: "run:N" for agent run N, "reply:T" for a reply the voice gave at T without a run. */
         val key: String = "run:$runSeq"
     ) {
@@ -77,15 +79,19 @@ object SurfaceModel {
         val inRun = agent.status == AgentStatus.THINKING || agent.status == AgentStatus.ACTING || agent.status == AgentStatus.PAUSED
         if (inRun) {
             val active = steps.lastOrNull { it.active }
-            return if (active == null) State(run, Mode.PROCESSING, if (agent.status == AgentStatus.PAUSED) "Paused" else "Working on it", steps)
+            if (agent.status == AgentStatus.PAUSED) return State(run, Mode.PROCESSING, "Paused", steps, paused = true)
+            return if (active == null) State(run, Mode.PROCESSING, "Working on it", steps)
             else State(run, Mode.WORKING, active.label, steps)
         }
         // Understanding what was said (no run yet): a quiet processing state, nothing more to claim.
         if (voice.state == VoiceState.CAPTURED || voice.state == VoiceState.TRANSCRIBING || voice.state == VoiceState.UNDERSTANDING)
             return State(run, Mode.PROCESSING, "Understanding")
         val speaking = voice.state == VoiceState.SPEAKING
-        val resultAt = agent.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.RESULT }?.timeMs ?: 0L
-        val runFresh = resultAt == 0L || now - resultAt in 0..FRESH_MS
+        // When the run ended: its result line, or — for a stopped run, which writes none — its last line (the log is cleared
+        // when a run starts). A time newer than the host's clock counts as fresh (the clock ticks only on surface changes);
+        // 0 = no log yet.
+        val resultAt = (agent.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.RESULT } ?: agent.log.lastOrNull())?.timeMs ?: 0L
+        val runFresh = resultAt == 0L || now - resultAt <= FRESH_MS
         if (agent.status in TERMINAL && run > 0 && run != local.dismissedRun && runFresh) {
             val preview = previewOf(agent, steps, voice) ?: return State(run, Mode.HIDDEN)
             val mode = when (preview) {
@@ -99,7 +105,7 @@ object SurfaceModel {
         // shown as itself, never under an older run's title. Only one newer than the last dismissal, and fresh.
         val reply = voice.spoken.trim()
         if (reply.isNotEmpty() && voice.spokenAt > local.dismissedAt && voice.spokenAt != local.dismissedReplyAt &&
-            now - voice.spokenAt in 0..FRESH_MS && (agent.status !in TERMINAL || run == local.dismissedRun || !runFresh)) {
+            now - voice.spokenAt <= FRESH_MS && (agent.status !in TERMINAL || run == local.dismissedRun || !runFresh)) {
             val asked = titleOf(voice.lastCanonical.ifBlank { voice.lastRaw })
             return State(run, Mode.PRESENTING, asked.ifEmpty { "Answer" }, key = "reply:${voice.spokenAt}",
                 preview = Preview.Answer(asked.ifEmpty { "Answer" }, Summaries.compact(reply), reply), speaking = speaking)
@@ -134,14 +140,21 @@ object SurfaceModel {
     // ------------------------------------------------------------------ previews
 
     internal fun previewOf(agent: AgentUiState, steps: List<StepView>, voice: VoiceUiState): Preview? {
-        val result = try { agent.lastResult?.let { JSONObject(it) } } catch (_: Throwable) { null }
-        val summary = (result?.optString("summary")?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+        // Only THIS run's words. A stopped run writes no result, so lastResult still holds the previous run's (the emulator
+        // showed it under the new run's "Stopped", 14 Oct 2026): a result counts only with this run's number. The log is
+        // cleared when a run starts, so its lines are this run's; the voice's last reply counts only if spoken during it.
+        val result = (try { agent.lastResult?.let { JSONObject(it) } } catch (_: Throwable) { null })
+            ?.takeIf { it.optLong("runSeq", -1L) == agent.runSeq }
+        val runStart = agent.log.firstOrNull()?.timeMs ?: Long.MAX_VALUE
+        val own = result?.optString("summary")?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
             ?: agent.log.lastOrNull { it.kind == com.tekyerema.agent.LogEntry.Kind.RESULT }?.text?.trim()
-            ?: voice.spoken.trim()).ifEmpty { return null }
+        // A stopped run says only its own words (or that it stopped) — never a line the voice said along the way.
+        val summary = (own ?: voice.spoken.trim().takeIf { voice.spokenAt >= runStart && agent.status != AgentStatus.STOPPED }).orEmpty()
         val goal = (agent.request ?: agent.goal).orEmpty().trim()
         val title = titleOf(goal)
+        if (summary.isEmpty() && agent.status != AgentStatus.STOPPED) return null
         return when (agent.status) {
-            AgentStatus.STOPPED -> Preview.Problem("Stopped", summary.ifBlank { "Stopped." }, retryGoal = goal.ifEmpty { null })
+            AgentStatus.STOPPED -> Preview.Problem("Stopped", summary.ifBlank { "Stopped before it finished." }, retryGoal = goal.ifEmpty { null })
             AgentStatus.FAILED, AgentStatus.CANNOT_DO -> Preview.Problem(title.ifEmpty { "Couldn't finish" }, summary,
                 retryGoal = goal.takeIf { it.isNotEmpty() && agent.status == AgentStatus.FAILED })
             else -> {
@@ -182,10 +195,14 @@ object SurfaceModel {
 
 /** User-facing words for a real step (the planner's tool and its whitelisted subject). Pure. */
 object StepLabels {
+    /** At most [n] characters, cut at a word: "…headlines in Ghana…", not "…headlines in Ghana t" (emulator, 14 Oct 2026). */
+    internal fun clip(s: String, n: Int): String =
+        if (s.length <= n) s else (s.take(n).substringBeforeLast(' ').ifEmpty { s.take(n) }).trimEnd(',', ';', ':') + "…"
+
     fun label(tool: String, subject: String?): String {
         val x = subject?.trim()?.takeIf { it.isNotEmpty() }
         return when (tool) {
-            "web_search", "search_web" -> x?.let { "Searching the web for “${it.take(40)}”" } ?: "Searching the web"
+            "web_search", "search_web" -> x?.let { "Searching the web for “${clip(it, 40)}”" } ?: "Searching the web"
             "open_app" -> x?.let { "Opening $it" } ?: "Opening the app"
             "close_app" -> x?.let { "Closing $it" } ?: "Closing the app"
             "install_app" -> x?.let { "Installing $it" } ?: "Installing the app"
@@ -204,7 +221,7 @@ object StepLabels {
             "set_alarm" -> "Setting the alarm"
             "set_timer" -> "Setting the timer"
             "set_volume", "volume_up", "volume_down", "set_range" -> "Adjusting the volume"
-            "play_music" -> x?.let { "Playing $it" } ?: "Playing music"
+            "play_music" -> x?.let { "Playing ${clip(it, 48)}" } ?: "Playing music"
             "type" -> "Typing"
             "tap", "tap_sequence", "long_press" -> "Tapping on the screen"
             "scroll", "swipe" -> "Looking through the screen"

@@ -32,8 +32,10 @@ object AgentSteps {
     /** At most this many steps are kept for a run (a long walk shows its latest). */
     const val MAX = 24
 
-    /** A step started in [runSeq]. Steps of any other run are dropped — a list only ever describes one run. */
+    /** A step started in [runSeq]. Steps of an older run are dropped — a list only ever describes one run — and a late step of
+     *  an older run never replaces a newer run's list. */
     fun started(list: List<AgentStep>, runSeq: Long, index: Int, tool: String, subject: String?): List<AgentStep> {
+        if (list.any { it.runSeq > runSeq }) return list
         val mine = list.filter { it.runSeq == runSeq && it.index != index }
         return (mine + AgentStep(runSeq, index, tool, subject)).takeLast(MAX)
     }

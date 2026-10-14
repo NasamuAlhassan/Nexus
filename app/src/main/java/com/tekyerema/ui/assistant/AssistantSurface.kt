@@ -18,6 +18,8 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -32,6 +34,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -39,6 +42,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -52,7 +57,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -73,6 +80,7 @@ import com.tekyerema.agent.AgentEngine
 import com.tekyerema.agent.AgentStep
 import com.tekyerema.agent.AgentUiState
 import com.tekyerema.agent.AgentStatus
+import com.tekyerema.policy.ConfirmGate
 import com.tekyerema.ui.components.BigButton
 import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
@@ -96,6 +104,13 @@ import kotlinx.coroutines.delay
  * Hosted by [com.tekyerema.ui.home.HomeContent] (Home and the arrive-on-top Voice screen). Over other apps the waiting
  * panel is [com.tekyerema.ui.OverlayConfirm] (DECISIONS UX-2).
  */
+/** What the user did to the surface, kept for the process (both screens that host the surface share it, and a screen
+ *  recreated after a rotation or a return doesn't bring back a result the user closed). */
+object SurfaceStore {
+    val local = kotlinx.coroutines.flow.MutableStateFlow(SurfaceModel.Local())
+    fun update(f: (SurfaceModel.Local) -> SurfaceModel.Local) { local.value = f(local.value) }
+}
+
 @Composable
 fun AssistantSurfaceHost(
     voice: VoiceUiState,
@@ -105,24 +120,50 @@ fun AssistantSurfaceHost(
     onTypeRequest: () -> Unit,
     modifier: Modifier = Modifier,
     /** The surface's visibility, for the host to quieten what would repeat it (the line under the orb). */
-    onVisible: (Boolean) -> Unit = {}
+    onVisible: (Boolean) -> Unit = {},
+    /** The user's "read replies aloud": our own voice then says results and prompts, so TalkBack isn't also told them. */
+    readsAloud: Boolean = false
 ) {
     val context = LocalContext.current
-    var local by remember { mutableStateOf(SurfaceModel.Local()) }
+    val local by SurfaceStore.local.collectAsState()
     var expandedKey by remember { mutableStateOf("") }
     // A clock that ticks only when a result's freshness may run out (no per-frame work).
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val inRun = agent.status == AgentStatus.THINKING || agent.status == AgentStatus.ACTING || agent.status == AgentStatus.PAUSED ||
         agent.status == AgentStatus.ASKING || agent.status == AgentStatus.WAITING_CONFIRMATION || agent.status == AgentStatus.SECURE_INPUT
-    // A NEW request replaces the previous result (Siri replaces its snippet): when the user starts talking with no task running.
-    LaunchedEffect(voice.state) {
-        if (voice.state == VoiceState.LISTENING && !inRun) {
-            val t = System.currentTimeMillis()
-            local = local.copy(dismissedRun = agent.runSeq, dismissedAt = t)
-            now = t
+    // What the last committed frame saw (written only after a frame commits, in the SideEffect below).
+    val prev = remember { PrevFrame(voice.lastRaw, voice.state, agent.runSeq, voice.spokenAt, inRun) }
+    // The panel over other apps (OverlayConfirm) also shows a question or confirmation over our own screen, in this same
+    // place; while it is really up — and for the same prompt after it was answered on it — the surface doesn't draw the
+    // prompt a second time (TalkBack would read it twice; UX-10). If the panel couldn't be drawn (no accessibility service,
+    // no overlay permission), the surface shows the prompt itself.
+    val panelUp by com.tekyerema.ui.OverlayConfirm.onScreen.collectAsState()
+    val panelPrompt = remember { arrayOf("") }
+    val reduced = SurfaceModel.reduce(voice, agent, local, now = maxOf(now, voice.spokenAt), twi = twi)
+    val promptKey = reduced.waiting?.let { "${it.kind}|${it.seq}|${it.text}" }
+    val state = if (reduced.mode == SurfaceModel.Mode.WAITING && (panelUp || promptKey == panelPrompt[0])) reduced.copy(mode = SurfaceModel.Mode.HIDDEN)
+        else reduced
+    SideEffect {
+        if (panelUp && promptKey != null) panelPrompt[0] = promptKey
+        // A NEW request replaces what was on screen BEFORE it (Siri replaces its snippet; UX-6): the user starts talking, or a
+        // new request is typed or heard, while no task was running. What the previous frame had is dismissed — never "now":
+        // a quick answer that arrives in the same frame as its request must still show (review, 14 Oct 2026). An answer to
+        // the agent's own question comes during a run, so it never dismisses anything.
+        val newInput = voice.lastRaw.isNotBlank() && voice.lastRaw != prev.lastRaw
+        val startedTalking = voice.state == VoiceState.LISTENING && prev.voiceState != VoiceState.LISTENING
+        if ((newInput || startedTalking) && !prev.inRun) {
+            val run = prev.runSeq; val at = prev.spokenAt
+            SurfaceStore.update { l -> l.copy(dismissedRun = run, dismissedAt = maxOf(l.dismissedAt, at)) }
         }
+        prev.lastRaw = voice.lastRaw; prev.voiceState = voice.state; prev.runSeq = agent.runSeq; prev.spokenAt = voice.spokenAt; prev.inRun = inRun
     }
-    val state = SurfaceModel.reduce(voice, agent, local, now = maxOf(now, voice.spokenAt), twi = twi)
+    // TalkBack is told what changed through one polite live node (UX-7) — except what our own voice already says aloud:
+    // results and prompts when "read replies aloud" is on. Decided by the setting, not by the voice's moment-to-moment state,
+    // so switching it back on can't make TalkBack repeat a result the voice has just read.
+    val announce = when (state.mode) {
+        SurfaceModel.Mode.PRESENTING, SurfaceModel.Mode.FAILED, SurfaceModel.Mode.CANCELLED, SurfaceModel.Mode.WAITING -> !readsAloud
+        else -> true
+    }
     LaunchedEffect(state.key, state.mode) {
         now = System.currentTimeMillis()
         if (state.mode == SurfaceModel.Mode.PRESENTING || state.mode == SurfaceModel.Mode.FAILED || state.mode == SurfaceModel.Mode.CANCELLED) {
@@ -143,14 +184,17 @@ fun AssistantSurfaceHost(
         onDismiss = {
             if (state.speaking) VoiceEngine.hush()
             val t = System.currentTimeMillis()
-            local = if (state.key.startsWith("reply:")) local.copy(dismissedReplyAt = voice.spokenAt, dismissedAt = t)
-                else local.copy(dismissedRun = state.runSeq, dismissedAt = t)
+            SurfaceStore.update { l -> if (state.key.startsWith("reply:")) l.copy(dismissedReplyAt = voice.spokenAt, dismissedAt = t)
+                else l.copy(dismissedRun = state.runSeq, dismissedAt = t) }
             expandedKey = ""
         },
+        announce = announce,
         onStopTask = { VoiceEngine.cancel(); AgentEngine.stop() },
         onStopSpeaking = { VoiceEngine.hush() },
         onConfirm = { approved, seq -> AgentEngine.confirm(approved, seq) },
-        onChoice = { choice -> VoiceEngine.submitTyped(choice) },
+        // A choice is that answer only while the agent is still asking (ChoiceGate): a late or double tap must never reach a
+        // confirmation, where the label would be read as a typed yes/no or a change.
+        onChoice = { choice -> if (ChoiceGate.accepts(AgentEngine.state.value.status, engineQuestion = true)) VoiceEngine.submitTyped(choice) },
         onAnswerByVoice = { VoiceEngine.respond() },
         onType = onTypeRequest,
         onSecureDone = { AgentEngine.secureInputDone() },
@@ -159,6 +203,22 @@ fun AssistantSurfaceHost(
         onOpenUrl = { open(it) },
         onOpenMaps = { query, link -> open(link ?: MapsLink.of(query)) }
     )
+}
+
+/** What the previous committed frame of the surface host saw (plain fields, written only in its SideEffect). */
+private class PrevFrame(var lastRaw: String, var voiceState: VoiceState, var runSeq: Long, var spokenAt: Long, var inRun: Boolean)
+
+/**
+ * Whether a tapped choice may be sent as the answer. Only while the agent is still asking (a question from a task), or while
+ * nothing waits at all (a question at the end of a reply starts a new turn) — never while a confirmation or the secure step
+ * waits: a typed label there is read as "yes", "no" or a change to the confirmation (review, 14 Oct 2026). Pure.
+ */
+object ChoiceGate {
+    fun accepts(status: AgentStatus, engineQuestion: Boolean): Boolean = when (status) {
+        AgentStatus.WAITING_CONFIRMATION, AgentStatus.SECURE_INPUT -> false
+        AgentStatus.ASKING -> true
+        else -> !engineQuestion
+    }
 }
 
 /** A maps search the phone's maps app runs near the user ("geo:0,0?q=…"); nothing about the place is invented here. */
@@ -184,20 +244,26 @@ fun AssistantSurface(
     onRetry: (String) -> Unit,
     onFollowUp: () -> Unit,
     onOpenUrl: (String) -> Unit,
-    onOpenMaps: (String, String?) -> Unit
+    onOpenMaps: (String, String?) -> Unit,
+    announce: Boolean = true
 ) {
     val calm = LocalCalmMotion.current
     AnimatedVisibility(
         visible = state.visible,
-        modifier = modifier,
+        // A readable width in landscape and on tablets (UX-8); the host centres it.
+        modifier = modifier.widthIn(max = 560.dp),
         // Enters from the top and leaves the way it came (HIG Motion: dismiss on the entry axis); calm = a fade only.
         enter = if (calm) fadeIn(tween(160)) else fadeIn(tween(220)) + slideInVertically(spring(0.8f, 380f, IntOffset(1, 1))) { -it / 3 },
         exit = if (calm) fadeOut(tween(120)) else fadeOut(tween(160)) + slideOutVertically(spring(1f, 900f, IntOffset(1, 1))) { -it / 4 }
     ) {
         val summary = spokenSummary(state)
+        // At most 80 % of the screen's height: the header stays put and the body scrolls (UX-8 — large text, a long question).
+        val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
         Column(
             Modifier
                 .fillMaxWidth()
+                .heightIn(max = maxHeight)
+                .background(Tk.palette.ink.copy(alpha = 0.95f), RoundedCornerShape(28.dp))
                 .glass(RoundedCornerShape(28.dp), strong = true, elevation = 10.dp)
                 .clip(RoundedCornerShape(28.dp))
                 .animateContentSize(if (calm) tween(0) else spring(0.9f, 420f, IntSize(1, 1)))
@@ -207,9 +273,12 @@ fun AssistantSurface(
                 }
                 .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
-            Header(state, expanded, summary, onExpand, onDismiss, onStopTask, onStopSpeaking)
+            Header(state, expanded, summary, onExpand, onDismiss, onStopTask, onStopSpeaking, announce)
+            // Each new state starts at its top.
+            val bodyScroll = remember(state.key, state.mode) { ScrollState(0) }
             AnimatedContent(
                 targetState = state,
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(bodyScroll),
                 contentKey = { "${it.key}|${it.mode}|${it.waiting?.seq}" },
                 transitionSpec = {
                     (if (calm) fadeIn(tween(160)) togetherWith fadeOut(tween(90))
@@ -237,33 +306,61 @@ internal fun spokenSummary(s: SurfaceModel.State): String = when {
 @Composable
 private fun Header(
     s: SurfaceModel.State, expanded: Boolean, summary: String,
-    onExpand: (Boolean) -> Unit, onDismiss: () -> Unit, onStopTask: () -> Unit, onStopSpeaking: () -> Unit
+    onExpand: (Boolean) -> Unit, onDismiss: () -> Unit, onStopTask: () -> Unit, onStopSpeaking: () -> Unit,
+    announce: Boolean
 ) {
     val working = s.mode == SurfaceModel.Mode.PROCESSING || s.mode == SurfaceModel.Mode.WORKING
     val presenting = s.mode == SurfaceModel.Mode.PRESENTING || s.mode == SurfaceModel.Mode.FAILED || s.mode == SurfaceModel.Mode.CANCELLED
-    val canExpand = presenting || (s.mode == SurfaceModel.Mode.WORKING && s.steps.size > SurfaceModel.COMPACT_STEPS)
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Glyph(glyphOf(s), active = working, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(12.dp))
+    // "More" only when expanding shows something more: the whole answer, the steps taken, or a title cut short (a "Stopped"
+    // card offered More with nothing behind it — emulator, 14 Oct 2026).
+    val longTitle = s.title.length > 44
+    val canExpand = when (val p = s.preview) {
+        is SurfaceModel.Preview.Answer -> presenting && (p.body.length > p.summary.length || s.steps.isNotEmpty() || longTitle)
+        is SurfaceModel.Preview.Action -> presenting && (s.steps.isNotEmpty() || longTitle)
+        is SurfaceModel.Preview.Problem -> false
+        null -> s.mode == SurfaceModel.Mode.WORKING && s.steps.count { !it.active } > SurfaceModel.COMPACT_STEPS
+    }
+    // At large text the title gets its own line and the controls sit under it (at 200 % "More" and "Done" left the title
+    // two words wide — emulator, 14 Oct 2026).
+    val stacked = LocalDensity.current.fontScale >= 1.5f
+    val title: @Composable (Modifier) -> Unit = { m ->
         // One stable, polite live node carries the meaning; the rows below are read on demand, never announced.
         Text(
             s.title,
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
             color = Tk.Text,
-            maxLines = if (expanded) 4 else 2,
+            maxLines = if (expanded || stacked) 4 else 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f).semantics {
+            modifier = m.semantics {
                 heading()
-                liveRegion = LiveRegionMode.Polite
-                contentDescription = summary
+                // The real title — the step running now, "Paused", or the result with its words — politely announced as it
+                // changes (in the app, live steps are few: a knowledge question's searches). Not announced when our own voice
+                // says it (results and prompts with "read replies aloud" on): TalkBack would say the same words over it.
+                if (announce) liveRegion = LiveRegionMode.Polite
+                contentDescription = if (working) s.title else summary
             }
         )
+    }
+    val actions: @Composable () -> Unit = {
         when {
             working -> SmallAction("Stop", "Stop the task", onStopTask)
             s.speaking -> SmallAction("Quiet", "Stop reading — the result stays here", onStopSpeaking)
             canExpand -> SmallAction(if (expanded) "Less" else "More", if (expanded) "Show less" else "Show more") { onExpand(!expanded) }
         }
         if (presenting) SmallAction("Done", "Done — close this result", onDismiss)
+    }
+    if (stacked) Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Glyph(glyphOf(s), active = working && !s.paused, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(12.dp))
+            title(Modifier.weight(1f))
+        }
+        Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) { actions() }
+    } else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Glyph(glyphOf(s), active = working && !s.paused, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(12.dp))
+        title(Modifier.weight(1f))
+        actions()
     }
 }
 
@@ -277,7 +374,8 @@ private fun Body(
 ) {
     Column(Modifier.fillMaxWidth()) {
         when (s.mode) {
-            SurfaceModel.Mode.WORKING, SurfaceModel.Mode.PROCESSING -> Steps(s.steps, expanded)
+            // The step running now is the title; the rows are the steps before it (one row repeated the title).
+            SurfaceModel.Mode.WORKING, SurfaceModel.Mode.PROCESSING -> Steps(s.steps.filterNot { it.active }, expanded)
             SurfaceModel.Mode.WAITING -> s.waiting?.let { Waiting(it, twi, onConfirm, onChoice, onAnswerByVoice, onType, onSecureDone, onStopTask) }
             else -> when (val p = s.preview) {
                 is SurfaceModel.Preview.Answer -> AnswerPreview(p, s.steps, expanded, onExpand, onFollowUp, onOpenUrl, onOpenMaps)
@@ -334,38 +432,55 @@ private fun Waiting(
     onSecureDone: () -> Unit, onStopTask: () -> Unit
 ) {
     Column(Modifier.padding(top = 10.dp)) {
-        Text(w.text, style = MaterialTheme.typography.bodyLarge, color = Tk.Text,
-            modifier = Modifier.semantics { contentDescription = w.text })
+        val shown = ScreenText.of(w.text)
+        Text(shown, style = MaterialTheme.typography.bodyLarge, color = Tk.Text,
+            modifier = Modifier.semantics { contentDescription = shown })
         Spacer(Modifier.height12())
+        // The same spoken words as the panel over other apps (OverlayConfirm), in the user's one language.
+        val stopWords = if (twi) "Gyae adwuma no" else "Stop the task"
         when (w.kind) {
             PromptSurface.Kind.CONFIRM -> {
                 val (no, yes) = ConfirmWords.buttons(w.text, twi)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // The verb counts only once this confirmation has been on screen for a moment (ConfirmGate.armed, as on the
+                // panel over other apps): a tap meant for the card as it arrives can't approve anything. Before that the
+                // button gives a plain tick, not the confirm buzz.
+                val shownAt = remember(w.seq) { android.os.SystemClock.uptimeMillis() }
+                var armed by remember(w.seq) { mutableStateOf(false) }
+                LaunchedEffect(w.seq) { delay(ConfirmGate.armMs()); armed = true }
+                ButtonRow(listOf(no, yes), listOf(1f, 1.4f)) { i, m ->
                     // J-02: these answer THIS confirmation (its own number), never whatever is pending at tap time.
-                    BigButton(no, onClick = { onConfirm(false, w.seq) }, modifier = Modifier.weight(1f), filled = false,
-                        contentDescription = "$no — don't do it", haptic = TkHaptic.REJECT)
-                    BigButton(yes, onClick = { onConfirm(true, w.seq) }, modifier = Modifier.weight(1.4f), haptic = TkHaptic.CONFIRM)
+                    if (i == 0) BigButton(no, onClick = { onConfirm(false, w.seq) }, modifier = m, filled = false,
+                        contentDescription = if (twi) "Daabi, nnyɛ" else "$no — don't do it", haptic = TkHaptic.REJECT)
+                    else BigButton(yes, onClick = { if (ConfirmGate.armed(shownAt, android.os.SystemClock.uptimeMillis())) onConfirm(true, w.seq) },
+                        modifier = m, contentDescription = if (twi) "Aane, yɛ" else "$yes — do it",
+                        haptic = if (armed) TkHaptic.CONFIRM else TkHaptic.TAP)
                 }
             }
             PromptSurface.Kind.QUESTION -> {
                 val choices = QuestionChoices.of(w.text)
                 if (choices.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     choices.forEach { c -> BigButton(c, onClick = { onChoice(c) }, modifier = Modifier.fillMaxWidth(), filled = false,
-                        contentDescription = "Answer: $c") }
+                        contentDescription = (if (twi) "Bua: " else "Answer: ") + c) }
                 }
                 if (choices.isNotEmpty()) Spacer(Modifier.height12())
                 val (stop, answer) = PromptSurface.buttons(PromptSurface.Kind.QUESTION, twi)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    BigButton(stop, onClick = onStopTask, modifier = Modifier.weight(1f), filled = false, contentDescription = "Stop the task")
-                    BigButton("Type", onClick = onType, modifier = Modifier.weight(1f), filled = false, contentDescription = "Type your answer")
-                    BigButton(answer, onClick = onAnswerByVoice, modifier = Modifier.weight(1.3f), contentDescription = "Answer by voice")
+                val type = if (twi) "Twerɛ" else "Type"
+                ButtonRow(listOf(stop, type, answer), listOf(1f, 1f, 1.3f)) { i, m ->
+                    when (i) {
+                        0 -> BigButton(stop, onClick = onStopTask, modifier = m, filled = false, contentDescription = stopWords)
+                        1 -> BigButton(type, onClick = onType, modifier = m, filled = false,
+                            contentDescription = if (twi) "Twerɛ wo mmuae" else "Type your answer")
+                        else -> BigButton(answer, onClick = onAnswerByVoice, modifier = m,
+                            contentDescription = if (twi) "Bua wɔ kasa mu" else "Answer by voice")
+                    }
                 }
             }
             PromptSurface.Kind.SECURE -> {
                 val (stop, done) = PromptSurface.buttons(PromptSurface.Kind.SECURE, twi)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    BigButton(stop, onClick = onStopTask, modifier = Modifier.weight(1f), filled = false, contentDescription = "Stop the task")
-                    BigButton(done, onClick = onSecureDone, modifier = Modifier.weight(1.4f), contentDescription = "I've finished entering it")
+                ButtonRow(listOf(stop, done), listOf(1f, 1.4f)) { i, m ->
+                    if (i == 0) BigButton(stop, onClick = onStopTask, modifier = m, filled = false, contentDescription = stopWords)
+                    else BigButton(done, onClick = onSecureDone, modifier = m,
+                        contentDescription = if (twi) "Mawie" else "I've finished entering it")
                 }
             }
         }
@@ -380,9 +495,9 @@ private fun AnswerPreview(
     onExpand: (Boolean) -> Unit, onFollowUp: () -> Unit, onOpenUrl: (String) -> Unit, onOpenMaps: (String, String?) -> Unit
 ) {
     Column(Modifier.padding(top = 10.dp)) {
-        val text = if (expanded) p.body else p.summary
-        Box(Modifier.fillMaxWidth().heightIn(max = if (expanded) 360.dp else 160.dp)
-            .then(if (expanded) Modifier.verticalScroll(rememberScrollState()) else Modifier)
+        val text = ScreenText.of(if (expanded) p.body else p.summary)
+        // Expanded = the whole answer; the card's body scrolls (UX-8), so no inner scroll fights it.
+        Box(Modifier.fillMaxWidth()
             .clickable(role = Role.Button, onClickLabel = if (expanded) "Show less" else "Show the whole answer",
                 enabled = p.body.length > p.summary.length) { onExpand(!expanded) }) {
             Text(text, style = MaterialTheme.typography.bodyLarge, color = Tk.Text,
@@ -402,20 +517,19 @@ private fun AnswerPreview(
             Steps(steps, expanded = true)
         }
         Spacer(Modifier.height12())
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            val maps = p.mapLink != null || p.mapQuery != null
-            if (maps) BigButton("Open in Maps", onClick = { onOpenMaps(p.mapQuery ?: "", p.mapLink) }, modifier = Modifier.weight(1f),
-                filled = false, contentDescription = "Open ${p.mapQuery ?: "the place"} in your maps app")
-            BigButton("Ask a follow-up", onClick = onFollowUp, modifier = Modifier.weight(1f), filled = !maps,
-                contentDescription = "Ask a follow-up question by voice")
-        }
+        val follow = "Ask a follow-up"
+        if (p.mapLink != null || p.mapQuery != null) ButtonRow(listOf("Open in Maps", follow), listOf(1f, 1f)) { i, m ->
+            if (i == 0) BigButton("Open in Maps", onClick = { onOpenMaps(p.mapQuery ?: "", p.mapLink) }, modifier = m, filled = false,
+                contentDescription = "Open ${p.mapQuery ?: "the place"} in your maps app")
+            else BigButton(follow, onClick = onFollowUp, modifier = m, filled = false, contentDescription = "Ask a follow-up question by voice")
+        } else BigButton(follow, onClick = onFollowUp, modifier = Modifier.fillMaxWidth(), contentDescription = "Ask a follow-up question by voice")
     }
 }
 
 @Composable
 private fun ActionPreview(p: SurfaceModel.Preview.Action, steps: List<SurfaceModel.StepView>, expanded: Boolean, onFollowUp: () -> Unit) {
     Column(Modifier.padding(top = 10.dp)) {
-        Text(p.summary, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
+        Text(ScreenText.of(p.summary), style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
         if (!p.verified) Text("I couldn't confirm it finished — please check.", style = MaterialTheme.typography.bodyMedium,
             color = Tk.Attention, modifier = Modifier.padding(top = 6.dp))
         if (expanded && steps.isNotEmpty()) {
@@ -432,7 +546,7 @@ private fun ActionPreview(p: SurfaceModel.Preview.Action, steps: List<SurfaceMod
 @Composable
 private fun ProblemPreview(p: SurfaceModel.Preview.Problem, cancelled: Boolean, onRetry: (String) -> Unit, onDismiss: () -> Unit) {
     Column(Modifier.padding(top = 10.dp)) {
-        Text(p.message, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
+        Text(ScreenText.of(p.message), style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
         Spacer(Modifier.height12())
         val retry = p.retryGoal
         if (retry != null && !cancelled) BigButton("Try again", onClick = { onRetry(retry) }, modifier = Modifier.fillMaxWidth(),
@@ -452,7 +566,9 @@ private fun SmallAction(label: String, description: String, onClick: () -> Unit)
             .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
             .clip(RoundedCornerShape(16.dp))
             .clickable(interaction, indication = null, role = Role.Button, onClickLabel = description, onClick = onClick)
-            .semantics { contentDescription = description }
+            // ONE node for TalkBack: the spoken label replaces the visible word on the clickable node itself (as BigButton does,
+            // Gate G). A plain `semantics` here made a second, unclickable node under it (emulator dump, 14 Oct 2026).
+            .clearAndSetSemantics { contentDescription = description }
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -468,7 +584,7 @@ private fun SourceChip(title: String, description: String, onClick: () -> Unit) 
             .clip(RoundedCornerShape(24.dp))
             .glass(RoundedCornerShape(24.dp), elevation = 0.dp)
             .clickable(role = Role.Button, onClickLabel = description, onClick = onClick)
-            .semantics { contentDescription = description }
+            .clearAndSetSemantics { contentDescription = description }   // one clickable node (see SmallAction)
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -478,10 +594,47 @@ private fun SourceChip(title: String, description: String, onClick: () -> Unit) 
 
 private fun Modifier.height12(): Modifier = this.then(Modifier.padding(top = 12.dp))
 
+/** Buttons side by side — or one under the other, in the same order, when a word of theirs wouldn't fit its share of the
+ *  width at the user's text size (UX-8: large text is common among the people this app is for). */
+@Composable
+private fun ButtonRow(labels: List<String>, weights: List<Float>, button: @Composable (index: Int, modifier: Modifier) -> Unit) {
+    val screen = LocalConfiguration.current.screenWidthDp.toFloat()
+    val inner = minOf(screen - 24f, 560f) - 36f   // the host's margins, the card's width cap, the card's padding
+    if (ButtonFit.sideBySide(labels, weights, inner, LocalDensity.current.fontScale))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            labels.indices.forEach { i -> button(i, Modifier.weight(weights[i])) }
+        }
+    else Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        labels.indices.forEach { i -> button(i, Modifier.fillMaxWidth()) }
+    }
+}
+
+/**
+ * Whether a row of buttons fits side by side at the user's text size: each button gets its weight's share of the width and
+ * needs its padding plus its longest word (a word never breaks mid-way; a label of several words may wrap). Pure.
+ */
+object ButtonFit {
+    /** About one character of the buttons' 17 sp semibold label at 100 % text, in dp — a little generous: stack early. */
+    private const val CHAR_DP = 10f
+    /** BigButton's horizontal padding, both sides. */
+    private const val PAD_DP = 48f
+
+    fun sideBySide(labels: List<String>, weights: List<Float>, widthDp: Float, fontScale: Float, gapDp: Float = 10f): Boolean {
+        if (labels.size < 2 || weights.size != labels.size) return true
+        val total = weights.sum()
+        if (total <= 0f) return true
+        val free = widthDp - gapDp * (labels.size - 1)
+        return labels.indices.all { i ->
+            val longest = labels[i].split(' ').maxOf { it.length }
+            free * weights[i] / total >= PAD_DP + longest * CHAR_DP * fontScale
+        }
+    }
+}
+
 internal enum class Glyph { ACTIVE, DONE, FAILED, NEUTRAL, ASK, RESULT, STOPPED }
 
 internal fun glyphOf(s: SurfaceModel.State): Glyph = when (s.mode) {
-    SurfaceModel.Mode.PROCESSING, SurfaceModel.Mode.WORKING -> Glyph.ACTIVE
+    SurfaceModel.Mode.PROCESSING, SurfaceModel.Mode.WORKING -> if (s.paused) Glyph.NEUTRAL else Glyph.ACTIVE
     SurfaceModel.Mode.WAITING -> Glyph.ASK
     SurfaceModel.Mode.FAILED -> Glyph.FAILED
     SurfaceModel.Mode.CANCELLED -> Glyph.STOPPED
@@ -500,11 +653,10 @@ internal fun Glyph(g: Glyph, active: Boolean, modifier: Modifier = Modifier) {
     val muted = Tk.TextTertiary
     val attention = Tk.Attention
     val ok = Tk.Success
-    val alpha = if (active && !calm) {
-        val t = rememberInfiniteTransition(label = "breath")
-        t.animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "breath alpha").value
-    } else 1f
-    Canvas(modifier.clearAndSetSemantics { }.graphicsLayer { this.alpha = alpha }) {
+    // The breath is read in the layer, not in composition: a layer update a frame, never a recomposition of the card.
+    val breath = if (active && !calm) rememberInfiniteTransition(label = "breath")
+        .animateFloat(0.45f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "breath alpha") else null
+    Canvas(modifier.clearAndSetSemantics { }.graphicsLayer { this.alpha = breath?.value ?: 1f }) {
         val r = size.minDimension / 2f
         val c = Offset(size.width / 2f, size.height / 2f)
         val stroke = Stroke(width = r * 0.22f, cap = StrokeCap.Round)
@@ -525,15 +677,31 @@ internal fun Glyph(g: Glyph, active: Boolean, modifier: Modifier = Modifier) {
     }
 }
 
+/** A line built for the voice, as the screen shows it: its pause marks (voice/SpokenText) become line breaks. Pure. */
+object ScreenText {
+    private val AROUND_BREAK = Regex("[ \\t]*\\n[ \\t]*")
+    private val MANY_BREAKS = Regex("\\n{3,}")
+    /** The voice spaces digits out ("ending 3 6 1 1"); on screen a group stays on one line (no-break spaces). */
+    private val SPACED_DIGITS = Regex("(?<=\\b\\d) (?=\\d\\b)")
+    fun of(text: String): String = text.replace(com.tekyerema.voice.SpokenText.BREAK, '\n').replace(com.tekyerema.voice.SpokenText.PAUSE, '\n')
+        .replace(AROUND_BREAK, "\n").replace(MANY_BREAKS, "\n\n").replace(SPACED_DIGITS, " ").trim()
+}
+
 /** A confirmation's buttons: Cancel and a VERB that says what will happen ("Send", "Call", "Buy") — HIG Snippets. Pure. */
 object ConfirmWords {
     private val VERBS = listOf("Send", "Call", "Buy", "Pay", "Open", "Turn", "Delete", "Reply", "Text", "Share", "Post", "Install",
         "Save", "Set", "Book", "Order", "Transfer", "Top up", "Dial", "Remove", "Clear", "Start")
+    /** "… Send it?" / "… Call him?" — the verb of a closing question. */
+    private val CLOSING = Regex("(?i)\\b([a-z]+(?: up)?)\\s+(?:it|this|that|them|him|her)\\s*\\?\\s*$")
 
     fun buttons(text: String, twi: Boolean): Pair<String, String> {
         if (twi) return PromptSurface.buttons(PromptSurface.Kind.CONFIRM, twi = true).let { it[0] to it[1] }
-        val first = text.trim().trimStart('“', '"').lowercase()
-        val verb = VERBS.firstOrNull { v -> first.startsWith(v.lowercase() + " ") || first.startsWith(v.lowercase() + "?") }
+        val plain = ScreenText.of(text).trim()
+        // The closing question names the act most exactly ("…The message: "…". Send it?" → Send); else the first word.
+        val closing = CLOSING.find(plain)?.groupValues?.get(1)
+        val first = plain.trimStart('“', '"').lowercase()
+        val verb = VERBS.firstOrNull { v -> closing.equals(v, ignoreCase = true) }
+            ?: VERBS.firstOrNull { v -> first.startsWith(v.lowercase() + " ") || first.startsWith(v.lowercase() + "?") }
         return "Cancel" to (verb ?: "Yes, do it")
     }
 }

@@ -26,8 +26,8 @@ import org.junit.Test
 class AssistantSurfaceModelTest {
     private val now = 1_000_000_000L
     private val idleVoice = VoiceUiState()
-    private fun result(status: AgentStatus, summary: String, goal: String) =
-        JSONObject().put("status", status.name).put("summary", summary).put("goal", goal).toString()
+    private fun result(status: AgentStatus, summary: String, goal: String, run: Long) =
+        JSONObject().put("status", status.name).put("summary", summary).put("goal", goal).put("runSeq", run).toString()
     private fun resultLog(text: String, at: Long = now - 1_000) = LogEntry(at, LogEntry.Kind.RESULT, text)
 
     // ------------------------------------------------------------------ the step list (engine bookkeeping)
@@ -50,6 +50,63 @@ class AssistantSurfaceModelTest {
         // and the surface filters by the agent's CURRENT run too
         val agent = AgentUiState(status = AgentStatus.ACTING, runSeq = 6, steps = steps)
         assertTrue(SurfaceModel.reduce(idleVoice, agent, now = now).steps.isEmpty())
+    }
+
+    @Test fun a_late_step_from_a_stopped_run_never_replaces_the_newer_runs_steps() {
+        // Run 4 was stopped; its coroutine can still be unwinding after run 5 began (a cancelled job stops counting as active
+        // before its code stops). Its late "step started" must not wipe run 5's list. (The engine also writes a step only while
+        // its own run owns the state — AgentEngine, runCtx.seq.)
+        val five = AgentSteps.started(emptyList(), runSeq = 5, index = 1, tool = "web_search", subject = "osmosis")
+        assertEquals(five, AgentSteps.started(five, runSeq = 4, index = 3, tool = "open_app", subject = "Settings"))
+        assertEquals(five, AgentSteps.finished(five, runSeq = 4, index = 1, ok = false))
+        assertEquals("Searching the web for “osmosis”", SurfaceModel.reduce(idleVoice,
+            AgentUiState(status = AgentStatus.ACTING, runSeq = 5, steps = five), now = now).title)
+    }
+
+    @Test fun a_new_request_replaces_the_previous_result_and_the_replies_before_it() {
+        // UX-6: when the user starts a new request, the host records the run on screen and the moment.
+        val done = AgentUiState(status = AgentStatus.COMPLETED, runSeq = 5, goal = "explain osmosis",
+            lastResult = result(AgentStatus.COMPLETED, "Water moves across a membrane.", "x", 5), log = listOf(resultLog("x", now - 5_000)))
+        assertEquals(Mode.PRESENTING, SurfaceModel.reduce(idleVoice, done, now = now).mode)
+        val replaced = SurfaceModel.Local(dismissedRun = 5, dismissedAt = now - 1_000)
+        assertEquals(Mode.HIDDEN, SurfaceModel.reduce(idleVoice, done, replaced, now = now).mode)
+        // a quick reply from before the new request stays gone; the one after it is shown as itself
+        val before = VoiceUiState(spoken = "It's 5 pm.", spokenAt = now - 2_000, lastCanonical = "what's the time")
+        assertEquals(Mode.HIDDEN, SurfaceModel.reduce(before, done, replaced, now = now).mode)
+        val after = VoiceUiState(spoken = "The battery is at 80 percent.", spokenAt = now - 500, lastCanonical = "battery level")
+        assertEquals("reply:${now - 500}", SurfaceModel.reduce(after, done, replaced, now = now).key)
+        // and the next run's result is never hidden by the old run's dismissal
+        val next = done.copy(runSeq = 6, log = listOf(resultLog("x", now - 100)))
+        assertEquals(Mode.PRESENTING, SurfaceModel.reduce(idleVoice, next, replaced, now = now).mode)
+    }
+
+    @Test fun a_stopped_run_never_shows_the_previous_runs_words() {
+        // The emulator, 14 Oct 2026: run 5 answered; run 6 (the same request) was stopped before any result. A stopped run
+        // writes no result, so lastResult still held run 5's — and the card showed run 5's words under "Stopped".
+        val stopped = AgentUiState(status = AgentStatus.STOPPED, runSeq = 6, goal = "what are the latest headlines in Ghana today",
+            lastResult = result(AgentStatus.COMPLETED, "I couldn't locate reliable headline listings.", "x", 5),
+            log = listOf(LogEntry(now - 1_000, LogEntry.Kind.INFO, "Stopped by user.")))
+        // the voice's last reply was run 5's, said before run 6 began
+        val voice = VoiceUiState(spoken = "I couldn't locate reliable headline listings.", spokenAt = now - 30_000)
+        val s = SurfaceModel.reduce(voice, stopped, now = now)
+        assertEquals(Mode.CANCELLED, s.mode)
+        val p = s.preview as Preview.Problem
+        assertEquals("Stopped before it finished.", p.message)
+        assertEquals("what are the latest headlines in Ghana today", p.retryGoal)
+        // …and a run that finished still shows its own words
+        val done = stopped.copy(status = AgentStatus.COMPLETED, lastResult = result(AgentStatus.COMPLETED, "Here are today's headlines.", "x", 6),
+            log = listOf(resultLog("Here are today's headlines.")))
+        assertEquals("Here are today's headlines.", (SurfaceModel.reduce(voice, done, now = now).preview as Preview.Answer).summary)
+    }
+
+    @Test fun a_paused_task_says_paused_and_a_stop_logged_after_the_clock_ticked_still_shows() {
+        val paused = SurfaceModel.reduce(idleVoice, AgentUiState(status = AgentStatus.PAUSED, runSeq = 3), now = now)
+        assertEquals(Mode.PROCESSING, paused.mode); assertEquals("Paused", paused.title); assertTrue(paused.paused)
+        // The host's clock ticks only when the surface changes. A stop at a question (the panel up, the surface hidden) is
+        // logged after its last tick; that newer-than-the-clock end must count as fresh, not hide the "Stopped" card (review).
+        val stopped = AgentUiState(status = AgentStatus.STOPPED, runSeq = 3, goal = "x",
+            log = listOf(LogEntry(now + 5_000, LogEntry.Kind.INFO, "Stopped by user.")))
+        assertEquals(Mode.CANCELLED, SurfaceModel.reduce(idleVoice, stopped, now = now).mode)
     }
 
     @Test fun what_a_step_may_say_about_itself_is_whitelisted() {
@@ -113,7 +170,7 @@ class AssistantSurfaceModelTest {
         steps = AgentSteps.finished(steps, 7, 1, ok = true, sources = listOf(AgentStep.Source("Britannica", "https://www.britannica.com/x")))
         val agent = AgentUiState(status = AgentStatus.COMPLETED, runSeq = 7, steps = steps,
             goal = "explain the difference between photosynthesis and respiration",
-            lastResult = result(AgentStatus.COMPLETED, "Photosynthesis makes glucose from light. Respiration breaks it down for energy.", "x"),
+            lastResult = result(AgentStatus.COMPLETED, "Photosynthesis makes glucose from light. Respiration breaks it down for energy.", "x", 7),
             log = listOf(resultLog("Photosynthesis makes glucose from light.")))
         val s = SurfaceModel.reduce(idleVoice, agent, now = now)
         assertEquals(Mode.PRESENTING, s.mode)
@@ -135,7 +192,7 @@ class AssistantSurfaceModelTest {
         assertEquals("pharmacy", PlaceQuery.of("pharmacy near me"))
         assertNull(PlaceQuery.of("explain photosynthesis"))
         val agent = AgentUiState(status = AgentStatus.COMPLETED, runSeq = 9, goal = "where is the closest mall from here",
-            lastResult = result(AgentStatus.COMPLETED, "The closest is Legon City Mall.", "x"), log = listOf(resultLog("x")))
+            lastResult = result(AgentStatus.COMPLETED, "The closest is Legon City Mall.", "x", 9), log = listOf(resultLog("x")))
         val a = SurfaceModel.reduce(idleVoice, agent, now = now).preview as Preview.Answer
         assertEquals("closest mall", a.mapQuery)
         assertNull("no map link was returned by any step", a.mapLink)
@@ -145,25 +202,25 @@ class AssistantSurfaceModelTest {
         var steps = AgentSteps.started(emptyList(), 4, 1, "open_setting", "wifi")
         steps = AgentSteps.finished(steps, 4, 1, ok = true)
         val done = AgentUiState(status = AgentStatus.COMPLETED, runSeq = 4, steps = steps, goal = "turn on the wifi",
-            lastResult = result(AgentStatus.COMPLETED, "Turned Wi-Fi on.", "x"), log = listOf(resultLog("Turned Wi-Fi on.")))
+            lastResult = result(AgentStatus.COMPLETED, "Turned Wi-Fi on.", "x", 4), log = listOf(resultLog("Turned Wi-Fi on.")))
         val action = SurfaceModel.reduce(idleVoice, done, now = now).preview as Preview.Action
         assertEquals("Turned Wi-Fi on.", action.summary); assertTrue(action.verified)
         val unverified = SurfaceModel.reduce(idleVoice, done.copy(status = AgentStatus.COMPLETED_UNVERIFIED), now = now).preview as Preview.Action
         assertFalse("never claimed as verified", unverified.verified)
         val failed = SurfaceModel.reduce(idleVoice, done.copy(status = AgentStatus.FAILED,
-            lastResult = result(AgentStatus.FAILED, "WhatsApp didn't open.", "x")), now = now)
+            lastResult = result(AgentStatus.FAILED, "WhatsApp didn't open.", "x", 4)), now = now)
         assertEquals(Mode.FAILED, failed.mode)
         assertEquals("turn on the wifi", (failed.preview as Preview.Problem).retryGoal)
         val cannot = SurfaceModel.reduce(idleVoice, done.copy(status = AgentStatus.CANNOT_DO,
-            lastResult = result(AgentStatus.CANNOT_DO, "I can't pay bills yet.", "x")), now = now)
+            lastResult = result(AgentStatus.CANNOT_DO, "I can't pay bills yet.", "x", 4)), now = now)
         assertNull("trying again can't help", (cannot.preview as Preview.Problem).retryGoal)
         assertEquals(Mode.CANCELLED, SurfaceModel.reduce(idleVoice, done.copy(status = AgentStatus.STOPPED,
-            lastResult = result(AgentStatus.STOPPED, "Stopped by user.", "x")), now = now).mode)
+            lastResult = result(AgentStatus.STOPPED, "Stopped by user.", "x", 4)), now = now).mode)
     }
 
     @Test fun a_dismissed_or_stale_result_is_gone_and_a_quick_answer_is_shown_as_itself() {
         val done = AgentUiState(status = AgentStatus.COMPLETED, runSeq = 4, goal = "explain photosynthesis",
-            lastResult = result(AgentStatus.COMPLETED, "Plants make food from light.", "x"), log = listOf(resultLog("x")))
+            lastResult = result(AgentStatus.COMPLETED, "Plants make food from light.", "x", 4), log = listOf(resultLog("x")))
         assertEquals(Mode.PRESENTING, SurfaceModel.reduce(idleVoice, done, now = now).mode)
         assertEquals(Mode.HIDDEN, SurfaceModel.reduce(idleVoice, done, SurfaceModel.Local(dismissedRun = 4, dismissedAt = now - 10), now = now).mode)
         assertEquals("an hour later", Mode.HIDDEN, SurfaceModel.reduce(idleVoice, done.copy(log = listOf(resultLog("x", now - 3_600_000))), now = now).mode)
@@ -184,6 +241,9 @@ class AssistantSurfaceModelTest {
         assertEquals("Opening WhatsApp", StepLabels.label("open_app", "WhatsApp"))
         assertEquals("Going through the Mobile Money menu", StepLabels.label("ussd_navigate", null))
         assertEquals("Working on it", StepLabels.label("some_new_tool", "x"))
+        // a long search is cut at a word (the emulator showed “…in Ghana t”)
+        assertEquals("Searching the web for “what are the latest headlines in Ghana…”",
+            StepLabels.label("web_search", "what are the latest headlines in Ghana today"))
         val long = "Photosynthesis uses light energy to turn carbon dioxide and water into glucose and releases oxygen. " +
             "Respiration breaks down glucose to release energy for the cell and consumes oxygen. Both happen in plants."
         val c = Summaries.compact(long)

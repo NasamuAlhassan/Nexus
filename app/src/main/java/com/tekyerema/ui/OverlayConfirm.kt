@@ -58,6 +58,9 @@ object OverlayConfirm {
     private val main = Handler(Looper.getMainLooper())
     @Volatile private var view: View? = null
     @Volatile private var wmUsed: WindowManager? = null
+    /** True while the panel is really on screen: the in-app assistant surface then doesn't draw the same prompt under it
+     *  (it sits in the same place, and TalkBack would read the prompt twice). False when it couldn't be drawn. */
+    val onScreen = kotlinx.coroutines.flow.MutableStateFlow(false)
     private var presence: MiniPresenceView? = null
     private var caption: TextView? = null
     private var scope: CoroutineScope? = null
@@ -142,6 +145,8 @@ object OverlayConfirm {
             }
 
             // Top row: the small presence + the question.
+            // The words and the choices (they scroll when large text makes them tall; the buttons below never do).
+            val words = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL }
             val row = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val mini = MiniPresenceView(host, calm)
             val miniSize = if (secure) 40 else 64
@@ -155,7 +160,8 @@ object OverlayConfirm {
                 letterSpacing = 0.12f
             })
             texts.addView(TextView(host).apply {
-                text = prompt
+                // The voice's pause marks are line breaks on screen ("…ending 3 6 1 1." / "The message: …" / "Send it?").
+                text = com.tekyerema.ui.assistant.ScreenText.of(prompt)
                 setTextColor(Color.parseColor(TEXT))
                 textSize = if (secure) 15f else 18f
                 setLineSpacing(0f, 1.12f)
@@ -171,7 +177,7 @@ object OverlayConfirm {
             }
             texts.addView(cap)
             row.addView(texts, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            card.addView(row)
+            words.addView(row)
 
             // The buttons: a parallel path to the voice (a helper, TalkBack, a noisy room), always there to answer on.
             val buttons = LinearLayout(host).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(10), 0, 0) }
@@ -231,11 +237,25 @@ object OverlayConfirm {
             if (choices.isNotEmpty()) {
                 val list = LinearLayout(host).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(10), 0, 0) }
                 choices.forEach { c ->
-                    list.addView(btn(c, (if (twi) "Bua: " else "Answer: ") + c, filled = false, hides = false) { VoiceEngine.submitTyped(c) },
+                    // The choice is that answer only while the question is still asked (ChoiceGate) — never a confirmation's
+                    // yes/no or change — and once: the choices go inactive after the first tap (review, 14 Oct 2026).
+                    list.addView(btn(c, (if (twi) "Bua: " else "Answer: ") + c, filled = false, hides = false) {
+                        if (com.tekyerema.ui.assistant.ChoiceGate.accepts(AgentEngine.state.value.status, engineQuestion = engine)) {
+                            for (i in 0 until list.childCount) list.getChildAt(i).isEnabled = false
+                            VoiceEngine.submitTyped(c)
+                        }
+                    }
+                        .apply { setTextColor(Color.parseColor(TEXT)) },   // an answer, brighter than Stop / Type
                         LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6) })
                 }
-                card.addView(list)
+                words.addView(list)
             }
+            // At most 65 % of the screen for the words and choices, so the buttons always stay on it: at 200 % text a
+            // three-choice question filled the whole screen and pushed them to its bottom edge (emulator, 14 Oct 2026).
+            card.addView(CappedScrollView(host, (host.resources.displayMetrics.heightPixels * 0.65f).toInt()).apply {
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(words, android.widget.FrameLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
             card.addView(buttons)
 
             val wrapper = LinearLayout(host).apply {
@@ -255,8 +275,7 @@ object OverlayConfirm {
                 type,
                 // NOT_FOCUSABLE keeps the buttons touchable without stealing IME focus (and never makes the panel the
                 // active window the agent observes); LAYOUT_IN_SCREEN so our position is absolute (not inset by the
-                // IME). A confirmation/question is CENTRED: a bottom card hid behind the soft keyboard while a message
-                // was being composed (the Telegram confirm bug). The secure step sits at the TOP, clear of a PIN keypad.
+                // IME). Where it sits: below (a bottom card once hid behind the soft keyboard — the Telegram confirm bug).
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
                 android.graphics.PixelFormat.TRANSLUCENT
             ).apply {
@@ -265,11 +284,9 @@ object OverlayConfirm {
                 gravity = Gravity.TOP
                 y = topInset(host) + dp(8)
             }
-            // Entrance: the card grows into place from 90 % and settles with a slight overshoot (scale, not a slide:
-            // the window is exactly the card's size, so a slide would be clipped at its edge). The secure step grows
-            // from its top edge, out of the way of a PIN pad. 380 ms — well inside the Yes button's 600 ms arming
-            // delay (ConfirmGate), so the button is still by the time a tap can count. Alpha starts just above 0: a
-            // view at alpha 0 is not "visible to user", and TalkBack could skip the panel's first moment.
+            // Entrance: the card slides down 24 dp into place as it fades in (the window is the card's size, so it is
+            // revealed from the window's top edge); calm = a fade only. Alpha starts just above 0: a view at alpha 0 is
+            // not "visible to user", and TalkBack could skip the panel's first moment.
             card.alpha = 0.02f
             if (!calm) card.translationY = -dp(24).toFloat()
             startTyping = typing@{
@@ -334,6 +351,7 @@ object OverlayConfirm {
             }
             try {
                 wm.addView(wrapper, lp); view = wrapper; wmUsed = wm; presence = mini; caption = cap
+                onScreen.value = true
                 // Down from the top edge and settled — no bounce (HIG Motion: enter and leave on one axis). 320 ms, inside the
                 // Yes button's 600 ms arming delay (ConfirmGate), so the button is still when a tap can count.
                 card.animate().alpha(1f).translationY(0f)
@@ -414,6 +432,7 @@ object OverlayConfirm {
         scope?.cancel(); scope = null
         presence = null; caption = null
         byEngine = false
+        onScreen.value = false
         val v = view ?: return
         try { wmUsed?.removeView(v) } catch (t: Throwable) {}
         view = null; wmUsed = null
@@ -534,5 +553,14 @@ object OverlayConfirm {
                 c.drawCircle(cx, cy, rr, paint)
             }
         }
+    }
+}
+
+/** A ScrollView no taller than [maxPx]: the panel's words and choices scroll in it, and the buttons below stay on screen. */
+private class CappedScrollView(ctx: Context, private val maxPx: Int) : android.widget.ScrollView(ctx) {
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val size = MeasureSpec.getSize(heightMeasureSpec)
+        val capped = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED) maxPx else minOf(size, maxPx)
+        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(capped, MeasureSpec.AT_MOST))
     }
 }
