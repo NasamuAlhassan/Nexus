@@ -1579,12 +1579,51 @@ class LocalFastRouter(
     /** An information QUERY answer — spoken on the normal (Twi-capable) voice. */
     private fun handled(intent: FastIntent, text: String) = FastOutcome(intent.name, text, systemVoice = false)
 
-    /** "stop the timer": Android's own dismiss-timer request to the Clock app (API 28+); null → the agent tries on screen. */
-    private fun stopTimer(intent: FastIntent): FastOutcome? {
+    /**
+     * "stop the timer": Android's own dismiss-timer request to the Clock app (API 28+) — which only silences a RINGING timer.
+     * Then the Clock's notifications are checked (TimerNotice): a timer still running, or no way to see → null, and the agent
+     * stops it on screen. The reply says "stopped" only when nothing is left running (A20e, 14 Oct 2026: the old reply said it
+     * had asked, and the timer ran on).
+     */
+    private suspend fun stopTimer(intent: FastIntent): FastOutcome? {
         val i = android.content.Intent("android.intent.action.DISMISS_TIMER").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-        if (i.resolveActivity(appContext.packageManager) == null) return null
-        return try { appContext.startActivity(i); handled(intent, "Okay, I've asked the Clock to stop the timer.") }
-        catch (_: Throwable) { null }
+        val clock = i.resolveActivity(appContext.packageManager)?.packageName ?: return null
+        try { appContext.startActivity(i) } catch (_: Throwable) { return null }
+        kotlinx.coroutines.delay(800)   // the Clock takes the ringing timer's notification down
+        fun running(): Boolean? = com.tekyerema.notifications.TekyeremaNotificationListener.ongoingWords(clock)?.let { TimerNotice.stillRunning(it) }
+        when (running()) {
+            false -> return handled(intent, "Okay, the timer is stopped.")
+            null -> { Log.i(TAG, "[LOCAL_FAST_PATH] STOP_TIMER can't see the Clock's notifications → agent"); return null }
+            true -> {}
+        }
+        // Still counting down: open the Clock's timers and press its own Cancel / Stop (the agent, left to find it, opened the
+        // notification shade and tapped "Stopwatch" while the timer ran out — A20e, 14 Oct 2026).
+        val c = controller() ?: return null
+        com.tekyerema.ui.OwnUi.leave()
+        val show = android.content.Intent("android.intent.action.SHOW_TIMERS").setPackage(clock).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        try { appContext.startActivity(show) } catch (_: Throwable) { return null }
+        var pressed = false
+        repeat(12) { i ->
+            if (!pressed) {
+                kotlinx.coroutines.delay(250); c.waitForSettle(1000)
+                val snap = c.buildSnapshot()
+                val id = TimerNotice.stopButton(snap.elements.map { it.id to it.label })
+                val el = id?.let { k -> snap.elements.firstOrNull { it.id == k } }
+                // A node click the Clock ignores gets a real tap at the button's centre.
+                if (el != null && (snap.appPackage == clock || c.foregroundPackage() == clock))
+                    pressed = c.clickElement(el.id) || c.tap(el.bounds.centerX, el.bounds.centerY)
+                Log.d(TAG, "[LOCAL_FAST_PATH] STOP_TIMER look#$i app=${snap.appPackage} fg=${c.foregroundPackage()} n=${snap.elements.size} " +
+                    "stop=${el?.label} pressed=$pressed")
+            }
+        }
+        if (!pressed) { Log.i(TAG, "[LOCAL_FAST_PATH] STOP_TIMER no Cancel/Stop on the Clock's timer screen → agent"); return null }
+        // The Clock hides its timer notification while its own screen is open, so the screen says whether it stopped: no Pause
+        // (or Resume) left on it.
+        kotlinx.coroutines.delay(600); c.waitForSettle(1000)
+        if (TimerNotice.showsRunning(c.buildSnapshot().elements.map { it.label })) {
+            Log.i(TAG, "[LOCAL_FAST_PATH] STOP_TIMER pressed, but the timer still shows Pause → agent"); return null
+        }
+        return action("STOP_TIMER", "Okay, the timer is stopped.")
     }
 
     /** A deterministic ACTION confirmation — spoken on the OFFLINE system engine so it's instant, never

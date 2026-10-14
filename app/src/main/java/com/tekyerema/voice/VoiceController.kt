@@ -1026,6 +1026,8 @@ class VoiceController(
     }
 
     /** What the user hears when their words couldn't be recognised ([cause] from the voice boundary). */
+    private fun twiNow(): Boolean = (forceLanguage() ?: sessionLanguage()) == Lang.TWI
+
     private fun cantHear(cause: com.tekyerema.voice.io.Heard.Cause): String = when (cause) {
         com.tekyerema.voice.io.Heard.Cause.OFFLINE -> "Voice needs the internet right now, or type your request."
         com.tekyerema.voice.io.Heard.Cause.NO_RECOGNIZER -> "This phone's speech service isn't available. You can type your request."
@@ -1121,7 +1123,13 @@ class VoiceController(
                         if (quiet) { idle(""); return }
                         fail(VoiceStage.MIC, heard.detail, "I can't use the microphone right now."); return
                     }
-                    fail(VoiceStage.ASR, heard.detail, cantHear(heard.cause)); return
+                    // The Twi recogniser down: say so as it is, and in Twi in a Twi conversation (never "come closer").
+                    val twiDown = when (heard.detail) {
+                        TWI_SERVICE_DOWN -> if (twiNow()) Phrases.get("twiAsrDown", true, TWI_SERVICE_DOWN_TWI) else TWI_SERVICE_DOWN
+                        TWI_NEEDS_INTERNET -> if (twiNow()) Phrases.get("twiNeedsInternet", true, TWI_NEEDS_INTERNET_TWI) else TWI_NEEDS_INTERNET
+                        else -> null
+                    }
+                    fail(VoiceStage.ASR, heard.detail, twiDown ?: cantHear(heard.cause)); return
                 }
             }
             if (tr.isBlank) { fail(VoiceStage.ASR, "Empty transcript", "Sorry, I didn't catch that. Try again, a little closer to the phone."); return }

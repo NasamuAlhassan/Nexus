@@ -39,7 +39,7 @@
           },
           "timeouts": {
             "connectMs": 6000,
-            "callMs": 25000
+            "callMs": 15000
           }
         },
         "hcilab_tts": {

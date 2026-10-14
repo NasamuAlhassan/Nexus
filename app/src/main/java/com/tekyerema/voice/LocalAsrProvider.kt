@@ -156,6 +156,10 @@ class HybridAsr(
 /** What the user hears when Twi can't be heard. */
 const val TWI_SERVICE_DOWN = "The Twi voice service isn't answering right now. Say it in English, or try again in a moment."
 const val TWI_NEEDS_INTERNET = "Twi needs the internet for now. Say it in English, or try again when you're connected."
+/** The same in a Twi conversation — said in Twi, not as English sent through translation (A20e, 14 October 2026: the
+ *  translation of the English line timed out and the user heard English). [owner: verify the Twi] */
+const val TWI_SERVICE_DOWN_TWI = "Mante. Twi kasa no nnyɛ adwuma seesei. Ka no Borɔfo mu, anaa twɛn kakra na san ka bio."
+const val TWI_NEEDS_INTERNET_TWI = "Twi hia intanɛt seesei. Ka no Borɔfo mu, anaa san ka bio sɛ intanɛt aba a."
 
 /** Honest placeholder: no model bundled yet. Never fakes a transcript, never calls the network. */
 object NotIntegratedSpeechToRaw : SpeechToRaw {

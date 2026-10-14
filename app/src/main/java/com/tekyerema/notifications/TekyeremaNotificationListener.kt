@@ -122,6 +122,19 @@ class TekyeremaNotificationListener : NotificationListenerService() {
         @Volatile var instance: TekyeremaNotificationListener? = null
             private set
 
+        /** The ongoing notifications [pkg] shows now, as their words (channel, title, text); null when the listener isn't
+         *  connected. Used to check that "stop the timer" really stopped one (agent/TimerNotice). */
+        fun ongoingWords(pkg: String): List<String>? {
+            val l = instance ?: return null
+            return try {
+                l.activeNotifications.orEmpty().filter { it.packageName == pkg && it.isOngoing }.map { sbn ->
+                    val n = sbn.notification
+                    listOfNotNull(n.channelId, n.category, n.extras?.getCharSequence(Notification.EXTRA_TITLE)?.toString(),
+                        n.extras?.getCharSequence(Notification.EXTRA_TEXT)?.toString()).joinToString(" ")
+                }
+            } catch (_: Throwable) { null }
+        }
+
         /** E-17: dismiss the notification with [key]; false when the listener isn't connected. */
         fun dismiss(key: String): Boolean {
             val l = instance ?: return false
