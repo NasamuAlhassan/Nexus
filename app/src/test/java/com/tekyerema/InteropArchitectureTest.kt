@@ -108,7 +108,8 @@ class InteropArchitectureTest {
         val callers = src.walkTopDown().filter { it.isFile && it.extension == "kt" }.flatMap { f ->
             code(f).flatMap { l -> confirmCall.findAll(l).map { rel(f) to topLevelArgs(l, it.range.last) }.toList() }
         }.toList()
-        assertTrue("the known callers are found", callers.size >= 7)
+        // 6 since 14 Oct 2026: the panel over other apps answers through one confirm(approved, seq) (DECISIONS V2-12).
+        assertTrue("the known callers are found", callers.size >= 6)
         val noSeq = callers.filter { (_, args) -> args.size < 2 }.map { (f, a) -> f to a.single() }
         for ((file, args) in noSeq) {
             val ok = file == "debug/RunGoalReceiver.kt" ||                                   // DEBUG-only receiver (not in the main manifest)

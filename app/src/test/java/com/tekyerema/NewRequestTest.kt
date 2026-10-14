@@ -217,10 +217,15 @@ class NewRequestTest {
             _s.value = AgentUiState(status = AgentStatus.WAITING_CONFIRMATION, goal = "call Prince", pendingConfirmation = "Call Prince?")
         }
         val vc = controller(this, agent, HoldingTts { false })
-        val sentence = vc.submitTyped("ok call mum")
+        // A sentence holding a yes-word is never a yes: kept in the field, with the reason.
+        val sentence = vc.submitTyped("ok sure thing")
         assertFalse("kept in the field", sentence.accepted)
-        assertNull("a new request containing 'ok' must never approve what is waiting", agent.confirmed)
+        assertNull("a sentence containing 'ok' must never approve what is waiting", agent.confirmed)
         assertTrue(sentence.notice.contains("yes or no"))
+        // One that names someone the read-back doesn't is a correction (re-planned and confirmed again — DECISIONS V2-14).
+        vc.submitTyped("ok call mum")
+        assertEquals("ok call mum", agent.revised)
+        assertNull("a new request containing 'ok' must never approve what is waiting", agent.confirmed)
         assertFalse(vc.submitTyped("hmm").accepted)
         assertNull(agent.confirmed)
 
