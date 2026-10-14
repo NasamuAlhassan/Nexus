@@ -40,6 +40,26 @@ object ContactResolver {
         return results.distinctBy { it.name }
     }
 
+    /** Every contact whose number ends with [digits] (≥ 3; a +233 / 0 prefix and spaces don't matter) — "the one ending 2019"
+     *  when the name the user said doesn't hold that number (A20e, 14 Oct 2026). Unreadable contacts → empty. */
+    fun endingWith(context: Context, digits: String): List<Contact> {
+        val tail = digits.filter { it.isDigit() }
+        if (tail.length < 3) return emptyList()
+        val out = ArrayList<Contact>()
+        try {
+            context.contentResolver.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
+                null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(0)?.trim().orEmpty()
+                    val number = c.getString(1).orEmpty()
+                    if (name.isNotEmpty() && number.filter { it.isDigit() }.endsWith(tail)) out.add(Contact(name, number))
+                }
+            }
+        } catch (_: Throwable) {}
+        return out.distinctBy { it.name.lowercase() to it.number.filter { ch -> ch.isDigit() }.takeLast(9) }
+    }
+
     /** C-03: family words a user says instead of the saved name ("call mum" → a contact saved as "Mama" / "Mother").
      *  `os.contacts.aliases` (word → saved-name candidates) adds or overrides these. */
     private val DEFAULT_ALIASES = mapOf(

@@ -93,6 +93,11 @@ object AgentEngine {
      *  that names a NEW person (group 1, possibly empty). */
     private val SOMEONE_ELSE = Regex("(?i)^(?:no[,.]?\\s*)?(?:someone|somebody|a different person|another person)\\s+else\\b[,.:;—-]*\\s*" +
         "(?:it'?s\\s+|called\\s+|named\\s+|i mean\\s+)?(.*)$")
+    /** The follow-up when none of the offered contacts is the one. [owner: verify the Twi] */
+    private const val WHO_THEN = "Who is it, then? Say the name as it's saved in your contacts, or the phone number."
+    private const val WHO_THEN_TWI = "Ɛnneɛ hwan ni? Ka ne din sɛnea wokyerɛw too wo fɔn mu, anaa ne nɔma."
+    /** Tools whose read-back names a contact: a correction "ending 2019" finds that contact (ContactEnding). */
+    private val ENDING_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME)
     private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
         com.tekyerema.money.TelcoUssdTool.NAME)
     private const val TAG = "Tekyerema"
@@ -1260,6 +1265,7 @@ object AgentEngine {
                                 var ans: String? = null
                                 var chosen = false
                                 var newName: String? = null
+                                var numberGiven = false
                                 for (round in 0..1) {
                                     val a = askUser(ask, ask, twiWording = askTwi)
                                     if (a == null) {
@@ -1276,22 +1282,30 @@ object AgentEngine {
                                         com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index
                                     if (idx != null && com.tekyerema.tools.ContactChoice.apply(args2, pre.data, choices[idx])) { chosen = true; break }
                                     val other = SOMEONE_ELSE.find(a.trim())
-                                    if (other != null) {
-                                        newName = other.groupValues[1].trim().trim(',', '.', ' ').takeIf { it.isNotEmpty() }
-                                        if (newName == null) {
-                                            log(LogEntry.Kind.RESULT, "Who should it be? Say the name as it's saved, or the phone number.")
-                                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
+                                    if (other != null) newName = other.groupValues[1].trim().trim(',', '.', ' ').takeIf { it.isNotEmpty() }
+                                    if (newName != null) break
+                                    // "None of them — there's another Dad" / "someone else": ask who, here, and carry on with the answer
+                                    // (A20e, 14 Oct 2026: the same list was asked again and the task ended).
+                                    if (other != null || ContactEnding.noneOfThem(a)) {
+                                        val who = askUser(WHO_THEN, WHO_THEN, twiWording = WHO_THEN_TWI)
+                                        if (who == null || com.tekyerema.voice.ControlVerbs.classify(who) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
+                                            log(LogEntry.Kind.RESULT, "Okay, I've left it. Nothing was done.")
+                                            finish(AgentStatus.STOPPED, stats, run = runCtx); return
                                         }
+                                        ans = who
+                                        val num = ContactEnding.wholeNumber(who)
+                                        if (num != null) { args2.put("number", num); args2.remove("contact"); numberGiven = true }
+                                        else newName = who.trim().trim(',', '.', ' ').takeIf { it.isNotEmpty() }
                                         break
                                     }
                                     history.add("${decision.name}(${shortArgs(decision.args)}) → the user's answer \"$a\" was none of the options offered" +
                                         if (round == 0) "; the same question was asked again." else ".")
                                 }
-                                if (!chosen && newName == null) {
+                                if (!chosen && newName == null && !numberGiven) {
                                     log(LogEntry.Kind.RESULT, "I couldn't tell which one you meant, so nothing was done. Say the full name as it's saved, or the phone number.")
                                     finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                 }
-                                if (!chosen) { args2.put("contact", newName); args2.remove("number") }
+                                if (!chosen && newName != null) { args2.put("contact", newName); args2.remove("number") }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → several contacts matched; the user was asked " +
                                     "\"${ask.take(120)}\" and answered \"$ans\" — the call is being proposed again for that contact.")
                                 planned.addFirst(decision.copy(args = args2, rationale = "the user chose the contact"))
@@ -1565,6 +1579,22 @@ object AgentEngine {
                                         // gate (audit 2026-10-01: the correction went to the on-device rules, which read this
                                         // note aloud or claimed "Opened Mobile Money"; nothing was re-proposed).
                                         // (A "try again" repeats a send exactly — a change there ends it, MoMoRetry's rule.)
+                                        // "The one ending 2019": the contact whose number ends so, proposed again (ContactEnding; the
+                                        // owner's MoMo test on the A20e, 14 Oct 2026 — the planner offered the same number again).
+                                        val tail = if (decision.name in ENDING_TOOLS && decision.rationale != com.tekyerema.money.MoMoRetry.RATIONALE)
+                                            ContactEnding.digits(reply.text) else null
+                                        if (tail != null && !decision.args.optString("number").filter(Char::isDigit).endsWith(tail)) {
+                                            val args3 = endingFix(decision, tail, ctxApp)
+                                            if (args3 == null) {
+                                                log(LogEntry.Kind.RESULT, "Okay, I've left it. Nothing was sent.")
+                                                finish(AgentStatus.STOPPED, stats, run = runCtx); return
+                                            }
+                                            log(LogEntry.Kind.POLICY, "Correction applied (the number ending $tail) — reading it back again.")
+                                            history.add("You proposed: \"$prompt\". The user said the number ends $tail; the contact with that number " +
+                                                "is being proposed again and will be confirmed again.")
+                                            planned.addFirst(decision.copy(args = args3, rationale = "the user corrected the number's ending"))
+                                            setStatus(AgentStatus.THINKING); continue
+                                        }
                                         val revised = if (decision.rationale == com.tekyerema.money.MoMoRetry.RATIONALE) null
                                             else ReviseTurn.patch(decision.name, decision.args, reply.text)
                                         if (revised != null) {
@@ -2428,6 +2458,36 @@ object AgentEngine {
      * the whole gate and is read back in full, so a changed number is always confirmed again. Returns the new number, or
      * null when the reply isn't such a fix (the planner then revises as before).
      */
+    /** "The one ending 2019" (ContactEnding): among the contacts with the name said, else all contacts, the one whose number
+     *  ends so → the arguments to propose again. Several → asked which; none → asked for the whole number. Null = the user
+     *  stopped or gave nothing usable (the caller ends the task; nothing runs). */
+    private suspend fun endingFix(decision: AgentDecision.CallTool, tail: String, ctxApp: Context): org.json.JSONObject? {
+        val name = decision.args.optString("contact").takeIf { it.isNotBlank() }?.let { com.tekyerema.tools.ContactChoice.narrow(it).first }
+        val same = name?.let { com.tekyerema.tools.ContactChoice.withEnding(com.tekyerema.android.ContactResolver.resolve(ctxApp, it), tail) }.orEmpty()
+        val found = com.tekyerema.tools.ContactChoice.distinct(same.ifEmpty { com.tekyerema.android.ContactResolver.endingWith(ctxApp, tail) })
+        val args = org.json.JSONObject(decision.args.toString())
+        fun stop(a: String?) = a == null || com.tekyerema.voice.ControlVerbs.classify(a) == com.tekyerema.voice.ControlVerbs.Verb.STOP
+        when {
+            found.size == 1 -> { args.put("contact", found[0].name.trim()).put("number", found[0].number); return args }
+            found.size > 1 -> {
+                val c = com.tekyerema.tools.ContactChoice.build(name ?: "one", found)
+                val a = askUser(c.question, c.question, twiWording = c.twiQuestion.ifBlank { null })
+                if (stop(a)) return null
+                val labels = c.options.map { it.label }
+                val idx = (com.tekyerema.agent.research.OptionAnswer.parse(a!!, labels) as?
+                    com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index ?: return null
+                args.put("contact", c.options[idx].name).put("number", c.options[idx].number); return args
+            }
+            else -> {
+                val q = "I couldn't find a number ending ${tail.toList().joinToString(" ")} in your contacts. Say the whole number, or say stop."
+                val a = askUser(q, q)
+                if (stop(a)) return null
+                val n = ContactEnding.wholeNumber(a!!) ?: return null
+                args.put("number", n); args.remove("contact"); return args
+            }
+        }
+    }
+
     private fun requeueNumberFix(decision: AgentDecision.CallTool, reply: String, prompt: String,
                                  history: MutableList<String>, planned: ArrayDeque<AgentDecision>): String? {
         val fixed = NumberCorrection.revise(decision.name, decision.args, reply) ?: return null
