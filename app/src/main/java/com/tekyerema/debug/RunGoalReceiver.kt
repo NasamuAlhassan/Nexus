@@ -215,6 +215,34 @@ class RunGoalReceiver : BroadcastReceiver() {
                 "click=${target.isClickable} focusable=${target.isFocusable} children=${target.childCount}")
             return
         }
+        // Press a node the way TalkBack's double-tap does: ACTION_CLICK through the accessibility service, on the nth node (any
+        // window) whose text or description contains the words, or its nearest clickable ancestor. Fast — a uiautomator dump
+        // waits ~8 s for the animated orb to idle, too slow to catch a running task's Stop (docs/assistant-ux, 14 Oct 2026).
+        //   --es a11y_click "Stop the task" [--es a11y_click_nth 2]     Logged as [A11Y-CLICK].
+        intent.getStringExtra("a11y_click")?.let { needle ->
+            var nth = intent.getStringExtra("a11y_click_nth")?.toIntOrNull() ?: 1
+            val svc = com.tekyerema.accessibility.TekyeremaAccessibilityService.live
+            val roots = try {
+                (svc?.windows?.mapNotNull { it.root } ?: emptyList()).ifEmpty { listOfNotNull(svc?.rootInActiveWindow) }
+            } catch (_: Throwable) { emptyList() }
+            var found: android.view.accessibility.AccessibilityNodeInfo? = null
+            for (root in roots) {
+                val stack = ArrayDeque<android.view.accessibility.AccessibilityNodeInfo>(); stack.add(root)
+                while (stack.isNotEmpty() && found == null) {
+                    val n = stack.removeFirst()
+                    val hit = n.text?.toString()?.contains(needle, true) == true || n.contentDescription?.toString()?.contains(needle, true) == true
+                    if (hit && --nth <= 0) { found = n; break }
+                    for (i in n.childCount - 1 downTo 0) n.getChild(i)?.let { stack.addFirst(it) }
+                }
+                if (found != null) break
+            }
+            var target = found; var up = 0
+            while (target != null && !target.isClickable && up < 4) { target = target.parent; up++ }
+            val ok = target?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK) ?: false
+            Log.i("Tekyerema", "[A11Y-CLICK] '$needle' -> " + if (target == null) "not found (windows=${roots.size})" else
+                "ok=$ok cls=${target.className?.toString()?.substringAfterLast('.')} desc='${target.contentDescription}' text='${target.text}'")
+            return
+        }
         intent.getStringExtra("dump_screen")?.let {
             val pending = goAsync()
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
