@@ -80,6 +80,28 @@ internal object UssdDialog {
     /** The dialog as it stands, waiting briefly for it — one immediate read misses it while the phone app is still
      *  settling (A20e 2026-09-30: the guided walk's reply read once, saw another window, and wrongly said the menu
      *  had closed). Null only after [timeoutMs] of genuinely no dialog. */
+    /**
+     * A PIN or payment prompt from an EARLIER request still in front (MTN's pushed "Enter MM PIN" for a bundle, a "Reply 1
+     * to confirm"): a new walk must not dial over it — the new session's first screen would be that prompt, read as the
+     * new request's and cancelled for the wrong amount (A20e, 14 Oct 2026 00:10: the Mashup's PIN prompt was waiting, the
+     * owner asked for 1 cedi of airtime, and the walk pressed Cancel on the Mashup). Null when nothing like that is open.
+     */
+    suspend fun promptInFront(ctrl: AccessibilityController): Screen? {
+        val s = try { read(ctrl) } catch (_: Throwable) { null } ?: return null
+        if (!s.hasInput) return null
+        val kind = BankUssd.kind(s.text, s.hasInput, s.masked)
+        return s.takeIf { it.masked || kind == BankUssd.ScreenKind.PIN || kind == BankUssd.ScreenKind.MONEY }
+    }
+
+    /** What to say instead of dialling over [prompt]: finish or cancel it first. The prompt's words are never repeated. */
+    fun promptInFrontLine(network: String?, prompt: Screen): String {
+        val net = network ?: "The network"
+        val what = if (prompt.masked || BankUssd.kind(prompt.text, prompt.hasInput, prompt.masked) == BankUssd.ScreenKind.PIN)
+            "is still waiting for your PIN for the earlier request" else "is still asking you to confirm the earlier payment"
+        return "$net $what — it's on the screen now. Enter it there" +
+            (if (PinPad.handles()) ", or with the volume keys" else "") + ", or press Cancel on it. Then ask me again."
+    }
+
     suspend fun awaitCurrent(ctrl: AccessibilityController, timeoutMs: Long = 5_000L): Screen? {
         val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
         while (true) {

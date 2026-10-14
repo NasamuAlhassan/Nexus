@@ -82,8 +82,46 @@ object MoneyAsk {
         if (LIMIT.containsMatchIn(g)) return null
         // "send Kofi 5 cedis for credit" gives a reason; "send 5 cedis credit to Kofi" buys airtime.
         if (AIRTIME_WORD.containsMatchIn(g) && !FOR_AIRTIME.containsMatchIn(g))
-            return airtime(clean)?.let { if (vague && it.number == null && it.badNumber == null) it.copy(name = null, forSelf = false) else it }
-        return send(clean)?.let { if (vague && it.number == null && it.badNumber == null) it.copy(name = null) else it }
+            return (airtime(clean) ?: harvest(clean, airtime = true))
+                ?.let { if (vague && it.number == null && it.badNumber == null) it.copy(name = null, forSelf = false) else it }
+        return (send(clean) ?: harvest(clean, airtime = false))
+            ?.let { if (vague && it.number == null && it.badNumber == null) it.copy(name = null) else it }
+    }
+
+    /**
+     * The request said in pieces, or twice — the way people talk: "I want you to buy it for a telephone number and the number
+     * is 050 879-7323, I want you to buy 2 cedis airtime" (the owner's answer, A20e, 14 Oct 2026). The strict reading gave up
+     * on the extra words, and the cloud planner then spent two minutes on web searches and codes typed into the dialer. Here
+     * the slots are collected from the whole sentence (R-A10's slot filling): exactly ONE phone number; the amount (the same
+     * figure said twice is one; two different figures leave it unsaid, so the flow asks "How much?"); the kind from its words —
+     * and only when nothing else is asked for (another action, a bundle, a bill, a question, a refund, a scratch card).
+     */
+    private fun harvest(clean: String, airtime: Boolean): Ask? {
+        val s0 = VIA.replace(clean, " ")
+        val g = s0.lowercase()
+        if (QUESTION_HEAD.containsMatchIn(g) || ABOUT.containsMatchIn(g) || PRICE.containsMatchIn(g) || BILL.containsMatchIn(g) ||
+            CARD.containsMatchIn(g) || BACK.containsMatchIn(g) || DATA_WORD.containsMatchIn(g) || AIR_MEDIA.containsMatchIn(g) ||
+            OTHER_ACTION.containsMatchIn(g)) return null
+        var t = toks(s0)
+        if (t.none { it.low in (if (airtime) AIRTIME_VERBS else SEND_VERBS) }) return null
+        if (!airtime && !MONEY_CUE.containsMatchIn(g)) return null
+        val numbers = ArrayList<Phone>()
+        while (numbers.size < 4) {
+            val p = findPhone(t) ?: break
+            numbers += p
+            t = t.subList(0, p.from) + PHONE_TOK + t.subList(p.to, t.size)
+        }
+        val valid = numbers.mapNotNull { it.number }.distinct()
+        if (valid.size != 1 || numbers.any { it.number == null }) return null
+        val figures = ArrayList<String>()
+        var rest = t
+        while (figures.size < 4) {
+            val a = firstAmount(rest) ?: break
+            figures += a.value ?: return null          // "two fifty": 2.50 or 250 — the strict reading's question, not a guess
+            rest = cut(rest, a)
+        }
+        val amount = figures.takeIf { f -> f.map { it.toBigDecimal().stripTrailingZeros() }.distinct().size == 1 }?.first()
+        return Ask(if (airtime) Kind.AIRTIME else Kind.SEND, amount = amount, number = valid.single(), forSelf = false)
     }
 
     /**
@@ -546,6 +584,11 @@ object MoneyAsk {
     // ------------------------------------------------------------------ vocabulary
 
     private val SPACES = Regex("\\s+")
+    /** Another kind of action in the same sentence — never collected into a money request (harvest). */
+    private val OTHER_ACTION = Regex("\\b(?:call|ring|text|message|whatsapp|tell|inform|notify|remind|open|play|read|show|search|" +
+        "set|turn|switch|navigate|alarm|timer|check|balance|limit|withdraw|cash ?out|loan|borrow|save|savings)\\b")
+    /** A send of MONEY says so: a money word or a currency next to the figure. */
+    private val MONEY_CUE = Regex("\\b(?:money|momo|mobile money|cash|cedis?|pesewas?|ghs|ghc)\\b|[₵¢]")
     private val NOT_WORD = Regex("[^a-z' ]")
     private val PUNCT = Regex("[?.!,]")
     private val WAKE = Regex("^(?:(?:hey|hi|ok|okay)[ ,]+)?t[ɛeƐE]kyer[ɛeƐE]ma[ ,:.!]*", RegexOption.IGNORE_CASE)

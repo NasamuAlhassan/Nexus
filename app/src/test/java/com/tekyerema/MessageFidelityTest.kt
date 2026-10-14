@@ -36,9 +36,13 @@ class MessageFidelityTest {
 
     @Test fun `a planner send_sms with other words is sent with the dictated words`() {
         val goal = "text Prince saying I'm on my way"
-        val rephrased = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Prince").put("message", "I am on my way now."), "planner")
+        // D-027 (owner, 14 Oct 2026): the same message written properly is kept as the planner wrote it...
+        val polished = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Prince").put("message", "I am on my way now."), "planner")
+        assertEquals("I am on my way now.", (FinalActionGuard.withUsersWords(polished, goal) as AgentDecision.CallTool).args.getString("message"))
+        // ...a message that says something else goes out with the user's words, tidied.
+        val rephrased = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Prince").put("message", "I'm stuck in traffic, start without me."), "planner")
         val fixed = FinalActionGuard.withUsersWords(rephrased, goal) as AgentDecision.CallTool
-        assertEquals("I'm on my way", fixed.args.getString("message"))
+        assertEquals("I'm on my way.", fixed.args.getString("message"))
         assertTrue(fixed.rationale!!.contains("replaced by the user's own words"))
         // the same words with the planner's punctuation: untouched
         val same = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Prince").put("message", "I'm on my way!"), "planner")
@@ -48,7 +52,7 @@ class MessageFidelityTest {
         val adapted = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Kofi").put("message", "You should call me."), "planner")
         assertEquals("You should call me.", (FinalActionGuard.withUsersWords(adapted, tellGoal) as AgentDecision.CallTool).args.getString("message"))
         val rewritten = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Kofi").put("message", "Please give me a call when free."), "planner")
-        assertEquals("you should call me", (FinalActionGuard.withUsersWords(rewritten, tellGoal) as AgentDecision.CallTool).args.getString("message"))
+        assertEquals("You should call me.", (FinalActionGuard.withUsersWords(rewritten, tellGoal) as AgentDecision.CallTool).args.getString("message"))
         // nothing dictated: the planner's composition stands
         val relay = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Ama").put("message", "Please call me when you can."), "planner")
         assertEquals("Please call me when you can.", (FinalActionGuard.withUsersWords(relay, "tell Ama to call me") as AgentDecision.CallTool).args.getString("message"))
@@ -58,11 +62,14 @@ class MessageFidelityTest {
     }
 
     @Test fun `a Send tap over a composer holding other words reads both`() {
-        val chat = Screens.chat(composer = "I am on my way now")
+        val chat = Screens.chat(composer = "I'm not coming today")
         val send = chat.element(Screens.SEND_ID)!!
         val goal = "send a WhatsApp message to Ama saying I'm on my way"
         val prompt = ActionSemantics.confirmation("tap", send, "Send", chat, goal = goal)!!
-        assertTrue(prompt, prompt.startsWith("The message in the box says “I am on my way now” — you said “I'm on my way”."))
+        assertTrue(prompt, prompt.startsWith("The message in the box says “I'm not coming today” — you said “I'm on my way”."))
+        // the same message written properly (D-027): the ordinary read-back, quoting it
+        val polished = ActionSemantics.confirmation("tap", send, "Send", Screens.chat(composer = "I am on my way now."), goal = goal)!!
+        assertTrue(polished, polished.startsWith("Send this message") && polished.contains("I am on my way now."))
         assertTrue(prompt, prompt.contains("Send it"))
         // the dictated words in the box: the ordinary read-back
         val ok = ActionSemantics.confirmation("tap", send, "Send", Screens.chat(composer = "I'm on my way"), goal = goal)!!

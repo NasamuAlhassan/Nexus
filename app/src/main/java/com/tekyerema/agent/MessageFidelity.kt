@@ -17,10 +17,49 @@ import com.tekyerema.voice.understand.MessageBody
 object MessageFidelity {
     /** The dictated words [raw], and [adapted] for a tell-form ("tell Kofi that he should call me" → "you should call me"). */
     data class Dictated(val raw: String, val adapted: String) {
-        /** What goes out when the planner's text is not the user's words. */
-        val preferred: String get() = adapted
-        fun matches(text: String?): Boolean = text != null && (sameWords(text, raw) || sameWords(text, adapted))
+        /** What goes out when the planner's text is not the user's words — the user's words, TIDIED ([tidy]): the same words
+         *  with sentences, capitals and a full stop, the recogniser's fillers dropped. Never other words. */
+        val preferred: String get() = tidy(adapted)
+        fun matches(text: String?): Boolean = text != null && (sameWords(text, raw) || sameWords(text, adapted) || sameWords(text, preferred))
     }
+
+    /**
+     * Dictated words as a message a person would send (owner, A20e 14 Oct 2026 00:29: "I'm there I have issues with the file
+     * right in fixing it" went out exactly as heard — "it didn't reframe the message I wanted well"). Only shape, never
+     * content: the recogniser's fillers go ("um", "uh", "you know", a leading "so"/"okay"), a new first-person clause after
+     * a word starts a new sentence ("I'm there I have issues" → "I'm there. I have issues"), "i" is "I", the first letter
+     * is a capital, and it ends with a full stop. Words that could be meant ("right", "like") are kept. Pure.
+     */
+    fun tidy(words: String): String {
+        var t = words.trim().replace(Regex("\\s+"), " ")
+        if (t.isEmpty()) return t
+        t = FILLER.replace(t, " ").replace(Regex("\\s+"), " ").trim()
+        t = LEAD_FILLER.replace(t, "")
+        t = Regex("\\s+,").replace(t, ",")
+        // A new clause after a word (no punctuation between) starts a new sentence — unless the word before it joins clauses.
+        t = CLAUSE_START.replace(t) { m ->
+            val before = m.groupValues[1]
+            // group 2 is only looked at (not consumed); group 3 is the clause's first letter, which the match did consume
+            if (before.lowercase() in JOINERS) m.value else "$before. ${m.groupValues[3]}"
+        }
+        t = Regex("(?i)(^|[.!?]\\s+|\\s)i(?=['’\\s]|$)").replace(t) { m -> m.groupValues[1] + "I" }
+        t = t.replaceFirstChar { it.uppercaseChar() }
+        t = Regex("([.!?])\\s+(\\p{Ll})").replace(t) { m -> m.groupValues[1] + " " + m.groupValues[2].uppercase() }
+        t = t.trimEnd(',', ' ')
+        return if (t.last() in ".!?…") t else "$t."
+    }
+
+    // Only sounds that are never words ("um", "uh"); "okay", "yes", "you know" may be part of the message and stay.
+    private val FILLER = Regex("(?i)(?<![\\p{L}'])(?:um+|uh+|erm+|hmm+)(?![\\p{L}'])")
+    private val LEAD_FILLER = Regex("(?i)^(?:(?:so|like)[,\\s]+)+(?=\\p{L})")
+    /** A first-person clause that starts after a word with no punctuation between: a new sentence. */
+    private val CLAUSE_START = Regex("(?i)(\\b[\\p{L}\\p{N}'’]+)\\s+(?=(i'm|i am|i'll|i will|i've|i have|i was|i can't|i cannot|i need|i don't|i didn't|" +
+        "we're|we are|we'll|we will|we have)\\b)(\\S)")
+    /** Words that join a clause to what follows ("I think I'm late", "sorry I'm late"): no sentence break after them. */
+    private val JOINERS = setOf("that", "if", "because", "and", "but", "so", "or", "when", "while", "where", "whether", "think", "know",
+        "hope", "said", "say", "says", "sure", "maybe", "wish", "guess", "believe", "as", "then", "what", "who", "how", "why", "since",
+        "unless", "until", "after", "before", "once", "though", "although", "like", "told", "tell", "mean", "feel", "see", "sorry",
+        "yes", "no", "okay", "ok", "well")
 
     private val LEADING_MARKER = Regex("(?i)^(?:saying|that\\s+says|which\\s+says|and\\s+say|(?:and\\s+)?tell(?:ing)?\\s+(?:him|her|them)(?:\\s+that)?|" +
         "telling\\s+(?:him|her|them)|with\\s+the\\s+message|the\\s+message\\s+is|message\\s+is|that)\\b\\s*|^[:\"“]\\s*")
@@ -44,18 +83,66 @@ object MessageFidelity {
     private fun norm(s: String) = s.lowercase().replace(Regex("[’']"), "'").replace(Regex("[^\\p{L}\\p{N}' ]+"), " ")
         .replace(Regex("\\s+"), " ").trim()
 
-    /** The text a planner's messaging tool call should carry: the dictated words when its own differ, else unchanged. */
+    /**
+     * Is [text] the dictated message, POLISHED — the same meaning written properly — rather than a different message? D-027
+     * (owner, A20e, 14 Oct 2026: "it didn't reframe the message I wanted well"): the planner may fix recognition slips,
+     * grammar, punctuation and person, and split run-ons; it may not add facts. Measured on content words (function words,
+     * fillers and common auxiliaries don't count): nothing new beyond one light word, and most of what was said kept. A
+     * near-spelling (an edit of two letters, a shared stem) is the same word ("fixing"/"fix", "issue"/"issues"). Pure.
+     */
+    fun faithful(text: String?, d: Dictated): Boolean {
+        if (text.isNullOrBlank()) return false
+        if (d.matches(text)) return true
+        val said = content(d.raw) + content(d.adapted)
+        val wrote = content(text)
+        if (wrote.isEmpty()) return false
+        val added = wrote.filter { w -> said.none { same(it, w) } }
+        val kept = content(d.raw).count { s -> wrote.any { same(it, s) } }
+        val saidCount = content(d.raw).size
+        return added.size <= 1 && added.size * 5 <= wrote.size.coerceAtLeast(1) + 1 && (saidCount == 0 || kept * 10 >= saidCount * 6)
+    }
+
+    private fun content(s: String): Set<String> = norm(s).split(' ').map { it.trim('\'') }
+        .filter { it.length > 1 && it !in LIGHT }.toSet()
+    private fun same(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (a.length >= 4 && b.length >= 4 && a.take(4) == b.take(4)) return true
+        return a.length >= 5 && b.length >= 5 && editDistance(a, b) <= 2
+    }
+    private fun editDistance(a: String, b: String): Int {
+        val d = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = d[0]; d[0] = i
+            for (j in 1..b.length) { val tmp = d[j]; d[j] = minOf(d[j] + 1, d[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1); prev = tmp }
+        }
+        return d[b.length]
+    }
+    /** Words a polish may add or drop without changing what is said. */
+    private val LIGHT = setOf("i", "i'm", "im", "am", "is", "are", "was", "were", "be", "been", "being", "the", "a", "an", "and", "but",
+        "so", "or", "to", "of", "in", "on", "at", "with", "for", "from", "it", "it's", "its", "that", "this", "these", "those", "my", "your",
+        "me", "you", "we", "we're", "us", "our", "he", "she", "they", "them", "his", "her", "their", "have", "has", "having", "had", "i've",
+        "do", "does", "did", "don't", "will", "i'll", "would", "can", "could", "should", "just", "now", "some", "any", "right", "very",
+        "really", "please", "okay", "ok", "there", "here", "also", "still", "currently", "already", "then", "um", "uh", "like", "well",
+        "yeah", "yes", "hi", "hello", "by", "as", "if", "not", "no", "all", "about", "up", "out", "get", "got", "getting")
+
+    /** The text a planner's messaging tool call should carry: the planner's own when it is the dictated words, written
+     *  properly ([faithful]); the user's words, tidied, when it says something else. */
     fun enforced(toolName: String, text: String?, goal: String): String? {
         if (toolName !in TEXT_TOOLS) return text
         val d = dictated(goal) ?: return text
-        return if (d.matches(text)) text else d.preferred
+        return when {
+            d.matches(text) -> tidy(text!!)
+            faithful(text, d) -> text
+            else -> d.preferred
+        }
     }
 
-    /** The disclosure for a Send tap whose composer holds other words than the user dictated; null when they agree. */
+    /** The disclosure for a Send tap whose composer holds a DIFFERENT message from the one dictated (not the same words
+     *  polished — [faithful]); null when they agree. */
     fun composerNotice(composer: String?, goal: String): String? {
         val d = dictated(goal) ?: return null
-        if (composer.isNullOrBlank() || d.matches(composer)) return null
-        return "The message in the box says “${composer.trim().take(120)}” — you said “${d.preferred.take(120)}”."
+        if (composer.isNullOrBlank() || faithful(composer, d)) return null
+        return "The message in the box says “${composer.trim().take(120)}” — you said “${d.adapted.take(120)}”."
     }
 
     val TEXT_TOOLS = setOf("send_sms", "reply_to_notification")

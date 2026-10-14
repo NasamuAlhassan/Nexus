@@ -101,6 +101,12 @@ object MoneyFlow {
             val code = s("code")?.replace(Regex("\\s"), "") ?: return d
             return if (codeAllowed(code, goal)) d else AgentDecision.CannotDo("money", MADE_UP_CODE)
         }
+        // A code TYPED into the dialer is a dialled code: the planner typed "*516*0508797323*2#" and "*170*0508797323*2#"
+        // (A20e, 14 Oct 2026 00:13) — a money shortcut it composed, with the user's PIN as its next step.
+        if (d.name == "type") {
+            val text = s("text")?.replace(Regex("\\s"), "") ?: return d
+            if (TYPED_CODE.matches(text) && !codeAllowed(text, goal)) return AgentDecision.CannotDo("money", MADE_UP_CODE)
+        }
         if (!enabled()) return d
         val nav = JSONObject()
         when (d.name) {
@@ -151,6 +157,8 @@ object MoneyFlow {
 
     /** A code may be dialled when the user said it ("dial star 1 3 5 hash", "*135#") or it is in the checked tables: the
      *  balance code, the networks' data / offers menus, the Mobile Money and bank roots. */
+    private val TYPED_CODE = Regex("^\\*\\d{2,4}(?:\\*[\\d.]+)*#?$")
+
     internal fun codeAllowed(code: String, goal: String): Boolean {
         val said = goal.lowercase().replace(Regex("\\bstar\\b"), "*").replace(Regex("\\b(?:hash|pound)\\b"), "#")
             .replace(Regex("[\\s,]"), "")
@@ -166,6 +174,10 @@ object MoneyFlow {
         // A correction the engine could not apply itself is the planner's (RoutingBrain.pendingRevision) — never re-proposed here.
         if (com.tekyerema.agent.RoutingBrain.pendingRevision(history)) return null
         recordsMode(goal)?.let { return records(it, history) }
+        // "I want you to buy" — the recogniser stopped before the rest (A20e, 14 Oct 2026 00:11). One question, here, and the
+        // answer is a money request in its own right (MoneyPlan.fromAnswer) — the planner used to take it from here and
+        // spent two minutes on web searches and codes typed into the dialer.
+        if (!walked(history) && BARE_BUY.matches(goal.lowercase().replace('’', '\'').trim())) return question(history, WHAT_PREFIX, WHAT_WORDINGS)
         val ask = try { MoneyAsk.parse(goal) } catch (_: Throwable) { null }
             ?: return if (history.isEmpty()) notYet(goal)?.let { AgentDecision.Done(it) } else null
         return when (ask.kind) {
@@ -267,6 +279,16 @@ object MoneyFlow {
     // ------------------------------------------------------------------ slots from the user's answers
     private const val AMOUNT_PREFIX = "How much"
     private const val WHO_PREFIX = "Who should I send"
+    /** "I want you to buy" and nothing more: what, how much, for whom — asked once, answered as a whole request. */
+    const val WHAT_PREFIX = "What should I buy"
+    private val WHAT_WORDINGS = listOf(
+        "$WHAT_PREFIX — airtime, data, or a bundle? Say the amount, and the number if it's for someone else.",
+        "$WHAT_PREFIX? For example, say “2 cedis of airtime for 0 2 4…”, or “a 3-cedi data bundle”.")
+    private val BARE_BUY = Regex("^(?:please |kindly |so |okay )*(?:i want (?:you )?to |i'd like (?:you )?to |i would like (?:you )?to |can you |could you |help me )?" +
+        "(?:buy|purchase|top ?up|recharge)(?: it| some| something| for me| me| one)?\\s*[.!?]*$")
+
+    /** The (question, answer) of one history line, or null when it isn't an answered question. */
+    internal fun answerOf(line: String): Pair<String, String>? = ASKED.find(line)?.let { m -> m.groupValues[1] to m.groupValues[2] }
     /** The number was said but the recogniser destroyed it: asked for again, on its own (end-to-end pass, 6 October 2026). */
     private const val NUMBER_PREFIX = "I couldn't catch the phone number"
     private val ASKED = Regex("^ask_user\\(\"(.*?)\"\\) → the user answered: \"(.*?)\"(?: \\(= .*\\))?$")
@@ -299,7 +321,7 @@ object MoneyFlow {
     }
 
     /** A walk (or the older tools) already ran in this task: nothing more is proposed from here. */
-    private fun walked(history: List<String>): Boolean =
+    internal fun walked(history: List<String>): Boolean =
         history.any { it.startsWith("$NAV(") || it.startsWith("momo_send(") || it.startsWith("mobile_money(") }
 
     private fun cedis(amount: String): String = com.tekyerema.tools.GhanaMobileMoney.cedisPhrase(amount)

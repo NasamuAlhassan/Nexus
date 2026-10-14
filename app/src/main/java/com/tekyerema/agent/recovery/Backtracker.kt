@@ -126,6 +126,12 @@ class Backtracker(
             if (onPhoneSession(screen.appPackage)) break
         }
         val target = stack.last()
+        // Only a route THIS task verified is replayed. The screen the task merely started on (checkpoint 0, no step of ours)
+        // is not: "turn off the data and turn on the Wi-Fi" began on YouTube, the first toggle went wrong, and the engine
+        // relaunched YouTube in the middle of a settings task (A20e, 14 Oct 2026 00:31).
+        // (The home screen is the exception: pressing Home is harmless and is where a lost task should start again.)
+        if (stack.all { it.via == null } && !isHome(target.appName ?: "", target.key.pkg))
+            return Result.NotReached(presses, "no step of this task to replay")
         val replay = replayTo(target) ?: return Result.NotReached(presses, "no replayable route to ${target.appName ?: target.key.pkg}")
         return Result.Replay(replay, presses, target)
     }

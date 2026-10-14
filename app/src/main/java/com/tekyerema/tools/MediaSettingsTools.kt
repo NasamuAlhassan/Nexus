@@ -349,6 +349,11 @@ object OpenSettingTool : Tool {
      *  settings" here instead of opening the Settings app's front page. */
     fun knows(target: String): Boolean = actionFor(target) != null
 
+    /** The tool reads the switch back after setting it ("confirmed" = its checked state is what was asked): an OUTCOME, so
+     *  the engine trusts it instead of a screen-change guess — without this, a confirmed "Turned mobile data off." was
+     *  judged "no effect" and a 15-second screen read followed (Pixel emulator, 14 Oct 2026). */
+    override val verifiesOutcome = true
+
     /** Map a target to (intent action, spoken label). Panel actions land on a togglable surface where they exist.
      *  E-11: `os.settings.map` in config can add targets ({"target": {"action": "...", "label": "..."}}). */
     private fun actionFor(target: String): Pair<String, String>? {
@@ -386,7 +391,8 @@ object OpenSettingTool : Tool {
 
     /** Whole-word label patterns for each target's switch ("wi" alone matched "Switch", "Window"…). */
     internal fun labelPattern(target: String): Regex? = when (norm(target)) {
-        "wifi", "wi-fi", "wi_fi" -> Regex("(?i)\\b(wi-?fi|wlan)\\b")
+        // Any hyphen: Android 15's panels write "Wi‑Fi" with U+2011, the non-breaking hyphen (Pixel emulator, 14 Oct 2026).
+        "wifi", "wi-fi", "wi_fi" -> Regex("(?i)\\b(wi[-‐‑‒–— ]?fi|wlan)\\b")
         "mobile_data", "data", "internet", "cellular" -> Regex("(?i)\\b(mobile data|data|cellular data)\\b")
         "airplane", "flight", "aeroplane" -> Regex("(?i)\\b(airplane|aeroplane|flight) mode\\b|\\bairplane\\b")
         "bluetooth" -> Regex("(?i)\\bbluetooth\\b")
@@ -394,10 +400,55 @@ object OpenSettingTool : Tool {
         else -> null
     }
 
-    /** E-10: the switch whose label names the target — never "the first checkable thing on the screen". */
+    /**
+     * E-10: the switch whose label names the target — never "the first checkable thing on the screen". The label may be the
+     * switch's own, or the TextView just before it in reading order: on the A20e's Internet and Wi-Fi panels (One UI 3,
+     * 14 Oct 2026) the Switch has no text and no description at all — "Wi-Fi" / "Mobile data" are sibling TextViews, with
+     * the carrier name ("MTN") between "Mobile data" and its switch. Both toggles were reported "couldn't find its switch"
+     * and the task went to the cloud planner's quick-settings fumbling.
+     */
     internal fun findToggle(snap: UiSnapshot, target: String): com.tekyerema.accessibility.UiElement? {
         val re = labelPattern(target) ?: return null
-        return snap.elements.firstOrNull { it.checkable && it.label?.let(re::containsMatchIn) == true }
+        val els = snap.elements
+        els.firstOrNull { it.checkable && it.label?.let(re::containsMatchIn) == true }?.let { return it }
+        // A label that names the target, then the first checkable element within the next few nodes — stopping at the next
+        // label that names a DIFFERENT setting (on the Internet panel "Wi-Fi" must not take "Mobile data"'s switch).
+        val others = listOf("wifi", "mobile_data", "airplane", "bluetooth", "location").mapNotNull { labelPattern(it) }.filter { it.pattern != re.pattern }
+        for ((i, e) in els.withIndex()) {
+            val label = e.label ?: continue
+            if (e.checkable || !re.containsMatchIn(label) || label.length > 40) continue
+            for (j in i + 1..minOf(i + 4, els.lastIndex)) {
+                val c = els[j]
+                if (c.checkable) return c
+                val l = c.label
+                if (l != null && others.any { it.containsMatchIn(l) }) break
+            }
+        }
+        return null
+    }
+
+    /** The switch's state now: the same labelled switch, else the target's switch found afresh (a label of null matches
+     *  nothing — on the Internet panel every switch is unlabelled, and "the first unlabelled switch" is Wi-Fi's). */
+    internal fun stateOf(snap: UiSnapshot, toggle: com.tekyerema.accessibility.UiElement, target: String): Boolean? =
+        toggle.label?.let { l -> snap.elements.firstOrNull { it.checkable && it.label == l }?.checked } ?: findToggle(snap, target)?.checked
+
+    /** The phone's own record of a radio's state (Settings.Global, readable by any app), or null when it has none. */
+    internal fun systemState(ctx: android.content.Context, target: String): Boolean? = try {
+        val cr = ctx.contentResolver
+        fun global(key: String): Int? = Settings.Global.getInt(cr, key, -1).takeIf { it >= 0 }
+        when (norm(target)) {
+            "wifi", "wi-fi", "wi_fi" -> global(Settings.Global.WIFI_ON)?.let { it == 1 || it == 2 }   // 2 = on while in airplane mode
+            "mobile_data", "data", "internet", "cellular" -> global("mobile_data")?.let { it != 0 }
+            "airplane", "flight", "aeroplane" -> global(Settings.Global.AIRPLANE_MODE_ON)?.let { it != 0 }
+            "bluetooth" -> global(Settings.Global.BLUETOOTH_ON)?.let { it != 0 }
+            else -> null
+        }
+    } catch (_: Throwable) { null }
+
+    /** One UI may ask first ("Turn off mobile data?"): the button that does what the user asked, or null. */
+    internal fun confirmButton(snap: UiSnapshot, want: Boolean): com.tekyerema.accessibility.UiElement? {
+        val re = if (want) Regex("(?i)^(?:turn on|switch on|enable|ok|okay|allow)$") else Regex("(?i)^(?:turn off|switch off|disable|ok|okay)$")
+        return snap.elements.firstOrNull { it.clickable && it.label?.trim()?.let(re::matches) == true }
     }
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
@@ -424,11 +475,14 @@ object OpenSettingTool : Tool {
         // (audit 2026-09-30, half 2 #11).
         var before = ctrl.buildSnapshot()
         val deadline = android.os.SystemClock.uptimeMillis() + 5_000L
-        while (before.appPackage != settingsPkg && android.os.SystemClock.uptimeMillis() < deadline) {
+        // Android 12+ shows the Internet panel as a System UI dialog, not a Settings screen (Pixel emulator, 14 Oct 2026): for
+        // a panel, either package is "the settings screen came up".
+        val shownBy = setOf(settingsPkg) + (if (action.startsWith("android.settings.panel.")) setOf("com.android.systemui") else emptySet())
+        while (before.appPackage !in shownBy && android.os.SystemClock.uptimeMillis() < deadline) {
             kotlinx.coroutines.delay(300)
             before = ctrl.buildSnapshot()
         }
-        if (before.appPackage != settingsPkg)
+        if (before.appPackage !in shownBy)
             return ToolResult(true, if (want == null) "Opened $label settings — it was still coming up." else
                 "Opened $label settings — the screen didn't come up in time, so please use the switch there.",
                 data = JSONObject().put("confirmed", false), channel = "intent", recoverable = true)
@@ -449,10 +503,32 @@ object OpenSettingTool : Tool {
             return ToolResult(true, "Opened $label settings. I only guide you in Settings, so please turn it $word there yourself: " +
                 "find the $label switch and double-tap it.", data = JSONObject().put("confirmed", false), channel = "intent", recoverable = false)
         val tapped = ctrl.clickElement(toggle.id)
-        ctrl.waitForSettle(900)
-        val after = ctrl.buildSnapshot()
-        val nowChecked = after.elements.firstOrNull { it.checkable && it.label == toggle.label }?.checked
-            ?: findToggle(after, target)?.checked
+        ctrl.waitForSettle(700)
+        var after = ctrl.buildSnapshot()
+        var nowChecked = stateOf(after, toggle, target)
+        // The switch can take a moment to show its new position (the radio behind it changes first), and One UI / Android 15
+        // may ask first ("Turn off mobile data?"): for up to 3 s the confirm button is pressed once if it appears, and the
+        // phone's own setting (Wi-Fi on, mobile data) counts as the answer. The 14 Oct emulator run 3 turned both off/on and
+        // still said "couldn't confirm it" — the switch was read before it moved.
+        var pressedConfirm = false
+        var waited = 0L
+        while (tapped && nowChecked != want && waited <= 3_000L) {
+            if (!pressedConfirm) confirmButton(after, want)?.let { b ->
+                android.util.Log.i("Tekyerema", "[SETTING] the phone asked to confirm — pressing “${b.label}” (what the user asked for)")
+                ctrl.clickElement(b.id)
+                pressedConfirm = true
+                ctrl.waitForSettle(700)
+            }
+            if (systemState(ctx.appContext, target) == want) { nowChecked = want; break }
+            kotlinx.coroutines.delay(300); waited += 300
+            after = ctrl.buildSnapshot()
+            nowChecked = stateOf(after, toggle, target)
+        }
+        // A quick-settings PANEL is closed once its switch is set: the user is back where they were, and the next toggle
+        // in the same request opens its own (owner, A20e, 14 Oct 2026: "Wi-Fi and data is supposed to be very, very quick").
+        if (tapped && nowChecked == want && action.startsWith("android.settings.panel.")) {
+            try { ctrl.globalAction("back") } catch (_: Throwable) {}
+        }
         return if (tapped && nowChecked == want)
             ToolResult(true, "Turned $label $word.", data = JSONObject().put("confirmed", true), channel = "a11y")
         else

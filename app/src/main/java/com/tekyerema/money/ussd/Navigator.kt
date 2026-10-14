@@ -29,7 +29,9 @@ class Navigator(
         /** The consolidated line was spoken-worthy and the PIN/confirmation is the user's: the walk SUCCEEDED up to
          *  the boundary. [handedOff] = it reached the authorization (limits/receipt bookkeeping applies). */
         data class Boundary(val line: String, val handedOff: Boolean, val registeredName: String? = null) : Outcome()
-        data class Final(val line: String) : Outcome()                  // the network's last word (a balance, a receipt)
+        /** The network's last word (a balance, a receipt) — or its PROMISE that the PIN prompt follows ([pushedPin]: the
+         *  caller watches for the pushed dialog, money/ussd/PushedPin). */
+        data class Final(val line: String, val pushedPin: Boolean = false) : Outcome()
         /** Guided from here — the user chooses. [pending] = the brain's own question, its answers mapped to rows. */
         data class NeedUser(val ask: String, val pending: MenuBrain.Move.Ask? = null) : Outcome()
         data class Failed(val line: String) : Outcome()                 // honest, nothing moved
@@ -81,7 +83,13 @@ class Navigator(
             // S-03: the PIN / payment-confirmation screen (the registered name, the amount) is traced by size, never in words.
             t("READ", if (m.kind == MenuModel.Kind.PIN || m.kind == MenuModel.Kind.CONFIRM) "${m.kind} (${m.text.length} chars)" else "${m.kind} ${m.text.take(80)}")
             when (m.kind) {
-                MenuModel.Kind.PIN, MenuModel.Kind.CONFIRM -> return boundary(m, screen)
+                MenuModel.Kind.PIN, MenuModel.Kind.CONFIRM -> {
+                    // A confirmation that shows exactly what the user approved is confirmed, not asked again (Boundary.approvedExactly).
+                    val key = approvedConfirmKey(m) ?: return boundary(m, screen)
+                    t("CONFIRM", "shows what was approved — pressed $key")
+                    lastEntered = null; lastPressedMenu = null
+                    screen = press(m.text, key) ?: return timedOut()
+                }
                 MenuModel.Kind.ERROR -> { val closed = cancel(screen); return Outcome.Failed(honestError(m.text, closed)) }
                 MenuModel.Kind.FINAL -> {
                     // The network's last word. Its words have been taken, so its dialog is closed here — a blind user was
@@ -91,6 +99,12 @@ class Navigator(
                     // (A message that the request is on its way — "you will receive a prompt to authorise" — is not a
                     // refusal: it is read as it is, with no claim about what did or did not happen.)
                     cancel(screen)
+                    // "You will soon receive payment prompt": one short line, and the caller watches for the PIN dialog —
+                    // never the whole promise read out while the dialog lands (owner, A20e, 13 October 2026).
+                    if (tx.intent != TxIntent.CHECK_BALANCE && PushedPin.promptComing(m.text)) {
+                        t("PROMISE", "the PIN prompt will be pushed")
+                        return Outcome.Final(PushedPin.waitingLine(com.tekyerema.agent.NumberSpeech.networkName(tx.provider ?: "the network")), pushedPin = true)
+                    }
                     return if (tx.intent == TxIntent.CHECK_BALANCE || IN_PROGRESS.containsMatchIn(m.text)) Outcome.Final(UssdSpeech.forEar(m.text))
                         else Outcome.Failed(endedBeforePin(tx, m.text))
                 }
@@ -158,7 +172,17 @@ class Navigator(
      *  recipient when there is one. The amount is the send's, never a product price — a "Buy" is always asked. */
     private fun goal() = MenuBrain.Goal(amount = tx.amount, pay = "momo",
         forOthers = tx.recipient != null && tx.intent != TxIntent.CHECK_BALANCE,
-        net = tx.provider?.let { com.tekyerema.agent.NumberSpeech.networkName(it) } ?: "The network")
+        net = tx.provider?.let { com.tekyerema.agent.NumberSpeech.networkName(it) } ?: "The network",
+        // Airtime for another network: the read-back the user approved said it can't be reversed (UssdNavigatorTool), so
+        // MTN's own notice of it is accepted rather than asked again.
+        irreversibleSaid = tx.confirmedUpFront && tx.intent == TxIntent.SEND_AIRTIME && crossNetwork() == true)
+
+    /** The confirm key of a payment confirmation that shows exactly what the user approved, or null (then it is asked). */
+    private fun approvedConfirmKey(m: MenuModel.Screen): String? {
+        if (m.kind != MenuModel.Kind.CONFIRM) return null
+        val keys = MenuBrain.confirmKeys(m.text) ?: return null
+        return keys.first.takeIf { Boundary.approvedExactly(tx, m) }
+    }
 
     /** What did NOT happen, in the intent's own word: a balance check never sends or buys anything. */
     private fun nothing(): String = when (tx.intent) {

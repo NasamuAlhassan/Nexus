@@ -37,7 +37,10 @@ object MenuBrain {
         val net: String = "The network",
         /** A tier is inferred from an amount that is none of the prices only until the user has steered the menu
          *  themselves (a "0, go back" must not be undone by the same guess — live A20e, 30 September 2026). */
-        val inferTier: Boolean = true
+        val inferTier: Boolean = true,
+        /** The approved read-back said this purchase can't be reversed (airtime for another network) — the network's own
+         *  notice of exactly that is accepted, not asked again. */
+        val irreversibleSaid: Boolean = false
     )
 
     sealed class Move {
@@ -144,6 +147,8 @@ object MenuBrain {
             mapOf("yes" to buy.first, "no" to cancelOption(rows)))
     }
 
+    private val IRREVERSIBLE = Regex("(?i)\\b(?:cannot|can ?not|can't|won't|will not) be (?:reversed|refunded|undone)\\b|\\bnon-?reversible\\b|\\birreversible\\b")
+
     /** A bare "go on" row — the word alone ("1. Confirm", "1. Proceed"), not "Proceed to buy bundle (No 4G bonus)". */
     private val GO_ON_ROW = Regex("(?i)^(?:confirm|proceed|continue|ok|okay|yes|accept|agree|i agree|go on|next)\\W*$")
     /** A head that is only a prompt to pick a row ("Welcome to MTN Pulse. Please select an option"), not a notice. */
@@ -161,6 +166,8 @@ object MenuBrain {
         val go = actions.singleOrNull()?.takeIf { GO_ON_ROW.matches(it.second.trim()) } ?: return null
         val said = describe(flat)
         if (said == "this" || said.length < 12 || PROMPT_HEAD.containsMatchIn(said)) return null   // nothing to tell
+        // "Airtime purchased for other networks cannot be reversed": the user already heard that in the read-back they approved.
+        if (goal.irreversibleSaid && IRREVERSIBLE.containsMatchIn(said)) return Move.Press(go.first, go.second, "the read-back you approved said it can't be reversed")
         return Move.Ask("${goal.net} says: $said. Shall I go on? Say yes or no.", Kind.CONFIRM,
             mapOf("yes" to go.first, "no" to cancelOption(rows)))
     }

@@ -31,6 +31,26 @@ object Boundary {
     /** @param paidBefore the network has already CONFIRMED a send to this number from this phone — the registered name is
      *  still said, but the "isn't the name you have saved" note is not repeated every time (the owner's own second line
      *  is registered in someone else's name; first live send, 2 October 2026). */
+    /**
+     * A network confirmation ("You are sending GHS 2.00 airtime to this Telecel number: 0508797323. Reply 1 to confirm or 0
+     * to start again") that shows EXACTLY what the user approved in the read-back — the same amount, the same number, no fee
+     * or tax they didn't hear — so its confirm key is pressed without asking again (owner, A20e, 13–14 Oct 2026: "when it
+     * gets that option, should it ask again?"). The PIN that follows stays the user's. Anything missing or different: false,
+     * and the screen is read and asked about as before. Pure.
+     */
+    fun approvedExactly(tx: TxContext, m: MenuModel.Screen): Boolean {
+        if (tx.intent == TxIntent.CHECK_BALANCE || !tx.confirmedUpFront) return false
+        val p = MtnConfirm.parse(m.text)
+        if ((p.fee ?: java.math.BigDecimal.ZERO).signum() > 0 || (p.tax ?: java.math.BigDecimal.ZERO).signum() > 0) return false
+        val asked = tx.amount?.replace(",", "")?.toBigDecimalOrNull() ?: return false
+        val shown = p.amount ?: m.shownAmount?.toBigDecimalOrNull() ?: return false
+        if (asked.compareTo(shown) != 0) return false
+        val want = NumberSpeech.normalize(tx.recipient)
+        if (want.isEmpty()) return tx.intent == TxIntent.BUY_AIRTIME            // this phone: the amount is all there is to check
+        val number = p.number ?: return false
+        return number.takeLast(9) == want.takeLast(9)
+    }
+
     fun decide(tx: TxContext, m: MenuModel.Screen, pinTip: String? = null, paidBefore: Boolean = false,
                /** A "Reply 1 to confirm" screen whose confirm key Tɛkyerɛma presses at the user's spoken yes: the line ends
                 *  with that question instead of reading the raw screen (2 October 2026: "the screen says '…to this Telecel

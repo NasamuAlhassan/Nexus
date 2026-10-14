@@ -71,6 +71,25 @@ object FinalActionGuard {
      * punctuation of the same words is kept. Pure.
      */
     internal fun withUsersWords(proposed: AgentDecision.CallTool, goal: String): AgentDecision {
+        // A chat's composer (`type`): when the planner typed the dictated words as heard, the TIDIED words go instead — the
+        // same words with sentences and a full stop (MessageFidelity.tidy; owner, A20e 14 Oct 2026). Any other typed text
+        // (a contact's name in a search box) is not touched.
+        if (proposed.name == "type") {
+            val own = proposed.args.optString("text").takeIf { it.isNotBlank() } ?: return proposed
+            val d = MessageFidelity.dictated(goal) ?: return proposed
+            // The planner typed the words as heard: they go out tidied (sentences, capitals, a full stop). A polished version
+            // of the same message (MessageFidelity.faithful) is kept as written. Anything else typed in this task — a name in
+            // a search box — shares no words with the message and is left alone.
+            val kept = when {
+                d.matches(own) -> MessageFidelity.tidy(own)
+                MessageFidelity.faithful(own, d) -> own
+                else -> return proposed
+            }
+            if (kept == own) return proposed
+            android.util.Log.i("Tekyerema", "[GUARD] type: the dictated words go out tidied (sentences, capitals, a full stop)")
+            return proposed.copy(args = JSONObject(proposed.args.toString()).put("text", kept),
+                rationale = (proposed.rationale ?: "") + " [message text tidied]")
+        }
         if (proposed.name !in MessageFidelity.TEXT_TOOLS) return proposed
         val key = if (proposed.args.has("message")) "message" else if (proposed.args.has("text")) "text" else return proposed
         val own = proposed.args.optString(key).takeIf { it.isNotBlank() } ?: return proposed
@@ -94,7 +113,8 @@ object FinalActionGuard {
     fun apply(proposed: AgentDecision, goal: String, history: List<String>, screenText: String = "", appPackage: String? = null): AgentDecision {
         if (proposed !is AgentDecision.CallTool) return proposed
         val typedInMenu = proposed.name == "type" && com.tekyerema.accessibility.TelephonyWindows.matches(appPackage)
-        if (proposed.name !in PERSON_ARGS && !typedInMenu) return proposed
+        // A chat composer's text (a `type` outside a phone menu): the dictated words, tidied or polished (D-027).
+        if (proposed.name !in PERSON_ARGS && !typedInMenu) return if (proposed.name == "type") withUsersWords(proposed, goal) else proposed
         if (!com.tekyerema.core.config.AppConfig.bool("agent.finalActionGuard", true)) return proposed
         val facts = TaskFacts(goal, history, screenText)
         val v = if (typedInMenu) typed(proposed.args.optString("text"), facts) else check(proposed.name, proposed.args, facts)

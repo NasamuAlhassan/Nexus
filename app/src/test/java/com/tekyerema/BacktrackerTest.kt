@@ -105,6 +105,17 @@ class BacktrackerTest {
         assertEquals(Backtracker.REPLAY_TAG, r.steps[0].rationale)
     }
 
+    @Test fun the_app_the_task_merely_started_in_is_never_relaunched() = runBlocking {
+        // A20e, 14 Oct 2026 00:31: "turn off the data and turn on the Wi-Fi" began on YouTube; the first toggle went wrong and
+        // the engine relaunched YouTube in the middle of a settings task. No step of the task led there: nothing to replay.
+        val b = Backtracker(maxPresses = 2, maxDepth = 8)
+        val youtube = screen("com.google.android.youtube", null, "Home", "Shorts", "Subscriptions")
+        b.base(youtube)
+        val panel = screen(S, "Internet connectivity", "Wi-Fi", "Mobile data", "Done")
+        val r = b.run(panel, FakeOps(listOf(panel, panel)))
+        assertTrue(r.toString(), r is Backtracker.Result.NotReached)
+    }
+
     @Test fun a_route_with_an_id_only_tap_is_not_replayed() = runBlocking {
         val b = Backtracker(maxPresses = 1)
         b.onVerifiedNavigation(settingsHome, open("Settings"))

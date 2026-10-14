@@ -175,6 +175,12 @@ object UssdNavigatorTool : Tool {
         )
         Log.i(TAG, "[NAV] opened $root (${sim.provider}${if (sim.dualSim) ", dual-SIM: default voice slot ${sim.slot}" else ""}) intent=${tx.intent}")
         if (!balance) com.tekyerema.money.MoMoRetry.clear()   // a balance check doesn't cancel a send waiting to be retried
+        // A PIN or payment prompt from an EARLIER request still in front is the user's to finish or cancel — never dialled over
+        // (the new session's first screen would be that prompt, read as this request's; A20e, 14 Oct 2026).
+        UssdDialog.promptInFront(ctrl)?.let { p ->
+            Log.i(TAG, "[NAV] a PIN or payment prompt from an earlier request is still in front — not dialling over it")
+            return ToolResult(false, UssdDialog.promptInFrontLine(com.tekyerema.agent.NumberSpeech.networkName(sim.provider ?: "mtn"), p), recoverable = false)
+        }
         // A dialog left open is closed first, and a "Connection problem or invalid MMI code" (nothing ran) is redialled once.
         val first = try { UssdDialog.dial(ctx.appContext, ctrl, root) } catch (t: Throwable) {
             return ToolResult(false, "I couldn't open Mobile Money. ${nothing(intent)}", recoverable = true)
@@ -203,7 +209,23 @@ object UssdNavigatorTool : Tool {
                 AfterPin.watch(ctrl, ctx.appContext, sim.provider)
                 ToolResult(true, out.line, data = JSONObject().put("boundary", true), channel = "native")
             }
-            is Navigator.Outcome.Final -> ToolResult(true, out.line, data = JSONObject().put("final", true), channel = "native")
+            is Navigator.Outcome.Final -> {
+                if (out.pushedPin) {
+                    val net = com.tekyerema.agent.NumberSpeech.networkName(sim.provider ?: "the network")
+                    Log.i(TAG, "[NAV] $net will push the PIN prompt — watching for it")
+                    var booked = false
+                    PushedPin.watch(ctrl, ctx.appContext, net) { kind ->
+                        // The hand-off is booked when the network's own prompt is in front (the ledger, today's total, the look).
+                        if (!booked && (kind == BankUssd.ScreenKind.PIN || kind == BankUssd.ScreenKind.MONEY)) {
+                            booked = true
+                            com.tekyerema.money.MoneyStatus.handedOff(ctx.appContext,
+                                if (intent == TxIntent.SEND_MONEY) com.tekyerema.money.TxLedger.What.SEND else com.tekyerema.money.TxLedger.What.AIRTIME,
+                                com.tekyerema.money.MoneyLimits.parseAmount(tx.amount), tx.recipient, contact, sim.provider)
+                        }
+                    }
+                }
+                ToolResult(true, out.line, data = JSONObject().put("final", true), channel = "native")
+            }
             is Navigator.Outcome.NeedUser -> {
                 // Guided from the CURRENT screen: the guide asks, the user chooses, the same dialog machinery types.
                 val now = UssdDialog.awaitCurrent(ctrl, 2_000L)
@@ -282,6 +304,14 @@ object UssdNavigatorTool : Tool {
         return spec.takeIf { !firstTime || com.tekyerema.voice.ConfirmTemplates.oneVoice(it) != null }
     }
 
+    /** Said in the read-back of airtime for another network. */
+    const val IRREVERSIBLE_LINE = "Airtime for another network can't be reversed."
+
+    /** The SIM's network key ("mtn"), or null when it can't be read (unit tests, no SIM). */
+    private fun simKey(): String? = try {
+        com.tekyerema.agent.AgentEngine.appContext()?.let { Provider.current(it).provider?.lowercase() }
+    } catch (_: Throwable) { null }
+
     override fun confirmationPrompt(args: JSONObject): String {
         val intent = intentOf(args)
         if (intent == TxIntent.CHECK_BALANCE) return BALANCE_PROMPT
@@ -291,8 +321,13 @@ object UssdNavigatorTool : Tool {
         val tail = "I'll go through the menu quietly and stop at the PIN for you to enter."
         if (intent != TxIntent.SEND_MONEY) {
             val whom = if (intent == TxIntent.BUY_AIRTIME) "this phone" else who?.first ?: "another number"
+            // Airtime for another network can't be reversed — said HERE, once, so MTN's own notice of it needn't be asked
+            // about again during the walk (Navigator.goal → MenuBrain.notice; owner, 14 Oct 2026).
+            val to = com.tekyerema.agent.NumberSpeech.networkKey(args.str("number"))
+            val sim = args.str(MoMoSendTool.ARG_SIM)?.lowercase() ?: simKey()
+            val irreversible = IRREVERSIBLE_LINE.takeIf { intent == TxIntent.SEND_AIRTIME && to != null && sim != null && to != sim }
             val warn = listOfNotNull(UNSAID_AMOUNT_LINE.takeIf { args.optBoolean(ARG_UNSAID_AMOUNT) },
-                UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who?.second.takeIf { intent == TxIntent.SEND_AIRTIME }, call)
+                UNSAID_LINE.takeIf { args.optBoolean(ARG_UNSAID) }, who?.second.takeIf { intent == TxIntent.SEND_AIRTIME }, irreversible, call)
                 .joinToString(" ").ifEmpty { null }
             return "Buy $amt of airtime for $whom, from your Mobile Money wallet?\n" + (warn?.let { "$it " } ?: "") + tail
         }

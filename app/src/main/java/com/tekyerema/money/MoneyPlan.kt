@@ -16,6 +16,7 @@ import com.tekyerema.agent.LocalBrain
  */
 object MoneyPlan {
     fun decide(goal: String, history: List<String>): AgentDecision? {
+        if (history.isNotEmpty()) fromAnswer(history)?.let { return it }
         // Untranslated Twi (the phone's own Twi commands didn't take it) is for the translator and the planner, not these
         // English parsers: "Mesrɛ wo, tɔ data bundle a ne bo yɛ sidi mmiɛnsa ma me" matched the telco walk on the words
         // "data bundle" and lost the 3 cedis (QA TW05, 3 October 2026). Quoted message words may be Twi on purpose.
@@ -24,6 +25,29 @@ object MoneyPlan {
             ?: TelcoGuide.decide(goal, history)
             // Finance audit (2026-10-01): a spoken send / airtime / balance / "did it go through" is planned on the phone.
             ?: MoneyFlow.decide(goal, history)
+    }
+
+    /**
+     * The user's ANSWER to a question is a money request in its own right — ours ("What should I buy?", MoneyFlow) or the
+     * planner's ("How much airtime would you like to buy and for which phone number?") — so it is decided here as if it were
+     * the goal, with whatever came after it. The planner never walks it: on the A20e (14 Oct 2026 00:12) "I want you to buy"
+     * was cut short, the planner asked, the answer named 2 cedis of airtime for a Telecel number, and the planner then spent
+     * two minutes on web searches for Telecel codes and shortcuts typed into the dialer. Only before any walk, and only an
+     * answer that is a COMPLETE send or airtime request (or any answer to our own question).
+     */
+    private fun fromAnswer(history: List<String>): AgentDecision? {
+        if (MoneyFlow.walked(history) || history.any { it.startsWith("${TelcoUssdTool.NAME}(") || it.startsWith("${BankUssdTool.NAME}(") }) return null
+        val idx = history.indexOfLast { MoneyFlow.answerOf(it) != null }
+        if (idx < 0) return null
+        val (q, ans) = MoneyFlow.answerOf(history[idx]) ?: return null
+        val ours = q.startsWith(MoneyFlow.WHAT_PREFIX)
+        val ask = try { MoneyAsk.parse(ans) } catch (_: Throwable) { null }
+        val complete = ask != null && (ask.kind == MoneyAsk.Kind.SEND || ask.kind == MoneyAsk.Kind.AIRTIME) && ask.amount != null &&
+            (ask.number != null || ask.name != null || ask.badNumber != null || ask.forSelf)
+        if (!ours && !complete) return null
+        val d = decide(ans, history.drop(idx + 1)) ?: return null
+        android.util.Log.i("Tekyerema", "[MONEY] the answer to “${q.take(40)}” is a money request — decided on the phone, not by the planner")
+        return d
     }
 
     fun end(history: List<String>): Pair<AgentStatus, String>? {

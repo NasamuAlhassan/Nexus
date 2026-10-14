@@ -17,7 +17,7 @@ object BrainPrompts {
         "ONE ongoing conversation: use it to resolve references and corrections ('actually…','X instead','make it shorter','never mind') — redo the pending " +
         "action with the change; if they cancel, stop. " +
         "Describe a consequential action in plain words (who + what). Told WHAT to say ('tell X to call his " +
-        "mother') → compose a natural message ('Please call your mom when you're free.'), adapting pronouns; use exact quoted words verbatim.\n\n" +
+        "mother' → 'Please call your mom.'); dictated words → as typed by the user: slips and punctuation fixed, nothing added; quotes verbatim.\n\n" +
         "LOOP: read the screen listing (a line per element: [element_id] kind \"label\" actions state), do the single best next action, then observe the result. Target by element_id (or label); " +
         "use x,y ONLY for a source=vision element — never invent coordinates. If what you expect isn't listed, tap it by label (that scrolls to find it in an app — never page the home screen: open_app), use " +
         "the app's own search, or read_state with vision=true. In Settings, use 'Search settings' for anything not on screen — never guess the section (layouts differ by phone). " +
