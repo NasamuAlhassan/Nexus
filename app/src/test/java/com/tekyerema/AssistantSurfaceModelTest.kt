@@ -74,10 +74,24 @@ class AssistantSurfaceModelTest {
         val before = VoiceUiState(spoken = "It's 5 pm.", spokenAt = now - 2_000, lastCanonical = "what's the time")
         assertEquals(Mode.HIDDEN, SurfaceModel.reduce(before, done, replaced, now = now).mode)
         val after = VoiceUiState(spoken = "The battery is at 80 percent.", spokenAt = now - 500, lastCanonical = "battery level")
-        assertEquals("reply:${now - 500}", SurfaceModel.reduce(after, done, replaced, now = now).key)
+        assertEquals("The battery is at 80 percent.", (SurfaceModel.reduce(after, done, replaced, now = now).preview as Preview.Answer).body)
         // and the next run's result is never hidden by the old run's dismissal
         val next = done.copy(runSeq = 6, log = listOf(resultLog("x", now - 100)))
         assertEquals(Mode.PRESENTING, SurfaceModel.reduce(idleVoice, next, replaced, now = now).mode)
+    }
+
+    @Test fun a_quick_answer_shows_while_it_is_spoken_and_keeps_its_place_after() {
+        // Owner on the A20e, 14 Oct 2026: "check the time" sat in the middle of Home while it was spoken — the words were only
+        // in partialHint until the voice finished. Now the surface shows them as they are spoken, as one object.
+        val idle = AgentUiState()
+        val during = VoiceUiState(state = VoiceState.SPEAKING, partialHint = "It's 9:40 in the morning.", lastCanonical = "what's the time")
+        val s1 = SurfaceModel.reduce(during, idle, now = now)
+        assertEquals(Mode.PRESENTING, s1.mode); assertTrue(s1.speaking)
+        val after = VoiceUiState(state = VoiceState.IDLE, spoken = "It's 9:40 in the morning.", spokenAt = now - 100, lastCanonical = "what's the time")
+        val s2 = SurfaceModel.reduce(after, idle, now = now)
+        assertEquals("the same key while spoken and after: no blink", s1.key, s2.key)
+        // closed while still being spoken: it stays closed when the voice finishes
+        assertEquals(Mode.HIDDEN, SurfaceModel.reduce(after, idle, SurfaceModel.Local(dismissedReplyKey = s1.key, dismissedAt = now - 200), now = now).mode)
     }
 
     @Test fun a_stopped_run_never_shows_the_previous_runs_words() {
@@ -107,6 +121,26 @@ class AssistantSurfaceModelTest {
         val stopped = AgentUiState(status = AgentStatus.STOPPED, runSeq = 3, goal = "x",
             log = listOf(LogEntry(now + 5_000, LogEntry.Kind.INFO, "Stopped by user.")))
         assertEquals(Mode.CANCELLED, SurfaceModel.reduce(idleVoice, stopped, now = now).mode)
+    }
+
+    @Test fun an_answered_prompt_reads_as_working_never_a_blink_to_hidden() {
+        // The engine has its answer (the prompt is cleared) but hasn't moved on yet.
+        val s = SurfaceModel.reduce(idleVoice, AgentUiState(status = AgentStatus.WAITING_CONFIRMATION, runSeq = 2,
+            pendingConfirmation = null, confirmationSeq = 4), now = now)
+        assertEquals(Mode.PROCESSING, s.mode)
+        assertEquals(Mode.PROCESSING, SurfaceModel.reduce(idleVoice, AgentUiState(status = AgentStatus.ASKING, runSeq = 2), now = now).mode)
+    }
+
+    @Test fun finished_steps_read_in_the_past_tense() {
+        assertEquals("Opened battery usage settings", StepLabels.done("open_setting", "battery usage"))
+        assertEquals("Searched the web for “osmosis”", StepLabels.done("web_search", "osmosis"))
+        assertEquals("Texted Ama", StepLabels.done("send_sms", "Ama"))
+        assertEquals("Did a step", StepLabels.done("some_new_tool", null))
+        var steps = AgentSteps.started(emptyList(), 3, 1, "open_setting", "battery usage")
+        steps = AgentSteps.finished(steps, 3, 1, ok = true)
+        val view = SurfaceModel.reduce(idleVoice, AgentUiState(status = AgentStatus.ACTING, runSeq = 3, steps = steps), now = now).steps.single()
+        assertEquals("Opening battery usage settings", view.label)
+        assertEquals("Opened battery usage settings", view.past)
     }
 
     @Test fun what_a_step_may_say_about_itself_is_whitelisted() {
@@ -229,7 +263,7 @@ class AssistantSurfaceModelTest {
             lastCanonical = "what's the time")
         val s = SurfaceModel.reduce(voice, done, SurfaceModel.Local(dismissedRun = 4, dismissedAt = now - 2_000), now = now)
         assertEquals(Mode.PRESENTING, s.mode)
-        assertEquals("reply:${now - 500}", s.key)
+        assertTrue(s.key.startsWith("reply:"))
         assertEquals("What's the time", s.title)
         assertTrue(s.speaking)
         // …and that reply dismissed is gone too

@@ -23,7 +23,9 @@ object SurfaceModel {
 
     /** A step as the user sees it. [active] = the one running now; a RUNNING step that is not the latest was superseded
      *  (shown neutral — never ticked, because nothing confirmed it). */
-    data class StepView(val key: String, val label: String, val state: AgentStep.State, val active: Boolean)
+    data class StepView(val key: String, val label: String, val state: AgentStep.State, val active: Boolean,
+                        /** The finished step in the past tense ("Opened battery settings"), shown once the engine reports it done. */
+                        val past: String = label)
 
     sealed class Preview {
         /** An answer or a finished task's summary. [sources] only when a search really returned them; [mapQuery] only
@@ -59,7 +61,9 @@ object SurfaceModel {
 
     /** What the user did to the surface: dismissed run N's result (at [dismissedAt]); dismissed the voice reply spoken at
      *  [dismissedReplyAt]. A new request also dismisses the previous run's result (Siri replaces the old snippet). */
-    data class Local(val dismissedRun: Long = -1L, val dismissedAt: Long = 0L, val dismissedReplyAt: Long = -1L)
+    data class Local(val dismissedRun: Long = -1L, val dismissedAt: Long = 0L, val dismissedReplyAt: Long = -1L,
+                     /** The reply closed by the user, by its key ("reply:<text>") — it may have been closed while still spoken. */
+                     val dismissedReplyKey: String = "")
 
     /** A result stays on the surface this long after it arrived (an hours-old answer is not "the" answer). */
     const val FRESH_MS = 10 * 60_000L
@@ -76,6 +80,9 @@ object SurfaceModel {
             PromptSurface.confirmationText(agent.pendingQuestion, agent.pendingQuestionTwi), agent.confirmationSeq, twi)?.let { p ->
             return State(run, Mode.WAITING, titleOfWaiting(p.kind), steps, waiting = Waiting(p.kind, p.text, p.seq))
         }
+        // The engine has its answer (the prompt is cleared) but hasn't moved on yet: still working, never a blink to hidden.
+        if (agent.status == AgentStatus.WAITING_CONFIRMATION || agent.status == AgentStatus.ASKING || agent.status == AgentStatus.SECURE_INPUT)
+            return State(run, Mode.PROCESSING, "Working on it", steps)
         val inRun = agent.status == AgentStatus.THINKING || agent.status == AgentStatus.ACTING || agent.status == AgentStatus.PAUSED
         if (inRun) {
             val active = steps.lastOrNull { it.active }
@@ -103,11 +110,17 @@ object SurfaceModel {
         }
         // A reply the voice gave WITHOUT an agent run (the phone's own quick answers: the time, the battery, the volume) —
         // shown as itself, never under an older run's title. Only one newer than the last dismissal, and fresh.
-        val reply = voice.spoken.trim()
-        if (reply.isNotEmpty() && voice.spokenAt > local.dismissedAt && voice.spokenAt != local.dismissedReplyAt &&
-            now - voice.spokenAt <= FRESH_MS && (agent.status !in TERMINAL || run == local.dismissedRun || !runFresh)) {
+        // While the voice reads a quick answer, its words are in partialHint (spoken/spokenAt are set only when it finishes):
+        // show them AS they are spoken — before, the reply sat mid-screen until the voice had stopped (owner, A20e, 14 Oct).
+        val speakingLine = if (speaking) voice.partialHint.trim() else ""
+        val reply = speakingLine.ifEmpty { voice.spoken.trim() }
+        val replyKey = "reply:" + reply.hashCode().toUInt().toString(36)   // the same key while spoken and after
+        val replyFresh = speakingLine.isNotEmpty() ||
+            (voice.spokenAt > local.dismissedAt && voice.spokenAt != local.dismissedReplyAt && now - voice.spokenAt <= FRESH_MS)
+        if (reply.isNotEmpty() && replyFresh && replyKey != local.dismissedReplyKey &&
+            (agent.status !in TERMINAL || run == local.dismissedRun || !runFresh)) {
             val asked = titleOf(voice.lastCanonical.ifBlank { voice.lastRaw })
-            return State(run, Mode.PRESENTING, asked.ifEmpty { "Answer" }, key = "reply:${voice.spokenAt}",
+            return State(run, Mode.PRESENTING, asked.ifEmpty { "Answer" }, key = replyKey,
                 preview = Preview.Answer(asked.ifEmpty { "Answer" }, Summaries.compact(reply), reply), speaking = speaking)
         }
         return State(run, Mode.HIDDEN)
@@ -127,7 +140,7 @@ object SurfaceModel {
         val out = ArrayList<StepView>()
         for (s in mine) {
             val label = StepLabels.label(s.tool, s.subject)
-            val view = StepView("${s.runSeq}:${s.index}", label, s.state, active = s === lastRunning)
+            val view = StepView("${s.runSeq}:${s.index}", label, s.state, active = s === lastRunning, past = StepLabels.done(s.tool, s.subject))
             if (out.isNotEmpty() && out.last().label == label) out[out.lastIndex] = view else out += view
         }
         return out.takeLast(MAX_STEPS)
@@ -229,6 +242,40 @@ object StepLabels {
             "open_url", "open_link" -> "Opening the link"
             "take_photo", "read_image", "camera" -> "Looking through the camera"
             else -> "Working on it"
+        }
+    }
+
+    /** The same step once the engine reports it done, in the past tense: "Opened battery settings" (mission v2). */
+    fun done(tool: String, subject: String?): String {
+        val x = subject?.trim()?.takeIf { it.isNotEmpty() }
+        return when (tool) {
+            "web_search", "search_web" -> x?.let { "Searched the web for “${clip(it, 40)}”" } ?: "Searched the web"
+            "open_app" -> x?.let { "Opened $it" } ?: "Opened the app"
+            "close_app" -> x?.let { "Closed $it" } ?: "Closed the app"
+            "install_app" -> x?.let { "Installed $it" } ?: "Installed the app"
+            "open_setting" -> x?.let { "Opened ${it.replace('_', ' ')} settings" } ?: "Opened settings"
+            "make_call" -> x?.let { "Called $it" } ?: "Placed the call"
+            "send_sms" -> x?.let { "Texted $it" } ?: "Sent the text"
+            "reply_to_notification" -> x?.let { "Replied to $it" } ?: "Sent your reply"
+            "read_notifications", "search_messages" -> "Read your messages"
+            "find_contact", "search_contacts" -> x?.let { "Found $it in your contacts" } ?: "Found the contact"
+            "get_location", "where_am_i", "my_location" -> "Checked your location"
+            "ussd_navigate" -> "Went through the Mobile Money menu"
+            "telco_ussd" -> "Went through the network's menu"
+            "run_ussd" -> "Dialled the network's code"
+            "momo_send", "mobile_money" -> "Opened Mobile Money"
+            "bank_ussd" -> "Went through the bank's menu"
+            "set_alarm" -> "Set the alarm"
+            "set_timer" -> "Set the timer"
+            "set_volume", "volume_up", "volume_down", "set_range" -> "Adjusted the volume"
+            "play_music" -> x?.let { "Played ${clip(it, 48)}" } ?: "Played music"
+            "type" -> "Typed"
+            "tap", "tap_sequence", "long_press" -> "Tapped on the screen"
+            "scroll", "swipe" -> "Looked through the screen"
+            "key_event" -> "Pressed a key"
+            "open_url", "open_link" -> "Opened the link"
+            "take_photo", "read_image", "camera" -> "Looked through the camera"
+            else -> "Did a step"
         }
     }
 }

@@ -42,6 +42,17 @@ class PromptChoicesTest {
         assertEquals("Cancel" to "Send", ConfirmWords.buttons("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?", twi = false))
     }
 
+    @Test fun the_primary_pill_names_the_act_and_the_person_when_plainly_said() {
+        val p = com.tekyerema.voice.SpokenText.PAUSE
+        assertEquals("Send to Prince Ice P", ConfirmWords.label("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?", twi = false))
+        assertEquals("Call Ama", ConfirmWords.label("Call Ama?", twi = false))
+        assertEquals("Send to Ama", ConfirmWords.label("Send this message to Ama?\n“I'm on my way.”", twi = false))
+        assertEquals("a number is not a name", "Buy", ConfirmWords.label("Buy 2 cedis of airtime for 0 5 0, 8 7 9, 7 3 2 3, a Telecel number?", twi = false))
+        assertEquals("Call", ConfirmWords.label("Call 0 2 4 4 1 2 3 4 5 6?", twi = false))
+        assertEquals("Yes, do it", ConfirmWords.label("MTN says this sends ten pesewas. Go ahead?", twi = false))
+        assertEquals("Aane, yɛ", ConfirmWords.label("Soma sika?", twi = true))
+    }
+
     @Test fun the_voices_pause_marks_are_line_breaks_on_screen() {
         val p = com.tekyerema.voice.SpokenText.PAUSE
         val b = com.tekyerema.voice.SpokenText.BREAK

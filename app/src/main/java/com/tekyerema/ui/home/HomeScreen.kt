@@ -164,6 +164,9 @@ fun HomeContent(
     // The assistant surface at the top (ui/assistant) shows the task's steps, questions and result; while it is up the line
     // under the orb doesn't repeat it (it keeps the live words while listening, and the hint).
     var surfaceVisible by remember { mutableStateOf(false) }
+    // The orb holds still (its calm path stops drawing once settled) while the surface shows a result or is being moved —
+    // unless the orb is the thing saying "listening" (docs/assistant-ux PLAN_V2, stage 7).
+    var orbPaused by remember { mutableStateOf(false) }
     val typeFocus = remember { androidx.compose.ui.focus.FocusRequester() }
     val phrase = Phrases.forState(presence, voice, agent)
         .let { if (presence == Presence.IDLE && !idleHintFresh) "" else it }
@@ -206,7 +209,7 @@ fun HomeContent(
             LivingVoice(
                 presence = presence,
                 level = { VoiceEngine.level.value },
-                reduceMotion = reduceMotion,
+                reduceMotion = reduceMotion || (orbPaused && presence != Presence.LISTENING && presence != Presence.CONFIRM_LISTENING),
                 contentDescription = label,
                 stateDescription = stateText,
                 circularHitArea = circularHitArea,
@@ -268,12 +271,13 @@ fun HomeContent(
                 modifier = Modifier.padding(top = 6.dp, bottom = 22.dp))
         } else Spacer(Modifier.height(6.dp))
     }
+        // The whole screen, so a tap outside a finished result can dismiss it (the surface itself sits at the top).
         com.tekyerema.ui.assistant.AssistantSurfaceHost(
             voice = voice, agent = agent, twi = twi,
-            onTypeRequest = { try { typeFocus.requestFocus() } catch (_: Throwable) {} },
             onVisible = { surfaceVisible = it },
             readsAloud = speakAloud,
-            modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp)
+            onOrbPause = { orbPaused = it },
+            modifier = Modifier.fillMaxSize()
         )
     }
 }

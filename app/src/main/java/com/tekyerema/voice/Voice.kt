@@ -91,6 +91,10 @@ enum class InputSource { NONE, ASR, TYPED }
 /** Sub-phase of CONFIRMATION_REQUIRED while the confirmation runs by voice. */
 enum class ConfirmPhase { NONE, ASKING, LISTENING, HEARD }
 
+/** Why a spoken confirmation is being asked again: the answer wasn't understood, or the user asked for a moment ("wait").
+ *  Read-only for the screen (docs/assistant-ux DECISIONS V2-6) — it changes nothing about how an answer is decided. */
+enum class ConfirmRetry { NONE, UNCLEAR, HOLD }
+
 /** Where a voice attempt failed — for honest per-layer failure reporting (§29). */
 enum class VoiceStage {
     MIC, VAD, ASR, LID, NORMALIZATION, AGENT, EXECUTION, VERIFICATION, TTS, NONE
@@ -112,6 +116,8 @@ data class VoiceUiState(
     val speechDetected: Boolean = false,
     /** While a confirmation is being asked and answered by voice. */
     val confirmPhase: ConfirmPhase = ConfirmPhase.NONE,
+    /** Why the current spoken confirmation is being asked again, if it is (NONE on its first asking). */
+    val confirmRetry: ConfirmRetry = ConfirmRetry.NONE,
     /** Whether the last text that entered the agent came from ASR or the keyboard. */
     val inputSource: InputSource = InputSource.NONE,
     /** voice/io: the phone recognizer's partial words while the user talks (screen only; empty on the captured path).

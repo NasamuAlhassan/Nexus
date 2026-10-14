@@ -153,11 +153,10 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     LaunchedEffect(presence, typing) {
         if (typing) return@LaunchedEffect
         when (presence) {
-            Presence.DONE -> {
-                delay(1600)   // let the spoken reply finish before re-opening the mic
-                if (conversational && Perms.mic(context) && !VoiceEngine.isRunning) VoiceEngine.followUp()
-                // If not conversational (visual/TalkBack), the IDLE that follows closes us.
-            }
+            // No automatic re-listen after a reply (owner on the A20e, 14 Oct 2026: "it starts listening again, which is
+            // wrong"). The mic still reopens when the reply asks a QUESTION (VoiceController's question tail) — that one waits
+            // on the user's answer. Otherwise the IDLE that follows closes us; "Hey Tɛkyerɛma" or a tap starts the next turn.
+            Presence.DONE -> {}
             // A11Y-H3: a screen-reader user explores by touch (slower) — don't dismiss the panel out from under them.
             // I-08: the answer card stays long enough to be read (≈60 ms a character, up to 15 s).
             Presence.IDLE -> {

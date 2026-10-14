@@ -847,6 +847,8 @@ class VoiceController(
         // words are Twi even when the voice is not), never MT'd at runtime.
         val useTwi = lang == Lang.TWI && !promptTwi.isNullOrBlank()
         val askLang = if (useTwi) Lang.TWI else Lang.GH_EN
+        // A fresh confirmation is asked for the first time (the screen's "asking again" note belongs to the previous one).
+        _state.update { it.copy(confirmRetry = ConfirmRetry.NONE) }
         try {
             var spokenQuestion = if (useTwi) promptTwi!! else Confirmation.question(prompt)
             // B-09: "wait"/"hold on" keeps the question pending and listens patiently; it isn't an attempt (≤3 holds).
@@ -924,14 +926,17 @@ class VoiceController(
                         patient = true
                         spokenQuestion = Phrases.get("confirmHold", lang == Lang.TWI, if (lang == Lang.TWI) "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
                             else "Okay, take your time. Say yes or no when you're ready.")
+                        _state.update { it.copy(confirmRetry = ConfirmRetry.HOLD) }   // the screen says why it asks again
                     } else {
                         if (attempt == 0) spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT
                         attempt++
+                        _state.update { it.copy(confirmRetry = ConfirmRetry.UNCLEAR) }
                     }
                     Confirmation.Answer.UNCLEAR -> {
                         if (attempt == 0)
                             spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT  // §A.1 Twi repeat
                         attempt++
+                        _state.update { it.copy(confirmRetry = ConfirmRetry.UNCLEAR) }
                     }
                 }
             }

@@ -88,11 +88,47 @@ object OverlayConfirm {
     /** A panel can be shown at all: the accessibility service is connected, or overlays are allowed. */
     fun canShow(ctx: Context): Boolean = TekyeremaAccessibilityService.live != null || canDraw(ctx)
 
-    /** The panel for what the task is waiting on now. */
-    fun showPrompt(ctx: Context, p: PromptSurface.Prompt) = render(ctx, p.text, p.kind, engine = true, seq = p.seq)
+    /** The panel for what the task is waiting on now — unless Tɛkyerɛma's own screen is in front, where the assistant surface
+     *  shows the prompt itself (DECISIONS V2-4); then it is held and shown the moment our screen leaves. */
+    fun showPrompt(ctx: Context, p: PromptSurface.Prompt) {
+        val app = ctx.applicationContext
+        main.post {
+            if (appSurface) { held = p; heldCtx = app; if (byEngine) hideNow(); return@post }
+            held = null
+            shown = p
+            renderNow(app, p.text, p.kind, engine = true, seq = p.seq)
+        }
+    }
 
-    /** The task stopped waiting: take down the panel it put up (not a card someone else showed). */
-    fun hidePrompt(ctx: Context) { main.post { if (byEngine) hideNow() } }
+    /** The task stopped waiting: take down the panel it put up (not a card someone else showed), and forget a held one. */
+    fun hidePrompt(ctx: Context) { main.post { held = null; shown = null; if (byEngine) hideNow() } }
+
+    /** True while Tɛkyerɛma's own screen is resumed with its assistant surface (set by the surface host). */
+    @Volatile private var appSurface = false
+    /** The task's prompt while our surface shows it instead of the panel; null when none is waiting. */
+    @Volatile private var held: PromptSurface.Prompt? = null
+    @Volatile private var heldCtx: Context? = null
+    /** The task prompt the panel is showing now (to hand over to the surface when our screen comes to the front). */
+    @Volatile private var shown: PromptSurface.Prompt? = null
+
+    /**
+     * The surface host's lifecycle: [showing] = our screen is resumed (its surface shows the task's prompts), false = it has
+     * left (paused, another tab, closed). Leaving brings a still-waiting prompt straight back as the panel, so a prompt is
+     * never hidden from the user wherever they are.
+     */
+    fun setAppSurface(ctx: Context, showing: Boolean) {
+        val app = ctx.applicationContext
+        main.post {
+            if (appSurface == showing) return@post
+            appSurface = showing
+            if (showing) {
+                if (view != null && byEngine) { held = shown; heldCtx = app; hideNow() }
+            } else held?.let { p ->
+                held = null; shown = p
+                renderNow(heldCtx ?: app, p.text, p.kind, engine = true, seq = p.seq)
+            }
+        }
+    }
 
     /** A card for a question at the end of a reply (the task is over; the answer starts a new turn). */
     fun showQuestion(ctx: Context, question: String) = render(ctx, question, PromptSurface.Kind.QUESTION, engine = false)
@@ -104,12 +140,18 @@ object OverlayConfirm {
      *  ([show], the debug hook) gets [ConfirmGate.NO_CONFIRMATION], so its Yes can never approve anything. */
     private fun render(ctx: Context, prompt: String, kind: PromptSurface.Kind, engine: Boolean,
                        seq: Long = com.tekyerema.policy.ConfirmGate.NO_CONFIRMATION) {
-        main.post {
+        main.post { renderNow(ctx, prompt, kind, engine, seq) }
+    }
+
+    /** [render]'s body, run now on the main thread: callers already on it ([showPrompt], [setAppSurface]) keep their order
+     *  against [hidePrompt] — a posted render could otherwise draw a prompt the task had already resolved. */
+    private fun renderNow(ctx: Context, prompt: String, kind: PromptSurface.Kind, engine: Boolean, seq: Long) {
+        run {
             hideNow()
             // J-02 tapjacking guard: the Yes only counts once the panel has been up for a moment (ConfirmGate.armed).
             val shownAt = android.os.SystemClock.uptimeMillis()
             val svc = TekyeremaAccessibilityService.live
-            if (svc == null && !canDraw(ctx)) return@post
+            if (svc == null && !canDraw(ctx)) return@run
             val host: Context = svc ?: ctx
             this.kind = kind
             this.byEngine = engine
