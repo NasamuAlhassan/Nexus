@@ -111,6 +111,14 @@ class AgenticMoneyFlowsTest {
         assertEquals("my mother", open("buy a mashup bundle for my mother").name)
         assertEquals("0552093690", open("buy 5 cedis mashup for 0552093690").number)
         assertNull(open("buy 5 cedis mashup for 0552093690").name)
+        // The owner's sentence on the A20e (13 Oct 2026), the number as the recogniser wrote it: dashes and spaces used to
+        // hide the amount (the number's four figures stayed in the text), and "more minutes than data" was read as unsaid.
+        val said = open("okay so I want you to do 5 cedis mashup send it to 055-2093 690 the person needs more minutes than data")
+        assertEquals("mashup", said.key)
+        assertEquals("5", said.amount)
+        assertEquals("0552093690", said.number)
+        assertEquals("MINUTES", said.prefer)
+        assertEquals("momo", said.pay)
         // Not people: the user themselves, a purpose, a period.
         for (self in listOf("buy data for me", "buy a data bundle for my phone", "I want to buy data", "buy data for browsing",
                 "buy a data bundle for the week", "buy data for 3 days", "I want to buy mashup"))
@@ -160,5 +168,17 @@ class AgenticMoneyFlowsTest {
         assertEquals("1", TelcoGuide.priceRow(listOf("1" to "500MB @ 5.00 cedis", "2" to "5GB for GHS 50"), "5")!!.first)
         assertNull("a size is not a price", TelcoGuide.priceRow(listOf("1" to "10GB monthly", "2" to "10 days bundle"), "10"))
         assertNull("two offers at that price: the user chooses", TelcoGuide.priceRow(listOf("1" to "Voice GHS 5", "2" to "Data GHS 5"), "5"))
+    }
+
+    @Test fun a_bundle_sent_to_a_number_is_never_the_local_brains_money_send() {
+        // Emulator, 13 Oct 2026 (build 39): once the amount was parsed, LocalBrain's "send … cedis … to <number>" rule took the
+        // owner's Mashup sentence as a 5-cedi TRANSFER and walked *170#. A product word hands it to the network-menu guide.
+        fun local(goal: String) = kotlinx.coroutines.runBlocking {
+            com.tekyerema.agent.LocalBrain().decide(com.tekyerema.agent.BrainContext(goal, JSONObject(), emptyList(), org.json.JSONArray(), org.json.JSONArray()))
+        }
+        val mashup = local("okay so I want you to do 5 cedis mashup send it to 0552093690 the person needs more minutes than data")
+        assertFalse(mashup.toString(), mashup is com.tekyerema.agent.AgentDecision.CallTool && (mashup as com.tekyerema.agent.AgentDecision.CallTool).name == UssdNavigatorTool.NAME)
+        val send = local("send 5 cedis to 0552093690 with mobile money")
+        assertTrue(send.toString(), send is com.tekyerema.agent.AgentDecision.CallTool && (send as com.tekyerema.agent.AgentDecision.CallTool).name == UssdNavigatorTool.NAME)
     }
 }

@@ -115,13 +115,17 @@ object TelcoUssd {
         if (ASKS_ABOUT.containsMatchIn(g) && !BUY_LEAD.containsMatchIn(g)) return null
         val otherSaid = Regex("\\bfor (?:another|an ?other|someone|somebody|a different)\\b| for [0-9]| to [0-9]").containsMatchIn(g)
         // The request's own slots: a 10-digit Ghana number (folded from +233/233 forms) and a cedi amount.
-        val number = Regex("(?:\\+?233|0)\\s?\\d[\\d\\s-]{7,}").find(goal)?.value?.filter { it.isDigit() }
+        val numberSpan = Regex("(?:\\+?233|0)\\s?\\d[\\d\\s-]{7,}").find(goal)?.value
+        val number = numberSpan?.filter { it.isDigit() }
             ?.let { if (it.startsWith("233") && it.length == 12) "0" + it.drop(3) else it }?.takeIf { it.length == 10 && it.startsWith("0") }
-        // The recipient number is stripped FIRST so it isn't read as the amount; then the whole remaining text goes to
-        // MoneyLimits.parseAmount, which converts pesewas → cedis ("10 pesewas" → 0.1, NOT 10 — live A20e 2026-09-30).
-        // Only a figure said AS MONEY is an amount: "buy 1 gig of data" is one gigabyte, not one cedi.
+        // The recipient number is stripped FIRST so it isn't read as the amount — AS IT WAS SAID ("055-2093 690", with the
+        // recogniser's dashes and spaces), not as its folded digits, which never occur in the text (A20e, 13 October 2026:
+        // "do 5 cedis mashup send it to 055-2093 690" kept the number's four figures, lost its 5 cedis, and the price was
+        // asked again at the offers). Then the remaining text goes to MoneyLimits.parseAmount, which converts pesewas →
+        // cedis ("10 pesewas" → 0.1, NOT 10 — live A20e 2026-09-30). Only a figure said AS MONEY is an amount: "buy 1 gig of
+        // data" is one gigabyte, not one cedi.
         val amount = if (!MONEY_WORD.containsMatchIn(goal.lowercase())) null
-            else MoneyLimits.parseAmount(goal.replace(number ?: "\u0000", " "))?.toPlainString()
+            else MoneyLimits.parseAmount(if (number != null && numberSpan != null) goal.replace(numberSpan, " ") else goal)?.toPlainString()
         // "… for Prince Melanin", "… to my mother": a person named instead of a number. It used to be ignored — and the
         // bundle was then bought for the user's own phone. The tool looks the name up before anything is read back.
         // (How it is paid for — "… with mobile money" — is not part of who it is for.)

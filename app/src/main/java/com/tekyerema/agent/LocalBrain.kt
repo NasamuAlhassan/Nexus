@@ -234,7 +234,10 @@ class LocalBrain : AgentBrain {
             (g.contains("money") || g.contains("cash") || g.contains("cedi") || g.contains("pesewa") || g.contains("momo") || g.contains("mobile money") || g.contains("sika"))) {
             // "compare the cheapest way to send 50 cedis to …" asks ABOUT sending — it is never read back as a send.
             if (RE_COMPARE.containsMatchIn(g)) return network(raw)
-            sendMoneyDecision(raw)?.let { return it }
+            // "do 5 cedis mashup, send it to 055…" is a BUNDLE for that number, not a transfer: the network-menu guide
+            // (money/TelcoGuide, through MoneyPlan) owns anything that names a product. Once the amount was parsed, this
+            // rule took the owner's sentence as a 5-cedi send (emulator, 13 October 2026, build 39).
+            if (!RE_TELCO_PRODUCT.containsMatchIn(g)) sendMoneyDecision(raw)?.let { return it }
         }
 
         // --- §A.2 play music (generic/local); §P2.4 also a named track against the local library. A track on
@@ -1226,6 +1229,8 @@ class LocalBrain : AgentBrain {
         private val RE_OTHER_APP = Regex("\\b(?:on|via|through|in|using)\\s+(?:telegram|messenger|signal|instagram|facebook|imo)\\b",
             RegexOption.IGNORE_CASE)
         private val RE_SEND_WORDS = Regex("^\\s*$LEADIN(?:send)\\s+(.+?)\\s+to\\s+(.+)$", RegexOption.IGNORE_CASE)
+        /** A network PRODUCT in a "send … to …" sentence: a bundle bought for that number, never a money transfer. */
+        private val RE_TELCO_PRODUCT = Regex("\\b(?:mash ?up|pulse|bundles?|data|airtime|credit|minutes|mins|megabytes?|gigabytes?|gigs?|offers?)\\b", RegexOption.IGNORE_CASE)
         // What "send X to Y" means when X is NOT the words of a message: money, a file or thing, a pronoun, a number.
         private val RE_NOT_WORDS = Regex("(?i)^(?:an?|the|my|your|his|her|our|their|this|that|these|those|it|them|some|all|me|him|us)\\b|" +
             "\\d|\\b(?:money|cash|momo|mobile money|airtime|cedis?|pesewas?|ghs|gh₵|credit|bundles?|data|photos?|pictures?|pics?|images?|" +

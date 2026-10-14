@@ -124,6 +124,21 @@ class MenuBrainTest {
         val r = MenuBrain.resolve(q, "5 cedis", tiers) as MenuBrain.Answer.Learned
         assertEquals("2", r.option); assertEquals("5", r.amount)
         assertEquals("1", (MenuBrain.resolve(q, "one cedi", tiers) as MenuBrain.Answer.Learned).option)
+        // The owner's own answer (A20e, 13 Oct 2026): "I told you 5 cedis 5" — two figures, the same price. Its digits had
+        // been glued into "55", and the tier rule then chose the 30-cedi bundle.
+        val said = MenuBrain.resolve(q, "I told you 5 cedis 5", tiers) as MenuBrain.Answer.Learned
+        assertEquals("2", said.option); assertEquals("5", said.amount)
+        assertEquals("2", (MenuBrain.resolve(q, "5 5", tiers) as MenuBrain.Answer.Learned).option)
+        assertEquals("3", (MenuBrain.resolve(q, "the 10 cedis one", tiers) as MenuBrain.Answer.Learned).option)
+        assertEquals("1", (MenuBrain.resolve(q, "50 pesewas", tiers) as MenuBrain.Answer.Learned).option)   // below every tier: the first tier's range
+        assertEquals("a figure above every tier is asked again, never the dearest tier", MenuBrain.Answer.Unclear, MenuBrain.resolve(q, "55", tiers))
+        assertEquals("two different figures are asked again", MenuBrain.Answer.Unclear, MenuBrain.resolve(q, "5 or 10", tiers))
+        assertEquals("the second one", MenuBrain.Answer.Press("2"), MenuBrain.resolve(q, "the second one", tiers))
+        assertEquals("option 3", MenuBrain.Answer.Press("3"), MenuBrain.resolve(q, "option 3", tiers))
+        assertEquals("5", MenuBrain.amountSaid("no, I said 5 cedis"))
+        assertEquals("0.50", MenuBrain.amountSaid("50 pesewas"))
+        assertNull(MenuBrain.amountSaid("5 or 10 cedis"))
+        assertNull(MenuBrain.amountSaid("the cheap one"))
         // "1. GHC 1 2. Enter amount GHC (0.07 - 4.99)" with 1 cedi → the GHC 1 row.
         assertEquals("1", (MenuBrain.decide(mtn.copy(amount = "1"), "Select one of the following: 1. GHC 1 2. Enter amount GHC (GHC 0.07 - 4.99) 0. Back") as Move.Press).option)
     }
@@ -145,6 +160,16 @@ class MenuBrainTest {
         assertEquals(MenuBrain.Prefer.MINUTES, MenuBrain.preferOf("Buy a Mashup bundle for my number with more minutes"))
         assertEquals(MenuBrain.Prefer.DATA, MenuBrain.preferOf("mashup with more data"))
         assertNull(MenuBrain.preferOf("Buy a Mashup bundle for my number"))
+        // Comparisons, as people say them (the owner, A20e, 13 Oct 2026: "the person needs more minutes than data").
+        assertEquals(MenuBrain.Prefer.MINUTES, MenuBrain.preferOf("do 5 cedis mashup send it to 0552093690 the person needs more minutes than data"))
+        assertEquals(MenuBrain.Prefer.MINUTES, MenuBrain.preferOf("the person needs more airtime than more data"))
+        assertEquals(MenuBrain.Prefer.MINUTES, MenuBrain.preferOf("airtime more than data"))
+        assertEquals(MenuBrain.Prefer.MINUTES, MenuBrain.preferOf("he needs calls, not data"))
+        assertEquals(MenuBrain.Prefer.DATA, MenuBrain.preferOf("more data than minutes"))
+        assertEquals(MenuBrain.Prefer.DATA, MenuBrain.preferOf("data rather than calls"))
+        assertEquals(MenuBrain.Prefer.DATA, MenuBrain.preferOf("mostly for browsing"))
+        assertEquals(MenuBrain.Prefer.MINUTES, MenuBrain.preferOf("mainly airtime"))
+        assertNull("both sides, no comparison: asked", MenuBrain.preferOf("I want more minutes and more data"))
     }
 
     @Test fun `yes and no to the brain's questions`() {

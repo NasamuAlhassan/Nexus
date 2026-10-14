@@ -39,12 +39,17 @@ class AndroidTts(context: Context) : TtsProvider {
          * The singular forms follow the plurals and were not played to him.
          */
         private val RESPELL: List<Pair<Regex, String>> = listOf(
-            Regex("(?i)\\bcedis\\b") to "sidis",
-            Regex("(?i)\\bcedi\\b") to "sidi",
+            // 13 October 2026, the owner on the installed build: "not 5-city but cedis… not cities" — "sidis" came out as
+            // "cities" (a short i and a t-like d). "seedy"/"seedies" is the long "SEE-dee" every English voice already
+            // knows how to say; `speech.tts.respell` {"cedis": "…"} overrides it by ear without a rebuild.
+            Regex("(?i)\\bcedis\\b") to "seedies",
+            Regex("(?i)\\bcedi\\b") to "seedy",
             Regex("(?i)\\bpesewas\\b") to "pesswess",
             Regex("(?i)\\bpesewa\\b") to "pessweh",
             Regex("(?i)\\btɛkyerɛma\\b|\\btekyerema\\b") to "Tetcherrma"
         )
+        /** A line with figures in it — a number said digit by digit, an amount — before Verbalize turns them into words. */
+        private val FIGURES = Regex("(?i)\\d\\s\\d\\s\\d|\\d{4,}|\\b\\d+(?:\\.\\d+)?\\s*(?:cedis?|pesewas?|ghs|ghc)\\b|(?:GH₵|GHS|GHC|₵)\\s?\\d")
     }
 
     private val ready = CompletableDeferred<Boolean>()
@@ -78,10 +83,12 @@ class AndroidTts(context: Context) : TtsProvider {
     /** The closest installed English voice to Ghana: en-GH, else en-NG, else en-GB — never a network-only voice.
      *  Cached once and re-applied on every speak (setLanguage resets the engine's voice). */
     private var voicePicked = false
+    private var pickedFor: String? = null
     private var pickedVoice: android.speech.tts.Voice? = null
     private fun applyBestVoice() {
-        if (!voicePicked) {
+        if (!voicePicked || pickedFor != TtsAccent.value) {
             voicePicked = true
+            pickedFor = TtsAccent.value
             pickedVoice = try {
                 // Offline-capable English voices only; a voice whose pack isn't downloaded yet is still a candidate —
                 // Google fetches the pack on first use (the A20e ships en-NG local voices undownloaded).
@@ -89,7 +96,9 @@ class AndroidTts(context: Context) : TtsProvider {
                     it.locale?.language.equals("en", true) && !it.isNetworkConnectionRequired
                 }.orEmpty()
                 val installed = voices.filterNot { it.features.contains(TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED) }
-                listOf("GH", "NG", "GB").firstNotNullOfOrNull { c ->
+                // Ghana first if a phone ever ships it; then the accent chosen in Settings › Voice, British by default —
+                // the Nigerian voice is offered, not imposed (owner, 13 October 2026).
+                TtsAccent.order().firstNotNullOfOrNull { c ->
                     fun best(pool: List<android.speech.tts.Voice>) =
                         pool.filter { (it.locale?.country ?: "").equals(c, true) }.maxByOrNull { it.quality }
                     best(installed) ?: best(voices)
@@ -163,12 +172,23 @@ class AndroidTts(context: Context) : TtsProvider {
             return false
         }
         applyBestVoice()   // setLanguage (in supports) resets the voice — put the picked one back
-        @Suppress("NAME_SHADOWING") val text = respell(text)
+        // Every line is verbalised HERE, at the engine's door: the confirmation question went to the engine as written
+        // ("an MTN number" → "a mountain number", digits run together) because its path skipped Verbalize (owner, A20e,
+        // 13 October 2026). Verbalize is idempotent, so lines already verbalised by their callers are unchanged.
+        @Suppress("NAME_SHADOWING") val text = respell(Verbalize.apply(text))
         // B-15/K-07: our stream (accessibility when TalkBack drives the phone) + may-duck focus for the duration.
         try { engine.setAudioAttributes(focus.attributes(AudioFocus.Kind.SPEAK)) } catch (_: Throwable) {}
         // Live tuning knobs (owner, 2026-09-30 "let's manage the current one"): rate and pitch from config, so the
         // voice's feel is adjusted by set_config on the phone — no rebuild. Clamped so a typo can't make it absurd.
-        try { engine.setSpeechRate(com.tekyerema.core.config.AppConfig.double("speech.tts.rate", 1.0).toFloat().coerceIn(0.5f, 1.5f)) } catch (_: Throwable) {}
+        // A line that carries a phone number or an amount is said a touch slower (`speech.tts.figuresRate`, 0.9): listeners
+        // check digits best at a measured pace with the groups apart (R-A12 — Baumann 2001; nine-digit recall 55 → 69 % with
+        // pauses). The user's own slow/normal/fast choice still scales everything.
+        val figures = FIGURES.containsMatchIn(text)
+        try {
+            val base = com.tekyerema.core.config.AppConfig.double("speech.tts.rate", 1.0)
+            val factor = if (figures) com.tekyerema.core.config.AppConfig.double("speech.tts.figuresRate", 0.9) else 1.0
+            engine.setSpeechRate((base * factor).toFloat().coerceIn(0.5f, 1.5f))
+        } catch (_: Throwable) {}
         try { engine.setPitch(com.tekyerema.core.config.AppConfig.double("speech.tts.pitch", 1.0).toFloat().coerceIn(0.7f, 1.3f)) } catch (_: Throwable) {}
         // Our OWN focus request, released only by us: a newer line used to acquire focus, then this line's finally
         // released it, and the newer line played with the music at full volume.

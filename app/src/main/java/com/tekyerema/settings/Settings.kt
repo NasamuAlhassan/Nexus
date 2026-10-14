@@ -224,6 +224,11 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_RATE, 1)
         set(v) = put { putInt(KEY_RATE, v.coerceIn(0, 2)) }
 
+    /** The English voice's accent (voice/TtsAccent): "auto" | "GB" | "NG" | "US". */
+    var ttsAccent: String
+        get() = prefs.getString(KEY_TTS_ACCENT, com.tekyerema.voice.TtsAccent.AUTO) ?: com.tekyerema.voice.TtsAccent.AUTO
+        set(v) = put { putString(KEY_TTS_ACCENT, v.takeIf { it in com.tekyerema.voice.TtsAccent.CHOICES } ?: com.tekyerema.voice.TtsAccent.AUTO) }
+
     /** B-13: how much Tɛkyerɛma says — "brief" | "normal" | "detailed" (default from config ux.verbosity). */
     var verbosity: String
         get() = prefs.getString("verbosity", null) ?: com.tekyerema.core.config.AppConfig.string("ux.verbosity", "normal")
@@ -356,6 +361,7 @@ class Settings(context: Context) {
         private const val KEY_LANG_MODE = "language_mode"
         private const val KEY_SPEAK = "speak_aloud"
         private const val KEY_RATE = "speech_rate"
+        private const val KEY_TTS_ACCENT = "tts_accent"
         private const val KEY_HAPTICS = "haptics"
         private const val KEY_SOUNDS = "sounds"
         private const val KEY_REDUCE_MOTION = "reduce_motion"

@@ -178,11 +178,14 @@ object TelcoGuide {
      * "Enter amount GHC (0.07-4.99)"); the next screen's own range is still checked before anything is typed, and a
      * wrong tier costs one "0. Back". Null unless EVERY option (but Back / More) is such a tier.
      */
-    internal fun tierRow(rows: List<Pair<String, String>>, amount: String): Pair<String, String>? {
+    internal fun tierRow(rows: List<Pair<String, String>>, amount: String, aboveToo: Boolean = true): Pair<String, String>? {
         val v = amount.toBigDecimalOrNull()?.takeIf { it.signum() > 0 } ?: return null
         val options = rows.filter { !Regex("(?i)^(?:back|more|next|exit|main menu)\\b").containsMatchIn(it.second.trim()) }
         val tiers = options.mapNotNull { r -> TIER_PRICE.find(r.second.trim())?.groupValues?.get(1)?.toBigDecimalOrNull()?.let { r to it } }
         if (tiers.size < 2 || tiers.size != options.size) return null
+        // [aboveToo] false: an amount above EVERY tier is not a tier — a spoken "55" to "1, 5, 10 or 30?" is a misheard
+        // answer, not a wish for the dearest bundle (A20e, 13 October 2026).
+        if (!aboveToo && v > tiers.maxOf { it.second }) return null
         return (tiers.filter { it.second <= v }.maxByOrNull { it.second } ?: tiers.minByOrNull { it.second })?.first
     }
 
@@ -363,6 +366,10 @@ object TelcoGuide {
 
     /** The last line at a payment confirmation, a PIN prompt or a final message — read out, then the user takes over. */
     fun handOffLine(s: TelcoSession.View): String {
+        // "You will soon receive payment prompt…": the PIN dialog is on its way (money/ussd/PushedPin watches for it) — one
+        // short line, so the voice is not still reading when the prompt lands (owner, A20e, 13 October 2026).
+        if (s.kind == BankUssd.ScreenKind.FINAL && com.tekyerema.money.ussd.PushedPin.promptComing(s.screen))
+            return com.tekyerema.money.ussd.PushedPin.waitingLine(s.flow.netName)
         // A FINAL screen (a balance, a receipt) is the ANSWER: paced, in words, one item per breath (UssdSpeech).
         if (s.kind == BankUssd.ScreenKind.FINAL) return UssdSpeech.forEar(s.screen, intro = "${s.flow.netName} says")
         val said = "${s.flow.netName}'s screen says: “${BankUssd.spokenScreen(s.screen)}”."
@@ -398,10 +405,12 @@ object TelcoGuide {
     }
 
     /** The SIM's network key ("mtn" | "telecel" | "airteltigo"), via the same table Mobile Money uses. */
+    // The SIM the walk will really dial on — through money/ussd/Provider, so the debug simulator's pretend MTN SIM counts too.
+    // This read the TelephonyManager directly, so on the emulator (fake carrier) the guide never saw a bundle request and the
+    // owner's Mashup sentence went to the cloud planner instead (13 October 2026, build 40).
     private fun simNetwork(): String? = try {
         val ctx = com.tekyerema.agent.AgentEngine.appContext() ?: return null
-        val tm = ctx.getSystemService(android.content.Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
-        com.tekyerema.tools.GhanaMobileMoney.network(tm?.simOperatorName?.ifBlank { tm.simOperator } ?: tm?.simOperator)
+        com.tekyerema.money.ussd.Provider.current(ctx).provider
     } catch (_: Throwable) { null }
 
     /** The walk is waiting on the user's spoken yes/no to a payment confirmation's confirm key (not a PIN screen). */

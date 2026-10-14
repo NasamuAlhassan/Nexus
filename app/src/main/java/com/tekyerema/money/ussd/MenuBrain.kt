@@ -200,20 +200,41 @@ object MenuBrain {
         goal.lowercase().replace('’', '\'').replace(Regex("[^\\p{L}' ]"), " ").split(Regex("\\s+"))
             .map { it.trim('\'') }.filter { it.length >= 3 && it !in GENERIC }.toSet()
 
-    private val PREFER_MINUTES = Regex("(?i)\\b(?:more|most|lots? of|plenty of|extra|bigger) (?:call|calls|minutes?|mins|talk ?time|voice)\\b|" +
-        "\\bfor (?:calls|calling|talking)\\b|\\b(?:calls|minutes?) (?:more|rather)\\b|\\bcalls?\\b(?! me)")
-    private val PREFER_DATA = Regex("(?i)\\b(?:more|most|lots? of|plenty of|extra|bigger) (?:data|internet|megabytes|mb|gigs?|gb|browsing)\\b|" +
+    // In Ghana "airtime" and "credit" are what you call with: on a bundle they mean the minutes side of a mix.
+    private const val MIN_WORDS = "calls?|calling|minutes?|mins|talk(?: ?time)?|talking|voice|airtime|credit"
+    private const val DATA_WORDS = "data|internet|megabytes?|mb|gigs?|gb|browsing|browse|net|whatsapp"
+    private val PREFER_MINUTES = Regex("(?i)\\b(?:more|most|mostly|mainly|lots? of|plenty of|extra|bigger|enough) (?:$MIN_WORDS)\\b|" +
+        "\\bfor (?:calls|calling|talking)\\b|\\b(?:calls|minutes?|airtime) (?:more|rather)\\b|\\bcalls?\\b(?! me)")
+    private val PREFER_DATA = Regex("(?i)\\b(?:more|most|mostly|mainly|lots? of|plenty of|extra|bigger|enough) (?:$DATA_WORDS)\\b|" +
         "\\b(?:data|internet) (?:more|rather)\\b|\\bfor (?:browsing|internet)\\b")
     private val PREFER_CHEAP = Regex("(?i)\\bcheapest\\b|\\bsmallest\\b|\\bleast expensive\\b")
     private val PREFER_BIG = Regex("(?i)\\bbiggest\\b|\\blargest\\b")
+    /** "more minutes than data", "airtime more than data", "data rather than calls", "calls, not data": X wins over Y. */
+    private val COMPARE = Regex("(?i)\\b(?:(?:more|most|mostly|mainly|plenty of|lots? of|extra|bigger|much)\\s+)?($MIN_WORDS|$DATA_WORDS)\\b\\s*" +
+        "(?:bundles?\\s+)?(?:more than|rather than|over|instead of|not|than|before)\\s+(?:more\\s+|the\\s+|just\\s+|any\\s+)?($MIN_WORDS|$DATA_WORDS)\\b")
+    private val IS_MIN = Regex("(?i)^(?:$MIN_WORDS)$")
+    private val IS_DATA = Regex("(?i)^(?:$DATA_WORDS)$")
 
-    /** "…with more minutes" → MINUTES; "more data" → DATA; "the cheapest" → CHEAPEST. Null when not said. */
-    fun preferOf(text: String): Prefer? = when {
-        PREFER_DATA.containsMatchIn(text) -> Prefer.DATA
-        PREFER_MINUTES.containsMatchIn(text) -> Prefer.MINUTES
-        PREFER_CHEAP.containsMatchIn(text) -> Prefer.CHEAPEST
-        PREFER_BIG.containsMatchIn(text) -> Prefer.BIGGEST
-        else -> null
+    /**
+     * "…with more minutes" → MINUTES; "more data" → DATA; "the cheapest" → CHEAPEST. Null when not said. A comparison is
+     * read as one ("the person needs more minutes than data" → MINUTES — both words occur, and the old reading took that
+     * for "not said" and asked again at the mixes; owner, A20e, 13 October 2026). Two sides without a comparison → null.
+     */
+    fun preferOf(text: String): Prefer? {
+        COMPARE.find(text)?.let { m ->
+            val x = m.groupValues[1]; val y = m.groupValues[2]
+            if (IS_MIN.matches(x) && IS_DATA.matches(y)) return Prefer.MINUTES
+            if (IS_DATA.matches(x) && IS_MIN.matches(y)) return Prefer.DATA
+        }
+        val data = PREFER_DATA.containsMatchIn(text)
+        val minutes = PREFER_MINUTES.containsMatchIn(text)
+        return when {
+            data && !minutes -> Prefer.DATA
+            minutes && !data -> Prefer.MINUTES
+            PREFER_CHEAP.containsMatchIn(text) -> Prefer.CHEAPEST
+            PREFER_BIG.containsMatchIn(text) -> Prefer.BIGGEST
+            else -> null
+        }
     }
 
     private fun stem(w: String) = w.lowercase().removeSuffix("s")
@@ -327,6 +348,8 @@ object MenuBrain {
     fun resolve(ask: Move.Ask, answer: String, screen: String): Answer {
         val rows = TelcoUssd.rows(screen)
         val a = answer.trim()
+        // "The second one", "option 2": a position, whatever the question was about.
+        ordinalRow(rows, a)?.let { return Answer.Press(it) }
         when (ask.kind) {
             Kind.LOAN, Kind.SWITCH_PAY, Kind.CONFIRM -> {
                 // "No" to a loan, a switch of wallet or a purchase closes the network's menu outright — surer than its own
@@ -343,11 +366,15 @@ object MenuBrain {
                 if (d && !m) ask.options["data"]?.let { return Answer.Learned(it, prefer = Prefer.DATA) }
             }
             Kind.PRICE -> {
-                // "5", "five", "one cedi", "5 cedis" — on a price list a bare figure is a PRICE, not an option number.
-                val amount = com.tekyerema.money.MoneyLimits.parseAmount(a)?.toPlainString()
-                    ?: com.tekyerema.money.BankUssd.entry(a)?.takeIf { e -> e.isNotEmpty() && e.all { it.isDigit() || it == '.' } }
+                // "5", "five", "one cedi", "5 cedis", "I told you 5 cedis, 5" — on a price list a figure is a PRICE, not an
+                // option number. The figure next to a money word wins; the same figure said twice is that figure; two
+                // DIFFERENT figures are never glued into one (the digits of "5 … 5" had become 55, and the tier rule then
+                // chose the 30-cedi bundle — A20e, 13 October 2026). A figure above every tier is no tier either: ask again.
+                val amount = amountSaid(a)
                 if (amount != null) {
-                    (TelcoGuide.priceRow(rows, amount) ?: TelcoGuide.tierRow(rows, amount))?.let { return Answer.Learned(it.first, amount = amount) }
+                    (TelcoGuide.priceRow(rows, amount) ?: TelcoGuide.tierRow(rows, amount, aboveToo = false))
+                        ?.let { return Answer.Learned(it.first, amount = amount) }
+                    return Answer.Unclear
                 }
             }
         }
@@ -356,6 +383,53 @@ object MenuBrain {
         if (digits != null && rows.any { it.first == digits }) return Answer.Press(digits)
         TelcoGuide.rowNamed(rows, a)?.let { return Answer.Press(it) }
         return Answer.Unclear
+    }
+
+    private val MONEY_NEAR = Regex("(?i)(?:gh[sc₵¢]?|₵|¢)\\s*(\\d+(?:\\.\\d+)?)|(\\d+(?:\\.\\d+)?)\\s*(?:cedis?|ghs|ghc|₵|¢|pesewas?)\\b")
+    private val FIGURE = Regex("\\d+(?:\\.\\d+)?")
+    /** "the cheap one", "the second one": that "one" is a pronoun, not a figure — dropped before number words become figures. */
+    private val PRONOUN_ONE = Regex("(?i)\\b(the|that|this|which|cheap(?:est)?|dear(?:est)?|expensive|small(?:est)?|big(?:gest)?|first|second|third|fourth|fifth|last|other|same|middle|top|bottom|next|previous)\\s+one\\b")
+    private val ALTERNATIVES = Regex("(\\d+(?:\\.\\d+)?)(?:\\s*(?:cedis?|ghs|ghc|pesewas?))?\\s+or\\s+(?:maybe\\s+)?(\\d+(?:\\.\\d+)?)")
+
+    /**
+     * The amount an answer names: the figure next to a money word ("5 cedis", "GHC 10", "50 pesewas" → 0.50); else the one
+     * figure in it, said once or repeated ("5", "5 5"); null when figures disagree ("5 or 10") — never their digits glued.
+     */
+    internal fun amountSaid(answer: String): String? {
+        // Number WORDS ("one cedi", "five", "twenty five cedis") become figures first; an answer that already has figures
+        // is left as heard, so "5 5" stays two figures of the same price and is never joined into 55.
+        val heard = if (answer.any { it.isDigit() }) answer
+            else try { com.tekyerema.voice.Normalizer.normalize(PRONOUN_ONE.replace(answer, "$1"), com.tekyerema.voice.Lang.GH_EN) } catch (_: Throwable) { answer }
+        val s = heard.lowercase().replace(",", "")
+        // "5 or 10 cedis" is a choice not yet made, even though one figure sits beside the money word.
+        ALTERNATIVES.find(s)?.let { m -> if (m.groupValues[1] != m.groupValues[2]) return null }
+        val near = MONEY_NEAR.findAll(s).mapNotNull { m ->
+            (m.groupValues[1].ifEmpty { m.groupValues[2] }).toBigDecimalOrNull()
+                ?.let { v -> if (Regex("(?i)pesewas?").containsMatchIn(m.value)) v.movePointLeft(2) else v }
+        }.toList()
+        val figures = FIGURE.findAll(s).mapNotNull { it.value.toBigDecimalOrNull() }.toList()
+        val v = when {
+            near.isNotEmpty() && near.map { it.stripTrailingZeros() }.distinct().size == 1 -> near[0]
+            near.isEmpty() && figures.isNotEmpty() && figures.map { it.stripTrailingZeros() }.distinct().size == 1 -> figures[0]
+            else -> return null
+        }
+        return v.toPlainString()
+    }
+
+    private val ORDINAL = Regex("(?i)\\b(?:the\\s+)?(first|second|third|fourth|fifth|sixth|last|1st|2nd|3rd|4th|5th)(?:\\s+(?:one|option|row|choice))?\\b|" +
+        "\\b(?:option|number|choice)\\s+(\\d{1,2})\\b")
+
+    /** "The second one" / "option 2" → that row's number (positions skip Back / More). Null when no position is named. */
+    internal fun ordinalRow(rows: List<Pair<String, String>>, answer: String): String? {
+        val m = ORDINAL.find(answer) ?: return null
+        m.groupValues[2].takeIf { it.isNotEmpty() }?.let { n -> return rows.firstOrNull { it.first == n }?.first }
+        val usable = rows.filter { !isNav(it.second) }
+        val idx = when (m.groupValues[1].lowercase()) {
+            "first", "1st" -> 0; "second", "2nd" -> 1; "third", "3rd" -> 2; "fourth", "4th" -> 3; "fifth", "5th" -> 4; "sixth" -> 5
+            "last" -> usable.lastIndex
+            else -> return null
+        }
+        return usable.getOrNull(idx)?.first
     }
 
     private fun units(s: String): String = s

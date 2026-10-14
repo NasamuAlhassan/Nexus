@@ -392,8 +392,10 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     /** Drop every loaded recognizer (N-08 low-memory: onTrimMemory). They reload on the next request. */
     suspend fun releaseAll() = withContext(Dispatchers.Default) {
         lock.withLock {
-            synchronized(ResidentModels.monitor) { releaseLocked { true } }
-            Log.i("Tekyerema", "[ASR] released all recognizers (low memory)")
+            val n = synchronized(ResidentModels.monitor) { releaseLocked { true } }
+            // Only when something was held: a 3 GB phone trims memory every few seconds, and this line said "released"
+            // seven times in twenty seconds with nothing loaded (A20e, 13 October 2026).
+            if (n > 0) Log.i("Tekyerema", "[ASR] released all recognizers (low memory)")
         }
     }
 

@@ -35,6 +35,8 @@ object Verbalize {
     private val PHONE = Regex("(?<![\\d.,])(?:\\+233|233|0)(?:[ -]?\\d){9}(?![\\d.,]?\\d)")
     private val ENDING = Regex("(?i)\\b(ending(?: in)?)\\s+(\\d{2,4})\\b")
     private val DATA_SIZE = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s?(GB|MB)\\b")
+    /** "15.64Mins", "6.7 min" — a bundle's minutes, said whole ("sixteen minutes"), never "fifteen point six four mins". */
+    private val MINS = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s?mins?\\b")
     private val CUR_ALONE = Regex("(?<![\\p{L}\\p{N}])(?:GH₵|GH¢|GHS|GHC)(?![\\p{L}\\p{N}])")
 
     /** "0552093690" / "+233 55 209 3690" → "zero five five, two zero nine, three six nine zero" (the local 3-3-4 grouping). */
@@ -59,7 +61,21 @@ object Verbalize {
         "AirtelTigo" to "Airtel Tigo",
         "USSD" to "U S S D",
         "OTP" to "O T P",
-        "SMS" to "S M S"
+        "SMS" to "S M S",
+        // MTN's own menu words, as read on the A20e on 13 October 2026 ("MashUp GHC 5", "Y'ello!", "Enter MM PIN", "No 4G
+        // bonus", "MyMTN App"): said as the words they stand for, not spelled or run together.
+        "MyMTN" to "My M T N",
+        "MashUp" to "Mash Up",
+        "Mashup" to "Mash Up",
+        "Y'ello" to "Yellow",     // MTN's greeting is said "yellow"; a dictionary word is the one spelling every voice knows (R-A12)
+        "Y'ello!" to "Yellow!",
+        "MM PIN" to "Mobile Money PIN",
+        "MoMoPay" to "Momo Pay",
+        "Me2U" to "Me to You",
+        "4G" to "four G",
+        "3G" to "three G",
+        "5G" to "five G",
+        "a/c" to "account"
     )
 
     fun apply(text: String): String {
@@ -71,9 +87,25 @@ object Verbalize {
         // audit, 5 October 2026.
         t = PHONE.replace(t) { m -> phone(m.value) }
         t = ENDING.replace(t) { m -> m.groupValues[1] + " " + m.groupValues[2].map { ONES[it - '0'] }.joinToString(" ") }
+        // Data in figures a listener can hold (owner, 13 October 2026: the reading of MTN's bundles was "so bad"): megabytes
+        // whole ("522.32 MB" → "522 megabytes"), a thousand and more of them as gigabytes to one decimal ("3133.94 MB" →
+        // "about 3.1 gigabytes"), gigabytes to one decimal; minutes whole ("15.64Mins" → "16 minutes").
         t = DATA_SIZE.replace(t) { m ->
-            val unit = if (m.groupValues[2].equals("GB", true)) "gigabyte" else "megabyte"
-            m.groupValues[1] + " " + unit + if (m.groupValues[1] == "1") "" else "s"
+            val n = m.groupValues[1].toDoubleOrNull() ?: return@replace m.value
+            val gb = m.groupValues[2].equals("GB", true)
+            val toGb = !gb && n >= 1024
+            val value = when {
+                toGb -> Math.round(n / 1024 * 10) / 10.0
+                gb -> Math.round(n * 10) / 10.0
+                else -> Math.round(n).toDouble()
+            }
+            val shown = if (value == Math.floor(value)) value.toLong().toString() else value.toString()
+            (if (toGb) "about " else "") + shown + (if (gb || toGb) " gigabyte" else " megabyte") + (if (shown == "1") "" else "s")
+        }
+        t = MINS.replace(t) { m ->
+            val n = m.groupValues[1].toDoubleOrNull() ?: return@replace m.value
+            val whole = Math.round(n)
+            "$whole minute" + if (whole == 1L) "" else "s"
         }
         t = MONEY_BEFORE.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
         t = MONEY_AFTER.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }

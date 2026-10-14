@@ -473,6 +473,7 @@ object VoiceEngine {
     }
 
     private fun applyVoiceSettings() {
+        TtsAccent.value = settings.ttsAccent   // the English voice re-picks itself on the next line it speaks
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
         ReadingPace.rate = when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }   // readings sized in seconds
         ownVoice?.rate = ReadingPace.rate

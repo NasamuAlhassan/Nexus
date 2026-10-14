@@ -184,6 +184,7 @@ object TelcoUssdTool : Tool {
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
             return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open ${flow.netName}'s menu. Allow Phone for Tɛkyerɛma in Settings.", recoverable = false)
         TelcoSession.end()
+        com.tekyerema.money.ussd.PushedPin.cancel()   // a new walk: an older wait for a pushed prompt is over
         Log.i(TAG, "[TELCO] opened ${flow.code} (${flow.netName} ${flow.key}) — guided, ${flow.auto.size} auto-steps")
         val first = try { UssdDialog.dial(ctx.appContext, ctrl, flow.code) } catch (t: Throwable) {
             return ToolResult(false, "I couldn't open ${flow.netName}'s menu.", recoverable = false)
@@ -203,6 +204,7 @@ object TelcoUssdTool : Tool {
         val net = TelcoSession.current()?.flow?.netName ?: "the network"
         val what = if (TelcoSession.current()?.flow?.what?.contains("send money") == true) "Nothing was sent." else "Nothing was bought."
         TelcoSession.end()
+        com.tekyerema.money.ussd.PushedPin.cancel()
         val now = UssdDialog.awaitCurrent(ctrl, 1_500L)
             ?: return ToolResult(true, "Okay — $net's menu is closed. $what", data = JSONObject().put("gone", true), channel = "native")
         val closed = UssdDialog.close(ctrl, now)
@@ -249,6 +251,13 @@ object TelcoUssdTool : Tool {
             ledger(app, session.flow, kind)   // first: the watcher that reads the receipt settles THIS entry
             handOver(kind, ctrl, app, session.flow.netName)
         }
+        // "You will soon receive payment prompt": the PIN dialog is pushed a few seconds later, as a new window — watched for,
+        // so the voice goes quiet and the volume keys are the pad when it lands (owner, A20e, 13 October 2026).
+        if (kind == BankUssd.ScreenKind.FINAL && com.tekyerema.money.ussd.PushedPin.promptComing(next.text)) {
+            Log.i(TAG, "[TELCO] ${session.flow.netName} will push the PIN prompt — watching for it")
+            val flow = session.flow
+            com.tekyerema.money.ussd.PushedPin.watch(ctrl, app, flow.netName) { k -> ledger(app, flow, k) }
+        }
         // The network's last word has been taken: its OK box is closed, so the user isn't left to find it.
         if (kind == BankUssd.ScreenKind.FINAL) UssdDialog.close(ctrl, next)
         return ToolResult(true, "${session.flow.netName}: ${BankUssd.spokenScreen(next.text, speakBalance = false).take(120)}",
@@ -294,7 +303,9 @@ object TelcoUssdTool : Tool {
             val number = args.str(ARG_NUMBER)?.takeIf { n -> n.count { it.isDigit() } >= 7 }
             val who = number?.let { n ->
                 val said = com.tekyerema.agent.NumberSpeech.moneyReadBack(n).first
-                args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }?.let { "$it, on $said" } ?: said
+                // "for the number 0 5 5…", never "for 0 5 5…": with the amount missing, "for 0" was heard as a zero amount
+                // (owner, A20e, 13 October 2026).
+                args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }?.let { "$it, on $said" } ?: "the number $said"
             }
             val pay = when (args.str(ARG_PAY)) { "momo" -> ", paying with Mobile Money"; "airtime" -> ", paying from your airtime"; else -> "" }
             if (args.str(ARG_FLOW) == TelcoUssd.MENU && amount == null && who == null)

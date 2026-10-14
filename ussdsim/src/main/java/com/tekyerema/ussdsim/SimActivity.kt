@@ -22,7 +22,16 @@ class SimActivity : Activity() {
     companion object {
         const val TITLE = "USSD simulator"
         const val EXTRA_CODE = "code"
+        /** The PIN dialog the network PUSHES after its last word (MTN: "You will soon receive payment prompt"): its text. */
+        const val EXTRA_PUSH = "push"
+        private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     }
+
+    private var pushScheduled = false
+
+    private fun scriptFor(intent: Intent?): MtnScript =
+        intent?.getStringExtra(EXTRA_PUSH)?.let { MtnScript("*567#", pushedPin = it) }
+            ?: MtnScript(intent?.getStringExtra(EXTRA_CODE) ?: "")
 
     private lateinit var script: MtnScript
     private lateinit var message: TextView
@@ -34,7 +43,7 @@ class SimActivity : Activity() {
         super.onCreate(savedInstanceState)
         title = TITLE
         setFinishOnTouchOutside(false)
-        script = MtnScript(intent?.getStringExtra(EXTRA_CODE) ?: "")
+        script = scriptFor(intent)
         val dp = resources.displayMetrics.density
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -56,7 +65,8 @@ class SimActivity : Activity() {
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        script = MtnScript(intent?.getStringExtra(EXTRA_CODE) ?: "")
+        script = scriptFor(intent)
+        pushScheduled = false
         render()
     }
 
@@ -76,5 +86,16 @@ class SimActivity : Activity() {
         if (s.input) entry.requestFocus()
         send.text = if (s.final) "OK" else "Send"
         cancel.visibility = if (s.final) View.GONE else View.VISIBLE
+        // The network's push: a NEW dialog a few seconds after its last word, whether or not this one was closed (the real
+        // phone app dismisses the previous alert when the next MMI arrives — 3GPP TS 23.090, AOSP PhoneUtils; R-A9).
+        if (s.final && s.pushAfterMs > 0 && s.pushText != null && !pushScheduled) {
+            pushScheduled = true
+            val app = applicationContext
+            val text = s.pushText
+            handler.postDelayed({
+                app.startActivity(Intent(app, SimActivity::class.java).putExtra(EXTRA_PUSH, text)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            }, s.pushAfterMs)
+        }
     }
 }

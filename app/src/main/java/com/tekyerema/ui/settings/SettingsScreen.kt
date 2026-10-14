@@ -227,7 +227,21 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
             ChoiceRow("Normal", selected = rate == 1) { settings.speechRate = 1 }
             ChoiceRow("Fast", selected = rate == 2, divider = false) { settings.speechRate = 2 }
         } }
-        Note("You can also say “speak slower”, “keep it short” or “be patient with me”.")
+        val accent = remember(version) { settings.ttsAccent }
+        GlassGroup("English voice") { Column(Modifier.selectableGroup()) {
+            ChoiceRow("Automatic", "Tɛkyerɛma's own Ghanaian voice when it is installed; British English until then.",
+                accent == com.tekyerema.voice.TtsAccent.AUTO) { settings.ttsAccent = com.tekyerema.voice.TtsAccent.AUTO }
+            ChoiceRow("British English", selected = accent == "GB") { settings.ttsAccent = "GB" }
+            ChoiceRow("Nigerian English", selected = accent == "NG") { settings.ttsAccent = "NG" }
+            ChoiceRow("American English", selected = accent == "US", divider = false) { settings.ttsAccent = "US" }
+        } }
+        GlassGroup {
+            SettingRow("Hear a sample", description = "An amount, a phone number and the network, in the voice chosen above.",
+                divider = false) {
+                com.tekyerema.voice.VoiceEngine.announce("Sending 5 cedis 50 pesewas to 0 5 5, 2 0 9, 3 6 9 0, an MTN number, with Mobile Money.")
+            }
+        }
+        Note("You can also say “speak slower”, “keep it short” or “be patient with me”. Twi is always spoken by the lab's Ghanaian voice.")
     }
 }
 

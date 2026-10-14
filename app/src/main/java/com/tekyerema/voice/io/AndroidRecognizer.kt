@@ -27,13 +27,32 @@ class AndroidRecognizerEngine(
     override fun available(): Boolean = try { SpeechRecognizer.isRecognitionAvailable(context) } catch (_: Throwable) { false }
 
     override fun create(): RecognizerHandle? {
-        val cn = component().trim().takeIf { it.isNotEmpty() }?.let { ComponentName.unflattenFromString(it) }
+        val cn = component().trim().takeIf { it.isNotEmpty() }?.let { ComponentName.unflattenFromString(it) } ?: preferredGoogle()
         val r = try {
             // The ComponentName overload asks for the component to be checked with queryIntentServices first.
             if (cn != null && serviceComponents(context).contains(cn)) SpeechRecognizer.createSpeechRecognizer(context, cn)
             else SpeechRecognizer.createSpeechRecognizer(context)
         } catch (t: Throwable) { Log.w(TAG, "[VOICE] createSpeechRecognizer failed: ${t.javaClass.simpleName}"); null }
         return r?.let { Handle(it) }
+    }
+
+    /**
+     * Google's recognizer when the phone's default is another maker's (Samsung's on the A20e): it lists Ghanaian English
+     * (en-GH) and the free-form model the assistant relies on, and it is what the Pixel uses anyway, so the emulator and
+     * the phone hear alike (owner, 13 October 2026: "changing the TTS and ASR… will be better"). `systemSpeech.preferGoogle`
+     * false keeps the phone's default; an explicit `component` always wins. Logged once, without content.
+     */
+    private var loggedPick = false
+    private fun preferredGoogle(): ComponentName? {
+        val want = try { com.tekyerema.core.config.AppConfig.bool("speech.voiceLayer.systemSpeech.preferGoogle", true) } catch (_: Throwable) { true }
+        if (!want) return null
+        val default = defaultServicePackage(context)
+        if (default != null && default.startsWith("com.google.")) return null
+        val services = serviceComponents(context)
+        val google = services.firstOrNull { it.packageName == GOOGLE_RECOGNIZER_PKG }
+            ?: services.firstOrNull { it.packageName.startsWith("com.google.") } ?: return null
+        if (!loggedPick) { loggedPick = true; Log.i(TAG, "[VOICE] recognizer: ${google.packageName} preferred over the phone's default ${default ?: "?"}") }
+        return google
     }
 
     private inner class Handle(private val r: SpeechRecognizer) : RecognizerHandle {
@@ -77,6 +96,8 @@ class AndroidRecognizerEngine(
 
     companion object {
         private const val TAG = "Tekyerema"
+        /** The Google app's recognition service (Android 11 phones); Pixels default to it. */
+        const val GOOGLE_RECOGNIZER_PKG = "com.google.android.googlequicksearchbox"
 
         /** Installed RecognitionService components (needs the `<queries>` entry on API 30+ without QUERY_ALL_PACKAGES). */
         fun serviceComponents(ctx: Context): List<ComponentName> = try {
