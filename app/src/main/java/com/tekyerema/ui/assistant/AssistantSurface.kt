@@ -784,7 +784,8 @@ internal fun Waiting(
                             contentDescription = if (twi) "Aane, yɛ" else "$verb — do it", haptic = TkHaptic.CONFIRM, tier = tier)
                     }
                     // Over other apps the answer can also be typed: a small quiet pill under the two that decide.
-                    if (onTypeConfirm != null) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
+                    // (not for an announced call: it goes ahead by itself; "stop" or Cancel is all it takes)
+                    if (onTypeConfirm != null && facts?.announced != true) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
                         GlassPill(if (twi) "Twerɛ" else "Type", onClick = onTypeConfirm, compact = true, available = !resolving,
                             contentDescription = if (twi) "Twerɛ wo mmuae" else "Type your answer instead of saying it", tier = tier)
                     }

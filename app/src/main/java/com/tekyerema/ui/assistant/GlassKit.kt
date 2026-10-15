@@ -214,7 +214,7 @@ fun Modifier.glassBody(
 ): Modifier = this.liquidGlass(
     // A card over another app is a "large" glass (Apple: more opaque) — words on it never read as text on top of text.
     style = LiquidStyles.of(palette.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
-        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (palette.dark) 0.90f else 0.92f))
+        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (palette.dark) 0.93f else 0.92f))
     },
     shape = GlassShape.Rounded(radius),
     depth = GlassDepth.FLOATING,

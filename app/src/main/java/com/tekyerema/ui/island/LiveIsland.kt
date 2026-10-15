@@ -113,7 +113,7 @@ fun LiveIsland(
 
     val style = LiquidStyles.of(g.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
         // Denser than our pages: over another app's text, words on glass must never read as "text on top of text" (NN/g).
-        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (open) (if (g.dark) 0.95f else 0.96f) else (if (g.dark) 0.90f else 0.92f)))
+        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (open) (if (g.dark) 0.95f else 0.96f) else (if (g.dark) 0.93f else 0.92f)))
     }
     val tilt = com.tekyerema.ui.glass.rememberTiltLight(tier == GlassTier.FULL && !calm)
     val radius by animateDpAsState(if (open) 30.dp else 23.dp, if (calm) tween(0) else spring(0.82f, 170f), label = "islandRadius")
