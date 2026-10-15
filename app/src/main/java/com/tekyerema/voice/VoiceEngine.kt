@@ -510,14 +510,20 @@ object VoiceEngine {
      * balance in English (A20e, 9 October 2026). Whatever is still being said is stopped first: once the network has
      * answered, the PIN line is stale (that day the Twi PIN line played AFTER the balance).
      */
-    fun announceAnswer(english: String, twi: String?) {
+    fun announceAnswer(english: String, twi: String?, urgent: Boolean = false) {
         if (!initialized || !settings.speakAloud || english.isBlank()) return
         hush()
         scope.launch {
-            val lang = conversationLanguage()
-            val text = if (lang == Lang.TWI && twi != null) twi else english
-            val ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), lang) } catch (_: Throwable) { false }
-            android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok lang=$lang (${text.length} chars)")   // no words in the log
+            // "speak Twi" counts before any Twi has been said — in the demo the call comes first (rehearsal, 15 Oct 2026).
+            val lang = settings.forcedLanguage ?: conversationLanguage()
+            // Twi only while the Twi voice is known to work: a lab that is down spends its retries and then has the English
+            // voice read Twi words — the English line, at once, instead. An [urgent] line (a ringing phone) can't wait for a
+            // new lab line either (~10–15 s even when it is up): English unless `phone.announceCallerTwiLive` says otherwise.
+            val inTwi = lang == Lang.TWI && twi != null && TwiVoiceStatus.shared.state == TwiVoiceStatus.State.OK &&
+                (!urgent || com.tekyerema.core.config.AppConfig.bool("phone.announceCallerTwiLive", false))
+            val text = if (inTwi) twi!! else english
+            val ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), if (inTwi) Lang.TWI else Lang.GH_EN) } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok lang=$lang twiVoice=$inTwi (${text.length} chars)")   // no words in the log
         }
     }
 

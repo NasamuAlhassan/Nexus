@@ -9,6 +9,16 @@ import org.junit.Test
 
 /** The owner's demo flow (14 Oct 2026): a message asks for money; the send; "tell him I've sent it". Fake people only. */
 class DemoStepsTest {
+    @Test fun another_networks_name_in_brackets_is_not_the_person_paid() {
+        val other = com.tekyerema.money.MoMoOutcome.parse("Payment made for GHS 5.00 to 0500002222 (Telecel). Fee charged: GHS 0.50. " +
+            "Current Balance: GHS 7.00. Reference: transport.")!!
+        assertNull(other.party)
+        assertEquals("0500002222", other.partyNumber)
+        val person = com.tekyerema.money.MoMoOutcome.parse("Payment made for GHS 5.00 to KOFI DEMO 0240001111. Current Balance: GHS 7.50. " +
+            "Reference: transport. Transaction ID: 123456.")!!
+        assertEquals("KOFI DEMO", person.party)
+    }
+
     @Test fun the_message_gives_the_amount_the_number_in_the_chat_and_the_name() {
         val r = MoneyRequest.parse("Kofi Demo", "Hi, it's Kofi. Please send me 5 cedis for transport. My MoMo number is 050 000 2222.")!!
         assertEquals("5", r.amount)
@@ -36,6 +46,13 @@ class DemoStepsTest {
         assertNull(LastSend.expand("I'm on my way", "Kofi Demo"))
         LastSend.clear()
         assertNull(LastSend.expand("I've sent it", "Kofi Demo"))
+        // A wrong PIN / not enough funds: never "I've sent you" afterwards — the truth, read back before it goes.
+        LastSend.note("Kofi Demo", "0500002222", "5", "transport")
+        LastSend.markFailed()
+        assertEquals("I tried to send you 5 cedis by Mobile Money, but it didn't go through.", LastSend.expand("I've sent it", "Kofi Demo"))
+        LastSend.note("Kofi Demo", "0500002222", "5", "fuel")   // a new send starts clean
+        assertEquals("I've sent you 5 cedis by Mobile Money. Reference: fuel.", LastSend.expand("I've sent it", "Kofi Demo"))
+        LastSend.clear()
     }
 
     @Test fun no_reference_becomes_payment() {

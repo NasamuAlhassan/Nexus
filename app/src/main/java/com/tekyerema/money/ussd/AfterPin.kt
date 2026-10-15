@@ -100,6 +100,10 @@ object AfterPin {
                 val withBalance = app?.let { a -> try { com.tekyerema.phonecare.PhoneAlerts.balanceAloud(a) } catch (_: Throwable) { false } } ?: false
                 val twiConversation = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
                 val spoken = lineFor(s.text, network, withBalance, twiConversation)
+                // A payment that didn't go through is never texted as sent afterwards ("tell him I've sent it", money/LastSend).
+                if (spoken.settled?.tx?.state == TxLedger.State.FAILED || UNPAID_END.containsMatchIn(s.text)) {
+                    com.tekyerema.money.LastSend.markFailed(); Log.i(TAG, "[MONEY] the last send is marked as not gone through")
+                }
                 Log.i(TAG, if (spoken.settled != null)
                     "[MONEY] outcome ${spoken.settled.tx.state.name.lowercase()} from the network's screen after the PIN"
                     else "[NAV] the network's answer after the PIN is read out (${s.text.length} chars${if (spoken.twi != null) ", in Twi" else ""})")

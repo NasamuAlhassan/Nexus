@@ -6,13 +6,18 @@ package com.tekyerema.money
  * walk; in memory only, for [maxAgeMs]. The text is still read back and confirmed before it goes (send_sms is confirmed).
  */
 object LastSend {
-    data class Sent(val name: String?, val number: String?, val amount: String?, val reference: String?, val at: Long)
+    data class Sent(val name: String?, val number: String?, val amount: String?, val reference: String?, val at: Long,
+                    val failed: Boolean = false)
 
     @Volatile private var last: Sent? = null
 
     fun note(name: String?, number: String?, amount: String?, reference: String?) {
         last = Sent(name?.trim()?.ifEmpty { null }, number, amount, reference?.trim()?.ifEmpty { null }, System.currentTimeMillis())
     }
+    /** The network said the payment didn't go through (wrong PIN, not enough funds, declined): from now on "tell him I've
+     *  sent it" never says it was sent (rehearsal, 15 Oct 2026 — it would have texted "I've sent you 5 cedis" after a
+     *  wrong PIN). */
+    fun markFailed() { last = last?.copy(failed = true) }
     fun clear() { last = null }
 
     private fun maxAgeMs(): Long = try { com.tekyerema.core.config.AppConfig.long("money.lastSend.maxAgeSeconds", 1800L) * 1000L } catch (_: Throwable) { 1_800_000L }
@@ -29,6 +34,9 @@ object LastSend {
         val amt = s.amount?.let { com.tekyerema.tools.GhanaMobileMoney.cedisPhrase(it) } ?: return null
         val toThem = to == null || s.name == null || s.name.contains(to.trim(), true) || to.trim().contains(s.name, true)
         val who = if (toThem) "you" else "to ${s.name}"
+        // The truth instead of the claim — and the user hears it in the read-back before anything is sent.
+        if (s.failed) return if (toThem) "I tried to send you $amt by Mobile Money, but it didn't go through."
+            else "I tried to send $amt $who by Mobile Money, but it didn't go through."
         val sent = if (toThem) "I've sent you $amt by Mobile Money." else "I've sent $amt $who by Mobile Money."
         return sent + (s.reference?.takeIf { !it.equals("Payment", true) }?.let { " Reference: $it." } ?: "")
     }

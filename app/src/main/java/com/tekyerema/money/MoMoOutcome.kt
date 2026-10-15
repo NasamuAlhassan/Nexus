@@ -105,6 +105,8 @@ object MoMoOutcome {
         "\\be-?levy\\b|\\bthank\\s+you\\b|\\bdownload\\b)|\\s+(?:on|at)\\s+\\d")
     private val PHONE = Regex("\\+?\\d[\\d ]{7,14}\\d")
     private val BREAK = Regex("[,;|\\n]")
+    /** A network's name alone ("Telecel", "AT Money", "Vodafone Cash") — the other side's network, never a person. */
+    private val NETWORK_ONLY = Regex("(?i)(?:mtn|telecel|vodafone|airteltigo|airtel\\s?tigo|airtel|tigo|at)(?:\\s+(?:cash|money|momo|network))?")
     private val SENTENCE_END = Regex("\\.\\s+")
 
     private val FEE = Regex("(?i)\\bfee\\b(?:\\s+(?:charged|was|is))?\\s*:?\\s*(?:$CUR\\s*)?$AMT")
@@ -169,7 +171,9 @@ object MoMoOutcome {
             if (rest.isEmpty() || rest.contains(' ') || rest.length > 8) name = name.substring(0, end.range.first)
         }
         name = name.replace(Regex("\\s+"), " ").trim(' ', '.', ',', '-', ':', ';')
-        val ok = name.count { it.isLetter() } >= 2 && name.length <= 60 && name.split(' ').size <= 8
+        // "to 0500002222 (Telecel)": the bracket names the other NETWORK, not the person — "5 cedis sent to Telecel" misled
+        // (rehearsal, 15 Oct 2026); without a name the line falls back to the contact the user chose.
+        val ok = name.count { it.isLetter() } >= 2 && name.length <= 60 && name.split(' ').size <= 8 && !NETWORK_ONLY.matches(name)
         return (if (ok) name else null) to number
     }
 

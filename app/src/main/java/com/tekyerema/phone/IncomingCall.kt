@@ -80,7 +80,7 @@ object IncomingCall {
                     // [owner: verify the Twi] "<name> refrɛ wo. Mia volume up na gye."
                     val twi = "$en refrɛ wo." + if (hint.isNotEmpty()) " Mia volume up na gye." else ""
                     // A moment after the ring starts: the ringtone takes the audio first, then the name is said over it.
-                    main.postDelayed({ if (isRinging) com.tekyerema.voice.VoiceEngine.announceAnswer("$who is calling.$hint", twi) }, 900)
+                    main.postDelayed({ if (isRinging) com.tekyerema.voice.VoiceEngine.announceAnswer("$who is calling.$hint", twi, urgent = true) }, 900)
                 }
             }
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
