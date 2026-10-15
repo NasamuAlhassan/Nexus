@@ -16,7 +16,13 @@ import java.math.RoundingMode
  * dialog.
  */
 class MtnScript(code: String, private val registeredName: String = "PRINCE NASAMU ALHASSAN", private val pin: String = "1234",
-                private val balance: String = "12.50", pushedPin: String? = null) {
+                private val balance: String = "12.50", pushedPin: String? = null,
+                /** The test PIN as a SHA-256 (hex) — the rehearsal's fake PIN lives in a local file and is never passed in the
+                 *  clear (demo rehearsal, 14 Oct 2026); null = [pin]. */
+                private val pinSha256: String? = null) {
+    private fun pinOk(t: String): Boolean = if (pinSha256 != null)
+        java.security.MessageDigest.getInstance("SHA-256").digest(t.toByteArray()).joinToString("") { "%02x".format(it) } == pinSha256.lowercase()
+        else t == pin
     data class Shown(val text: String, val input: Boolean, val masked: Boolean, val final: Boolean,
                      /** A last word after which the network PUSHES a PIN dialog: how long after, and what it says. */
                      val pushAfterMs: Long = 0L, val pushText: String? = null)
@@ -117,7 +123,7 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
                 else -> if (v.signum() <= 0) end("Invalid amount.") else { amount = t; "oref" }
             }
             "oref" -> { reference = t.ifBlank { "-" }; state = "opin" }
-            "opin" -> state = if (t != pin) wrongPin()
+            "opin" -> state = if (!pinOk(t)) wrongPin()
                 else if (amount.toBigDecimal() + BigDecimal(OTHER_NET_FEE) > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                 else end("Payment made for GHS ${money(amount)} to $number ($otherNet). Fee charged: GHS $OTHER_NET_FEE. " +
                     "Current Balance: GHS ${left((amount.toBigDecimal() + BigDecimal(OTHER_NET_FEE)).toPlainString())}. Reference: $reference.")
@@ -130,12 +136,12 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
             }
             "reference" -> { reference = t.ifBlank { "-" }; state = "pin" }
             // The receipt in MTN's own shape; "Not enough funds to perform this transaction." is MTN's own final (A20e, 3 Oct 2026).
-            "pin" -> state = if (t != pin) wrongPin()
+            "pin" -> state = if (!pinOk(t)) wrongPin()
                 else if (amount.toBigDecimal() > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                 else end("Payment made for GHS ${money(amount)} to $registeredName $number. Current Balance: GHS ${left(amount)}. " +
                     "Available Balance: GHS ${left(amount)}. Reference: $reference. Transaction ID: $txnId. Fee charged: GHS 0.00 TAX charged: GHS 0.00.")
             "wallet" -> state = when (t) { "1" -> "walletpin"; else -> end(INCORRECT) }
-            "walletpin" -> state = if (t == pin) end("Current Balance: GHS $balance Available Balance: GHS $balance") else wrongPin()
+            "walletpin" -> state = if (pinOk(t)) end("Current Balance: GHS $balance Available Balance: GHS $balance") else wrongPin()
             // ---- Airtime (A20e: self to the PIN at once; others and other networks end with the promise, the PIN pushed)
             "airtimehub" -> state = when (t) { "1" -> "airtime"; else -> end(INCORRECT) }
             "airtime" -> state = when (t) {
@@ -159,7 +165,7 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
             }
             "aconfirmx" -> state = when (t) { "1" -> "anotice"; "0" -> "root"; else -> end("Transaction cancelled.") }
             "anotice" -> state = when (t) { "1" -> airtimePromise(); else -> end("Transaction cancelled.") }
-            "apin" -> state = if (t == "2") end("Transaction cancelled.") else if (t != pin) wrongPin()
+            "apin" -> state = if (t == "2") end("Transaction cancelled.") else if (!pinOk(t)) wrongPin()
                 else if (amount.toBigDecimal() > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                 else end("Y'ello! Airtime purchase of GHS ${money(amount)} successful. Your MoMo balance is GHS ${left(amount)}.")
             // ---- Pulse / Mashup
@@ -190,7 +196,7 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
                 } else "mpin"
                 else -> end(INCORRECT)
             }
-            "mpin", "pushpin" -> state = if (t == "2") end("Transaction cancelled.") else if (t != pin) wrongPin()
+            "mpin", "pushpin" -> state = if (t == "2") end("Transaction cancelled.") else if (!pinOk(t)) wrongPin()
                 else if ((price.toBigDecimalOrNull() ?: BigDecimal.ZERO) > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                 else end(receipt())
             else -> {}

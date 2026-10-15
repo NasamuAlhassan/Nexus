@@ -39,6 +39,30 @@ private fun <K, V> lru(max: Int): MutableMap<K, V> = java.util.Collections.synch
  * Online recognition: audio up, raw transcript back, then the SAME on-device [LanguagePipeline] every recogniser
  * uses (LID, entity-first normalisation, entities) — so where the words came from never changes how they are read.
  */
+/**
+ * The owner's overnight mission (14 Oct 2026, the UG HCI Lab answering 502 "upstream_service_error"): a speech request is
+ * retried with exponential backoff inside a time limit — only after a server error (5xx) that came back with time left for
+ * another try; never after a timeout (that already used the wait) and never after a 4xx (a refusal is a refusal). 5xx replies
+ * are not counted against the daily quota (the callers' rule), so a retry costs no quota. [attempts] includes the first.
+ */
+internal object LabRetry {
+    suspend fun send(budgetMs: Long, attempts: Int = 3, baseDelayMs: Long = 800L,
+                     now: () -> Long = { SystemClock.elapsedRealtime() }, request: suspend () -> HttpReply): HttpReply {
+        val start = now()
+        var wait = baseDelayMs
+        var tries = 0
+        while (true) {
+            val t0 = now()
+            val r = request(); tries++
+            val took = now() - t0
+            if (r.code !in 500..599 || tries >= attempts) return r
+            if (budgetMs - (now() - start) < wait + took) return r          // another try would not finish in time
+            try { Log.i("Tekyerema", "[LANG] the lab answered ${r.code} in ${took} ms — try ${tries + 1} after ${wait} ms") } catch (_: Throwable) {}
+            kotlinx.coroutines.delay(wait); wait *= 2
+        }
+    }
+}
+
 class HttpAsrProvider(
     val spec: HttpSpeechSpec,
     private val secrets: () -> Map<String, String>,
@@ -65,7 +89,8 @@ class HttpAsrProvider(
         val t0 = SystemClock.elapsedRealtime()
         val reply = try {
             guard.run {
-                val r = transport.send(HttpSpeech.asrRequest(spec, secrets(), wav, code), spec.connectMs, spec.callMs)
+                val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.asr", 14_000L)) {
+                    transport.send(HttpSpeech.asrRequest(spec, secrets(), wav, code), spec.connectMs, spec.callMs) }
                 // It reached the gateway's counter — except a rejected key (401), which is refused before any counting.
                 if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
                 HttpSpeech.failureOf(spec, r)?.let { throw it }
@@ -169,10 +194,14 @@ class HttpTtsProvider(
             val key = "$code|$p"
             clips += cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)?.also { if (spec.cacheEntries > 0) cache[key] = it } ?: run {
                 val units = QuotaLedger.Units(chars = p.length)
+                // DEBUG builds: the line that has no recorded clip yet, so a rehearsal can list what to pre-record when the
+                // lab is up (owner's overnight mission, 14 Oct 2026). Never in a release build.
+                if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TTS-UNCACHED] key=$key")
                 ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return false }
                 try {
                     guard.run {
-                        val r = transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs)
+                        val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.tts", 10_000L)) {
+                            transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs) }
                         // A rejected key (401) never reached the plan's counter: don't spend the small day on it.
                         if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
                         HttpSpeech.failureOf(spec, r)?.let { throw it }

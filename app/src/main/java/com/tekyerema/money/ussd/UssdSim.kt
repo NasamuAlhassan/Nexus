@@ -39,7 +39,11 @@ object UssdSim {
 
     fun start(app: Context, code: String) {
         app.startActivity(Intent().setClassName(SIM_PACKAGE, SIM_ACTIVITY)
-            .putExtra(EXTRA_CODE, code).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            .putExtra(EXTRA_CODE, code)
+            // The rehearsal's fake account holder and its test PIN's SHA-256 (never the PIN) — runtime overrides, debug only.
+            .putExtra("pinSha256", AppConfig.string("money.ussd.simPinSha256", ""))
+            .putExtra("name", AppConfig.string("money.ussd.simName", ""))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 
     /** What the simulator shows: the dialog's words, whether it has an entry box, whether that box is masked (a PIN), and

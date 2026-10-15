@@ -74,6 +74,15 @@ object TwiCommands {
     private val SEND_MIXED = Regex("^send\\s+(?:$AMOUNT|sika(?:\\s+$AMOUNT)?)\\s+(?:kɔ\\s?ma|ma|to)\\s+(.+)$")
     /** "nkra" (messages) — the HCI Lab wrote "koraa" for it on GOLD K04 (3 October 2026). */
     private val READ_MESSAGES = Regex("^kenkan\\s+me\\s+(?:nkra|nkraa|nkara|koraa)$")
+    /** The owner's demo (14 Oct 2026), said in Twi: "no"/"ɔno" after the verb is him or her — the person just talked about
+     *  (the caller). Exact phrases only (money, calls and messages are never matched loosely). [owner: verify the Twi] */
+    private val DEMO_HIM = listOf(
+        Regex("^kenkan\\s+(?:me\\s+)?nkra\\s+no$") to "read my message",
+        Regex("^kenkan\\s+(?:ne|ɔno)\\s+nkra(?:\\s+no)?$") to "read his message",
+        Regex("^soma\\s+(?:no|ɔno)\\s+sika(?:\\s+no)?$") to "send money to him",
+        Regex("^fa\\s+sika\\s+no\\s+(?:kɔ\\s?ma|ma)\\s+(?:no|ɔno)$") to "send money to him",
+        Regex("^ka\\s+kyerɛ\\s+(?:no|ɔno)\\s+sɛ\\s+(?:ma|me)?soma(?:\\s+no)?(?:\\s+(?:dedaw|seesei))?$") to "tell him I've sent it",
+        Regex("^(?:seesei\\s+)?frɛ\\s+(?:no|ɔno)(?:\\s+seesei)?$") to "now call him")
     private val MOMO_BALANCE = Regex("^(?:me\\s+(?:momo|mobile money)(?:\\s+mu)?\\s+sika(?:\\s+a\\s+aka)?\\s+(?:yɛ|aka|ka)\\s+sɛn" +
         "|hwɛ\\s+me\\s+(?:momo\\s+)?sika(?:\\s+a\\s+aka|\\s+no)?|mewɔ\\s+sika\\s+sɛn)$")
     private val AIRTIME_BALANCE = Regex("^me\\s+(?:kredit|krɛdit|credit|airtime)(?:\\s+no)?\\s+(?:aka|ka|yɛ)\\s+sɛn$")
@@ -228,6 +237,7 @@ object TwiCommands {
                 if (a != null && b != null) return "$a and $b"
             }
         }
+        DEMO_HIM.firstOrNull { (re, _) -> re.matches(low) }?.let { return it.second }
         SEND_AMOUNT.find(low)?.let { m -> return send(amount(m.g(1), m.g(2)), m.g(3)) }
         SEND_MIXED.find(low)?.let { m -> return send(amount(m.g(1).ifEmpty { m.g(3).ifEmpty { null } }, m.g(2).ifEmpty { m.g(4) }), m.g(5)) }
         SEND_MONEY.find(low)?.let { m ->

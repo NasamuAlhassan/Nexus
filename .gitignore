@@ -84,3 +84,5 @@ local.properties.*
 /ussdsim/build/
 /demo-package/recordings/
 /scripts/.local/
+/demo-package/runs/**/*.png
+/demo-package/runs/**/app.log

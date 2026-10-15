@@ -66,4 +66,33 @@ class DemoStepsTest {
         assertTrue(go.args.optBoolean(com.tekyerema.money.ussd.UssdNavigatorTool.ARG_FROM_MESSAGE))
         MoneyRequest.clear()
     }
+
+    @Test fun the_demo_said_in_twi_maps_to_the_same_commands() {
+        val g = { t: String -> com.tekyerema.language.TwiCommands.gloss(t) }
+        assertEquals("read my message", g("kenkan me nkra no"))
+        assertEquals("send money to him", g("soma no sika"))
+        assertEquals("tell him I've sent it", g("ka kyerɛ no sɛ masoma"))
+        assertEquals("now call him", g("frɛ no seesei"))
+        assertEquals("read my messages", g("kenkan me nkra"))   // the plural catch-up is unchanged
+    }
+
+    @Test fun the_lab_is_retried_with_backoff_inside_a_time_limit() = kotlinx.coroutines.runBlocking {
+        var clock = 0L
+        val replies = ArrayDeque(listOf(502, 502, 200))
+        var calls = 0
+        val r = com.tekyerema.language.LabRetry.send(budgetMs = 14_000L, now = { clock }) {
+            calls++; clock += 2_000L; com.tekyerema.language.HttpReply(replies.removeFirst(), ByteArray(0), null, null)
+        }
+        assertEquals(200, r.code); assertEquals(3, calls)
+        // A slow 502 (8 s) leaves no time for another 8-s try inside 10 s: given up after one.
+        clock = 0L; calls = 0
+        val slow = com.tekyerema.language.LabRetry.send(budgetMs = 10_000L, now = { clock }) {
+            calls++; clock += 8_000L; com.tekyerema.language.HttpReply(502, ByteArray(0), null, null)
+        }
+        assertEquals(502, slow.code); assertEquals(1, calls)
+        // A refusal (4xx) is never retried.
+        calls = 0
+        com.tekyerema.language.LabRetry.send(budgetMs = 14_000L, now = { 0L }) { calls++; com.tekyerema.language.HttpReply(403, ByteArray(0), null, null) }
+        assertEquals(1, calls)
+    }
 }

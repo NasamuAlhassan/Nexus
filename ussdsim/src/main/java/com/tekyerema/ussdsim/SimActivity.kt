@@ -24,14 +24,23 @@ class SimActivity : Activity() {
         const val EXTRA_CODE = "code"
         /** The PIN dialog the network PUSHES after its last word (MTN: "You will soon receive payment prompt"): its text. */
         const val EXTRA_PUSH = "push"
+        const val EXTRA_PIN_SHA = "pinSha256"
+        const val EXTRA_NAME = "name"
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     }
 
     private var pushScheduled = false
 
-    private fun scriptFor(intent: Intent?): MtnScript =
-        intent?.getStringExtra(EXTRA_PUSH)?.let { MtnScript("*567#", pushedPin = it) }
-            ?: MtnScript(intent?.getStringExtra(EXTRA_CODE) ?: "")
+    /** The rehearsal's fake account name and the test PIN's SHA-256, from the dialling app; kept for the pushed PIN dialog. */
+    private var pinSha: String? = null
+    private var holder: String? = null
+    private fun scriptFor(intent: Intent?): MtnScript {
+        intent?.getStringExtra(EXTRA_PIN_SHA)?.takeIf { it.isNotBlank() }?.let { pinSha = it }
+        intent?.getStringExtra(EXTRA_NAME)?.takeIf { it.isNotBlank() }?.let { holder = it }
+        val name = holder ?: "PRINCE NASAMU ALHASSAN"
+        return intent?.getStringExtra(EXTRA_PUSH)?.let { MtnScript("*567#", registeredName = name, pushedPin = it, pinSha256 = pinSha) }
+            ?: MtnScript(intent?.getStringExtra(EXTRA_CODE) ?: "", registeredName = name, pinSha256 = pinSha)
+    }
 
     private lateinit var script: MtnScript
     private lateinit var message: TextView
