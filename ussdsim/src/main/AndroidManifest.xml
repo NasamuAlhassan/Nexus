@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- A test harness for the emulator: no permissions, no network, no launcher entry. Tɛkyerɛma (debug) starts the
-         dialog by explicit component when its `money.ussd.simulator` switch is on; the dialog looks to the accessibility
-         service exactly like the phone's MMI dialog (text, one entry box — masked on PIN screens — Send / Cancel / OK). -->
+    <!-- A test harness for the emulator (never shipped). Tɛkyerɛma (debug) starts the dialog by explicit component when its
+         `money.ussd.simulator` switch is on; the dialog looks to the accessibility service exactly like the phone's MMI dialog
+         (text, one entry box — masked on PIN screens — Send / Cancel / OK).
+         Twin-emulator rehearsal: INTERNET to settle a transfer with the mock MTN on the laptop (http://10.0.2.2 — the
+         emulator's own address for the host, hence cleartext), SEND_SMS for the other phone's SmsSendActivity. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
     <application
         android:allowBackup="false"
         android:label="USSD simulator"
+        android:usesCleartextTraffic="true"
         android:theme="@android:style/Theme.Material.Light.Dialog">
         <activity
             android:name=".SimActivity"
@@ -14,5 +19,11 @@
             android:taskAffinity=""
             android:label="USSD simulator"
             android:theme="@android:style/Theme.Material.Light.Dialog" />
+        <activity
+            android:name=".SmsSendActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
     </application>
 </manifest>

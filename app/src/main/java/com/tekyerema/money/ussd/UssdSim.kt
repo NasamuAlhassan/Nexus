@@ -44,6 +44,10 @@ object UssdSim {
             .putExtra("pinSha256", AppConfig.string("money.ussd.simPinSha256", ""))
             .putExtra("name", AppConfig.string("money.ussd.simName", ""))
             .putExtra("balance", AppConfig.string("money.ussd.simBalance", ""))
+            // Twin-emulator rehearsal: the mock MTN on the laptop settles a finished transfer (both phones get the network's
+            // SMS); this SIM's own number names the payer. Empty = the simulator keeps its local receipt.
+            .putExtra("mocknet", AppConfig.string("money.ussd.mocknet", ""))
+            .putExtra("msisdn", AppConfig.string("money.ussd.simMsisdn", ""))
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
     }
 

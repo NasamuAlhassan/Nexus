@@ -33,6 +33,12 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
         code.replace(" ", "") == "*567#" -> "pulse"
         else -> "unknown"
     }
+    /** A transfer the script has just completed (the PIN accepted, the funds there): what the network must settle — the
+     *  twin-emulator rehearsal sends it to the mock MTN on the laptop (scripts/mocknet), which moves the money between the
+     *  fake wallets and texts both phones. Null until a transfer completes. */
+    data class Settlement(val to: String, val amount: String, val reference: String, val network: String?)
+    var settlement: Settlement? = null; private set
+
     private var number = ""
     private var amount = ""
     private var reference = ""
@@ -127,6 +133,7 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
                 else if (amount.toBigDecimal() + BigDecimal(OTHER_NET_FEE) > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                 else end("Payment made for GHS ${money(amount)} to $number ($otherNet). Fee charged: GHS $OTHER_NET_FEE. " +
                     "Current Balance: GHS ${left((amount.toBigDecimal() + BigDecimal(OTHER_NET_FEE)).toPlainString())}. Reference: $reference.")
+                    .also { settlement = Settlement(number, amount, reference, otherNet) }
             "number" -> state = if (t.length in 9..13 && t.all { it.isDigit() }) { number = t; "confirm" } else end("Invalid number.")
             "confirm" -> state = if (t == number) "amount" else end("The numbers do not match.")
             "amount" -> state = when (val v = t.toBigDecimalOrNull()) {
@@ -140,6 +147,7 @@ class MtnScript(code: String, private val registeredName: String = "PRINCE NASAM
                 else if (amount.toBigDecimal() > balance.toBigDecimal()) end("Not enough funds to perform this transaction.")
                 else end("Payment made for GHS ${money(amount)} to $registeredName $number. Current Balance: GHS ${left(amount)}. " +
                     "Available Balance: GHS ${left(amount)}. Reference: $reference. Transaction ID: $txnId. Fee charged: GHS 0.00 TAX charged: GHS 0.00.")
+                    .also { settlement = Settlement(number, amount, reference, "MTN") }
             "wallet" -> state = when (t) { "1" -> "walletpin"; else -> end(INCORRECT) }
             "walletpin" -> state = if (pinOk(t)) end("Current Balance: GHS $balance Available Balance: GHS $balance") else wrongPin()
             // ---- Airtime (A20e: self to the PIN at once; others and other networks end with the promise, the PIN pushed)

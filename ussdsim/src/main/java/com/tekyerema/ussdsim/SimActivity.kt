@@ -28,6 +28,11 @@ class SimActivity : Activity() {
         const val EXTRA_NAME = "name"
         /** The wallet balance the script starts with (a rehearsal's "failed transfer": too little for the amount). */
         const val EXTRA_BALANCE = "balance"
+        /** The twin-emulator rehearsal's mock MTN on the laptop (scripts/mocknet/mtn_server.py), e.g. http://10.0.2.2:8787 —
+         *  a completed transfer is settled there (wallets moved, both phones texted). Blank = the script's own receipt. */
+        const val EXTRA_NET = "mocknet"
+        /** This phone's own MoMo number in the mock network (the payer). */
+        const val EXTRA_MSISDN = "msisdn"
         private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     }
 
@@ -37,7 +42,16 @@ class SimActivity : Activity() {
     private var pinSha: String? = null
     private var holder: String? = null
     private var balance: String? = null
+    private var net: String? = null
+    private var msisdn: String? = null
+    /** The network's own answer to a settled transfer, shown instead of the script's receipt. */
+    private var networkText: String? = null
+    /** Waiting for the mock MTN: the dialog keeps an (idle) entry box, so the app reading it waits for the real answer. */
+    private var settling = false
     private fun scriptFor(intent: Intent?): MtnScript {
+        intent?.getStringExtra(EXTRA_NET)?.let { n -> net = n.trim().trimEnd('/').takeIf { it.startsWith("http") } }
+        intent?.getStringExtra(EXTRA_MSISDN)?.let { m -> msisdn = m.trim().ifBlank { null } }
+        networkText = null
         intent?.getStringExtra(EXTRA_PIN_SHA)?.takeIf { it.isNotBlank() }?.let { pinSha = it }
         intent?.getStringExtra(EXTRA_NAME)?.takeIf { it.isNotBlank() }?.let { holder = it }
         // (present but blank = back to the default: the app always sends it; the activity's own push intent doesn't)
@@ -89,11 +103,40 @@ class SimActivity : Activity() {
         if (script.shown().final) { finish(); return }
         script.enter(entry.text.toString())
         render()
+        val done = script.settlement
+        val base = net
+        if (done != null && base != null) { settling = true; render(); settle(base, done) }
+    }
+
+    /** The mock MTN settles the transfer (wallets, texts to both phones) and its receipt replaces the script's. */
+    private fun settle(base: String, s: MtnScript.Settlement) {
+        val from = msisdn ?: ""
+        Thread {
+            val answer = try {
+                val c = java.net.URL("$base/momo/transfer").openConnection() as java.net.HttpURLConnection
+                c.connectTimeout = 4000; c.readTimeout = 8000; c.requestMethod = "POST"; c.doOutput = true
+                c.setRequestProperty("Content-Type", "application/json")
+                val body = org.json.JSONObject().put("from", from).put("to", s.to).put("amount", s.amount)
+                    .put("reference", s.reference).put("network", s.network ?: "")
+                c.outputStream.use { it.write(body.toString().toByteArray()) }
+                val text = (if (c.responseCode in 200..299) c.inputStream else c.errorStream).bufferedReader().use { it.readText() }
+                c.disconnect()
+                org.json.JSONObject(text).optString("text").ifBlank { null }
+            } catch (_: Throwable) { null }   // the laptop isn't there: the script's own receipt stands
+            runOnUiThread { settling = false; networkText = answer; render() }
+        }.start()
     }
 
     private fun render() {
         val s = script.shown()
-        message.text = s.text
+        if (settling) {
+            message.text = "Processing your request. Please wait."
+            entry.visibility = View.VISIBLE; entry.isEnabled = false; entry.setText("")
+            send.isEnabled = false; cancel.visibility = View.GONE
+            return
+        }
+        entry.isEnabled = true; send.isEnabled = true
+        message.text = if (s.final) networkText ?: s.text else s.text
         entry.visibility = if (s.input) View.VISIBLE else View.GONE
         entry.inputType = if (s.masked) InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD
             else InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
