@@ -281,8 +281,9 @@ class LanguageLayerTest {
         AppConfig.loadFrom(shippedConfig())
         val clients = AppConfig.obj("providers.speech.clients")
         // Our own Spaces first (free), then Khaya, then Google — each only built with its own local.properties entry.
-        assertEquals(listOf("space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.twiToEn", emptyList()))
-        assertEquals(listOf("space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.enToTwi", emptyList()))
+        // 15 Oct 2026: the Khaya web platform first (~0.6 s; the Space took 3–8 s), then our Spaces, the old Khaya, Google.
+        assertEquals(listOf("khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.twiToEn", emptyList()))
+        assertEquals(listOf("khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.enToTwi", emptyList()))
         val nllb = FakeTransport { json(200, """{"translation":"Send ten cedis to Ama"}""") }
         val n = LanguageLayer.build(clients, mapOf("SPEECH_NLLB_URL" to "https://x-tekyerema-translate.hf.space/translate",
             "SPEECH_NLLB_TOKEN" to "n-key"), nllb, { FakeSink() })
@@ -308,6 +309,13 @@ class LanguageLayerTest {
         val kb = JSONObject(bodyText(khaya.requests.single()))
         assertEquals("tw-en", kb.getString("lang")); assertEquals("Soma sidi du ma Ama", kb.getString("in"))
         assertEquals("k-key", khaya.requests.single().header("Ocp-Apim-Subscription-Key"))
+        // The Khaya web platform: {"in", "lang":"eng-twi"} → a bare JSON string, a Bearer key.
+        val web = FakeTransport { json(200, "\"Wowɔ nkrasɛm bi a efi Kofi Demo hɔ.\"") }
+        val w = LanguageLayer.build(clients, mapOf("SPEECH_KHAYA_WEB_KEY" to "w-key"), web, { FakeSink() })
+        assertEquals("Wowɔ nkrasɛm bi a efi Kofi Demo hɔ.", w.mt.getValue("khaya_web_mt").translate("You have a message from Kofi Demo.", Lang.GH_EN, Lang.TWI))
+        val wb = JSONObject(bodyText(web.requests.single()))
+        assertEquals("eng-twi", wb.getString("lang")); assertEquals("You have a message from Kofi Demo.", wb.getString("in"))
+        assertEquals("Bearer w-key", web.requests.single().header("Authorization"))
         // Both keys: Google is asked first.
         val both = LanguageLayer.build(clients, mapOf("SPEECH_GOOGLE_TRANSLATE_KEY" to "g", "SPEECH_KHAYA_KEY" to "k"), google, { FakeSink() })
         assertEquals("khaya_mt", LanguageLayer.mtIds(Lang.TWI, Lang.GH_EN).first { it in both.mt })

@@ -168,6 +168,26 @@ object EntityTags {
 
     private fun count(s: String, tag: String): Int = s.windowed(tag.length).count { it == tag }
 
+    /** Quotation marks right round a tag (“[P1]”) — they confused the Khaya translator, which then dropped a bracket. */
+    private val QUOTED_TAG = Regex("[“\"‘']\\s*(\\[[A-Z]\\d+\\])\\s*[”\"’']")
+
+    /** [text] for a translator: a tag's surrounding quotation marks taken off (its value is spoken the same either way). */
+    fun forTranslator(text: String): String = text.replace(QUOTED_TAG, "$1")
+
+    /**
+     * A translator's small slips with a known tag mended — "“P1]", "[P1", a bare "P1" — when the tag itself is missing
+     * (Khaya web, 15 Oct 2026: “[P1]” came back as “P1]). Only tags of [entities]; anything else is left as it is.
+     */
+    fun mend(out: String, entities: List<Entity>): String {
+        var s = out
+        for (e in entities) {
+            if (count(s, e.tag) > 0) continue
+            val core = Regex.escape(e.tag.removePrefix("[").removeSuffix("]"))
+            s = s.replace(Regex("(?<![\\p{L}\\p{N}])\\[?$core\\]?(?![\\p{L}\\p{N}])"), e.tag)
+        }
+        return s
+    }
+
     /** [text] with every tag replaced by [render] of its entity (default: its value). Unknown tags are left as they are. */
     fun restore(text: String, entities: List<Entity>, render: (Entity) -> String = { it.value }): String {
         val byTag = entities.associateBy { it.tag }

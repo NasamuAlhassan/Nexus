@@ -237,6 +237,47 @@
           },
           "cacheEntries": 256
         },
+        "khaya_web_mt": {
+          "_note": "Khaya web platform (the owner's new key, 15 Oct 2026) — translation. POST {in, lang:'eng-twi'|'twi-eng'} → a bare JSON string, ~0.6 s (the Space took 3–8 s). Key in local.properties as SPEECH_KHAYA_WEB_KEY=… (never committed). A per-minute rate limit applies (429 RATE_LIMIT_EXCEEDED after ~12 quick calls).",
+          "kind": "mt",
+          "enabled": true,
+          "quotaGroup": "khaya_web",
+          "endpoint": "https://khaya-web-backend.mangoisland-9f3b87df.swedencentral.azurecontainerapps.io/translate/v1/translate",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_KHAYA_WEB_KEY}"},
+          "languages": {"gh_en": "eng", "twi": "twi"},
+          "request": {"body": "json", "textField": "in", "language": "body", "languageField": "lang", "pairFormat": "{from}-{to}"},
+          "response": {"kind": "json", "path": "translation|text|out"},
+          "limits": {"perMinute": 10},
+          "timeouts": {"connectMs": 5000, "callMs": 8000},
+          "cacheEntries": 256
+        },
+        "khaya_web_asr": {
+          "_note": "Khaya web platform — Twi speech recognition. POST raw audio/wav to /asr/v1/transcribe?language=twi → {text, warnings}, ~1.7 s. NOT routed by default: the hackathon asks for the UG HCI Lab for Ghanaian-language ASR/TTS — list it under asr.online.twi only with the owner's decision.",
+          "kind": "asr",
+          "enabled": true,
+          "quotaGroup": "khaya_web",
+          "endpoint": "https://khaya-web-backend.mangoisland-9f3b87df.swedencentral.azurecontainerapps.io/asr/v1/transcribe",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_KHAYA_WEB_KEY}"},
+          "languages": {"twi": "twi"},
+          "request": {"body": "raw", "audioMime": "audio/wav", "language": "query", "languageField": "language"},
+          "response": {"kind": "json", "path": "text"},
+          "limits": {"perMinute": 10},
+          "timeouts": {"connectMs": 5000, "callMs": 15000}
+        },
+        "khaya_web_tts": {
+          "_note": "Khaya web platform — Twi voice. POST {text, language:'twi'} to /tts/v1/synthesize → audio/wav, ~1.3 s. NOT routed by default (see khaya_web_asr).",
+          "kind": "tts",
+          "enabled": true,
+          "quotaGroup": "khaya_web",
+          "endpoint": "https://khaya-web-backend.mangoisland-9f3b87df.swedencentral.azurecontainerapps.io/tts/v1/synthesize",
+          "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_KHAYA_WEB_KEY}"},
+          "languages": {"twi": "twi"},
+          "request": {"body": "json", "textField": "text", "language": "body", "languageField": "language", "maxChars": 400, "maxParts": 3},
+          "response": {"kind": "audio"},
+          "limits": {"perMinute": 10},
+          "timeouts": {"connectMs": 5000, "callMs": 12000},
+          "cacheEntries": 64
+        },
         "openai_asr": {
           "_note": "Any OpenAI-compatible /audio/transcriptions server, e.g. a hosted Ghanaian-English Whisper tune. Ghanaian English ONLY (Whisper has no Twi token) — list it under asr.online.gh_en, never twi or auto. Reuses the existing local.properties slots ASR_ONLINE_URL (…/v1), ASR_ONLINE_KEY, ASR_ONLINE_MODEL.",
           "kind": "asr",
@@ -275,8 +316,8 @@
       },
       "mt": {
         "_note": "Translator ids per direction, tried in order (a client without its key isn't built and is skipped). enToTwi localizes English replies for a Twi speaker (ReplyLocalizer: never text with numbers/money, names must survive, else the original is spoken). twiToEn puts a Twi request into English for the cloud planner, which gets BOTH (VoiceEngine.goalInEnglish → RoutingBrain.cloudGoalFor).",
-        "enToTwi": ["space_mt", "nllb_mt", "khaya_mt", "google_mt"],
-        "twiToEn": ["space_mt", "nllb_mt", "khaya_mt", "google_mt"],
+        "enToTwi": ["khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"],
+        "twiToEn": ["khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"],
         "localizeReplies": true,
         "maxChars": 400
       }

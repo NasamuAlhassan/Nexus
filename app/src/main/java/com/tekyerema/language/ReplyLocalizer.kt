@@ -44,15 +44,19 @@ class ReplyLocalizer(
         val tagged = EntityTags.protectEnglish(src, protectedTerms(src))
         if (hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N|Q)\\d+\\]"), " "))) return null
         val t0 = System.currentTimeMillis()
-        val out = try { kotlinx.coroutines.withTimeoutOrNull(wait) { translator.translate(tagged.text, Lang.GH_EN, Lang.TWI) } }
+        val out = try { kotlinx.coroutines.withTimeoutOrNull(wait) { translator.translate(EntityTags.forTranslator(tagged.text), Lang.GH_EN, Lang.TWI) } }
             catch (e: CancellationException) { throw e } catch (_: Exception) { null }
             ?.trim()?.takeIf { it.isNotEmpty() }
+            ?.let { EntityTags.mend(it, tagged.entities) }
         if (out == null) {
             if (System.currentTimeMillis() - t0 >= wait) Log.i("Tekyerema", "[MT] reply translation took longer than $wait ms — speaking the English")
             return null
         }
         if (!tagged.isEmpty && !EntityTags.intact(tagged.text, out, tagged.entities)) {
-            Log.w("Tekyerema", "[MT] the translation lost a name/amount tag — speaking the original"); return null
+            Log.w("Tekyerema", "[MT] the translation lost a name/amount tag — speaking the original")
+            // DEBUG builds: what went in and what came back, to see which tag a translator mangles (never in a release build)
+            if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[MT-TAGS] in='${tagged.text}' out='$out'")
+            return null
         }
         if (out.length > tagged.text.length * 3 + 40) { Log.w("Tekyerema", "[MT] translation implausibly long — speaking the original"); return null }
         return EntityTags.restore(out, tagged.entities, EntityTags::inTwi)

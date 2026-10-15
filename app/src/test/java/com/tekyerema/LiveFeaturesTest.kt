@@ -155,6 +155,20 @@ class LiveFeaturesTest {
         assertEquals("set a timer for 10 minutes", g("hyɛ timer simma 10"))
     }
 
+    @Test fun a_translators_slip_with_a_tag_is_mended_and_quotes_round_tags_are_taken_off() {
+        val t = com.tekyerema.language.EntityTags
+        val ents = listOf(com.tekyerema.language.EntityTags.Entity("[P2]", com.tekyerema.language.EntityTags.Kind.PERSON, "transport"),
+            com.tekyerema.language.EntityTags.Entity("[P1]", com.tekyerema.language.EntityTags.Kind.PERSON, "school fees"))
+        // Khaya web, 15 Oct 2026, word for word: the "[" of the second tag went missing after a curly quote
+        val out = "Dɛn na ɛsɛ sɛ nea wɔreka ho asɛm no ka? Sɛ nhwɛso no, ka sɛ “[P2]” anaa “P1]."
+        val mended = t.mend(out, ents)
+        assertTrue(mended, mended.contains("“[P1]."))
+        assertTrue(t.intact("say “[P2]” or “[P1]”.", mended, ents))
+        assertEquals("say [P2] or [P1].", t.forTranslator("say “[P2]” or “[P1]”."))
+        // a tag that is there is left alone; nothing else is touched
+        assertEquals("ka [P2] ne A12", t.mend("ka [P2] ne A12", listOf(ents[0])))
+    }
+
     // ---------------------------------------------------------------- music
     @Test fun the_phones_songs_are_matched_before_any_app() {
         val songs = listOf(

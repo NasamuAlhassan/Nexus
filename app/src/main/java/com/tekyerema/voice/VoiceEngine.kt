@@ -97,7 +97,8 @@ object VoiceEngine {
             catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
         if (out == null && mt != null && System.currentTimeMillis() - t0 >= waitMs)
             android.util.Log.i("Tekyerema", "[MT] the request's translation took longer than $waitMs ms — the planner gets the Twi")
-        val english = out?.takeIf { tagged.isEmpty || com.tekyerema.language.EntityTags.intact(tagged.text, it, tagged.entities) }
+        val english = out?.let { com.tekyerema.language.EntityTags.mend(it, tagged.entities) }
+            ?.takeIf { tagged.isEmpty || com.tekyerema.language.EntityTags.intact(tagged.text, it, tagged.entities) }
         if (out != null && english == null) android.util.Log.w("Tekyerema", "[MT] the translation lost a name/amount tag — not used")
         com.tekyerema.language.TwiTagSession.set(com.tekyerema.language.TwiTagSession.Entry(goal, tagged.text, english, tagged.entities))
         return english
@@ -522,7 +523,13 @@ object VoiceEngine {
             val inTwi = lang == Lang.TWI && twi != null && TwiVoiceStatus.shared.state == TwiVoiceStatus.State.OK &&
                 (!urgent || com.tekyerema.core.config.AppConfig.bool("phone.announceCallerTwiLive", false))
             val text = if (inTwi) twi!! else english
-            val ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), if (inTwi) Lang.TWI else Lang.GH_EN) } catch (_: Throwable) { false }
+            var ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), if (inTwi) Lang.TWI else Lang.GH_EN) } catch (_: Throwable) { false }
+            // A line held up elsewhere (a Twi voice retrying for seconds) can cut the caller's name off mid-ring: while the
+            // phone still rings, say it once more (rehearsal twi 17, 15 Oct 2026).
+            if (!ok && urgent && com.tekyerema.phone.IncomingCall.isRinging) {
+                kotlinx.coroutines.delay(300)
+                ok = try { englishVoice.speak(Verbalize.apply(english), Lang.GH_EN) } catch (_: Throwable) { false }
+            }
             android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok lang=$lang twiVoice=$inTwi (${text.length} chars)")   // no words in the log
         }
     }
