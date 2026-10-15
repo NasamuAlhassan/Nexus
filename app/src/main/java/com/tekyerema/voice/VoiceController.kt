@@ -969,8 +969,10 @@ class VoiceController(
                     }
                 }
             }
-            // Two unclear answers: the safe default is to do nothing, and to say so.
+            // Two unclear answers: the safe default is to do nothing, and to say so. A plain "yes" in the next few seconds asks
+            // the same request again (agent/NextStep's late yes) — it never approves this one.
             stopAlreadySaid = true
+            com.tekyerema.agent.NextStep.noteUnanswered(agent.state.value.goal)
             agent.confirmFor(seq, false)
             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
             try {

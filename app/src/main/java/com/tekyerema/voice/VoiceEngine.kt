@@ -496,11 +496,13 @@ object VoiceEngine {
 
     /** K-10: speak a line outside a voice turn (onboarding steps) — only when replies are read aloud and no screen
      *  reader is already reading the page (TalkBack users hear the screen itself). */
-    fun announce(text: String) {
+    fun announce(text: String, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
         scope.launch {
             val ok = try { englishVoice.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) { false }
             android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok (${text.length} chars)")   // no words in the log
+            // The line ended with a question (agent/NextStep's offer): the microphone opens once for the answer.
+            if (ok && listenAfter) try { controller.followUp() } catch (_: Throwable) {}
         }
     }
 
@@ -511,7 +513,7 @@ object VoiceEngine {
      * balance in English (A20e, 9 October 2026). Whatever is still being said is stopped first: once the network has
      * answered, the PIN line is stale (that day the Twi PIN line played AFTER the balance).
      */
-    fun announceAnswer(english: String, twi: String?, urgent: Boolean = false) {
+    fun announceAnswer(english: String, twi: String?, urgent: Boolean = false, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || english.isBlank()) return
         hush()
         scope.launch {
@@ -531,6 +533,8 @@ object VoiceEngine {
                 ok = try { englishVoice.speak(Verbalize.apply(english), Lang.GH_EN) } catch (_: Throwable) { false }
             }
             android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok lang=$lang twiVoice=$inTwi (${text.length} chars)")   // no words in the log
+            // An offer at the end ("Shall I text Kofi Demo that it's sent?" — agent/NextStep): listen once for the answer.
+            if (ok && listenAfter) try { controller.followUp() } catch (_: Throwable) {}
         }
     }
 

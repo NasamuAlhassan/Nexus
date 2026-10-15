@@ -224,9 +224,9 @@ object TriggerGate {
     fun prefs(ctx: Context): SharedPreferences = ctx.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /** Speak a line outside a turn and (optionally) leave it in the shade for someone who missed it. */
-    fun speak(ctx: Context, line: String, post: Boolean = true) {
+    fun speak(ctx: Context, line: String, post: Boolean = true, listenAfter: Boolean = false) {
         if (line.isBlank()) return
-        try { VoiceEngine.announce(line) } catch (_: Throwable) {}
+        try { VoiceEngine.announce(line, listenAfter) } catch (_: Throwable) {}
         if (post) try { VoiceSessionService.postResult(ctx.applicationContext, line) } catch (_: Throwable) {}
     }
 }

@@ -47,6 +47,28 @@ class LocalFastRouter(
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
         handOff = null
+        // The answer to an offered next step (agent/NextStep: "Shall I text Kofi Demo that it's sent?"): yes hands its request
+        // to the agent as if the user had said it — read back and confirmed there; no drops it; anything else is handled as
+        // said. Then the late yes: a read-back left unanswered moments ago is asked again (its request runs afresh).
+        NextStep.take()?.let { o ->
+            when (NextStep.shortAnswer(text)) {
+                com.tekyerema.voice.Confirmation.Answer.YES -> {
+                    Log.i(TAG, "[NEXT_STEP] yes (${o.kind}) → the agent")
+                    handOff = text to o.goal
+                    return null
+                }
+                com.tekyerema.voice.Confirmation.Answer.NO ->
+                    return FastOutcome("NEXT_STEP_NO", if (language == Lang.TWI) "Yoo." else "Okay.", systemVoice = true)
+                else -> {}
+            }
+        }
+        NextStep.takeLate()?.let { goal ->
+            if (NextStep.shortAnswer(text) == com.tekyerema.voice.Confirmation.Answer.YES) {
+                Log.i(TAG, "[NEXT_STEP] late yes → the unanswered request again")
+                handOff = text to goal
+                return null
+            }
+        }
         // The answer to "Which app should I play it on?" (live/MusicApps): play there and remember the choice.
         com.tekyerema.live.MusicApps.takePending()?.let { p ->
             com.tekyerema.live.MusicApps.pick(text, p.options)?.let { (pkg, name) ->

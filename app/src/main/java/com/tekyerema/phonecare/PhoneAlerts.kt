@@ -344,7 +344,24 @@ object PhoneAlerts {
         if (com.tekyerema.core.Redact.looksSecret(full)) { Log.w(TAG, "[ALERT] ${a.type} dropped: looked like a code"); return }
         if (hide) inbox.put(AlertInbox.Item(a.type, full, now, announcedPrivately = true, expiresAt = now + inboxTtl(), money = a.money))
         Log.i(TAG, "[ALERT] ${a.type} spoken private=$hide attempt=$attempt")   // never the words
-        TriggerGate.speak(app, line, post = false)
+        // Money from a saved person, said in full: offer a thank-you text (agent/NextStep) and listen once for the answer. A
+        // scam warning ("…check your balance before you believe it"): offer to check the balance now.
+        val offer = when {
+            hide || !com.tekyerema.agent.NextStep.enabled() || a.type != MONEY -> null
+            a.money != null -> thanksOffer(app, a.money, now)
+            else -> com.tekyerema.agent.NextStep.afterScamWarning(now)
+        }
+        offer?.let { com.tekyerema.agent.NextStep.offer(it) }
+        TriggerGate.speak(app, offer?.let { line + " " + it.english } ?: line, post = false, listenAfter = offer != null)
+    }
+
+    /** The thank-you offer for a credit from a payer who is a saved contact (by the name MTN gives), else null. */
+    private fun thanksOffer(app: Context, m: MoneyAlerts.Event.Received, now: Long): com.tekyerema.agent.NextStep.Offer? {
+        val from = m.from?.takeIf { it.isNotBlank() } ?: return null
+        val saved = try { com.tekyerema.android.ContactResolver.resolve(app, from) } catch (_: Throwable) { emptyList() }
+        val name = saved.firstOrNull()?.name ?: return null
+        val cedis = try { com.tekyerema.tools.GhanaMobileMoney.cedisPhrase(m.amount) } catch (_: Throwable) { null }
+        return com.tekyerema.agent.NextStep.afterReceived(name, cedis, now)
     }
 
     private fun inboxTtl() = AppConfig.long("alerts.inboxTtlMs", 60 * 60_000L)

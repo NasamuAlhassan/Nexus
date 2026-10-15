@@ -107,7 +107,18 @@ object AfterPin {
                 Log.i(TAG, if (spoken.settled != null)
                     "[MONEY] outcome ${spoken.settled.tx.state.name.lowercase()} from the network's screen after the PIN"
                     else "[NAV] the network's answer after the PIN is read out (${s.text.length} chars${if (spoken.twi != null) ", in Twi" else ""})")
-                VoiceEngine.announceAnswer(spoken.english, spoken.twi)
+                // A payment's outcome (sent, or not): offer the next step — tell the person (agent/NextStep). Not after a
+                // balance or any other answer.
+                val offer = if (spoken.settled != null && com.tekyerema.agent.NextStep.enabled())
+                    com.tekyerema.money.LastSend.recent()?.let { sent ->
+                        com.tekyerema.agent.NextStep.afterSend(sent.name, spoken.settled.tx.state == TxLedger.State.FAILED || sent.failed,
+                            System.currentTimeMillis())
+                    } else null
+                offer?.let { com.tekyerema.agent.NextStep.offer(it) }
+                VoiceEngine.announceAnswer(
+                    offer?.let { spoken.english + com.tekyerema.voice.SpokenText.BREAK + it.english } ?: spoken.english,
+                    offer?.twi?.let { t -> spoken.twi?.let { "$it $t" } } ?: spoken.twi,
+                    listenAfter = offer != null)
                 // The answer has been taken: the dialog is closed so the user isn't left to find its OK button, and the
                 // secure step (no self-opened microphone, the volume keys as a PIN pad) is over.
                 try { s.cancelId?.let { ctrl.clickElement(it) } } catch (_: Throwable) {}
