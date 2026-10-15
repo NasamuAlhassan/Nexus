@@ -199,7 +199,14 @@ object MoneyFlow {
      * came from the message. A "him" with no such message is the person just talked about (References).
      */
     private fun fromRequest(first: MoneyAsk.Ask, goal: String): Pair<MoneyAsk.Ask, Boolean> {
-        if (first.number != null || (first.name != null && !com.tekyerema.android.ContactResolver.isPronoun(first.name))) return first to false
+        if (first.number != null) return first to false
+        if (first.name != null && !com.tekyerema.android.ContactResolver.isPronoun(first.name)) {
+            // "send money to Kofi" right after Kofi Demo's message asked for money is that request too (rehearsal, 15 Oct 2026:
+            // it asked "How much … to Kofi?" instead). The read-back names Kofi Demo and reads the message's number in full,
+            // so another Kofi is one "no" away. A different full name ("Kofi Sample") is not this request.
+            val r = MoneyRequest.fresh()?.takeIf { sameAsSender(first.name, it) } ?: return first to false
+            return first.copy(number = r.number, name = r.name, amount = first.amount ?: r.amount, forSelf = false) to (r.number != null)
+        }
         MoneyRequest.fresh()?.let { r ->
             return first.copy(number = r.number, name = r.name, amount = first.amount ?: r.amount, forSelf = false) to (r.number != null)
         }
@@ -207,6 +214,28 @@ object MoneyFlow {
         return (if (person != null) first.copy(name = person, forSelf = false) else first) to false
     }
     private val PRONOUN_TO = Regex("(?i)\\b(?:to|for)\\s+(?:him|her|them)\\b|\\bsend\\s+(?:him|her|them)\\b")
+    /** [said] is the request's person: their name (or the sender's) holds it as whole words — "Kofi" in "Kofi Demo" — or a
+     *  one-word name a letter off a word of it ("Kofe": the Twi path doesn't correct names to the contacts first —
+     *  rehearsal twi 09). Four letters or more for the near-miss; the read-back names the person either way. */
+    internal fun sameAsSender(said: String, r: MoneyRequest.Req): Boolean {
+        val s = said.trim()
+        if (s.length < 2) return false
+        val words = Regex("(?i)(?<![\\p{L}])" + Regex.escape(s) + "(?![\\p{L}])")
+        if (words.containsMatchIn(r.name) || words.containsMatchIn(r.sender)) return true
+        if (s.contains(' ') || s.length < 4) return false
+        return (r.name.split(' ') + r.sender.split(' ')).any { w -> w.length >= 4 && oneLetterOff(s.lowercase(), w.lowercase()) }
+    }
+    private fun oneLetterOff(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+        var i = 0; var j = 0; var edits = 0
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) { i++; j++; continue }
+            if (++edits > 1) return false
+            when { a.length > b.length -> i++; a.length < b.length -> j++; else -> { i++; j++ } }
+        }
+        return edits + (a.length - i) + (b.length - j) <= 1
+    }
 
     private fun send(first: MoneyAsk.Ask, history: List<String>, goal: String = ""): AgentDecision? {
         if (walked(history)) return null                               // the walk's own end (MoneyPlan.end) takes it from here

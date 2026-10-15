@@ -84,6 +84,50 @@ class DemoStepsTest {
         MoneyRequest.clear()
     }
 
+    @Test fun the_recognisers_eh_at_the_edges_is_dropped_but_words_inside_stay() {
+        val f = com.tekyerema.voice.EdgeFillers
+        assertEquals("read my message please", f.strip("eh read my message please eh"))
+        assertEquals("send money to him please", f.strip("eh send money to him please"))
+        assertEquals("now call him", f.strip("now call him eh"))
+        assertEquals("kenkan me nkra no", f.strip("eh kenkan me nkra no eh"))
+        assertEquals("call Kofi.", f.strip("Umm, call Kofi."))
+        assertEquals("tell Kofi eh I'm coming", f.strip("tell Kofi eh I'm coming"))
+        assertEquals("call Emma", f.strip("call Emma"))
+        assertEquals("send it to Uber", f.strip("send it to Uber"))
+        assertEquals("eh", f.strip("eh"))
+        // …and what is left still goes the phone's own way
+        assertTrue(com.tekyerema.agent.FastIntentClassifier.classify("read my message please") is com.tekyerema.agent.FastIntent.ReadMessage)
+    }
+
+    @Test fun send_money_to_him_please_is_still_the_message_request() {
+        com.tekyerema.core.config.AppConfig.loadFrom(emptyList())
+        MoneyRequest.note(MoneyRequest.parse("Kofi Demo", "Please send me 5 cedis. My MoMo number is 050 000 2222.")!!)
+        val history = listOf("ask_user(\"${com.tekyerema.money.MoneyFlow.REF_PREFIX}? For example, say “transport” or “school fees”.\") → the user answered: \"transport\"")
+        val go = com.tekyerema.money.MoneyFlow.decide("send money to him please", history) as com.tekyerema.agent.AgentDecision.CallTool
+        assertEquals("0500002222", go.args.getString("number"))
+        MoneyRequest.clear()
+    }
+
+    @Test fun send_money_to_kofi_after_kofi_demos_message_is_that_request_but_another_kofi_is_not() {
+        com.tekyerema.core.config.AppConfig.loadFrom(emptyList())
+        val r = MoneyRequest.parse("Kofi Demo", "Please send me 5 cedis. My MoMo number is 050 000 2222.")!!
+        MoneyRequest.note(r)
+        val history = listOf("ask_user(\"${com.tekyerema.money.MoneyFlow.REF_PREFIX}? For example, say “transport” or “school fees”.\") → the user answered: \"transport\"")
+        val go = com.tekyerema.money.MoneyFlow.decide("send money to Kofi", history) as com.tekyerema.agent.AgentDecision.CallTool
+        assertEquals("0500002222", go.args.getString("number"))
+        assertEquals("Kofi Demo", go.args.getString(com.tekyerema.money.ussd.UssdNavigatorTool.ARG_CONTACT))
+        assertTrue(com.tekyerema.money.MoneyFlow.sameAsSender("kofi", r))
+        assertTrue(!com.tekyerema.money.MoneyFlow.sameAsSender("Kofi Sample", r))
+        assertTrue(!com.tekyerema.money.MoneyFlow.sameAsSender("Kof", r))
+        assertTrue(com.tekyerema.money.MoneyFlow.sameAsSender("Kofe", r))          // the Twi path's misheard name
+        assertTrue(!com.tekyerema.money.MoneyFlow.sameAsSender("Kwame", r))
+        assertTrue(!com.tekyerema.money.MoneyFlow.sameAsSender("Kofe Sample", r))
+        val go2 = com.tekyerema.money.MoneyFlow.decide("send money to Kofe",
+            listOf("ask_user(\"${com.tekyerema.money.MoneyFlow.REF_PREFIX}? For example, say “transport” or “school fees”.\") → the user answered: \"transport\"")) as com.tekyerema.agent.AgentDecision.CallTool
+        assertEquals("Kofi Demo", go2.args.getString(com.tekyerema.money.ussd.UssdNavigatorTool.ARG_CONTACT))
+        MoneyRequest.clear()
+    }
+
     @Test fun the_demo_said_in_twi_maps_to_the_same_commands() {
         val g = { t: String -> com.tekyerema.language.TwiCommands.gloss(t) }
         assertEquals("read my message", g("kenkan me nkra no"))
@@ -91,6 +135,12 @@ class DemoStepsTest {
         assertEquals("tell him I've sent it", g("ka kyerɛ no sɛ masoma"))
         assertEquals("now call him", g("frɛ no seesei"))
         assertEquals("read my messages", g("kenkan me nkra"))   // the plural catch-up is unchanged
+        // the rehearsal's other phrasings (twi 11: "kenkan ne nkra" went to the translator and the cloud instead)
+        assertEquals("read his message", g("kenkan ne nkra"))
+        assertEquals("send money to him", g("fa sika no kɔma no"))
+        assertEquals("now call him", g("frɛ no"))
+        // the recogniser's "eh" at the edges is dropped before the Twi is read (voice/EdgeFillers runs first)
+        assertEquals("read my message", g(com.tekyerema.voice.EdgeFillers.strip("eh kenkan me nkra no eh")))
     }
 
     @Test fun the_lab_is_retried_with_backoff_inside_a_time_limit() = kotlinx.coroutines.runBlocking {
