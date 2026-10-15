@@ -146,6 +146,15 @@ class LiveFeaturesTest {
         assertNull(NavSpeech.match("stop the directions", active = false))
     }
 
+    @Test fun the_new_abilities_said_in_twi() {
+        fun g(t: String) = com.tekyerema.language.TwiCommands.gloss(t)
+        assertEquals("show me directions to Accra Mall", g("kyerɛ me kwan kɔ Accra Mall"))
+        assertEquals("show me directions to the nearest mall", g("fa me kɔ mall a ɛbɛn paa"))
+        assertEquals("set a timer for 5 minutes", g("hyɛ timer simma anum"))
+        assertEquals("set a timer for 1 minute", g("hyɛ timer simma baako"))
+        assertEquals("set a timer for 10 minutes", g("hyɛ timer simma 10"))
+    }
+
     // ---------------------------------------------------------------- music
     @Test fun the_phones_songs_are_matched_before_any_app() {
         val songs = listOf(

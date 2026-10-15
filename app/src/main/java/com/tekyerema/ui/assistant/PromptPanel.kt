@@ -107,6 +107,7 @@ internal fun PromptPanel(
     }
     LaunchedEffect(Unit) { if (arrival.value < 1f) { delay(120); arrival.animateTo(1f, tween(760)) } }
 
+    val tilt = com.tekyerema.ui.glass.rememberTiltLight(tier == GlassTier.FULL && !calm)
     val title = if (twi) PromptSurface.header(prompt.kind, true).lowercase().replaceFirstChar { it.uppercase() }
         else SurfaceModel.titleOfWaiting(prompt.kind, prompt.text)
     val radius = 34.dp
@@ -131,7 +132,7 @@ internal fun PromptPanel(
                 // (the glass draws its own soft shadow, outside its shape only — ui/glass/LiquidGlass)
                 .glassBody(radius, glass, mood = { currentMood },
                     light = { if (currentMood == LightMood.LISTENING) 0.25f + 0.75f * micLevel.floatValue else 0.22f },
-                    sweep = { 0f }, glowShift = { 0f }, tier = tier, arrival = { arrival.value })
+                    sweep = { 0f }, glowShift = { 0f }, tier = tier, arrival = { arrival.value }, tilt = { tilt.value })
                 .clip(ContinuousShape(radius))
                 .semantics { paneTitle = title }
         ) {

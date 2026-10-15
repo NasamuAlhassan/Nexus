@@ -83,6 +83,13 @@ object TwiCommands {
         Regex("^fa\\s+sika\\s+no\\s+(?:kɔ\\s?ma|ma)\\s+(?:no|ɔno)$") to "send money to him",
         Regex("^ka\\s+kyerɛ\\s+(?:no|ɔno)\\s+sɛ\\s+(?:ma|me)?soma(?:\\s+no)?(?:\\s+(?:dedaw|seesei))?$") to "tell him I've sent it",
         Regex("^(?:seesei\\s+)?frɛ\\s+(?:no|ɔno)(?:\\s+seesei)?$") to "now call him")
+    /** The owner's 15 Oct round, said in Twi [owner: verify the Twi]: walking directions ("kyerɛ me kwan kɔ Accra Mall",
+     *  "fa me kɔ mall a ɛbɛn paa" — the nearest mall) and Tɛkyerɛma's own timer ("hyɛ timer simma anum" — 5 minutes). */
+    private val WALK_TO = Regex("^(?:kyerɛ|kyere)\\s+me\\s+(?:ɛ)?kwan(?:\\s+a\\s+ɛkɔ)?\\s+(?:kɔ\\s+)?(.+)$|^fa\\s+me\\s+kɔ\\s+(.+)$")
+    private val NEAREST_TWI = Regex("^(.+?)\\s+a\\s+ɛbɛn(?:\\s+paa)?(?:\\s+no)?$")
+    private val TIMER_TWI = Regex("^(?:hyɛ|to)\\s+(?:timer|bere)\\s+(?:ma\\s+)?(?:simma|sima|minutes?)\\s+(\\S+)$|^(?:simma|sima)\\s+(\\S+)\\s+timer$")
+    private val TWI_NUMBER = mapOf("baako" to 1, "biako" to 1, "mmienu" to 2, "abien" to 2, "mmiɛnsa" to 3, "abiɛsa" to 3, "anan" to 4,
+        "anum" to 5, "nsia" to 6, "nson" to 7, "nwɔtwe" to 8, "nkron" to 9, "du" to 10, "dunum" to 15, "aduonu" to 20, "aduasa" to 30)
     private val MOMO_BALANCE = Regex("^(?:me\\s+(?:momo|mobile money)(?:\\s+mu)?\\s+sika(?:\\s+a\\s+aka)?\\s+(?:yɛ|aka|ka)\\s+sɛn" +
         "|hwɛ\\s+me\\s+(?:momo\\s+)?sika(?:\\s+a\\s+aka|\\s+no)?|mewɔ\\s+sika\\s+sɛn)$")
     private val AIRTIME_BALANCE = Regex("^me\\s+(?:kredit|krɛdit|credit|airtime)(?:\\s+no)?\\s+(?:aka|ka|yɛ)\\s+sɛn$")
@@ -238,6 +245,16 @@ object TwiCommands {
             }
         }
         DEMO_HIM.firstOrNull { (re, _) -> re.matches(low) }?.let { return it.second }
+        WALK_TO.matchEntire(low)?.let { m ->
+            val where = (m.groups[1] ?: m.groups[2])?.let { g -> t.substring(g.range.first, g.range.last + 1) }?.trim() ?: return@let
+            val near = NEAREST_TWI.matchEntire(where.lowercase())?.groupValues?.get(1)
+            return if (near != null) "show me directions to the nearest $near" else "show me directions to $where"
+        }
+        TIMER_TWI.matchEntire(low)?.let { m ->
+            val w = m.groups[1]?.value ?: m.groups[2]?.value ?: return@let
+            val n = w.toIntOrNull() ?: TWI_NUMBER[w] ?: return@let
+            return "set a timer for $n minute" + if (n == 1) "" else "s"
+        }
         SEND_AMOUNT.find(low)?.let { m -> return send(amount(m.g(1), m.g(2)), m.g(3)) }
         SEND_MIXED.find(low)?.let { m -> return send(amount(m.g(1).ifEmpty { m.g(3).ifEmpty { null } }, m.g(2).ifEmpty { m.g(4) }), m.g(5)) }
         SEND_MONEY.find(low)?.let { m ->

@@ -208,7 +208,9 @@ fun Modifier.glassBody(
     sweep: () -> Float,
     @Suppress("UNUSED_PARAMETER") glowShift: () -> Float,
     tier: GlassTier,
-    @Suppress("UNUSED_PARAMETER") arrival: () -> Float = { 1f }
+    @Suppress("UNUSED_PARAMETER") arrival: () -> Float = { 1f },
+    /** The light's angle from the phone's tilt (ui/glass/rememberTiltLight); the default holds it still. */
+    tilt: () -> Float = { DEFAULT_LIGHT_DEGREES }
 ): Modifier = this.liquidGlass(
     // A card over another app is a "large" glass (Apple: more opaque) — words on it never read as text on top of text.
     style = LiquidStyles.of(palette.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
@@ -218,7 +220,7 @@ fun Modifier.glassBody(
     depth = GlassDepth.FLOATING,
     lightDegrees = {
         val m = mood()
-        if (tier == GlassTier.FULL && (m == LightMood.WORKING || m == LightMood.LISTENING)) DEFAULT_LIGHT_DEGREES + sweep() else DEFAULT_LIGHT_DEGREES
+        if (tier == GlassTier.FULL && (m == LightMood.WORKING || m == LightMood.LISTENING)) tilt() + sweep() else tilt()
     },
     glow = {
         val l = light().coerceIn(0f, 1f)

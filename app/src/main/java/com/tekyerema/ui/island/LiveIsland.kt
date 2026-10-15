@@ -33,6 +33,9 @@ import androidx.compose.material.icons.rounded.DirectionsWalk
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.Pause
+import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Place
 import androidx.compose.material.icons.rounded.Straight
 import androidx.compose.material.icons.rounded.Timer
@@ -110,8 +113,9 @@ fun LiveIsland(
 
     val style = LiquidStyles.of(g.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
         // Denser than our pages: over another app's text, words on glass must never read as "text on top of text" (NN/g).
-        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (g.dark) 0.90f else 0.92f))
+        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (open) (if (g.dark) 0.95f else 0.96f) else (if (g.dark) 0.90f else 0.92f)))
     }
+    val tilt = com.tekyerema.ui.glass.rememberTiltLight(tier == GlassTier.FULL && !calm)
     val radius by animateDpAsState(if (open) 30.dp else 23.dp, if (calm) tween(0) else spring(0.82f, 170f), label = "islandRadius")
     val pulse = if (lead.urgent && !calm && tier == GlassTier.FULL) rememberInfiniteTransition(label = "islandPulse")
         .animateFloat(0.10f, 0.26f, infiniteRepeatable(tween(1100), RepeatMode.Reverse), label = "pulse") else null
@@ -129,7 +133,7 @@ fun LiveIsland(
             .widthIn(max = 560.dp)
             // The glass BEFORE animateContentSize: that one clips what follows it to its bounds, and the soft shadow, drawn
             // outside the shape, was cut into a pale rectangle round the corners.
-            .liquidGlass(style, GlassShape.Rounded(radius), GlassDepth.FLOATING,
+            .liquidGlass(style, GlassShape.Rounded(radius), GlassDepth.FLOATING, lightDegrees = { tilt.value },
                 glow = { pulse?.let { glowColor.copy(alpha = it.value) } ?: if (lead.urgent) glowColor.copy(alpha = 0.18f) else Color.Transparent })
             .animateContentSize(if (calm) tween(0) else spring(0.82f, 170f))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { open = !open }
@@ -170,7 +174,7 @@ private fun Compact(a: LiveActivity, others: Int, text: Color, accent: Color) {
 
 @Composable
 private fun Expanded(a: LiveActivity, text: Color, secondary: Color, accent: Color, tier: GlassTier, act: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 16.dp)) {
+    Column(Modifier.fillMaxWidth().widthIn(min = 300.dp).padding(start = 18.dp, end = 18.dp, top = 16.dp, bottom = 16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Glyph(a, 34.dp, text, accent)
             Spacer(Modifier.width(14.dp))
@@ -195,13 +199,41 @@ private fun Expanded(a: LiveActivity, text: Color, secondary: Color, accent: Col
         }
         if (a.actions.isNotEmpty()) {
             Spacer(Modifier.height(14.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (a.kind == LiveKind.MUSIC) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically) {
+                // Music: the transport as icons (a word like "Pause" wrapped in a narrow pill), each a labelled button.
+                a.actions.forEach { act0 -> TransportButton(act0, text, accent) { act(act0.id) } }
+            } else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 a.actions.forEach { act0 ->
                     GlassPill(act0.label, onClick = { act(act0.id) }, modifier = Modifier.weight(1f),
                         tone = if (act0.primary) PillTone.PRIMARY else PillTone.QUIET, tier = tier, compact = true)
                 }
             }
         }
+    }
+}
+
+/** A music control: a round glass button with its icon; TalkBack hears its label ("Pause", "Next"). */
+@Composable
+private fun TransportButton(a: com.tekyerema.live.LiveAction, tint: Color, accent: Color, onClick: () -> Unit) {
+    val g = LocalGlass.current
+    val base = LiquidStyles.of(g.dark, com.tekyerema.ui.theme.glassMode())
+    val icon = when (a.id) {
+        "prev" -> Icons.Rounded.SkipPrevious
+        "next" -> Icons.Rounded.SkipNext
+        else -> if (a.label == "Pause") Icons.Rounded.Pause else Icons.Rounded.PlayArrow
+    }
+    val size = if (a.primary) 60.dp else 52.dp
+    Box(
+        Modifier.size(size)
+            .liquidGlass(base.copy(grain = 0f, glint = base.glint * 0.6f), GlassShape.Capsule, GlassDepth.FLAT,
+                tint = if (base.border != null) null else if (a.primary) accent.copy(alpha = 0.90f)
+                    else if (g.dark) Color.White.copy(alpha = 0.11f) else Color(0xFF0E1B1C).copy(alpha = 0.065f))
+            .clickable(role = Role.Button, onClickLabel = a.label, onClick = onClick)
+            .semantics { contentDescription = a.label },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(icon, contentDescription = null, tint = if (a.primary) Color(0xFF032420) else tint, modifier = Modifier.size(if (a.primary) 32.dp else 28.dp))
     }
 }
 
