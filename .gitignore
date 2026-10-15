@@ -86,3 +86,8 @@ local.properties.*
 /scripts/.local/
 /demo-package/runs/**/*.png
 /demo-package/runs/**/app.log
+/demo-package/runs/**/loop.log
+/demo-package/runs/**/scrcpy.log
+/demo-package/runs/**/live.log
+/demo-package/runs/**/rec_list.txt
+/demo-package/runs/**/rec_*.mp4
