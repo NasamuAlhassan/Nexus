@@ -223,6 +223,11 @@ object SetTimerTool : Tool {
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val seconds = args.intOrNull("seconds") ?: return ToolResult(false, "No duration provided.")
         if (seconds <= 0) return ToolResult(false, "Duration must be positive.")
+        // Our own timer (owner, 15 Oct 2026): no Clock app, the countdown in the island at the top (live/LiveTimer).
+        if (com.tekyerema.core.config.AppConfig.bool("live.timer.own", true)) {
+            val said = com.tekyerema.live.LiveTimer.start(ctx.appContext, seconds.toLong(), args.str("message"))
+            return ToolResult(true, said, channel = "native", data = JSONObject().put("ownTimer", true))
+        }
         val intent = Intent(AlarmClock.ACTION_SET_TIMER)
             .putExtra(AlarmClock.EXTRA_LENGTH, seconds)
             .putExtra(AlarmClock.EXTRA_SKIP_UI, true)
@@ -246,6 +251,8 @@ object SetTimerTool : Tool {
 
     override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
         if (!result.success) return VerificationResult(false, "the timer wasn't started")
+        if (result.data?.optBoolean("ownTimer") == true)
+            return VerificationResult(com.tekyerema.live.LiveTimer.running().isNotEmpty(), "Tɛkyerɛma's own timer is counting down")
         val listener = com.tekyerema.notifications.TekyeremaNotificationListener.instance
             ?: return VerificationResult(true, "the Clock app accepted the timer (it runs without a screen)")
         repeat(6) {

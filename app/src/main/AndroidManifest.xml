@@ -38,6 +38,11 @@
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Tɛkyerɛma's own timer (live/LiveTimer): an exact backstop alarm on Android 12+; Android 11 needs nothing. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- "play music": the songs already on the phone first (live/LocalMusic), then a music app. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- B-14: haptic cues (install-time; without it every vibration silently failed). -->
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- A-04: fingerprint-sensor gestures for the accessibility service (install-time). -->
@@ -293,6 +298,10 @@
                 android:resource="@xml/export_paths" />
         </provider>
 
+        <!-- Tɛkyerɛma's own timer: the backstop alarm (live/LiveTimer). Not exported. -->
+        <receiver
+            android:name=".live.TimerReceiver"
+            android:exported="false" />
         <!-- A-13 schedules (owner-approved unattended triggers): fires the user's own schedules and re-arms them after
              a reboot, an update or a clock change. Not exported — system broadcasts still arrive, no other app can fire one. -->
         <receiver

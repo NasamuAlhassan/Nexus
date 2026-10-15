@@ -41,6 +41,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -523,8 +524,7 @@ private fun GlassSurface(
                                 scaleX = 1f + swell; scaleY = 1f + swell
                                 transformOrigin = TransformOrigin(0.5f, 0f)
                             }
-                            .then(if (glass.shadow) Modifier.shadow(10.dp, ContinuousShape(radius), clip = false,
-                                ambientColor = Color(0x33103B37), spotColor = Color(0x40103B37)) else Modifier)
+                            // (the glass draws its own soft shadow, outside its shape only — ui/glass/LiquidGlass)
                             .glassBody(radius, glass, mood = { currentMood }, light = lightLevel, sweep = { sweep?.value ?: 0f },
                                 glowShift = { visualPx() * 0.25f }, tier = tier, arrival = { arrival.value })
                             .clip(ContinuousShape(radius))
@@ -730,9 +730,32 @@ internal fun Waiting(
     val cue = if (resolving) VoiceReflect.Cue.None else VoiceReflect.cue(w.kind, voice, choices.isNotEmpty(), twi)
     val stopWords = if (twi) "Gyae adwuma no" else "Stop the task"
     Column(Modifier.padding(top = 10.dp)) {
+        // A call, a text or a payment leads with the person (PersonPreview); the prompt's full words follow, smaller.
+        val facts = remember(w.text) { if (w.kind == PromptSurface.Kind.CONFIRM) ConfirmFacts.parse(w.text) else null }
         Reveal(0, w.seq to w.text) {
             val shown = ScreenText.of(w.text)
-            Text(shown, style = MaterialTheme.typography.bodyLarge, color = GlassColors.Text, modifier = Modifier.semantics { contentDescription = shown })
+            Column {
+                facts?.let { f ->
+                    PersonPreview(f)
+                    // An announced call: the short window it waits for a "stop", running out as a thin line of light.
+                    if (f.announced) {
+                        val left = remember(w.seq) { Animatable(1f) }
+                        LaunchedEffect(w.seq) {
+                            left.animateTo(0f, tween(com.tekyerema.policy.ConfirmTiers.windowMs(w.text).toInt(), easing = LinearEasing))
+                        }
+                        val bar = GlassColors.Accent
+                        val track = GlassColors.Text
+                        androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().padding(top = 12.dp).height(4.dp)) {
+                            val r = androidx.compose.ui.geometry.CornerRadius(size.height / 2f)
+                            drawRoundRect(track.copy(alpha = 0.12f), cornerRadius = r)
+                            drawRoundRect(bar, size = androidx.compose.ui.geometry.Size(size.width * left.value, size.height), cornerRadius = r)
+                        }
+                    }
+                    Spacer(Modifier.padding(top = 12.dp))
+                }
+                Text(shown, style = if (facts != null) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                    color = if (facts != null) GlassColors.TextSecondary else GlassColors.Text, modifier = Modifier.semantics { contentDescription = shown })
+            }
         }
         Spacer(Modifier.padding(top = 12.dp))
         Reveal(1, w.seq to w.text) {

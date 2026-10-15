@@ -70,6 +70,7 @@ fun defaultTools(): List<Tool> = listOf(
     com.tekyerema.interop.ReadSharedTool,   // text shared / selected into Tɛkyerɛma — untrusted content, never a command
     WebSearchTool,        // I-03 current facts with sources (owner-approved web search)
     // §A.2 reopened offline intents
+    WalkDirectionsTool,   // walking directions by Tɛkyerɛma itself, live in the island (live/nav/WalkGuide)
     PlayMusicTool,        // E-14 play (in a named app, by artist) / pause / next / previous, checked against the media session
     OpenSettingTool,
     // Real-world app tasks (loaded per step by the "apps" tool-search group, D-02)

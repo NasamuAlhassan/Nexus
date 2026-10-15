@@ -81,6 +81,8 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         live = this
         AgentEngine.attachController(this)
         com.tekyerema.phone.IncomingCall.start(this)   // demo step 1: the caller announced, Volume Up answers
+        com.tekyerema.ui.island.IslandOverlay.start(this)   // the island at the top: timers, directions, music, calls
+        com.tekyerema.live.MediaLive.start(this)            // any app's playing song shows in the island
         // System accessibility button (navigation bar / floating shortcut) → the voice experience.
         if (Build.VERSION.SDK_INT >= 26) {
             try {
@@ -273,6 +275,12 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP && com.tekyerema.phone.IncomingCall.isRinging &&
             com.tekyerema.core.config.AppConfig.bool("phone.volumeUpAnswers", true)) {
             return if (e.action == android.view.KeyEvent.ACTION_DOWN) true else com.tekyerema.phone.IncomingCall.answerByKey(this)
+        }
+        // Our own timer is going off (live/LiveTimer): either volume key stops it — consumed, the volume doesn't move.
+        if ((e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) &&
+            com.tekyerema.live.LiveTimer.isRinging()) {
+            if (e.action == android.view.KeyEvent.ACTION_UP) com.tekyerema.live.LiveTimer.dismiss(this)
+            return true
         }
         if (e.action != android.view.KeyEvent.ACTION_UP) return false
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-01", true) ||

@@ -78,7 +78,7 @@ object SurfaceModel {
         // The agent waits on the user — its own prompt, whatever the voice is doing.
         PromptSurface.of(agent.status, PromptSurface.confirmationText(agent.pendingConfirmation, agent.pendingConfirmationTwi),
             PromptSurface.confirmationText(agent.pendingQuestion, agent.pendingQuestionTwi), agent.confirmationSeq, twi)?.let { p ->
-            return State(run, Mode.WAITING, titleOfWaiting(p.kind), steps, waiting = Waiting(p.kind, p.text, p.seq))
+            return State(run, Mode.WAITING, titleOfWaiting(p.kind, p.text), steps, waiting = Waiting(p.kind, p.text, p.seq))
         }
         // The engine has its answer (the prompt is cleared) but hasn't moved on yet: still working, never a blink to hidden.
         if (agent.status == AgentStatus.WAITING_CONFIRMATION || agent.status == AgentStatus.ASKING || agent.status == AgentStatus.SECURE_INPUT)
@@ -205,6 +205,10 @@ object SurfaceModel {
         val cut = if (g.length <= 72) g else g.take(72).substringBeforeLast(' ') + "…"   // two header lines
         return cut.replaceFirstChar { it.uppercaseChar() }
     }
+
+    /** An announced call (policy/ConfirmTiers: "Calling Kofi Demo… Say stop to cancel.") is a preview, not a question. */
+    internal fun titleOfWaiting(kind: PromptSurface.Kind, text: String = ""): String =
+        if (kind == PromptSurface.Kind.CONFIRM && text.trimStart().startsWith("Calling ")) "Calling" else titleOfWaiting(kind)
 
     internal fun titleOfWaiting(kind: PromptSurface.Kind): String = when (kind) {
         PromptSurface.Kind.CONFIRM -> "Please confirm"

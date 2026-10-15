@@ -103,6 +103,7 @@ object OverlayConfirm {
         main.post {
             if (appSurface == showing) return@post
             appSurface = showing
+            com.tekyerema.ui.island.IslandOverlay.appFront.value = showing   // our screen draws its own island
             if (showing) {
                 if (view != null && byEngine) { held = shown; heldCtx = app; hideNow() }
             } else held?.let { p ->

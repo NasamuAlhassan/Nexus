@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -149,10 +150,14 @@ fun LivingVoice(
                         1f to (if (palette.dark) Color(0x8C000000) else Color(0x33103B37)),
                         center = Offset(0f, -0.12f * UNIT), radius = UNIT * 1.08f
                     ),
+                    // Light only where it strikes, zero elsewhere — no ring round the sphere (owner: no border lines).
                     rim = Brush.sweepGradient(
-                        0f to Color.White.copy(alpha = 0.10f), 0.30f to Color.White.copy(alpha = 0.05f),
-                        0.55f to Color.White.copy(alpha = 0.30f), 0.62f to Color.White.copy(alpha = 0.95f),
-                        0.72f to Color.White.copy(alpha = 0.35f), 1f to Color.White.copy(alpha = 0.10f),
+                        0f to Color.Transparent,
+                        0.08f to Color.Transparent, 0.12f to Color.White.copy(alpha = 0.18f), 0.16f to Color.Transparent,
+                        0.48f to Color.Transparent,
+                        0.56f to Color.White.copy(alpha = 0.22f), 0.62f to Color.White.copy(alpha = 0.90f),
+                        0.70f to Color.White.copy(alpha = 0.22f), 0.80f to Color.Transparent,
+                        1f to Color.Transparent,
                         center = Offset.Zero
                     ),
                     spec = Brush.radialGradient(
@@ -185,6 +190,15 @@ private class OrbKit(
 )
 
 private const val UNIT = 100f
+
+/** Tint filters reused frame to frame (a colour only changes during a state's cross-fade): no allocation per frame at rest. */
+private val TINTS = HashMap<Int, ColorFilter>()
+private fun tint(c: Color): ColorFilter {
+    val key = c.toArgb()
+    TINTS[key]?.let { return it }
+    if (TINTS.size > 96) TINTS.clear()
+    return ColorFilter.tint(c).also { TINTS[key] = it }
+}
 /** Orb radius as a share of the smaller side; the aura reaches ~1.55× that, inside the square. */
 private const val BASE_R = 0.30f
 private val LIGHTS = arrayOf(Spectrum.Aqua, Spectrum.Teal, Spectrum.Green, Spectrum.Coral)
@@ -231,7 +245,7 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
             scale(radius / UNIT, radius / UNIT, Offset.Zero)
         }) {
             drawCircle(kit.glow, radius = UNIT, center = Offset.Zero, alpha = a,
-                colorFilter = ColorFilter.tint(tone(LIGHTS[b])), blendMode = kit.blend)
+                colorFilter = tint(tone(LIGHTS[b])), blendMode = kit.blend)
         }
     }
 
@@ -244,6 +258,11 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
             drawCircle(tone(Spectrum.Aqua).copy(alpha = (0.45f * (1f - age) * (1f - age) * alphaScale * s.actMix.value).coerceIn(0f, 1f)),
                 radius = r * (1.02f + 0.5f * eased), center = Offset(cx, cy), style = kit.ripple)
         }
+    }
+
+    // 2b. A soft contact shadow under the sphere on the pale page (its edge comes from light and shadow, never a line).
+    if (!pal.dark) withTransform({ translate(cx, cy + r * 0.92f); scale(r * 0.95f / UNIT, r * 0.30f / UNIT, Offset.Zero) }) {
+        drawCircle(kit.glow, radius = UNIT, center = Offset.Zero, alpha = (0.22f * appear).coerceIn(0f, 1f), colorFilter = tint(Color(0xFF103B37)))
     }
 
     // 3. The glass body.
@@ -266,7 +285,7 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
                 scale(radius / UNIT, radius / UNIT, Offset.Zero)
             }) {
                 drawCircle(kit.glow, radius = UNIT, center = Offset.Zero, alpha = a,
-                    colorFilter = ColorFilter.tint(tone(LIGHTS[(b + 1) % 4])), blendMode = kit.blend)
+                    colorFilter = tint(tone(LIGHTS[(b + 1) % 4])), blendMode = kit.blend)
             }
         }
         // 5. The waveform: the user's voice (or the reply being spoken) as three coloured strands.
@@ -274,6 +293,10 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
         // The glass's weight toward its lower edge.
         withTransform({ translate(cx, cy); scale(r / UNIT, r / UNIT, Offset.Zero) }) {
             drawCircle(kit.depth, radius = UNIT, center = Offset.Zero)
+        }
+        // The caustic: light that came through the glass, gathered in a crescent at the bottom (liquid glass's lensing).
+        withTransform({ translate(cx + r * 0.10f, cy + r * 0.74f); scale(r * 0.62f / UNIT, r * 0.22f / UNIT, Offset.Zero) }) {
+            drawCircle(kit.spec, radius = UNIT, center = Offset.Zero, alpha = ((if (pal.dark) 0.22f else 0.30f) * appear).coerceIn(0f, 1f))
         }
     }
 
@@ -285,8 +308,8 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
                 alpha = ((if (pal.dark) 0.9f else 1f) * appear).coerceIn(0f, 1f))
         }
     }
-    // A faint outline so the sphere keeps its edge on the pale page.
-    if (!pal.dark) drawCircle(Color(0x22103B37), radius = r, center = Offset(cx, cy), style = kit.ripple)
+    // No outline (owner, 15 Oct 2026: no border lines — liquid glass blends): on the pale page the sphere keeps its edge from
+    // light alone — a soft contact shadow below it, drawn before the body (see step 2b).
 
     // 7. The specular highlight, top-left.
     withTransform({

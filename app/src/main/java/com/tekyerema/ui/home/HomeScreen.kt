@@ -30,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -271,6 +272,21 @@ fun HomeContent(
                 modifier = Modifier.padding(top = 6.dp, bottom = 22.dp))
         } else Spacer(Modifier.height(6.dp))
     }
+        // The island (ui/island): what keeps going — a timer, directions, music — at the top of our own screen too; it steps
+        // aside while the assistant surface uses the top.
+        val live by com.tekyerema.live.LiveActivities.state.collectAsState()
+        androidx.compose.animation.AnimatedVisibility(
+            visible = live.isNotEmpty() && !surfaceVisible,
+            modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 4.dp, start = 14.dp, end = 14.dp),
+            enter = androidx.compose.animation.slideInVertically(androidx.compose.animation.core.spring(0.78f, 190f)) { -it - 60 } +
+                androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.slideOutVertically { -it - 60 } + androidx.compose.animation.fadeOut()
+        ) {
+            androidx.compose.runtime.CompositionLocalProvider(com.tekyerema.ui.assistant.LocalGlass provides
+                    if (Tk.palette.dark) com.tekyerema.ui.assistant.DarkGlass else com.tekyerema.ui.assistant.LightGlass) {
+                com.tekyerema.ui.island.LiveIsland(live, onAction = { id, a -> com.tekyerema.live.LiveActivities.act(id, a) })
+            }
+        }
         // The whole screen, so a tap outside a finished result can dismiss it (the surface itself sits at the top).
         com.tekyerema.ui.assistant.AssistantSurfaceHost(
             voice = voice, agent = agent, twi = twi,

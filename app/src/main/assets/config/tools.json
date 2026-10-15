@@ -166,6 +166,12 @@
   "play_music": {
    "feature": "E-14"
   },
+  "walk_directions": {
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
   "install_app": {
    "feature": "E-01",
    "callers": [

@@ -1542,17 +1542,29 @@ object AgentEngine {
                                     ?.let { t -> twiDisclosed.filterNotNull().joinToString("") { "$it " } + t }
                                     ?: com.tekyerema.voice.VoiceEngine.twiLine(prompt)
                                 stats = stats.copy(confirmations = stats.confirmations + 1)
-                                log(LogEntry.Kind.CONFIRM, prompt)
+                                // Risk tiers (policy/ConfirmTiers): a plain call to a saved contact is announced, with a short
+                                // window to say stop, instead of asked; any warning or a Twi conversation keeps the question.
+                                val callingLine = if (decision.name == "make_call" && effectLine == null && origin == null &&
+                                    disclosures.all { it.startsWith("Taking '") && it.trimEnd().endsWith("from before.") } &&
+                                    decision.args.optString("contact").isNotBlank() && promptTwi == null &&
+                                    com.tekyerema.core.config.AppConfig.bool("confirm.callImplicit", true))
+                                    com.tekyerema.policy.ConfirmTiers.callingLine(prompt) else null
+                                val asked = callingLine ?: prompt
+                                log(LogEntry.Kind.CONFIRM, asked)
                                 // the Twi wording the user is asked in (debug builds only — the read-back names people and amounts)
                                 if (promptTwi != null && com.tekyerema.BuildConfig.DEBUG) android.util.Log.i("Tekyerema", "[CONFIRM-TWI] $promptTwi")
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
                                 drain(confirmChannel)   // only a reply to THIS prompt counts
                                 val seq = ++confirmSeq   // J-02: every surface's yes must name this number
-                                _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = prompt,
+                                _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = asked,
                                     pendingConfirmationTwi = promptTwi, confirmationSeq = seq) }
                                 // The reply panel (Yes / No over whatever app is in front) follows this state — VoiceEngine
                                 // shows it. It must be GONE before the approved action runs, or the tap lands on the panel.
-                                val reply = confirmChannel.receive()
+                                var bySilence = false
+                                val reply = if (callingLine != null)
+                                    kotlinx.coroutines.withTimeoutOrNull(com.tekyerema.policy.ConfirmTiers.windowMs(callingLine)) { confirmChannel.receive() }
+                                        ?: ConfirmReply.Approve.also { bySilence = true }
+                                else confirmChannel.receive()
                                 OverlayConfirm.hideAndWait(ctxApp)
                                 _state.update { it.copy(pendingConfirmation = null, pendingConfirmationTwi = null) }
                                 when (reply) {
@@ -1616,7 +1628,8 @@ object AgentEngine {
                                         continue
                                     }
                                     is ConfirmReply.Approve -> {
-                                        log(LogEntry.Kind.POLICY, "Confirmed by user.")
+                                        // (the audit says what happened: an announced call nobody stopped is not a spoken yes)
+                                        log(LogEntry.Kind.POLICY, if (bySilence) "No objection in the call's cancel window — calling." else "Confirmed by user.")
                                         stepAudit?.approved(seq, prompt)   // WS-C: the approval, with its confirmation number
                                         // The first approval of a Mobile-Money / dialer action unlocks the rest of the
                                         // USSD menu navigation for this run (guided navigation) — never the PIN.

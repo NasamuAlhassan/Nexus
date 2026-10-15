@@ -324,7 +324,9 @@ object UssdNavigatorTool : Tool {
         val amt = args.str("amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"
         val who = whoWords(args)
         val call = com.tekyerema.tools.MoneyPrivacy.callWarning(args.optBoolean(MoMoSendTool.ARG_ON_CALL))
-        val tail = "I'll go through the menu quietly and stop at the PIN for you to enter."
+        // Taught three times, then the short form (core/Taught): a read-back the user has heard before is quicker.
+        val tail = if (com.tekyerema.core.Taught.teach("money.readback.tail")) "I'll go through the menu quietly and stop at the PIN for you to enter."
+            else "I'll stop at the PIN for you."
         if (intent != TxIntent.SEND_MONEY) {
             val whom = if (intent == TxIntent.BUY_AIRTIME) "this phone" else who?.first ?: "another number"
             // Airtime for another network can't be reversed — said HERE, once, so MTN's own notice of it needn't be asked

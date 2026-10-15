@@ -36,8 +36,11 @@ class PromptBudgetTest {
         // send_sms. The 'open chrome' per-step subset moved 8,382 → 8,409 (guard below, 9k, unchanged). Cap = that + ~140.
         // QA run (2026-10-03): measured 29,441 — + cancel_alarm (the Clock's own DISMISS_ALARM request; "device" group, so it
         // loads per step only with alarm words). Cap = that + ~140.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 29_580)
-        assertTrue("system prompt grew to $system chars", system <= 5_600)
+        // Owner's round (2026-10-15): + walk_directions (Tɛkyerɛma's own walking guidance; "walk" group — loaded per step only
+        // with directions words) measured 29,950; and one routing line (prefer own timer / music / directions, never open
+        // Contacts) in the system prompt. Caps = measured + ~100.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 30_050)
+        assertTrue("system prompt grew to $system chars", system <= 5_760)
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */

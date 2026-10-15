@@ -66,6 +66,10 @@ object ToolSelector {
             listOf("set_volume", "volume_up", "volume_down"),
             Regex("(?i)\\b(volume|louder|quieter|softer|sound|mute|unmute|silent)\\b")
         ),
+        "walk" to Group(
+            listOf("walk_directions"),
+            Regex("(?i)\\b(directions?|navigate|navigation|route|walk me|take me|get to|way to|nearest|closest|where is the)\\b")
+        ),
         "media" to Group(
             listOf("play_music"),
             Regex("(?i)\\b(music|song|songs|play|playlist|podcast|radio|youtube|spotify|boomplay|audiomack)\\b")

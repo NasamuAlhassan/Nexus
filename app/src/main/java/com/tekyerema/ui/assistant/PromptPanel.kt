@@ -102,12 +102,13 @@ internal fun PromptPanel(
     // A new window's first frame is the slow one (composition, text layout): the spring starts once it has been drawn, or a
     // slow phone shows its opening already gone — on the emulator the glass jumped from half-way to settled.
     LaunchedEffect(Unit) {
-        if (appear.value < 1f) { withFrameNanos { }; withFrameNanos { }; appear.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 320f)) }
+        // Flowing down from the top edge with a soft liquid settle (owner, 15 Oct 2026: "a nice animation that flows from the top").
+        if (appear.value < 1f) { withFrameNanos { }; withFrameNanos { }; appear.animateTo(1f, spring(dampingRatio = 0.78f, stiffness = 190f)) }
     }
     LaunchedEffect(Unit) { if (arrival.value < 1f) { delay(120); arrival.animateTo(1f, tween(760)) } }
 
     val title = if (twi) PromptSurface.header(prompt.kind, true).lowercase().replaceFirstChar { it.uppercase() }
-        else SurfaceModel.titleOfWaiting(prompt.kind)
+        else SurfaceModel.titleOfWaiting(prompt.kind, prompt.text)
     val radius = 34.dp
     // The words and choices may scroll at very large text; the panel never grows past the screen.
     val maxBody = (LocalConfiguration.current.screenHeightDp * 0.72f).dp
@@ -116,18 +117,18 @@ internal fun PromptPanel(
         Box(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                // room below for the glass's own shadow (the window wraps its content)
+                .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 26.dp)
                 .widthIn(max = 560.dp)
                 .graphicsLayer {
                     val a = appear.value
-                    alpha = (0.02f + 0.98f * a).coerceIn(0.02f, 1f)
-                    translationY = -(1f - a) * size.height * 0.5f
-                    val s = 0.94f + 0.06f * a.coerceAtMost(1f)
-                    scaleX = s; scaleY = s
+                    alpha = (0.02f + 1.6f * a).coerceIn(0.02f, 1f)
+                    translationY = -(1f - a) * (size.height + 24.dp.toPx())
+                    val s = 0.92f + 0.08f * a.coerceAtMost(1.04f)
+                    scaleX = s; scaleY = 0.86f + 0.14f * a.coerceAtMost(1.04f)
                     transformOrigin = TransformOrigin(0.5f, 0f)
                 }
-                .then(if (glass.shadow) Modifier.shadow(10.dp, ContinuousShape(radius), clip = false,
-                    ambientColor = Color(0x33103B37), spotColor = Color(0x40103B37)) else Modifier)
+                // (the glass draws its own soft shadow, outside its shape only — ui/glass/LiquidGlass)
                 .glassBody(radius, glass, mood = { currentMood },
                     light = { if (currentMood == LightMood.LISTENING) 0.25f + 0.75f * micLevel.floatValue else 0.22f },
                     sweep = { 0f }, glowShift = { 0f }, tier = tier, arrival = { arrival.value })

@@ -37,6 +37,11 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.tekyerema.ui.theme.Spectrum
+import com.tekyerema.ui.glass.DEFAULT_LIGHT_DEGREES
+import com.tekyerema.ui.glass.GlassDepth
+import com.tekyerema.ui.glass.GlassShape
+import com.tekyerema.ui.glass.LiquidStyles
+import com.tekyerema.ui.glass.liquidGlass
 import kotlin.math.min
 
 /**
@@ -189,9 +194,11 @@ object SurfaceMotion {
 enum class LightMood { CALM, WORKING, LISTENING, SUCCESS, FAILURE }
 
 /**
- * Draws the glass behind the content: the tinted body, a soft inner glow that follows [glowShift] (drag and state), the top
- * specular line, and the edge light. [light] (0..1) and [sweep] (degrees) are read in the draw phase only, so a moving light
- * redraws the layer without recomposing anything.
+ * The surface's glass (owner, 15 Oct 2026: liquid glass, no border lines): the one material of ui/glass/LiquidGlass — the
+ * tinted body, light-defined rim, refraction band, sheen, glint, grain and outside-only shadow. The state shows as LIGHT,
+ * not as a coloured outline: while the agent works or listens the light slowly travels round the glass ([sweep], FULL tier
+ * only) and a soft teal glows from inside; a finished task glows warm, a failure faintly coral. [light] (0..1) is that
+ * glow's strength. Read in the draw phase only: a moving light redraws the layer without recomposing anything.
  */
 fun Modifier.glassBody(
     radius: Dp,
@@ -199,62 +206,30 @@ fun Modifier.glassBody(
     mood: () -> LightMood,
     light: () -> Float,
     sweep: () -> Float,
-    glowShift: () -> Float,
+    @Suppress("UNUSED_PARAMETER") glowShift: () -> Float,
     tier: GlassTier,
-    /** 0..1 once when the surface arrives: a highlight sweeping along the top edge (FULL only); 1 = done. */
-    arrival: () -> Float = { 1f }
-): Modifier = this.drawWithCache {
-    val r = radius.toPx()
-    val path = continuousPath(size, r)
-    val body = Brush.verticalGradient(0f to palette.top, 1f to palette.bottom)
-    val inner = Brush.radialGradient(
-        0f to Spectrum.Teal.copy(alpha = 0.20f), 0.55f to Spectrum.Aqua.copy(alpha = 0.06f), 1f to Color.Transparent,
-        center = Offset(size.width * 0.5f, 0f), radius = size.width * 0.62f
-    )
-    val specular = Brush.horizontalGradient(
-        0f to Color.Transparent, 0.18f to Color.White.copy(alpha = 0.30f), 0.5f to Color.White.copy(alpha = 0.42f),
-        0.82f to Color.White.copy(alpha = 0.30f), 1f to Color.Transparent, startX = r * 0.6f, endX = size.width - r * 0.6f
-    )
-    val hair = 1.dp.toPx()
-    val rim = Stroke(width = 1.25.dp.toPx())
-    val halo = Stroke(width = 6.dp.toPx())
-    // The edge light's colours: the brand spectrum, sweeping round the rim when the agent works (FULL) — a shader with a
-    // reused matrix, so the sweep costs no allocation per frame.
-    val sweepShader = android.graphics.SweepGradient(size.width / 2f, size.height / 2f,
-        intArrayOf(Spectrum.Aqua.toArgbInt(), Spectrum.Teal.toArgbInt(), Spectrum.Green.toArgbInt(), Spectrum.Coral.toArgbInt(),
-            Spectrum.Aqua.toArgbInt()), null)
-    val sweepBrush = ShaderBrush(sweepShader)
-    val matrix = android.graphics.Matrix()
-    val warm = Brush.linearGradient(listOf(palette.warm, Spectrum.Green), Offset.Zero, Offset(size.width, size.height))
-    val fail = androidx.compose.ui.graphics.SolidColor(palette.fail)
-    val bandW = size.width * 0.28f
-    val band = Brush.horizontalGradient(0f to Color.Transparent, 0.5f to Color.White.copy(alpha = 0.55f), 1f to Color.Transparent,
-        startX = 0f, endX = bandW)
-    onDrawBehind {
-        drawPath(path, body)
-        clipPath(path) {
-            translate(top = glowShift()) { drawRect(inner) }
-            drawLine(specular, Offset(r * 0.6f, hair * 1.2f), Offset(size.width - r * 0.6f, hair * 1.2f), strokeWidth = hair)
-            val a = arrival()
-            if (tier == GlassTier.FULL && a < 1f) translate(left = -bandW + (size.width + bandW) * a) {
-                drawRect(band, size = Size(bandW, hair * 3f))
-            }
-        }
-        val m = mood(); val l = light().coerceIn(0f, 1f)
-        val brush: Brush = when (m) {
-            LightMood.SUCCESS -> warm
-            LightMood.FAILURE -> fail
-            else -> {
-                matrix.setRotate(sweep(), size.width / 2f, size.height / 2f); sweepShader.setLocalMatrix(matrix); sweepBrush
-            }
-        }
-        if (l > 0.01f) {
-            if (tier == GlassTier.FULL && (m == LightMood.WORKING || m == LightMood.LISTENING || m == LightMood.SUCCESS))
-                drawPath(path, brush, alpha = 0.16f * l, style = halo)   // a soft aura just outside the rim
-            drawPath(path, brush, alpha = 0.25f + 0.65f * l, style = rim)
+    @Suppress("UNUSED_PARAMETER") arrival: () -> Float = { 1f }
+): Modifier = this.liquidGlass(
+    // A card over another app is a "large" glass (Apple: more opaque) — words on it never read as text on top of text.
+    style = LiquidStyles.of(palette.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
+        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (palette.dark) 0.90f else 0.92f))
+    },
+    shape = GlassShape.Rounded(radius),
+    depth = GlassDepth.FLOATING,
+    lightDegrees = {
+        val m = mood()
+        if (tier == GlassTier.FULL && (m == LightMood.WORKING || m == LightMood.LISTENING)) DEFAULT_LIGHT_DEGREES + sweep() else DEFAULT_LIGHT_DEGREES
+    },
+    glow = {
+        val l = light().coerceIn(0f, 1f)
+        when (mood()) {
+            LightMood.WORKING, LightMood.LISTENING -> Spectrum.Teal.copy(alpha = (if (palette.dark) 0.20f else 0.14f) * l)
+            LightMood.SUCCESS -> palette.warm.copy(alpha = 0.14f * l)
+            LightMood.FAILURE -> palette.fail.copy(alpha = 0.14f * l)
+            LightMood.CALM -> Color.Transparent
         }
     }
-}
+)
 
 private fun Color.toArgbInt(): Int = this.toArgb()
 

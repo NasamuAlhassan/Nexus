@@ -41,6 +41,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.tekyerema.ui.theme.LocalCalmMotion
+import com.tekyerema.ui.glass.GlassDepth
+import com.tekyerema.ui.glass.GlassShape
+import com.tekyerema.ui.glass.LiquidStyles
+import com.tekyerema.ui.glass.liquidGlass
 import com.tekyerema.ui.theme.Spectrum
 import com.tekyerema.ui.theme.TkHaptic
 import com.tekyerema.ui.theme.tkHaptic
@@ -103,45 +107,36 @@ fun GlassPill(
 
     val shape = RoundedCornerShape(percent = 50)
     val label = contentDescription ?: text
+    val base = LiquidStyles.of(g.dark, com.tekyerema.ui.theme.glassMode())
+    val pillStyle = base.copy(specular = base.specular * 0.7f, edge = base.edge * 0.85f, glint = base.glint * 0.6f, grain = 0f)
+    val accent = if (g.dark) Color(0xFF2FD8C2) else Color(0xFF14B8A3)
+    val quietTint = if (g.dark) Color.White.copy(alpha = 0.11f) else Color(0xFF0E1B1C).copy(alpha = 0.065f)
+    val onAccent = Color(0xFF032420)
     Box(
         modifier
             .minimumInteractiveComponentSize()
-            .heightIn(min = if (compact) 40.dp else 52.dp)
+            .heightIn(min = if (compact) 40.dp else 56.dp)
             .graphicsLayer { scaleX = scale.value; scaleY = scale.value; alpha = fade.value }
+            // Liquid glass (ui/glass/LiquidGlass): a pill inside the card is a FILL, not glass on glass (Apple's layering rule);
+            // the primary act is tinted glass — the colour in the body, dark ink on it for contrast — never a flat block.
+            .liquidGlass(
+                style = pillStyle,
+                shape = GlassShape.Capsule,
+                depth = GlassDepth.FLAT,
+                tint = if (pillStyle.border != null) null else if (tone == PillTone.PRIMARY) accent.copy(alpha = 0.90f) else quietTint,
+                press = { val b = bloom.value; if (b < 1f) 1f - b else 0f },
+                pressAt = { pressAt }
+            )
             .clip(shape)
             .drawWithCache {
-                val r = size.height / 2f
-                val quiet = g.quietFill
-                val quietBrush = androidx.compose.ui.graphics.SolidColor(quiet)
-                val primary = Brush.horizontalGradient(listOf(g.primaryA, g.primaryB))
-                val chosenFill = Brush.horizontalGradient(listOf(g.chosenA, g.chosenB))
-                val highlight = Brush.horizontalGradient(
-                    0f to Color.Transparent, 0.25f to g.highlight, 0.75f to g.highlight, 1f to Color.Transparent)
-                val inner = Brush.radialGradient(listOf(Color.White.copy(alpha = if (g.dark) 0.10f else 0.35f), Color.Transparent),
-                    center = Offset(size.width / 2f, 0f), radius = size.width * 0.55f)
-                val fillBand = if (g.dark) Color.White.copy(alpha = 0.16f) else Spectrum.Teal.copy(alpha = 0.14f)
-                val bloomColor = g.bloom
-                val hair = 1.dp.toPx()
+                val armBand = Color.Black.copy(alpha = if (g.dark) 0.34f else 0.22f)
                 onDrawBehind {
-                    val cr = CornerRadius(r)
-                    when {
-                        settle.value > 0f -> {
-                            drawRoundRect(if (tone == PillTone.PRIMARY) primary else quietBrush, cornerRadius = cr)
-                            drawRoundRect(chosenFill, cornerRadius = cr, alpha = settle.value)
-                        }
-                        tone == PillTone.PRIMARY -> {
-                            val a = arming().coerceIn(0f, 1f)
-                            drawRoundRect(primary, cornerRadius = cr, alpha = 0.40f + 0.60f * a)
-                            // The arming delay fills the pill from the left, then the band dissolves into the lit pill.
-                            if (a < 1f) drawRoundRect(fillBand, size = Size(size.width * a, size.height), cornerRadius = cr)
-                        }
-                        else -> drawRoundRect(quiet, cornerRadius = cr)
+                    if (tone == PillTone.PRIMARY) {
+                        // The arming delay: the not-yet-ready part of the pill stays dim, and the light fills it from the left.
+                        val a = arming().coerceIn(0f, 1f)
+                        if (a < 1f) drawRect(armBand, topLeft = Offset(size.width * a, 0f), size = Size(size.width * (1f - a), size.height))
                     }
-                    drawRect(inner)
-                    drawLine(highlight, Offset(r * 0.7f, hair), Offset(size.width - r * 0.7f, hair), strokeWidth = hair)
-                    val b = bloom.value
-                    if (b < 1f && pressAt != Offset.Unspecified)
-                        drawCircle(bloomColor, radius = size.maxDimension * (0.25f + 0.9f * b), center = pressAt, alpha = 0.20f * (1f - b))
+                    if (settle.value > 0f && tone != PillTone.PRIMARY) drawRect(accent.copy(alpha = 0.85f * settle.value))
                 }
             }
             .clickable(interactionSource = interaction, indication = null, enabled = available, role = Role.Button,
@@ -157,7 +152,11 @@ fun GlassPill(
         contentAlignment = Alignment.Center
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-            color = if (tone == PillTone.PRIMARY || chosen) g.onPrimary.takeIf { tone == PillTone.PRIMARY } ?: g.text else g.textSecondary,
+            color = when {
+                pillStyle.border != null -> g.text
+                tone == PillTone.PRIMARY || chosen -> onAccent
+                else -> g.text
+            },
             textAlign = TextAlign.Center, maxLines = 2)
     }
 }

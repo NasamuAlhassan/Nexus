@@ -79,9 +79,10 @@ object PinPad {
     fun length(): Int = try { com.tekyerema.core.config.AppConfig.int("pin.volumeKeys.length", MIN_DIGITS) } catch (_: Throwable) { MIN_DIGITS }
 
     /** Said after the PIN hand-off line, so the user knows the keys are there. */
-    fun handOffTip(): String = if (enabled()) " You can also enter it with the volume keys: press volume down once for each " +
+    fun handOffTip(): String = if (!enabled()) "" else if (com.tekyerema.core.Taught.teach("pin.volumeKeys.tip"))
+        " You can also enter it with the volume keys: press volume down once for each " +
         "number, then volume up to put it in — volume up on its own is a zero. It sends by itself after the last digit. " +
-        "A press while I'm talking only stops me." else ""
+        "A press while I'm talking only stops me." else " The volume keys work too."   // taught three times, then short
 
     @Volatile private var armed = false
     @Volatile private var counter: Counter? = null

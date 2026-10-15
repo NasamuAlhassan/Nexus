@@ -3,22 +3,21 @@ package com.tekyerema.ui.theme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.composed
-import androidx.compose.ui.draw.drawWithCache
-import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawOutline
-import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.tekyerema.ui.glass.GlassDepth
+import com.tekyerema.ui.glass.GlassShape
+import com.tekyerema.ui.glass.LiquidStyles
+import com.tekyerema.ui.glass.liquidGlass
 
 /**
- * A pane of glass: a translucent fill, a bright top edge that fades down its sides (the light catching the rim, as in
- * Liquid Glass), and — in the light palette — a soft, wide shadow so it floats over the page. [strong] is the denser
- * glass for controls that sit over moving light (the tab bar, the input pill): text on it keeps full contrast.
- *
- * No blur: Android 11 has no RenderEffect, and the page behind is soft light, so a gradient fill reads as frosted.
+ * A pane of glass on our own pages — the same liquid glass as the assistant's surfaces (ui/glass/LiquidGlass), one material
+ * everywhere. On our own pages what lies behind is known (the soft page light), so the glass may be clearer than over other
+ * apps; [strong] keeps the denser body for controls that sit over moving light (the tab bar, the input pill).
+ * [tint] washes the body with a colour (a selected or primary control).
  */
 fun Modifier.glass(
     shape: Shape = RoundedCornerShape(24.dp),
@@ -26,22 +25,22 @@ fun Modifier.glass(
     elevation: Dp = 14.dp,
     tint: Color? = null
 ): Modifier = composed {
-    val p = Tk.palette
-    val lift = if (!p.dark && elevation > 0.dp)
-        Modifier.shadow(elevation, shape, clip = false, ambientColor = Color(0x331B2A55), spotColor = Color(0x401B2A55))
-    else Modifier
-    lift.drawWithCache {
-        val outline = shape.createOutline(size, layoutDirection, this)
-        val top = if (strong) p.glassStrong else p.glass
-        val bottom = if (strong) p.glassStrong else p.glassLow
-        val fill = Brush.verticalGradient(listOf(top, bottom))
-        val wash = tint?.let { Brush.verticalGradient(listOf(it.copy(alpha = it.alpha * 0.9f), it.copy(alpha = it.alpha * 0.5f))) }
-        val edge = Brush.verticalGradient(0f to p.glassEdgeTop, 0.55f to p.glassEdgeBottom, 1f to p.glassEdgeBottom)
-        val stroke = Stroke(width = 1.dp.toPx())
-        onDrawBehind {
-            drawOutline(outline, fill)
-            if (wash != null) drawOutline(outline, wash)
-            drawOutline(outline, edge, style = stroke)
-        }
-    }
+    val dark = Tk.palette.dark
+    val base = LiquidStyles.of(dark, glassMode())
+    val style = if (strong || base.border != null) base else base.copy(fill = base.fill.copy(alpha = if (dark) 0.62f else 0.58f))
+    liquidGlass(
+        style = style,
+        shape = GlassShape.Of(shape),
+        depth = if (elevation > 0.dp) GlassDepth.CONTROL else GlassDepth.FLAT,
+        tint = tint?.let { t -> if (style.border != null) null else t.copy(alpha = (t.alpha * 0.85f).coerceAtMost(0.85f)).compositeOver(style.fill) }
+    )
+}
+
+/** The user's glass setting: tinted (default), solid (less see-through) or high contrast (settings `ui.glassMode`). */
+fun glassMode(): com.tekyerema.ui.glass.GlassMode = when (try {
+    com.tekyerema.core.config.AppConfig.string("ui.glassMode", "tinted").lowercase()
+} catch (_: Throwable) { "tinted" }) {
+    "solid" -> com.tekyerema.ui.glass.GlassMode.SOLID
+    "contrast", "high_contrast", "high-contrast" -> com.tekyerema.ui.glass.GlassMode.HIGH_CONTRAST
+    else -> com.tekyerema.ui.glass.GlassMode.TINTED
 }

@@ -84,6 +84,25 @@ class DemoStepsTest {
         MoneyRequest.clear()
     }
 
+    @Test fun a_new_request_of_another_kind_is_not_taken_as_the_answer_to_a_waiting_question() {
+        val n = com.tekyerema.voice.understand.AnswerOrNew
+        // the rehearsal's cases: a send asked "How much?" / "Who?" and the user moved on
+        assertTrue(n.isNewRequest("now call him", "send money to Kofi"))
+        assertTrue(n.isNewRequest("tell him I've sent it", "send Kofi Demo the money"))
+        assertTrue(n.isNewRequest("read his message", "send money to him"))
+        assertTrue(n.isNewRequest("okay open WhatsApp", "call Ama"))
+        // answers stay answers
+        assertTrue(!n.isNewRequest("Kofi Demo", "send money to him"))
+        assertTrue(!n.isNewRequest("five cedis", "send money to him"))
+        assertTrue(!n.isNewRequest("send it to Kofi", "send money to him"))
+        assertTrue(!n.isNewRequest("send 5 cedis", "send money to him"))
+        assertTrue(!n.isNewRequest("call Kofi Demo", "call Kofi"))
+        assertTrue(!n.isNewRequest("school fees", "send money to him"))
+        assertTrue(!n.isNewRequest("call him", null))                 // no task to compare with: an answer
+        assertEquals(com.tekyerema.voice.understand.AnswerOrNew.Kind.MESSAGE, n.kindOf("send him a message"))
+        assertEquals(com.tekyerema.voice.understand.AnswerOrNew.Kind.MONEY, n.kindOf("send him the money"))
+    }
+
     @Test fun the_recognisers_eh_at_the_edges_is_dropped_but_words_inside_stay() {
         val f = com.tekyerema.voice.EdgeFillers
         assertEquals("read my message please", f.strip("eh read my message please eh"))

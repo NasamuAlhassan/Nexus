@@ -47,6 +47,34 @@ class LocalFastRouter(
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
         handOff = null
+        // The answer to "Which app should I play it on?" (live/MusicApps): play there and remember the choice.
+        com.tekyerema.live.MusicApps.takePending()?.let { p ->
+            com.tekyerema.live.MusicApps.pick(text, p.options)?.let { (pkg, name) ->
+                com.tekyerema.live.MusicApps.remember(appContext, pkg)
+                val out = runTool("play_music", org.json.JSONObject().put("query", p.query).put("artist", p.artist).put("package", pkg), action = true)
+                val note = "I'll use $name for music from now on."
+                return out?.let { it.copy(spoken = it.spoken + com.tekyerema.voice.SpokenText.BREAK + note) }
+                    ?: FastOutcome("PLAY_MUSIC", "I couldn't start $name.", systemVoice = true, ok = false)
+            }
+        }
+        // Walking directions running (live/nav/WalkGuide): "stop the directions", "where do I turn?", "how far is it?".
+        com.tekyerema.live.nav.NavSpeech.match(text, com.tekyerema.live.nav.WalkGuide.active)?.let { m ->
+            val said = when (m) {
+                com.tekyerema.live.nav.NavSpeech.Match.STOP -> com.tekyerema.live.nav.WalkGuide.stop()
+                com.tekyerema.live.nav.NavSpeech.Match.REPEAT -> com.tekyerema.live.nav.WalkGuide.repeat()
+                com.tekyerema.live.nav.NavSpeech.Match.HOW_FAR -> com.tekyerema.live.nav.WalkGuide.howFar()
+            }
+            return FastOutcome("WALK", said, systemVoice = true)
+        }
+        // Our own timer (live/LiveTimer): while it rings, "stop" / "okay" / "dismiss" stops it; "how long is left" any time.
+        com.tekyerema.live.TimerSpeech.match(text, com.tekyerema.live.LiveTimer.isRinging(), com.tekyerema.live.LiveTimer.running().isNotEmpty())?.let { m ->
+            val said = when (m) {
+                com.tekyerema.live.TimerSpeech.Match.STOP -> com.tekyerema.live.LiveTimer.stop(appContext) ?: "Stopped."
+                com.tekyerema.live.TimerSpeech.Match.LEFT -> com.tekyerema.live.LiveTimer.leftWords() ?: "No timer is running."
+                com.tekyerema.live.TimerSpeech.Match.ADD_MINUTE -> { com.tekyerema.live.LiveTimer.addMinute(appContext); "Added a minute." }
+            }
+            return FastOutcome("TIMER", said, systemVoice = true)
+        }
         // The answer to "Did you mean …?" (the meaning matcher, below): yes runs it and remembers the wording, no drops it.
         // Anything else drops it too and is handled as said — so a stale suggestion never catches a later "yes".
         IntentMatcher.takePending()?.let { (said, canonical) ->
@@ -261,7 +289,10 @@ class LocalFastRouter(
         is FastIntent.PlayMusic -> runTool("play_music", org.json.JSONObject().apply {
             intent.query?.let { put("query", it) }; intent.artist?.let { put("artist", it) }; intent.app?.let { put("app", it) }
             intent.collection?.let { put("collection", it) }
-        }, action = true)
+        }, action = true)?.let { out ->
+            // "Which app should I play it on — YouTube Music or Spotify?": a question, so the mic opens for the answer.
+            if (com.tekyerema.live.MusicApps.pending != null) out.copy(ok = true, listenAfter = true) else out
+        }
 
         FastIntent.Back -> global("back", intent, "Went back.")
         FastIntent.Home -> global("home", intent, "Home.")
@@ -1530,6 +1561,10 @@ class LocalFastRouter(
                 return openApp(i.place)
             if (FastIntentClassifier.isPhoneThing(i.place)) return null   // "take me to my settings page": the agent's
         }
+        // Owner, 15 Oct 2026: walking directions by Tɛkyerɛma itself, live in the island — no map app (live/nav/WalkGuide;
+        // it hands over to Google Maps only when OpenStreetMap can't be reached).
+        if (com.tekyerema.core.config.AppConfig.bool("live.walk.own", true))
+            return handled(i, com.tekyerema.live.nav.WalkGuide.start(appContext, i.place))
         return runTool("open_intent", org.json.JSONObject().put("template", "maps_search").put("query", i.place), action = true)
     }
 
@@ -1614,6 +1649,8 @@ class LocalFastRouter(
      * had asked, and the timer ran on).
      */
     private suspend fun stopTimer(intent: FastIntent): FastOutcome? {
+        // Our own timer first (live/LiveTimer): the ringing one, else the soonest running one.
+        com.tekyerema.live.LiveTimer.stop(appContext)?.let { return handled(intent, it) }
         val i = android.content.Intent("android.intent.action.DISMISS_TIMER").addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
         val clock = i.resolveActivity(appContext.packageManager)?.packageName ?: return null
         try { appContext.startActivity(i) } catch (_: Throwable) { return null }

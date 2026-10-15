@@ -104,7 +104,25 @@ object PlayMusicTool : Tool {
             return playCollection(c, ctx)
         }
         val appName = args.str("app")?.trim()?.takeIf { it.isNotEmpty() }
-        val pkg = appName?.let { n ->
+        // Owner, 15 Oct 2026: the songs on the phone first — played here, no app opened (live/LocalMusic); a music app only
+        // when nothing here matches; with several music apps and no favourite yet, ask which one (and remember it).
+        var chosenPkg: String? = args.str("package")?.trim()?.takeIf { it.isNotEmpty() }
+        if (appName == null && chosenPkg == null && com.tekyerema.core.config.AppConfig.bool("music.localFirst", true)) {
+            val local = com.tekyerema.live.LocalMusic.match(com.tekyerema.live.LocalMusic.songs(ctx.appContext), query, artist)
+            if (local.isNotEmpty()) {
+                val said = com.tekyerema.live.LocalMusic.play(ctx.appContext, local)
+                return ToolResult(true, said, channel = "native", data = JSONObject().put("local", true))
+            }
+            val installed = com.tekyerema.live.MusicApps.installed(ctx.appContext)
+            val fav = com.tekyerema.live.MusicApps.preferred(ctx.appContext)?.takeIf { p -> installed.any { it.first == p } }
+            chosenPkg = fav ?: installed.singleOrNull()?.first
+            if (chosenPkg == null && installed.size > 1) {
+                com.tekyerema.live.MusicApps.pending = com.tekyerema.live.MusicApps.Pending(query, artist, installed)
+                return ToolResult(false, com.tekyerema.live.MusicApps.question(installed), needsDisambiguation = true,
+                    data = JSONObject().put("ask", com.tekyerema.live.MusicApps.question(installed)), recoverable = false)
+            }
+        }
+        val pkg = chosenPkg ?: appName?.let { n ->
             when (val m = com.tekyerema.android.AppResolver.resolveDetailed(ctx.appContext, n)) {
                 is com.tekyerema.android.AppResolver.Match.One -> m.app.packageName
                 else -> return ToolResult(false, "$n isn't installed on this phone — I can install it from the Play Store, or use another music app.",
@@ -279,6 +297,19 @@ object PlayMusicTool : Tool {
 
     /** A media key to whatever is playing, then (when the sessions are visible) say what plays now. */
     private suspend fun transport(action: String, ctx: ToolContext): ToolResult {
+        // Our own player (the phone's songs, live/LocalMusic) answers directly.
+        val local = com.tekyerema.live.LocalMusic
+        if (local.active) {
+            when (action) {
+                "pause" -> local.pause(); "resume", "play" -> local.resume(); "next" -> local.next()
+                "previous" -> local.previous(); "stop" -> local.stop()
+            }
+            val words = when (action) {
+                "pause" -> "Paused."; "stop" -> "Stopped."
+                else -> local.now()?.let { "Playing ${it.words()}." } ?: "Done."
+            }
+            return ToolResult(true, words, channel = "native", data = JSONObject().put("action", action).put("local", true))
+        }
         val code = when (action) {
             "pause" -> android.view.KeyEvent.KEYCODE_MEDIA_PAUSE
             "resume", "play" -> android.view.KeyEvent.KEYCODE_MEDIA_PLAY
@@ -317,7 +348,8 @@ object PlayMusicTool : Tool {
     override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
         val d = result.data
         // Verified only when a media session actually reported playback (or a key was delivered to a player).
-        val ok = result.success && d != null && (d.optBoolean("playing") || d.has("action"))
+        val ok = result.success && d != null && (d.optBoolean("playing") || d.has("action") ||
+            (d.optBoolean("local") && com.tekyerema.live.LocalMusic.active))
         return VerificationResult(ok, result.message)
     }
 }

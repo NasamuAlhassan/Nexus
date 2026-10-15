@@ -246,7 +246,8 @@ class LanguageLayerTest {
         val ok = HttpTranslationProvider(s, { secrets }, FakeTransport { json(200, """{"translation":"Mema wo akye"}""") }, guard())
         assertEquals("Mema wo akye", ok.translate("Good morning", Lang.GH_EN, Lang.TWI))
         val bad = HttpTranslationProvider(s, { secrets }, FakeTransport { json(503, "{}") }, guard())
-        assertNull(bad.translate("Good morning", Lang.GH_EN, Lang.TWI))
+        // (a line translated before may come from the phone's own cache — MtDiskCache; a new one fails cleanly)
+        assertNull(bad.translate("Good evening, a line never translated", Lang.GH_EN, Lang.TWI))
     }
 
     // ---------------------------------------------------------------- registry + routing

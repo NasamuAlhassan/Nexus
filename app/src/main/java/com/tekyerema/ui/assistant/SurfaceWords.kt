@@ -77,6 +77,8 @@ object ConfirmWords {
     fun buttons(text: String, twi: Boolean): Pair<String, String> {
         if (twi) return PromptSurface.buttons(PromptSurface.Kind.CONFIRM, twi = true).let { it[0] to it[1] }
         val plain = ScreenText.of(text).trim()
+        // An announced call (policy/ConfirmTiers) goes ahead by itself; the button only makes it go now.
+        if (plain.startsWith("Calling ")) return "Cancel" to "Call now"
         // The closing question names the act most exactly ("…The message: "…". Send it?" → Send); else the first word.
         val closing = CLOSING.find(plain)?.groupValues?.get(1)
         val first = plain.trimStart('“', '"').lowercase()

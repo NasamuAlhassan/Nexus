@@ -300,6 +300,26 @@ class VoiceController(
      * confirmation's question (our own voice) as the user's words. An interjection that already HEARD the user finishes
      * first, so what they said isn't lost (it becomes a revision of the proposal, see [applyInterjection]).
      */
+    /**
+     * I-26: [reply] to the waiting question is a new request of another kind ("now call him" while a send asks "How
+     * much?" — voice/understand/AnswerOrNew): the waiting task is stopped and the words run as a turn of their own.
+     * Returns false (it is the answer) otherwise.
+     */
+    private fun newRequestInsteadOfAnswer(reply: String, heard: Transcript?, source: InputSource): Boolean {
+        if (!com.tekyerema.voice.understand.AnswerOrNew.isNewRequest(reply, agent.state.value.goal)) return false
+        Log.i("Tekyerema", "[ANSWER] a new request, not the answer — the waiting question is dropped")
+        val language = forceLanguage() ?: sessionLanguage()
+        val tr = heard ?: LanguagePipeline.process(reply, language, forceLanguage(), backend = "answer-new")
+        agent.stop()
+        scope.launch {
+            var waited = 0L
+            while (agent.busy && waited < 3_000L) { kotlinx.coroutines.delay(100); waited += 100 }
+            followUpChain = 0
+            launchTurn { runTurn(tr, source) }
+        }
+        return true
+    }
+
     private fun launchOnAnswerMic(block: suspend () -> Unit): Job {
         val interjection = interjectJob?.takeIf { !it.isCompleted }
         if (interjection != null && !interjectionHeard) interjection.cancel()
@@ -390,6 +410,8 @@ class VoiceController(
                 // as said (voice/understand/AnswerContext).
                 if (text.isNotBlank()) {
                     val said = englishReply(text)
+                    if (newRequestInsteadOfAnswer(said, (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.takeIf { it.canonical == text },
+                            InputSource.ASR)) return
                     val read = com.tekyerema.voice.understand.AnswerContext.read(said, question, SpeechVocabulary.current())
                     if (read != said) {
                         Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(question)}")
@@ -655,6 +677,7 @@ class VoiceController(
             val heard = LanguagePipeline.process(t, language, forceLanguage()).canonical
             askJob?.cancel(); hideAsking(); cues.captured()
             val said = englishReply(heard)
+            if (newRequestInsteadOfAnswer(said, null, InputSource.ASR)) return true
             val read = com.tekyerema.voice.understand.AnswerContext.read(said, q, SpeechVocabulary.current())
             if (read != said) {
                 Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(q.orEmpty())}")
@@ -736,7 +759,12 @@ class VoiceController(
         val route = NewRequest.Route.ANSWER
         val seq = agent.state.value.confirmationSeq   // J-02: a typed yes/no answers the confirmation on screen NOW
         return when (agent.state.value.status) {
-            AgentStatus.ASKING -> { askJob?.cancel(); hideAsking(); cues.captured(); agent.answer(englishReply(t)); TypedResult(route, accepted = true) }
+            AgentStatus.ASKING -> {
+                askJob?.cancel(); hideAsking(); cues.captured()
+                if (!newRequestInsteadOfAnswer(englishReply(t), Transcript(raw = t, canonical = t, language = forceLanguage() ?: sessionLanguage(),
+                        reason = "typed"), InputSource.TYPED)) agent.answer(englishReply(t))
+                TypedResult(route, accepted = true)
+            }
             AgentStatus.WAITING_CONFIRMATION -> when {
                 Confirmation.looksLikeRevision(englishReply(t), agent.state.value.pendingConfirmation.orEmpty()) -> {
                     confirmJob?.cancel(); cues.captured(); agent.revise(englishReply(t)); TypedResult(route, accepted = true) }
