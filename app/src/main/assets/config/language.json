@@ -252,7 +252,7 @@
           "cacheEntries": 256
         },
         "khaya_web_asr": {
-          "_note": "Khaya web platform — Twi speech recognition. POST raw audio/wav to /asr/v1/transcribe?language=twi → {text, warnings}, ~1.7 s. NOT routed by default: the hackathon asks for the UG HCI Lab for Ghanaian-language ASR/TTS — list it under asr.online.twi only with the owner's decision.",
+          "_note": "Khaya web platform — Twi speech recognition. POST raw audio/wav to /asr/v1/transcribe?language=twi → {text, warnings}, ~1.7 s. Owner, 16 Oct 2026: routed as the BACKUP behind hcilab_asr (models.json asr.online.twi) — the hackathon asks for the UG HCI Lab, so the lab stays first.",
           "kind": "asr",
           "enabled": true,
           "quotaGroup": "khaya_web",
@@ -265,7 +265,7 @@
           "timeouts": {"connectMs": 5000, "callMs": 15000}
         },
         "khaya_web_tts": {
-          "_note": "Khaya web platform — Twi voice. POST {text, language:'twi'} to /tts/v1/synthesize → audio/wav, ~1.3 s. NOT routed by default (see khaya_web_asr).",
+          "_note": "Khaya web platform — Twi voice. POST {text, language:'twi'} to /tts/v1/synthesize → audio/wav, ~1.3 s. Owner, 16 Oct 2026: the backup behind hcilab_tts (models.json tts.twi).",
           "kind": "tts",
           "enabled": true,
           "quotaGroup": "khaya_web",

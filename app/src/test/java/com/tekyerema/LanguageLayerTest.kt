@@ -270,7 +270,9 @@ class LanguageLayerTest {
         assertEquals(setOf("hcilab_asr"), r.asr.keys)
         assertEquals(setOf("hcilab_tts"), r.tts.keys)
         assertTrue("the gateway has no translation", r.mt.isEmpty())
-        assertEquals(listOf("hcilab_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
+        // owner, 16 Oct 2026: the Khaya web platform is the backup — the HCI Lab stays first
+        assertEquals(listOf("hcilab_asr", "khaya_web_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
+        assertEquals(listOf("hcilab_tts", "khaya_web_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
         assertTrue("English stays on the phone", AppConfig.stringList("providers.speech.asr.online.gh_en", listOf("x")).isEmpty())
         assertNull("never at a PIN screen / offline", LanguageLayer.onlineAsr(Lang.TWI, r.asr, cloudAllowed = false))
     }
