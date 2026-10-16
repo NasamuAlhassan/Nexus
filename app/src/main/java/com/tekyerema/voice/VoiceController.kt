@@ -133,7 +133,9 @@ class VoiceController(
     private fun events(
         ready: () -> Unit = {}, speech: () -> Unit = {}, captured: () -> Unit = {}, partial: (String) -> Unit = {}
     ) = object : com.tekyerema.voice.io.ListenEvents {
-        override fun onReady() = ready()
+        // the moment the microphone is really open, for either recogniser — the phone-demo driver speaks on it
+        // (scripts/phone_demo.sh, 16 Oct 2026); no content
+        override fun onReady() { android.util.Log.i("Tekyerema", "[VOICE] ready to listen"); ready() }
         override fun onSpeechStart() = speech()
         override fun onCaptured() = captured()
         override fun onPartial(text: String) = partial(text)
