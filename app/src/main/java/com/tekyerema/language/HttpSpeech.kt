@@ -333,7 +333,10 @@ object HttpSpeech {
             c == 401 -> ProviderFailure(FailureKind.AUTH, "${spec.id} HTTP 401 (check the key in local.properties)")
             // Azure-APIM-style gateways (Khaya's, for one) answer an exhausted subscription with 403; either way the
             // account is refusing us, so rest it rather than retrying every turn.
-            c == 403 || c == 429 -> ProviderFailure(FailureKind.QUOTA, "${spec.id} HTTP $c (quota or access)", retry)
+            c == 403 -> ProviderFailure(FailureKind.QUOTA, "${spec.id} HTTP $c (quota or access)", retry)
+            // a bare 429 is "too many just now": rest a minute, not the 15 minutes of a spent quota — Khaya's account
+            // carries Twi hearing, voice AND translation, so a long rest took all of Twi with it (16 Oct 2026)
+            c == 429 -> ProviderFailure(FailureKind.QUOTA, "${spec.id} HTTP 429 (too many requests)", retry ?: 60_000L)
             c == 408 || c >= 500 -> ProviderFailure(FailureKind.TRANSIENT, "${spec.id} HTTP $c")
             else -> ProviderFailure(FailureKind.BAD_RESPONSE, "${spec.id} HTTP $c (request shape? check the client config)")
         }
@@ -341,7 +344,10 @@ object HttpSpeech {
 
     /** `error.code` of a JSON error body, lower-cased, or null. */
     fun errorCode(reply: HttpReply): String? = try {
-        (JSONTokener(reply.text().trim()).nextValue() as? JSONObject)?.optJSONObject("error")?.optString("code")
+        val o = JSONTokener(reply.text().trim()).nextValue() as? JSONObject
+        // the HCI Lab: {"error":{"code":…}}; Khaya's FastAPI backend: {"detail":"RATE_LIMIT_EXCEEDED"} / {"error":"…"}
+        (o?.optJSONObject("error")?.optString("code")?.takeIf { it.isNotBlank() }
+            ?: (o?.opt("detail") as? String) ?: (o?.opt("error") as? String))
             ?.trim()?.lowercase()?.ifBlank { null }
     } catch (_: Exception) { null }
 

@@ -82,7 +82,8 @@ object TwiCommands {
         Regex("^soma\\s+(?:no|ɔno)\\s+sika(?:\\s+no)?$") to "send money to him",
         Regex("^fa\\s+sika\\s+no\\s+(?:kɔ\\s?ma|ma)\\s+(?:no|ɔno)$") to "send money to him",
         Regex("^ka\\s+kyerɛ\\s+(?:no|ɔno)\\s+sɛ\\s+(?:ma|me)?soma(?:\\s+no)?(?:\\s+(?:dedaw|seesei))?$") to "tell him I've sent it",
-        Regex("^(?:seesei\\s+)?frɛ\\s+(?:no|ɔno)(?:\\s+seesei)?$") to "now call him")
+        // "seesei" (now) as Khaya hears it: "sɛ sei" — "Frɛ no sɛ, sei!" was a call to a contact "no sɛ sei" (16 Oct 2026)
+        Regex("^(?:seesei\\s+)?frɛ\\s+(?:no|ɔno)(?:\\s+(?:seesei|sesei|seisei|sɛ\\s?sei))?$") to "now call him")
     /** The owner's 15 Oct round, said in Twi [owner: verify the Twi]: walking directions ("kyerɛ me kwan kɔ Accra Mall",
      *  "fa me kɔ mall a ɛbɛn paa" — the nearest mall) and Tɛkyerɛma's own timer ("hyɛ timer simma anum" — 5 minutes). */
     private val WALK_TO = Regex("^(?:kyerɛ|kyere)\\s+me\\s+(?:ɛ)?kwan(?:\\s+a\\s+ɛkɔ)?\\s+(?:kɔ\\s+)?(.+)$|^fa\\s+me\\s+kɔ\\s+(.+)$")
@@ -132,6 +133,8 @@ object TwiCommands {
         "me momo mu sika aka sɛn" to "check my mobile money balance", "me airtime aka sɛn" to "check my airtime balance",
         "ma volume no so" to "turn the volume up", "brɛ volume no ase" to "turn the volume down",
         "bɔ nnwom bi" to "play some music", "bere bɛn ni" to "what's the time", "ɛyɛ dɔn sɛn" to "what's the time",
+        // "abɔ sɛn?" — it has struck how many: the everyday way to ask the time [owner: verify]
+        "abɔ sɛn" to "what's the time", "seesei abɔ sɛn" to "what's the time", "mprempren abɔ sɛn" to "what's the time",
         "sɔ kanea no" to "turn on the flashlight", "dum kanea no" to "turn off the flashlight")
 
     /** Letters only, ɛ→e / ɔ→o, doubled letters as one — how close two spellings SOUND, roughly. */
@@ -212,7 +215,10 @@ object TwiCommands {
     fun gloss(text: String, isContact: (String) -> Boolean = { false }): String? {
         // A polite lead-in ("Mesrɛ wo, …" please; "Mepa wo kyɛw, …") is not part of the request — with it in front no
         // pattern matched, and the English bundle parser then took the raw Twi and lost the amount (QA TW05, 3 October 2026).
-        val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(text).trim(), "").replace(Regex("\\s+"), " "), "")
+        // Khaya's recogniser punctuates its pauses — "Soma Sidi anum, Ma Prɛns, Melani." matched nothing (16 Oct 2026): a
+        // comma is a space here (one inside a figure, "1,000", is dropped)
+        val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(text).trim(), "")
+            .replace(Regex("(?<=\\d),(?=\\d{3})"), "").replace(",", " ").replace(Regex("\\s+"), " "), "")
             .let { KA_KYERE.replace(it, "ka kyerɛ ").replace(Regex("\\s+"), " ").trim() }
         if (t.isEmpty()) return null
         // Matched in lower case (Ɛ/ɛ and Ɔ/ɔ fold — a regex case flag alone doesn't, and the Unicode-case flag isn't
@@ -328,6 +334,8 @@ object TwiCommands {
         }
         CALL.find(low)?.let { m -> return "call ${who(m.g(1))}" }
         OPEN.find(low)?.let { m -> return "open ${m.g(1).trim()}" }
+        // "abɔ sɛn?" (what time is it) — too short for the near-miss match below; Khaya may write it as one word
+        if (low in setOf("abɔ sɛn", "abosɛn", "abɔsɛn", "abɔ sen", "abo sɛn")) return "what's the time"
         // Nothing exact: a near miss of a harmless whole request (never money, a call or a message — see NEAR).
         if (!Regex("\\d|soma|frɛ|cedi|pesewa|sika\\s+ma").containsMatchIn(low)) near(low)?.let { return it }
         return null

@@ -486,6 +486,8 @@ object AgentEngine {
         openTrace(goal)
         setGoal(goal)
         log(LogEntry.Kind.USER, request ?: goal)
+        // a Twi request's English is started now, while the phone's own routing runs (2–5 s on the A20e, 16 Oct 2026)
+        if (resume == null) com.tekyerema.voice.VoiceEngine.startGoalInEnglish(goal)
         if (resume != null) log(LogEntry.Kind.INFO, "Resuming a paused task (${resume.pauseReason ?: resume.state}): $goal")
         // Conversation memory: snapshot the PRIOR turns for this run's brain context, then record this
         // user turn for the NEXT one. Skipped for TEST scenarios (forcedBrain) so they stay isolated.

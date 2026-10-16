@@ -1,5 +1,6 @@
 package com.tekyerema.voice
 
+import kotlinx.coroutines.async
 import android.app.Application
 import android.content.pm.PackageManager
 import androidx.core.content.ContextCompat
@@ -77,6 +78,22 @@ object VoiceEngine {
      * translator was removed on 27 September and nothing took its place.
      */
     suspend fun goalInEnglish(goal: String): String? {
+        early?.takeIf { it.first == goal }?.let { (_, d) -> early = null; return d.await() }
+        return translateGoal(goal)
+    }
+
+    @Volatile private var early: Pair<String, kotlinx.coroutines.Deferred<String?>>? = null
+
+    /** [goal]'s English, started the moment the request reaches the agent — the translator (~0.6–1 s) then works while
+     *  the phone routes the request; [goalInEnglish] takes the finished answer. A Twi conversation only. */
+    fun startGoalInEnglish(goal: String) {
+        if (conversationLanguage() != Lang.TWI || twiToEnglish == null) { early = null; return }
+        early = goal to kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).async {
+            try { translateGoal(goal) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
+        }
+    }
+
+    private suspend fun translateGoal(goal: String): String? {
         if (conversationLanguage() != Lang.TWI && !com.tekyerema.language.TwiText.hasAkanLetters(goal)) return null
         // A Twi request the phone already understood arrives as its English command (language/TwiCommands): not Twi.
         // Its quoted message words may be Twi on purpose ("…saying “Meba anɔpa”") — they are sent as said, never translated.

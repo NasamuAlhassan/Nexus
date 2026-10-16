@@ -94,3 +94,4 @@ local.properties.*
 
 # real-phone demo takes (scripts/phone_demo.sh): the owner's real contact and number are on screen and in the logs
 demo-package/phone-run/*_take*/
+demo-package/phone-run/clips/
