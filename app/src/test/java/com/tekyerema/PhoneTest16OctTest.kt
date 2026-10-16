@@ -69,7 +69,41 @@ class PhoneTest16OctTest {
         assertFalse(r.available())
     }
 
-    @Test fun `only a client marked restOnTimeout rests on its first timeout`() = kotlinx.coroutines.test.runTest {
+    private class Voice(override val name: String, val ms: Long, val ok: Boolean) : com.tekyerema.voice.PrefetchTts {
+        val played = mutableListOf<String>()
+        override suspend fun fetch(text: String, language: String): List<ByteArray>? { delay(ms); return if (ok) listOf(ByteArray(1)) else null }
+        override suspend fun play(clips: List<ByteArray>): Boolean { played += name; return true }
+        override suspend fun speak(text: String, language: String) = fetch(text, language)?.let { play(it) } ?: false
+        override fun stop() {}
+        override fun shutdown() {}
+    }
+
+    @Test fun `a slow lab voice gets a head start, then the first audio back is played and only it`() = runBlocking {
+        val lab = Voice("lab", 1_000, true); val khaya = Voice("khaya", 30, true)
+        val chain = com.tekyerema.voice.FallbackTts(listOf(lab, khaya), hedgeMs = { 100 })
+        assertTrue(chain.speak("Wopɛ sɛ me frɛ no?", Lang.TWI))
+        assertEquals(listOf("khaya"), khaya.played); assertTrue(lab.played.isEmpty())
+        assertEquals("khaya", chain.lastVoice)
+        // the lab inside its head start speaks; Khaya is never fetched
+        val fast = Voice("lab", 10, true); val spare = Voice("khaya", 10, true)
+        assertTrue(com.tekyerema.voice.FallbackTts(listOf(fast, spare), hedgeMs = { 200 }).speak("x", Lang.TWI))
+        assertEquals(listOf("lab"), fast.played); assertTrue(spare.played.isEmpty())
+        // both network voices failing falls to the phone's voice
+        val phone = Voice("system", 0, true)
+        assertTrue(com.tekyerema.voice.FallbackTts(listOf(Voice("lab", 10, false), Voice("khaya", 10, false), phone), hedgeMs = { 50 })
+            .speak("x", Lang.TWI))
+        assertEquals(listOf("system"), phone.played)
+    }
+
+    @Test fun `a quoted message that ends its sentence keeps one full stop after translation`() {
+        val e = listOf(com.tekyerema.language.EntityTags.Entity("[Q1]", com.tekyerema.language.EntityTags.Kind.QUANTITY, "Please call me."))
+        assertEquals("So wode saa nkra yi kɔma no? Please call me.",
+            com.tekyerema.language.EntityTags.restore("So wode saa nkra yi kɔma no? [Q1].", e))
+        assertEquals("Ɔkae sɛ Hello... ", com.tekyerema.language.EntityTags.restore("Ɔkae sɛ [Q1].. ",
+            listOf(com.tekyerema.language.EntityTags.Entity("[Q1]", com.tekyerema.language.EntityTags.Kind.QUANTITY, "Hello."))))
+    }
+
+    @Test fun `only a client marked restOnTimeout rests on its first timeout`()= kotlinx.coroutines.test.runTest {
         val lab = ProviderHealth("hcilab_asr")
         runCatching { com.tekyerema.language.ProviderGuard(lab, 1_000L, restOnTimeout = true).run { delay(10_000L); "late" } }
         assertFalse("the lab rests at once", lab.available())

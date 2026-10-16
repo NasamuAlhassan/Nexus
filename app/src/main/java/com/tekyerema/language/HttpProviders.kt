@@ -145,7 +145,7 @@ class HttpTtsProvider(
     private val guard: ProviderGuard,
     private val sink: AudioSink,
     private val ledger: QuotaLedger = QuotaLedger()
-) : TtsProvider, HealthAware, com.tekyerema.voice.VoiceAvailability {
+) : com.tekyerema.voice.PrefetchTts, HealthAware, com.tekyerema.voice.VoiceAvailability {
     override val name = "http:${spec.id}"
     override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available() &&   // WS-C
         ledger.refusal(spec.id, spec.limits, QuotaLedger.Units(chars = 1)) == null
@@ -165,29 +165,35 @@ class HttpTtsProvider(
         com.tekyerema.voice.AsrMemory.onRelease(this) { clips.clear() }
     }
 
-    override suspend fun speak(text: String, language: String): Boolean {
-        val code = HttpSpeech.languageCode(spec, language) ?: return false
+    override suspend fun speak(text: String, language: String): Boolean = fetch(text, language)?.let { play(it) } ?: false
+
+    override suspend fun play(clips: List<ByteArray>): Boolean {
+        for (c in clips) if (!sink.play(c)) return false
+        return true
+    }
+
+    /** The clips for [text] — on the phone already, or fetched — without playing them; null when this voice can't say it
+     *  now (so [com.tekyerema.voice.FallbackTts] can ask two voices at once and play only the first to answer). */
+    override suspend fun fetch(text: String, language: String): List<ByteArray>? {
+        val code = HttpSpeech.languageCode(spec, language) ?: return null
         // Pause marks (voice/SpokenText) are silences on the phone's own voice; a network voice gets plain text.
         val flat = com.tekyerema.voice.SpokenText.plain(text)
         val say = if (language == Lang.TWI) TwiText.canonical(flat).trim() else flat.trim()
-        if (say.isEmpty()) return false
+        if (say.isEmpty()) return null
         // A line already on the phone — a lab clip recorded in advance and shipped in the app (LabClips), or one cached
         // earlier — plays at once: no network, no daily quota, and none of the lab's ~14 s wait (3 October 2026).
         val ready = HttpSpeech.parts(say, spec.maxChars).map { p ->
             val key = "$code|$p"
             cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)
         }
-        if (ready.isNotEmpty() && ready.all { it != null }) {
-            for (c in ready) if (!sink.play(c!!)) return false
-            return true
-        }
-        if (!available()) return false
+        if (ready.isNotEmpty() && ready.all { it != null }) return ready.map { it!! }
+        if (!available()) return null
         // The gateway takes at most spec.maxChars a request (HCI Lab: 250) — split, and leave a long reply to the phone's
         // own voice rather than spend several of a small day's requests on one answer.
         val parts = HttpSpeech.parts(say, spec.maxChars)
         if (parts.size > spec.maxParts) {
             Log.i("Tekyerema", "[TTS] $name: ${parts.size} parts (> ${spec.maxParts}) — the phone's voice says this one")
-            return false
+            return null
         }
         val clips = ArrayList<ByteArray>(parts.size)
         for (p in parts) {
@@ -197,7 +203,7 @@ class HttpTtsProvider(
                 // DEBUG builds: the line that has no recorded clip yet, so a rehearsal can list what to pre-record when the
                 // lab is up (owner's overnight mission, 14 Oct 2026). Never in a release build.
                 if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TTS-UNCACHED] key=$key")
-                ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return false }
+                ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return null }
                 try {
                     guard.run {
                         val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.tts", 10_000L)) {
@@ -210,12 +216,11 @@ class HttpTtsProvider(
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     (e as? ProviderFailure)?.window?.let { ledger.exhaust(spec.id, spec.limits, it) }
-                    ProviderGuard.log("TTS", spec.id, e); return false
+                    ProviderGuard.log("TTS", spec.id, e); return null
                 }
             }
         }
-        for (c in clips) if (!sink.play(c)) return false
-        return true
+        return clips
     }
 
     override fun stop() = sink.stop()

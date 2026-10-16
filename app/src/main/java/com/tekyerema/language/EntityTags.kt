@@ -191,7 +191,17 @@ object EntityTags {
     /** [text] with every tag replaced by [render] of its entity (default: its value). Unknown tags are left as they are. */
     fun restore(text: String, entities: List<Entity>, render: (Entity) -> String = { it.value }): String {
         val byTag = entities.associateBy { it.tag }
-        return TAG.replace(text) { m -> byTag[m.value]?.let(render) ?: m.value }
+        val out = StringBuilder()
+        var at = 0
+        for (m in TAG.findAll(text)) {
+            val v = byTag[m.value]?.let(render) ?: m.value
+            out.append(text, at, m.range.first).append(v)
+            at = m.range.last + 1
+            // a quoted message that ends its own sentence, then the translator's full stop: one stop, not two
+            // (A20e, 16 Oct 2026: "So wode saa nkra yi kɔma … ? Please call me..")
+            if (v.isNotEmpty() && v.last() in ".!?" && at < text.length && text[at] == '.' && text.getOrNull(at + 1) != '.') at++
+        }
+        return out.append(text, at, text.length).toString()
     }
 
     /** The facts line the planner gets with a tagged request: what each tag is, never asking it to translate a name. */

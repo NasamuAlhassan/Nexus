@@ -9,8 +9,22 @@ import kotlinx.coroutines.async
  * config change, not a code change.
  */
 
-/** Try TTS providers in order; the first that speaks wins. Degrades to the system engine (never silent). */
-class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider, VoiceAvailability {
+/** A voice that fetches its audio before it plays it — so two can be asked at once and only the first to answer heard. */
+interface PrefetchTts : TtsProvider {
+    /** The clips for [text] (cached or fetched), never played; null when this voice can't say it now. */
+    suspend fun fetch(text: String, language: String): List<ByteArray>?
+    suspend fun play(clips: List<ByteArray>): Boolean
+}
+
+/**
+ * Try TTS providers in order; the first that speaks wins. Degrades to the system engine (never silent).
+ *
+ * When the first two are network voices ([PrefetchTts]) the first gets [hedgeMs] (`providers.speech.ttsHedgeMs`, 6 s) to
+ * fetch its audio; still fetching, the second is asked beside it and the first audio back is played. A line the first
+ * voice already holds (a recorded lab clip, the cache) plays at once. On the A20e on 16 Oct 2026 the lab's voice timed out
+ * at 25 s before Khaya spoke a line it fetched in ~4 s.
+ */
+class FallbackTts(private val chain: List<TtsProvider>, private val hedgeMs: () -> Long = { configuredHedgeMs() }) : TtsProvider, VoiceAvailability {
     override val name = "fallback(" + chain.joinToString(",") { it.name } + ")"
     /** The first reason any voice in the chain gives for being unusable (the network voice's: key, quota, link). */
     override fun whyUnavailable(): String? = chain.firstNotNullOfOrNull { (it as? VoiceAvailability)?.whyUnavailable() }
@@ -19,12 +33,48 @@ class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider, VoiceAvai
     @Volatile var lastVoice: String? = null
         private set
     override suspend fun speak(text: String, language: String): Boolean {
-        for (p in chain) if (p.speak(text, language)) { lastVoice = p.name; return true }
+        val a = chain.getOrNull(0) as? PrefetchTts
+        val b = chain.getOrNull(1) as? PrefetchTts
+        val hedge = hedgeMs()
+        val rest = if (a != null && b != null && hedge > 0) {
+            raced(a, b, text, language, hedge)?.let { (who, clips) -> if (who.play(clips)) { lastVoice = who.name; return true } }
+            chain.drop(2)
+        } else chain
+        for (p in rest) if (p.speak(text, language)) { lastVoice = p.name; return true }
         lastVoice = null
         return false
     }
+
+    /** The first voice's audio, or the second's once [hedge] ms pass without it — whichever is back first. Null: neither. */
+    private suspend fun raced(a: PrefetchTts, b: PrefetchTts, text: String, language: String, hedge: Long): Pair<PrefetchTts, List<ByteArray>>? =
+        kotlinx.coroutines.coroutineScope {
+            val first = async { fetchOrNull(a, text, language) }
+            kotlinx.coroutines.withTimeoutOrNull(hedge) { first.join() }
+            if (first.isCompleted) return@coroutineScope first.await()?.let { a to it } ?: fetchOrNull(b, text, language)?.let { b to it }
+            Log.i("Tekyerema", "[TTS] ${a.name} still fetching after ${hedge}ms — asking ${b.name} too")
+            val pending = mutableListOf(first to a, async { fetchOrNull(b, text, language) } to b)
+            while (pending.isNotEmpty()) {
+                val (entry, clips) = kotlinx.coroutines.selects.select<Pair<Pair<kotlinx.coroutines.Deferred<List<ByteArray>?>, PrefetchTts>, List<ByteArray>?>> {
+                    pending.forEach { e -> e.first.onAwait { e to it } }
+                }
+                pending.remove(entry)
+                if (clips != null) { pending.forEach { it.first.cancel() }; return@coroutineScope entry.second to clips }
+            }
+            null
+        }
+
+    private suspend fun fetchOrNull(p: PrefetchTts, text: String, language: String): List<ByteArray>? =
+        try { p.fetch(text, language) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) { Log.w("Tekyerema", "[TTS] ${p.name} failed → next: ${e.message}"); null }
+
     override fun stop() { chain.forEach { it.stop() } }
     override fun shutdown() { chain.forEach { it.shutdown() } }
+
+    companion object {
+        fun configuredHedgeMs(): Long =
+            try { com.tekyerema.core.config.AppConfig.long("providers.speech.ttsHedgeMs", 6_000L) } catch (_: Throwable) { 6_000L }
+    }
 }
 
 /**
