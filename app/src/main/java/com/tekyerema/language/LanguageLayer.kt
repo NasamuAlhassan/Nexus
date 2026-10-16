@@ -79,7 +79,7 @@ object LanguageLayer {
             if (unusable != null) { skipped[id] = unusable; continue }
             if (!spec.limits.isEmpty) Log.i(TAG, "[LANG] $id quota: ${ledger.usage(id, spec.limits)}")
             // Backstop a little past the HTTP call timeout; the transport's own timeouts normally fire first.
-            val guard = ProviderGuard(health(spec.quotaGroup), spec.connectMs + spec.callMs + 1_000L)
+            val guard = ProviderGuard(health(spec.quotaGroup), spec.connectMs + spec.callMs + 1_000L, spec.restOnTimeout)
             val s = { secrets }
             when (spec.kind) {
                 HttpSpeechSpec.Kind.ASR -> asr[id] = HttpAsrProvider(spec, s, transport, guard, ledger)

@@ -87,13 +87,18 @@ internal fun unavailableReason(cloudAllowed: Boolean, resting: Boolean, lastFail
 }
 
 /** [window]: "day" / "week" when the API said that quota window is spent (the [QuotaLedger] then stops asking). */
-class ProviderFailure(val kind: FailureKind, message: String, val retryAfterMs: Long? = null, val window: String? = null) : Exception(message)
+/** [timedOut]: the service took longer than the client waits (not a refusal) — see [ProviderHealth.onFailure]. */
+class ProviderFailure(val kind: FailureKind, message: String, val retryAfterMs: Long? = null, val window: String? = null,
+                      val timedOut: Boolean = false) : Exception(message)
 
 /**
  * Circuit breaker for one API account (a quota group). QUOTA and AUTH rest the provider at once; TRANSIENT and
  * BAD_RESPONSE rest it after [Policy.failuresBeforeRest] in a row, each rest twice the last (capped). A success
  * closes the breaker. Resting providers are skipped by the router, so the turn goes straight to the next provider
  * or the on-device engine — the user never waits on an API we already know is down.
+ * A TIMEOUT rests it at once ([Policy.timeoutRestMs], doubling) for a client marked `restOnTimeout` (the HCI Lab): each
+ * one cost the user the whole wait — 15 s to hear, 25 s to speak — and the lab timed out on every turn of the owner's A20e
+ * test on 16 Oct 2026. Not for an account shared by several roles (Khaya: one translation timeout would rest its ears too).
  */
 class ProviderHealth(
     val id: String,
@@ -103,6 +108,7 @@ class ProviderHealth(
     data class Policy(
         val failuresBeforeRest: Int = 2,
         val transientRestMs: Long = 60_000L,
+        val timeoutRestMs: Long = 2 * 60_000L,
         val quotaRestMs: Long = 15 * 60_000L,
         val authRestMs: Long = 60 * 60_000L,
         val maxRestMs: Long = 6 * 60 * 60_000L
@@ -120,13 +126,17 @@ class ProviderHealth(
 
     @Synchronized fun onSuccess() { consecutive = 0; trips = 0; restUntil = 0L; lastFailure = null }
 
-    @Synchronized fun onFailure(kind: FailureKind, retryAfterMs: Long? = null) {
+    @Synchronized fun onFailure(kind: FailureKind, retryAfterMs: Long? = null, timedOut: Boolean = false) {
         if (kind == FailureKind.UNAVAILABLE) return
         lastFailure = kind
         val rest = when (kind) {
             FailureKind.QUOTA -> retryAfterMs?.takeIf { it > 0 } ?: policy.quotaRestMs
             FailureKind.AUTH -> policy.authRestMs
-            else -> {
+            else -> if (timedOut) {
+                consecutive = 0
+                trips++
+                policy.timeoutRestMs shl (trips - 1).coerceAtMost(8)
+            } else {
                 consecutive++
                 if (consecutive < policy.failuresBeforeRest) return
                 consecutive = 0
@@ -153,7 +163,7 @@ object ProviderHealthRegistry {
  * failure into a [ProviderFailure]. A user "stop" (plain cancellation) passes through untouched and is never held
  * against the provider.
  */
-class ProviderGuard(val health: ProviderHealth, private val backstopMs: Long) {
+class ProviderGuard(val health: ProviderHealth, private val backstopMs: Long, private val restOnTimeout: Boolean = false) {
     private class Box<T>(val value: T)
 
     suspend fun <T> run(block: suspend () -> T): T {
@@ -166,12 +176,15 @@ class ProviderGuard(val health: ProviderHealth, private val backstopMs: Long) {
             // rethrows an outer one, which then passes through as plain cancellation.
             val boxed = withTimeoutOrNull(backstopMs) { Box(block()) }
             // (recorded once, by the ProviderFailure catch below; a block may legitimately return null, hence the box)
-            if (boxed == null) throw ProviderFailure(FailureKind.TRANSIENT, "${health.id} timed out after ${backstopMs}ms")
+            if (boxed == null) throw ProviderFailure(FailureKind.TRANSIENT, "${health.id} timed out after ${backstopMs}ms", timedOut = true)
             boxed.value
         } catch (e: CancellationException) {
             throw e
         } catch (e: ProviderFailure) {
-            health.onFailure(e.kind, e.retryAfterMs); throw e
+            health.onFailure(e.kind, e.retryAfterMs, e.timedOut && restOnTimeout); throw e
+        } catch (e: java.io.InterruptedIOException) {   // OkHttp's call/read/connect timeouts (SocketTimeoutException too)
+            health.onFailure(FailureKind.TRANSIENT, timedOut = restOnTimeout)
+            throw ProviderFailure(FailureKind.TRANSIENT, "${health.id} network: ${e.message}", timedOut = true)
         } catch (e: IOException) {
             health.onFailure(FailureKind.TRANSIENT); throw ProviderFailure(FailureKind.TRANSIENT, "${health.id} network: ${e.message}")
         } catch (e: Exception) {

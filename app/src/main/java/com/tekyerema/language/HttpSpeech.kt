@@ -76,7 +76,10 @@ data class HttpSpeechSpec(
      *  `{"data":[…]}` → an event id, then GET `/gradio_api/call/<api>/<id>` → the answer as a server-sent event. */
     val dialect: String = "rest",
     /** Gradio: the endpoint's api_name (`translate`). */
-    val api: String = "translate"
+    val api: String = "translate",
+    /** One timeout rests this client's account at once (the HCI Lab, 16 Oct 2026) — for a client with a backup after it
+     *  whose account isn't shared with other roles; others rest after two failures in a row ([ProviderHealth]). */
+    val restOnTimeout: Boolean = false
 ) {
     enum class Kind { ASR, TTS, MT }
 
@@ -126,7 +129,8 @@ data class HttpSpeechSpec(
                 maxChars = req.optInt("maxChars", 0).coerceAtLeast(0),
                 maxParts = req.optInt("maxParts", 1).coerceAtLeast(1),
                 dialect = o.optString("dialect", "rest").trim().lowercase().ifBlank { "rest" },
-                api = req.optString("api", "translate").trim().ifBlank { "translate" }
+                api = req.optString("api", "translate").trim().ifBlank { "translate" },
+                restOnTimeout = o.optBoolean("restOnTimeout", false)
             )
         }
 

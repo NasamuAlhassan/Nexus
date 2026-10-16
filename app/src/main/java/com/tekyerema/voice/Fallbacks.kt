@@ -1,6 +1,7 @@
 package com.tekyerema.voice
 
 import android.util.Log
+import kotlinx.coroutines.async
 
 /**
  * Provider-agnostic voice plumbing: composites that try providers in order. [SpeechProviders] builds them from
@@ -26,19 +27,53 @@ class FallbackTts(private val chain: List<TtsProvider>) : TtsProvider, VoiceAvai
     override fun shutdown() { chain.forEach { it.shutdown() } }
 }
 
-/** Try ASR providers in order; the first that returns a transcript wins. */
-class FallbackAsr(private val chain: List<AsrProvider>) : AsrProvider {
+/**
+ * Try ASR providers in order; the first that returns a transcript wins.
+ *
+ * With [hedgeMs] > 0 (`providers.speech.asr.hedgeMs`, 7 s) the first provider gets a head start: still busy after it, the
+ * second is asked beside it and whichever answers first is used, the other cancelled. The UG HCI Lab answers in 4–6 s;
+ * on 16 Oct 2026 it timed out at 15 s on every turn before Khaya answered in 1.5–2.7 s — the A20e waited ~18 s per reply.
+ * The lab is still asked first and still wins whenever it is itself.
+ */
+class FallbackAsr(private val chain: List<AsrProvider>, private val hedgeMs: () -> Long = { configuredHedgeMs() }) : AsrProvider {
     override val name = "fallback(" + chain.joinToString(",") { it.name } + ")"
     override suspend fun transcribe(wav: ByteArray, sessionLanguage: String, forceLanguage: String?): Transcript {
-        var last: Exception? = null
-        for (p in chain) {
-            try { return p.transcribe(wav, sessionLanguage, forceLanguage) }
-            catch (e: kotlinx.coroutines.CancellationException) { throw e }   // user stop must propagate, never fall through
-            // Catch ANY provider failure — including a raw network IOException/SocketTimeout — so a timeout on
-            // the primary provider still falls through to the next tier instead of silently killing the turn.
-            catch (e: Exception) { Log.w("Tekyerema", "[ASR] ${p.name} failed → next: ${e.message}"); last = e }
+        val hedge = hedgeMs()
+        val rest = if (chain.size >= 2 && hedge > 0) {
+            raced(wav, sessionLanguage, forceLanguage, hedge)?.let { return it }
+            chain.drop(2)
+        } else chain
+        for (p in rest) attempt(p, wav, sessionLanguage, forceLanguage)?.let { return it }
+        throw AsrException("no ASR provider answered")
+    }
+
+    /** The first provider, and the second beside it once [hedge] ms pass without an answer. Null when both failed. */
+    private suspend fun raced(wav: ByteArray, s: String, f: String?, hedge: Long): Transcript? = kotlinx.coroutines.coroutineScope {
+        val first = async { attempt(chain[0], wav, s, f) }
+        kotlinx.coroutines.withTimeoutOrNull(hedge) { first.join() }
+        if (first.isCompleted) return@coroutineScope first.await() ?: attempt(chain[1], wav, s, f)
+        Log.i("Tekyerema", "[ASR] ${chain[0].name} still busy after ${hedge}ms — asking ${chain[1].name} too")
+        val pending = mutableListOf(first, async { attempt(chain[1], wav, s, f) })
+        while (pending.isNotEmpty()) {
+            val (done, t) = kotlinx.coroutines.selects.select<Pair<kotlinx.coroutines.Deferred<Transcript?>, Transcript?>> {
+                pending.forEach { d -> d.onAwait { d to it } }
+            }
+            pending.remove(done)
+            if (t != null) { pending.forEach { it.cancel() }; return@coroutineScope t }
         }
-        throw AsrException(last?.message ?: "no ASR provider available")
+        null
+    }
+
+    private suspend fun attempt(p: AsrProvider, wav: ByteArray, s: String, f: String?): Transcript? =
+        try { p.transcribe(wav, s, f) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }   // user stop must propagate, never fall through
+        // Catch ANY provider failure — including a raw network IOException/SocketTimeout — so a timeout on
+        // the primary provider still falls through to the next tier instead of silently killing the turn.
+        catch (e: Exception) { Log.w("Tekyerema", "[ASR] ${p.name} failed → next: ${e.message}"); null }
+
+    companion object {
+        fun configuredHedgeMs(): Long =
+            try { com.tekyerema.core.config.AppConfig.long("providers.speech.asr.hedgeMs", 7_000L) } catch (_: Throwable) { 7_000L }
     }
 }
 

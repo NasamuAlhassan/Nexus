@@ -145,6 +145,10 @@ object Normalizer {
     /** A cedi as the recognisers write it, for the joins below that only apply right after an amount's currency. */
     private const val CURRENCY_HEARD = "sidis|sedis|sidi|sedi|scedi|sɛdi|cedis|cedi"
     private val LAB_JOINS = listOf(
+        // Khaya's recogniser writes "sidi" the English way and glues the amount to it: "Soma 5seed is ma 0552093690."
+        // for "Soma sidi anum ma 0552093690" (the owner's A20e, 16 Oct 2026) — the money check then found no amount.
+        Regex("(\\d)((?:seed|sidi|sedi|cedi|pesewa|pɛsoa|pesoa)\\p{L}*)") to { m: MatchResult -> "${m.groupValues[1]} ${m.groupValues[2]}" },
+        Regex("(?<![\\p{L}])seed(?:\\s?is|s|i)(?![\\p{L}])") to { _: MatchResult -> "sidis" },
         // (…"se di" too: the on-device Twi model on the A20e, 3 October 2026 — "to mase di anoma ama")
         Regex("(?<![\\p{L}])(ma|so|to)?s[ie]\\s+di(?![\\p{L}])") to { m: MatchResult -> (m.groupValues[1].let { if (it.isEmpty()) "" else "$it " }) + "sidi" },
         Regex("(?<![\\p{L}])pɛ\\s+soa(?![\\p{L}])") to { _: MatchResult -> "pɛsoa" },
