@@ -10,13 +10,14 @@
    "baseUrl": "https://generativelanguage.googleapis.com/v1beta"
   },
   "speech": {
-   "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. Twi goes to the UG HCI Lab gateway (language.json hcilab_asr / hcilab_tts) when its token is in local.properties and its quota lasts; English stays on the phone. Owner, 16 Oct 2026 (morning): the Khaya web platform (khaya_web_asr / khaya_web_tts, the owner's new key) was the backup behind the HCI Lab. Owner, 16 Oct 2026 (later): \"pause the lab key … focus on the new one\" — Twi is Khaya only; to bring the lab back put hcilab_asr / hcilab_tts first in these lists (its clients and token are untouched).",
+   "_note": "B-18: provider ids per role, tried in order; the phone's engine is always the last resort. Twi goes to the UG HCI Lab gateway (language.json hcilab_asr / hcilab_tts) when its token is in local.properties and its quota lasts; English stays on the phone. Owner, 16 Oct 2026 (morning): the Khaya web platform (khaya_web_asr / khaya_web_tts, the owner's new key) was the backup behind the HCI Lab. Owner, 17 Oct 2026: option 2 — the lab's VOICE is first again (3.7 s on 16 Oct, recorded clips play at once), hearing stays Khaya's (lab ASR 37–63% word errors vs Khaya 28–44% on the owner's recordings); Khaya voice is the backup. Owner, 16 Oct 2026 (later): \"pause the lab key … focus on the new one\" — Twi is Khaya only; to bring the lab back put hcilab_asr / hcilab_tts first in these lists (its clients and token are untouched).",
    "tts": {
     "english": [
      "ghvoice",
      "system"
     ],
     "twi": [
+     "hcilab_tts",
      "khaya_web_tts",
      "system"
     ],
