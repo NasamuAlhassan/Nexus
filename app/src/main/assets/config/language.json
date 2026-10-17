@@ -7,7 +7,6 @@
         "hcilab_asr": {
           "_note": "UG HCI Lab Speech Gateway, Akan/Twi recogniser (docs: https://lab-subscription-platform.vercel.app/dashboard/documentation). POST multipart `file` (wav, ≤120 s, ≤10 MB) with a Bearer token → a transcript. The gateway URL is public; the TOKEN goes in local.properties as SPEECH_HCILAB_TOKEN=speech_live_… (never committed) — without it this client isn't built. Free plan (2026-09-28): 5/min, 10/day, 50/week, 30 min audio/week — counted on the phone (QuotaLedger), so a spent quota falls straight through to the on-device recogniser. Routed for Twi only (models.json asr.online.twi).",
           "kind": "asr",
-          "restOnTimeout": true,
           "enabled": true,
           "quotaGroup": "hcilab_asr",
           "endpoint": "https://lab-subscription-platform.vercel.app/api/v1/asr",
@@ -46,7 +45,6 @@
         "hcilab_tts": {
           "_note": "UG HCI Lab Speech Gateway, Twi voice. POST JSON {text, model_type:\"ss\", speaker:\"PT\"} (≤250 characters) → audio/wav (errors come back as JSON — never played). Token as for hcilab_asr. Free plan: 5/min, 15/day, 70/week, 5,000 characters/week, counted on the phone. A reply longer than one request (maxParts) is left to the phone's voice so the day's requests go to the short Twi lines (confirmations, questions) that matter most; those are cached in memory.",
           "kind": "tts",
-          "restOnTimeout": true,
           "enabled": true,
           "quotaGroup": "hcilab_tts",
           "endpoint": "https://lab-subscription-platform.vercel.app/api/v1/tts",
@@ -256,7 +254,7 @@
         "khaya_web_asr": {
           "_note": "Khaya web platform — Twi speech recognition. POST raw audio/wav to /asr/v1/transcribe?language=twi → {text, warnings}, ~1.7 s. Owner, 16 Oct 2026: routed as the BACKUP behind hcilab_asr (models.json asr.online.twi) — the hackathon asks for the UG HCI Lab, so the lab stays first.",
           "kind": "asr",
-          "enabled": true,
+          "enabled": false,
           "quotaGroup": "khaya_web",
           "endpoint": "https://khaya-web-backend.mangoisland-9f3b87df.swedencentral.azurecontainerapps.io/asr/v1/transcribe",
           "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_KHAYA_WEB_KEY}"},
@@ -269,7 +267,7 @@
         "khaya_web_tts": {
           "_note": "Khaya web platform — Twi voice. POST {text, language:'twi'} to /tts/v1/synthesize → audio/wav, ~1.3 s. Owner, 16 Oct 2026: the backup behind hcilab_tts (models.json tts.twi).",
           "kind": "tts",
-          "enabled": true,
+          "enabled": false,
           "quotaGroup": "khaya_web",
           "endpoint": "https://khaya-web-backend.mangoisland-9f3b87df.swedencentral.azurecontainerapps.io/tts/v1/synthesize",
           "auth": {"header": "Authorization", "prefix": "Bearer ", "key": "${SPEECH_KHAYA_WEB_KEY}"},

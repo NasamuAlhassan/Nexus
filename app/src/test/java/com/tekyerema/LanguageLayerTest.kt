@@ -271,9 +271,13 @@ class LanguageLayerTest {
         assertEquals(setOf("hcilab_tts"), r.tts.keys)
         assertTrue("the gateway has no translation", r.mt.isEmpty())
         // owner, 16 Oct 2026: the lab paused — Twi hearing and voice are the Khaya web platform's (its clients stay built)
-        assertEquals(listOf("khaya_web_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
+        assertEquals(listOf("hcilab_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
         // 17 Oct 2026 (owner, option 2): the lab's VOICE first again, Khaya hears and backs it up
-        assertEquals(listOf("hcilab_tts", "khaya_web_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
+        assertEquals(listOf("hcilab_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
+        // 17 Oct 2026 (owner, final): the lab's ASR and TTS alone for Twi — Khaya's speech clients are disabled (translation stays)
+        val withKhaya = LanguageLayer.build(clients, mapOf("SPEECH_HCILAB_TOKEN" to "speech_live_x", "SPEECH_KHAYA_WEB_KEY" to "k"), FakeTransport { json(200, "{}") }, { FakeSink() })
+        assertEquals(setOf("hcilab_asr"), withKhaya.asr.keys); assertEquals(setOf("hcilab_tts"), withKhaya.tts.keys)
+        assertTrue(withKhaya.mt.containsKey("khaya_web_mt"))
         assertTrue("English stays on the phone", AppConfig.stringList("providers.speech.asr.online.gh_en", listOf("x")).isEmpty())
         assertNull("never at a PIN screen / offline", LanguageLayer.onlineAsr(Lang.TWI, r.asr, cloudAllowed = false))
     }

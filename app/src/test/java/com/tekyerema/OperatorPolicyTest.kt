@@ -253,7 +253,6 @@ class OperatorPolicyTest {
         OperatorPolicy.cloudAllowed = false
         assertNull(com.tekyerema.language.LanguageLayer.onlineAsr(twi, r.asr, cloudAllowed = true))
         assertFalse(r.tts.getValue("hcilab_tts").speak("Mema wo akye", twi))   // the phone's own voice says it instead
-        assertFalse(r.tts.getValue("khaya_web_tts").speak("Mema wo akye", twi))
         assertEquals(0, sent)
         AppConfig.loadFrom(emptyList())
     }
