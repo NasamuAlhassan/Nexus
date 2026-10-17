@@ -260,6 +260,18 @@ class OpenAiCompatBrain(
                     coolUntil[coolKey] = System.currentTimeMillis() + cool
                     android.util.Log.w("Tekyerema", "[LLM] 429 on key #${chosen + 1}/${keys.size} → cooling ${cool}ms${if (daily) " (daily quota)" else ""}")
                 }
+                // A key the provider REJECTS (401 "Invalid API Key"): skip it for hours and take the next key — it used to end
+                // the whole Groq attempt, so every step went on to Gemini (3–8 s slower) while three good keys sat unused
+                // (A20e, 17 Oct 2026: GROQ_API_KEY_2, seven times). Only when no key is left does the step fail.
+                code == 401 -> {
+                    coolUntil[coolKey] = System.currentTimeMillis() + 6 * 3_600_000L
+                    val now = System.currentTimeMillis()
+                    val live = keys.indices.count { (coolUntil["$model|${keys[it]}"] ?: 0L) <= now }
+                    android.util.Log.w("Tekyerema", "[LLM] key #${chosen + 1}/${keys.size} was rejected (401) — skipping it " +
+                        "for 6 h ($live usable key(s) left); check GROQ_API_KEY_${chosen + 1} in local.properties")
+                    if (live == 0) return@withContext AgentDecision.Fail("LLM HTTP 401: ${text.take(220)}")
+                    continue
+                }
                 // Still over the per-request limit: lower the reply allowance by the overshoot once and resend.
                 code == 413 && !shrunk && TOO_LARGE.containsMatchIn(text) -> {
                     shrunk = true
