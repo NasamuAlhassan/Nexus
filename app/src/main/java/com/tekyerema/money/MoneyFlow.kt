@@ -338,7 +338,10 @@ object MoneyFlow {
         val t = answer.trim().trim('.', '!', '"', '“', '”').trim()
         if (t.isEmpty()) return null
         if (Regex("(?i)^(?:no(?:ne| reference)?|nothing|skip(?: it)?|leave it(?: empty| blank)?|no need|any(?:thing)?)$").matches(t)) return "Payment"
-        return t.removePrefix("the reference is ").removePrefix("reference ").removePrefix("it's ").removePrefix("it is ").trim().take(30)
+        // USSD takes the phone's basic alphabet: the Twi letters ɛ / ɔ (a Twi recogniser's "transpɔt") can't be typed into
+        // MTN's menu — and "transpɔt" was read back as the reference (A20e, 17 Oct 2026). Plain letters instead.
+        return t.removePrefix("the reference is ").removePrefix("reference ").removePrefix("it's ").removePrefix("it is ").trim()
+            .replace('ɛ', 'e').replace('Ɛ', 'E').replace('ɔ', 'o').replace('Ɔ', 'O').take(30)
     }
     /** "I want you to buy" and nothing more: what, how much, for whom — asked once, answered as a whole request. */
     const val WHAT_PREFIX = "What should I buy"

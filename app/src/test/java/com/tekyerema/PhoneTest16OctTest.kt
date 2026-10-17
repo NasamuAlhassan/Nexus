@@ -123,4 +123,10 @@ class PhoneTest16OctTest {
         runCatching { com.tekyerema.language.ProviderGuard(khaya, 1_000L).run { delay(10_000L); "late" } }
         assertTrue("one timeout doesn't rest a shared account", khaya.available())
     }
+
+    @Test fun `a reference said in Twi letters is typed with plain letters for the USSD menu`() {
+        assertEquals("transpot", com.tekyerema.money.MoneyFlow.referenceOf("transpɔt"))   // typeable on a USSD menu; no ɔ
+        assertEquals("food", com.tekyerema.money.MoneyFlow.referenceOf("food."))
+        assertEquals("Payment", com.tekyerema.money.MoneyFlow.referenceOf("no reference"))
+    }
 }
