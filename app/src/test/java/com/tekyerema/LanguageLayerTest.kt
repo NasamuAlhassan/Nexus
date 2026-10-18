@@ -291,8 +291,9 @@ class LanguageLayerTest {
         val clients = AppConfig.obj("providers.speech.clients")
         // Our own Spaces first (free), then Khaya, then Google — each only built with its own local.properties entry.
         // 15 Oct 2026: the Khaya web platform first (~0.6 s; the Space took 3–8 s), then our Spaces, the old Khaya, Google.
-        assertEquals(listOf("khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.twiToEn", emptyList()))
-        assertEquals(listOf("khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"), AppConfig.stringList("providers.speech.mt.enToTwi", emptyList()))
+        // 18 Oct 2026 (owner): the shipped app translates with our own NLLB only — no Khaya, no Google in the chain.
+        assertEquals(listOf("space_mt", "nllb_mt"), AppConfig.stringList("providers.speech.mt.twiToEn", emptyList()))
+        assertEquals(listOf("space_mt", "nllb_mt"), AppConfig.stringList("providers.speech.mt.enToTwi", emptyList()))
         val nllb = FakeTransport { json(200, """{"translation":"Send ten cedis to Ama"}""") }
         val n = LanguageLayer.build(clients, mapOf("SPEECH_NLLB_URL" to "https://x-tekyerema-translate.hf.space/translate",
             "SPEECH_NLLB_TOKEN" to "n-key"), nllb, { FakeSink() })
@@ -327,7 +328,8 @@ class LanguageLayerTest {
         assertEquals("Bearer w-key", web.requests.single().header("Authorization"))
         // Both keys: Google is asked first.
         val both = LanguageLayer.build(clients, mapOf("SPEECH_GOOGLE_TRANSLATE_KEY" to "g", "SPEECH_KHAYA_KEY" to "k"), google, { FakeSink() })
-        assertEquals("khaya_mt", LanguageLayer.mtIds(Lang.TWI, Lang.GH_EN).first { it in both.mt })
+        // The chain no longer names them, so their keys alone build nothing that is asked.
+        assertTrue(LanguageLayer.mtIds(Lang.TWI, Lang.GH_EN).none { it in both.mt })
     }
 
     /** Our language Space speaks Gradio's two-step API; its answer is a JSON STRING with "translation" and "covered"

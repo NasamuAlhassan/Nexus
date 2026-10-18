@@ -1651,12 +1651,13 @@ class LocalFastRouter(
         // see the foreground, so announce the attempt instead of claiming the result. If it never comes up,
         // fall through: the agent observes the real screen and either finishes the job or says why not.
         val c = controller() ?: return action("OPEN_APP", "Opening ${app.label}.")
-        // Up to ~6 s: a cold start of a heavy app (Chrome, a bank app) on a low-end phone routinely takes 3–5 s,
-        // and a slow launch is not a failure. Polling is cheap — foregroundPackage() reads event-tracked state.
-        val (ok, fg) = com.tekyerema.verifier.Verify.pollLaunched(c, app.packageName, prevFg)
+        // About a second: a warm app is in front by then ("X is open."). A cold start of a heavy app (Instagram, a bank app)
+        // on a low-end phone takes 3-6 s — the launch is already under way, so say "Opening X." at once instead of waiting and
+        // then handing a plain "open X" to the cloud brain (owner, 18 Oct 2026: "open Instagram" sat on "thinking").
+        val (ok, fg) = com.tekyerema.verifier.Verify.pollLaunched(c, app.packageName, prevFg, attempts = 5)
         if (!ok) {
-            Log.i(TAG, "[LOCAL_FAST_PATH] OPEN_APP ${app.packageName} not in front (fg=$fg) → agent")
-            return null
+            Log.i(TAG, "[LOCAL_FAST_PATH] OPEN_APP ${app.packageName} still starting (fg=$fg) → said so, no agent")
+            return action("OPEN_APP", "Opening ${app.label}.")
         }
         return action("OPEN_APP", "${app.label} is open.")
     }

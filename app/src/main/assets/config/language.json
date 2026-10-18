@@ -39,7 +39,7 @@
           },
           "timeouts": {
             "connectMs": 6000,
-            "callMs": 75000
+            "callMs": 150000
           }
         },
         "hcilab_tts": {
@@ -275,7 +275,7 @@
           "fixedLanguage": "twi",
           "request": {"api": "asr_b64"},
           "response": {"kind": "json", "path": "text"},
-          "timeouts": {"connectMs": 6000, "callMs": 45000}
+          "timeouts": {"connectMs": 6000, "callMs": 100000}
         },
         "space_tts": {
           "_note": "OUR OWN Twi voice (tekyerema-tts-twi) on the language Space — the backup behind hcilab_tts, whose new lines take 20-90+ s (18 Oct 2026). Gradio two-step API tts (text + language -> a WAV file to download), 1-2 s. Twi only.",
@@ -342,8 +342,8 @@
       },
       "mt": {
         "_note": "Translator ids per direction, tried in order (a client without its key isn't built and is skipped). enToTwi localizes English replies for a Twi speaker (ReplyLocalizer: never text with numbers/money, names must survive, else the original is spoken). twiToEn puts a Twi request into English for the cloud planner, which gets BOTH (VoiceEngine.goalInEnglish → RoutingBrain.cloudGoalFor).",
-        "enToTwi": ["khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"],
-        "twiToEn": ["khaya_web_mt", "space_mt", "nllb_mt", "khaya_mt", "google_mt"],
+        "enToTwi": ["space_mt", "nllb_mt"],
+        "twiToEn": ["space_mt", "nllb_mt"],
         "localizeReplies": true,
         "maxChars": 400
       }
