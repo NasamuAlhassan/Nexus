@@ -47,7 +47,9 @@ object PushedPin {
         "$network will ask for your PIN in a moment. I'll go quiet when it comes — then enter your PIN, or use the volume keys."
 
     /** Said the moment the prompt is in front (after the voice was silenced): two words, then nothing. */
-    fun arrivedLine(): String = "PIN now."
+    // Was "PIN now." (8 characters): the owner's Mashup purchase on the A20e, 17 Oct 2026, was never finished — two words said once,
+    // over a muted voice, and he didn't take them for an ask. Said as a request, with the volume-key tip (taught three times).
+    fun arrivedLine(): String = "MTN is asking for your PIN. Enter it now."
 
     /** A payment confirmation arrived before the PIN: the user confirms it themselves; the watch goes on. */
     fun confirmFirstLine(network: String): String =
@@ -85,7 +87,7 @@ object PushedPin {
                         try { com.tekyerema.agent.helper.HelperGate.atPin() } catch (_: Throwable) {}
                         Log.i(TAG, "[MONEY] the network's pushed PIN prompt arrived after ${(android.os.SystemClock.uptimeMillis() - started) / 1000} s — voice silenced, secure step, pad armed")
                         try { onArrived(kind) } catch (_: Throwable) {}
-                        try { VoiceEngine.announce(arrivedLine()) } catch (_: Throwable) {}
+                        try { VoiceEngine.announce(arrivedLine() + com.tekyerema.money.PinPad.handOffTip()) } catch (_: Throwable) {}
                         AfterPin.watch(ctrl, app, network?.lowercase())
                         return@launch
                     }

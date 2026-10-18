@@ -26,7 +26,7 @@ class PushedPinTest {
         val waiting = PushedPin.waitingLine("MTN")
         assertTrue(waiting, waiting.startsWith("MTN will ask for your PIN in a moment"))
         assertTrue("short enough to be over before the prompt lands", waiting.length < 140)
-        assertEquals("PIN now.", PushedPin.arrivedLine())
+        assertEquals("MTN is asking for your PIN. Enter it now.", PushedPin.arrivedLine())
         assertTrue(PushedPin.lateLine("MTN").contains("star 1 7 0 hash"))
         assertTrue(PushedPin.confirmFirstLine("MTN").contains("confirm"))
         // Nothing here ever says, keeps or types a PIN digit.

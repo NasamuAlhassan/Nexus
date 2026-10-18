@@ -91,10 +91,22 @@ object AfterPin {
         job = scope.launch {
             val deadline = android.os.SystemClock.uptimeMillis() + SecureStep.MAX_MS
             var gone = 0
+            var told = false
             while (android.os.SystemClock.uptimeMillis() < deadline) {
                 delay(900)
                 val s = try { UssdDialog.read(ctrl) } catch (_: Throwable) { null }
-                if (s == null) { if (++gone > 25) return@launch; continue }      // no dialog for ~22 s: closed or cancelled
+                if (s == null) {
+                    gone++
+                    // The PIN went in and the dialog closed with no answer on the screen: MTN replies by TEXT. It used to end in
+                    // silence (the owner's Mashup, 17 Oct 2026: "I didn't complete it") — say so, once.
+                    if (gone == 5 && !told) {
+                        told = true
+                        Log.i(TAG, "[MONEY] the dialog closed after the PIN with no answer on screen — told the user the result comes by text")
+                        try { VoiceEngine.announce("PIN sent. MTN will text you the result, and I'll read it out when it comes.") } catch (_: Throwable) {}
+                    }
+                    if (gone > 25) { PinPad.disarm(); SecureStep.end(); return@launch }   // no dialog for ~22 s: closed or cancelled
+                    continue
+                }
                 gone = 0
                 if (s.hasInput || s.masked) continue                              // still asking for something: not ours to read
                 val withBalance = app?.let { a -> try { com.tekyerema.phonecare.PhoneAlerts.balanceAloud(a) } catch (_: Throwable) { false } } ?: false
