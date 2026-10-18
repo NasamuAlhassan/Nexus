@@ -38,6 +38,9 @@ import kotlin.coroutines.resume
 object OnDeviceVoice {
     const val FILE = "voice.json"
     const val VITS_PIPER = "vits-piper"
+    /** A character VITS (Meta MMS architecture) with no espeak: the Kusaal phone voice (owner, 18 October 2026) —
+     *  campaign/kaggle/kus-ondevice. Its tokens are letters; sherpa-onnx lower-cases ASCII only, so [forModel] does. */
+    const val VITS_MMS = "vits-mms"
 
     data class Spec(
         val type: String,
@@ -50,14 +53,25 @@ object OnDeviceVoice {
         val lengthScale: Float = 1f,
         val noiseScale: Float = 0.667f,
         val noiseScaleW: Float = 0.8f,
-        val say: Map<String, String> = emptyMap()
+        val say: Map<String, String> = emptyMap(),
+        /** The one language a [VITS_MMS] voice speaks (voice.json "language", e.g. "kus"); null = English (Piper). */
+        val language: String? = null
     )
+
+    /** Whether this voice may say a line in [language]: a Piper voice is English (never Twi); an MMS voice only its own. */
+    fun speaks(s: Spec, language: String): Boolean =
+        if (s.type == VITS_MMS) s.language != null && language.equals(s.language, ignoreCase = true) else language != Lang.TWI
+
+    /** The text as the model's front-end wants it: an MMS voice's letters are lower-case tokens (ɛ, ɔ, ʋ included). */
+    fun forModel(s: Spec, text: String): String = if (s.type == VITS_MMS) text.lowercase() else text
 
     /** A `voice.json`, or null when it names a type this build can't run or lacks a file it needs. */
     fun parse(json: String): Spec? {
         val o = try { JSONObject(json) } catch (_: Throwable) { return null }
         val type = o.optString("type").trim()
-        if (type != VITS_PIPER) return null
+        if (type != VITS_PIPER && type != VITS_MMS) return null
+        val language = o.optString("language").trim().ifEmpty { null }
+        if (type == VITS_MMS && language == null) return null
         val model = o.optString("model").trim().ifEmpty { return null }
         val tokens = o.optString("tokens", "tokens.txt").trim().ifEmpty { return null }
         val say = LinkedHashMap<String, String>()
@@ -68,7 +82,7 @@ object OnDeviceVoice {
             lengthScale = o.optDouble("lengthScale", 1.0).toFloat().coerceIn(0.5f, 2f),
             noiseScale = o.optDouble("noiseScale", 0.667).toFloat().coerceIn(0f, 1.5f),
             noiseScaleW = o.optDouble("noiseScaleW", 0.8).toFloat().coerceIn(0f, 1.5f),
-            say = say)
+            say = say, language = language)
     }
 
     /** [text] with this voice's own pronunciations put in: whole words only, any case, longest entry first (so
@@ -177,8 +191,9 @@ class SherpaTts(context: Context, private val dir: String = "models/ondevice/eng
     }
 
     override suspend fun speak(text: String, language: String): Boolean {
-        if (text.isBlank() || language == Lang.TWI) return false
+        if (text.isBlank()) return false
         val s = spec ?: return false
+        if (!OnDeviceVoice.speaks(s, language)) return false
         if (!enabled() || loadError != null) return false
         NowSpeaking.begin()
         val line = Line()
@@ -216,7 +231,7 @@ class SherpaTts(context: Context, private val dir: String = "models/ondevice/eng
     private fun play(line: Line, s: OnDeviceVoice.Spec, raw: String): Boolean {
         if (line.cancelled) return true
         val tts = load(s) ?: return false
-        val pieces = OnDeviceVoice.plan(OnDeviceVoice.say(raw, s.say),
+        val pieces = OnDeviceVoice.plan(OnDeviceVoice.forModel(s, OnDeviceVoice.say(raw, s.say)),
             AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
             AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60))
         if (pieces.none { it.text != null }) return false
