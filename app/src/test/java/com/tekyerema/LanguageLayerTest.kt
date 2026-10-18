@@ -271,7 +271,8 @@ class LanguageLayerTest {
         assertEquals(setOf("hcilab_tts"), r.tts.keys)
         assertTrue("the gateway has no translation", r.mt.isEmpty())
         // owner, 16 Oct 2026: the lab paused — Twi hearing and voice are the Khaya web platform's (its clients stay built)
-        assertEquals(listOf("hcilab_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
+        // 18 Oct 2026: our own Twi hearing model on the Space backs the lab up (the lab has 10 hearings a day)
+        assertEquals(listOf("hcilab_asr", "space_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
         // 17 Oct 2026 (owner, option 2): the lab's VOICE first again, Khaya hears and backs it up
         assertEquals(listOf("hcilab_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
         // 17 Oct 2026 (owner, final): the lab's ASR and TTS alone for Twi — Khaya's speech clients are disabled (translation stays)
@@ -358,10 +359,7 @@ class LanguageLayerTest {
         val clients = AppConfig.obj("providers.speech.clients")
         val space = FakeTransport { r ->
             if (r.method == "POST") json(200, """{"event_id":"ev9"}""")
-            else HttpReply(200, "event: complete
-data: [\"wosika a aka y\u025b sidi duono\"]
-
-".toByteArray(), "text/event-stream", null)
+            else HttpReply(200, ("event: complete\ndata: [\"wosika a aka y\\u025b sidi duono\"]\n\n").toByteArray(), "text/event-stream", null)
         }
         val r = LanguageLayer.build(clients, mapOf("SPEECH_SPACE_URL" to "https://princealhassannasamu-tekyerema-lang.hf.space"), space, { FakeSink() })
         val asr = r.asr.getValue("space_asr")
