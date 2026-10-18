@@ -118,6 +118,13 @@ class RunGoalReceiver : BroadcastReceiver() {
             com.tekyerema.voice.VoiceDebug.transcribeFileAndRun(context.applicationContext, name, intent.getStringExtra("lang"))
             return
         }
+        // Queue recordings for the next listens (WAV files in the app's external files dir): --es inject_wav w1.wav,w2.wav | clear
+        intent.getStringExtra("inject_wav")?.let { names ->
+            if (names == "clear") com.tekyerema.voice.DebugMicInject.clear()
+            else com.tekyerema.voice.DebugMicInject.add(context.getExternalFilesDir(null), names)
+            Log.i("Tekyerema", "[VOICE-DEBUG] inject_wav $names")
+            return
+        }
         intent.getStringExtra("mic_test")?.let {
             com.tekyerema.voice.VoiceDebug.micTest(context.applicationContext)
             return

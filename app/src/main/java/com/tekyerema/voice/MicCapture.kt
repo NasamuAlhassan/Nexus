@@ -106,6 +106,13 @@ class MicCapture(
         onListening: () -> Unit,
         onSpeechStart: () -> Unit
     ): CaptureResult = withContext(Dispatchers.IO) {
+        // Debug builds only: a recording the tester queued (adb `inject_wav`) stands in for what the microphone would hear.
+        if (!echoCancelled && com.tekyerema.BuildConfig.DEBUG) DebugMicInject.next()?.let { f ->
+            onListening(); kotlinx.coroutines.delay(350); onSpeechStart(); kotlinx.coroutines.delay(150)
+            val bytes = f.readBytes()
+            android.util.Log.i("Tekyerema", "[VOICE] injected recording ${f.name} (${bytes.size} bytes)")
+            return@withContext CaptureResult.Success(bytes, ((bytes.size - 44) / 32L).coerceAtLeast(300L))
+        }
         // B-03: the silence strategy for this capture — explicit, else this mic's default, else the constructor values.
         val strat = strategy ?: defaultStrategy?.invoke()
         silero?.configure(strat?.hangoverMs ?: VadStrategy.NORMAL.hangoverMs, strat?.maxUtteranceMs ?: VadStrategy.NORMAL.maxUtteranceMs)
@@ -381,4 +388,12 @@ object Wav {
         s("data"); i32(pcm.size); out.write(pcm)
         return out.toByteArray()
     }
+}
+
+/** Debug hook: recordings (in the app's external files dir) the next listens will "hear", in order. */
+object DebugMicInject {
+    private val queue = java.util.concurrent.ConcurrentLinkedQueue<java.io.File>()
+    fun add(dir: java.io.File?, names: String) { names.split(',').map { it.trim() }.filter { it.isNotEmpty() }.forEach { n -> if (dir != null) queue.add(java.io.File(dir, n)) } }
+    fun clear() = queue.clear()
+    fun next(): java.io.File? = queue.poll()?.takeIf { it.isFile }
 }
