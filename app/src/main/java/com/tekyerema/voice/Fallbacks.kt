@@ -9,6 +9,25 @@ import kotlinx.coroutines.async
  * config change, not a code change.
  */
 
+/**
+ * The English voice Settings › Voice names (owner, 18 October 2026: Ghanaian as the fourth accent beside British,
+ * Nigerian and American). Automatic or Ghanaian: our own on-device voice, the phone's engine behind it so a failed
+ * model is never silence. British, Nigerian or American: the phone's engine alone — before this, a bundled own voice
+ * spoke first whatever accent was picked.
+ */
+class AccentTts(
+    private val own: TtsProvider,
+    private val system: TtsProvider,
+    private val ownFirst: () -> Boolean = { TtsAccent.ownVoiceFirst() }
+) : TtsProvider {
+    private val both = FallbackTts(listOf(own, system))
+    override val name = "accent(${own.name}|${system.name})"
+    override suspend fun speak(text: String, language: String): Boolean =
+        if (ownFirst()) both.speak(text, language) else system.speak(text, language)
+    override fun stop() { own.stop(); system.stop() }
+    override fun shutdown() { own.shutdown(); system.shutdown() }
+}
+
 /** A voice that fetches its audio before it plays it — so two can be asked at once and only the first to answer heard. */
 interface PrefetchTts : TtsProvider {
     /** The clips for [text] (cached or fetched), never played; null when this voice can't say it now. */

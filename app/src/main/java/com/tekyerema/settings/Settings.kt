@@ -224,7 +224,7 @@ class Settings(context: Context) {
         get() = prefs.getInt(KEY_RATE, 1)
         set(v) = put { putInt(KEY_RATE, v.coerceIn(0, 2)) }
 
-    /** The English voice's accent (voice/TtsAccent): "auto" | "GB" | "NG" | "US". */
+    /** The English voice's accent (voice/TtsAccent): "auto" | "GH" | "GB" | "NG" | "US". */
     var ttsAccent: String
         get() = prefs.getString(KEY_TTS_ACCENT, com.tekyerema.voice.TtsAccent.AUTO) ?: com.tekyerema.voice.TtsAccent.AUTO
         set(v) = put { putString(KEY_TTS_ACCENT, v.takeIf { it in com.tekyerema.voice.TtsAccent.CHOICES } ?: com.tekyerema.voice.TtsAccent.AUTO) }

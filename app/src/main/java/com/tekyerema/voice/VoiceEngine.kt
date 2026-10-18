@@ -37,7 +37,10 @@ object VoiceEngine {
     @Volatile private var sherpa: SherpaAsr? = null
     /** The app's own Ghanaian-English voice ([SherpaTts]) when this build carries one; null ⇒ the phone's engine only. */
     @Volatile private var ownVoice: SherpaTts? = null
-    /** What says an English line outside a voice turn: the own voice first, then the phone's engine (never silent). */
+    /** Whether this build carries the own Ghanaian voice (Settings › Voice says so beside the "Ghanaian English" choice). */
+    val hasOwnVoice: Boolean get() = ownVoice != null
+    /** What says an English line outside a voice turn: [AccentTts] — the accent chosen in Settings decides whether the
+     *  own voice goes first; the phone's engine is always behind it (never silent). */
     private lateinit var englishVoice: TtsProvider
     /** The voice the turns reply with (RoutingTts: English, or Twi with its fall-backs), for lines said outside a turn. */
     @Volatile private var replyVoice: TtsProvider? = null
@@ -215,7 +218,7 @@ object VoiceEngine {
         // words). Present only when the build bundles one (assets/models/ondevice/eng/tts/voice.json); it speaks first
         // and the phone's engine stays behind it, so a missing or failed model is never silence.
         val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
-        englishVoice = if (own != null) FallbackTts(listOf(own, systemVoice)) else systemVoice
+        englishVoice = if (own != null) AccentTts(own, systemVoice) else systemVoice
         stage("ownVoice")
         android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}")
         val levels = ArrayList<StateFlow<Float>>()

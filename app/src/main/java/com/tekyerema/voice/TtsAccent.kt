@@ -8,15 +8,22 @@ package com.tekyerema.voice
  */
 object TtsAccent {
     const val AUTO = "auto"
-    val CHOICES = listOf(AUTO, "GB", "NG", "US")
+    /** Tɛkyerɛma's own Ghanaian-English voice, on the phone (owner, 18 October 2026: "add it as the fourth ... so fast
+     *  and good" — a small Piper voice taught by our fine-tuned F5 voice, see campaign/kaggle/ghen-piper-f5). */
+    const val GHANA = "GH"
+    val CHOICES = listOf(AUTO, GHANA, "GB", "NG", "US")
 
     @Volatile var value: String = AUTO
+
+    /** Our own voice speaks first for Automatic and Ghanaian; a country the user picked is the phone's engine alone. */
+    fun ownVoiceFirst(choice: String = value): Boolean = choice == AUTO || choice.equals(GHANA, ignoreCase = true)
 
     /** The country codes to try, best first — the chosen one, then Ghana, then British, Nigerian, American English. */
     fun order(choice: String = value): List<String> =
         (listOfNotNull(choice.takeIf { it != AUTO && it.isNotBlank() }?.uppercase()) + listOf("GH", "GB", "NG", "US")).distinct()
 
     fun label(choice: String): String = when (choice.uppercase()) {
-        "GB" -> "British English"; "NG" -> "Nigerian English"; "US" -> "American English"; else -> "Automatic"
+        GHANA -> "Ghanaian English"; "GB" -> "British English"; "NG" -> "Nigerian English"; "US" -> "American English"
+        else -> "Automatic"
     }
 }

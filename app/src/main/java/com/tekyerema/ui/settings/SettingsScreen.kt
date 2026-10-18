@@ -231,6 +231,10 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
         GlassGroup("English voice") { Column(Modifier.selectableGroup()) {
             ChoiceRow("Automatic", "Tɛkyerɛma's own Ghanaian voice when it is installed; British English until then.",
                 accent == com.tekyerema.voice.TtsAccent.AUTO) { settings.ttsAccent = com.tekyerema.voice.TtsAccent.AUTO }
+            ChoiceRow("Ghanaian English",
+                if (com.tekyerema.voice.VoiceEngine.hasOwnVoice) "Tɛkyerɛma's own voice. Works without the internet."
+                else "Not in this version of the app yet. British English speaks until it is.",
+                accent == com.tekyerema.voice.TtsAccent.GHANA) { settings.ttsAccent = com.tekyerema.voice.TtsAccent.GHANA }
             ChoiceRow("British English", selected = accent == "GB") { settings.ttsAccent = "GB" }
             ChoiceRow("Nigerian English", selected = accent == "NG") { settings.ttsAccent = "NG" }
             ChoiceRow("American English", selected = accent == "US", divider = false) { settings.ttsAccent = "US" }
