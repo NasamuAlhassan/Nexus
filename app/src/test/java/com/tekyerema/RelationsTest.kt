@@ -54,6 +54,12 @@ class RelationsTest {
         assertNull(Relations.parseForget("forget ama"))
     }
 
+    @Test fun filler_words_after_the_name_are_not_part_of_it() {
+        assertEquals("my wife", ContactResolver.aliasesFor("my wife now").first())
+        assertEquals("Kofi", ContactResolver.aliasesFor("Kofi please").first())
+        assertEquals("Now", ContactResolver.aliasesFor("Now").first())
+    }
+
     @Test fun a_told_relation_is_tried_first_when_resolving_a_contact() {
         assertEquals("my mum", ContactResolver.aliasesFor("my mum").first())
         Relations.set("mother", "Ama Mensah")

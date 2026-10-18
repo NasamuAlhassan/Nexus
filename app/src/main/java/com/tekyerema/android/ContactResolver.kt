@@ -78,8 +78,12 @@ object ContactResolver {
         "grandparent" to listOf("grandparent", "grandma", "grandpa", "nana"), "child" to listOf("child", "my child")
     )
 
+    private val FILLER_TAIL = Regex("(?i)(?:\\s+(?:please|now|right now|for me|today))+$")
+
     /** The saved-name candidates to try for a spoken name: itself first, then its aliases. Pure → unit-tested. */
-    fun aliasesFor(name: String): List<String> {
+    fun aliasesFor(rawName: String): List<String> {
+        // "Call my wife now": the planner can hand the tool the whole phrase; the filler words are not part of the name.
+        val name = rawName.trim().replace(FILLER_TAIL, "").ifBlank { rawName.trim() }
         val key = name.trim().lowercase().removePrefix("my ").trim()
         val cfg = com.tekyerema.core.config.AppConfig.stringList("os.contacts.aliases.$key", emptyList())
         // C-03 / H-08: a relationship the user told us ("Ama Mensah is my mother") comes FIRST — it is what they meant,
