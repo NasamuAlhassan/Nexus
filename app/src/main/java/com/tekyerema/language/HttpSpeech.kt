@@ -434,5 +434,19 @@ object HttpSpeech {
         return cur
     }
 
+    /** The voice file's URL from a Gradio TTS event stream (`event: complete` / `data: [{"url": …}]`); throws BAD_RESPONSE when absent. */
+    fun gradioFileUrl(spec: HttpSpeechSpec, stream: String): String {
+        var event = ""
+        for (line in stream.lineSequence()) {
+            val l = line.trimEnd('\r')
+            if (l.startsWith("event:")) event = l.removePrefix("event:").trim()
+            else if (l.startsWith("data:") && event == "complete") {
+                val arr = try { JSONArray(l.removePrefix("data:").trim()) } catch (e: Exception) { throw bad(spec, "complete event is not a list") }
+                (arr.optJSONObject(0)?.optString("url"))?.takeIf { it.startsWith("https://") }?.let { return it }
+            }
+        }
+        throw bad(spec, "no audio file in the reply")
+    }
+
     private fun bad(spec: HttpSpeechSpec, why: String) = ProviderFailure(FailureKind.BAD_RESPONSE, "${spec.id}: $why")
 }

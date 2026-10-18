@@ -274,7 +274,8 @@ class LanguageLayerTest {
         // 18 Oct 2026: our own Twi hearing model on the Space backs the lab up (the lab has 10 hearings a day)
         assertEquals(listOf("hcilab_asr", "space_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
         // 17 Oct 2026 (owner, option 2): the lab's VOICE first again, Khaya hears and backs it up
-        assertEquals(listOf("hcilab_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
+        // 18 Oct 2026: our own Twi voice on the Space is the second voice (the lab's new lines take 20-90 s)
+        assertEquals(listOf("hcilab_tts", "space_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
         // 17 Oct 2026 (owner, final): the lab's ASR and TTS alone for Twi — Khaya's speech clients are disabled (translation stays)
         val withKhaya = LanguageLayer.build(clients, mapOf("SPEECH_HCILAB_TOKEN" to "speech_live_x", "SPEECH_KHAYA_WEB_KEY" to "k"), FakeTransport { json(200, "{}") }, { FakeSink() })
         assertEquals(setOf("hcilab_asr"), withKhaya.asr.keys); assertEquals(setOf("hcilab_tts"), withKhaya.tts.keys)
@@ -369,6 +370,26 @@ class LanguageLayerTest {
         assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/asr_b64", call.url.toString())
         assertTrue(bodyText(call).endsWith(""","twi"]}"""))
         assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/asr_b64/ev9", result.url.toString())
+    }
+
+    /** Our own Twi voice on the Space (tts): text + language in, a WAV file URL out, then the file itself. */
+    @Test fun our_own_twi_voice_on_the_space_is_called_the_gradio_way() = runTest {
+        AppConfig.loadFrom(shippedConfig())
+        val clients = AppConfig.obj("providers.speech.clients")
+        val wav = ByteArray(200) { 7 }
+        val space = FakeTransport { r ->
+            when {
+                r.method == "POST" -> json(200, """{"event_id":"t1"}""")
+                r.url.encodedPath.endsWith("/t1") -> HttpReply(200, ("event: complete\ndata: [{\"url\": \"https://x.hf.space/gradio_api/file=/tmp/a.wav\"}]\n\n").toByteArray(), "text/event-stream", null)
+                else -> HttpReply(200, wav, "audio/wav", null)
+            }
+        }
+        val sink = FakeSink()
+        val r = LanguageLayer.build(clients, mapOf("SPEECH_SPACE_URL" to "https://x.hf.space"), space, { sink })
+        val clips = (r.tts.getValue("space_tts") as com.tekyerema.voice.PrefetchTts).fetch("Mepa wo kyɛw", Lang.TWI)
+        assertEquals(1, clips?.size)
+        assertEquals("https://x.hf.space/gradio_api/call/tts", space.requests[0].url.toString())
+        assertEquals("https://x.hf.space/gradio_api/file=/tmp/a.wav", space.requests[2].url.toString())
     }
 
     /** Money in Twi goes to the translator in plain form — "sidi du" was "a dime" / "cents" in every model on 2 October 2026. */

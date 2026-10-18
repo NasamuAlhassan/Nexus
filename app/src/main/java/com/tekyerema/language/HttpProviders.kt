@@ -217,6 +217,20 @@ class HttpTtsProvider(
                 ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return null }
                 try {
                     guard.run {
+                        if (spec.dialect == "gradio") {
+                            // Our own Twi voice on the language Space (api tts: text + language → a WAV file to download).
+                            val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
+                                org.json.JSONArray().put(p).put(code)), spec.connectMs, spec.callMs)
+                            HttpSpeech.failureOf(spec, call)?.let { throw it }
+                            val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), HttpSpeech.gradioEventId(spec, call)),
+                                spec.connectMs, spec.callMs)
+                            HttpSpeech.failureOf(spec, result)?.let { throw it }
+                            val file = transport.send(okhttp3.Request.Builder().url(HttpSpeech.gradioFileUrl(spec, result.text())).get().build(),
+                                spec.connectMs, spec.callMs)
+                            HttpSpeech.failureOf(spec, file)?.let { throw it }
+                            if (file.body.size < 64) throw ProviderFailure(FailureKind.BAD_RESPONSE, "${spec.id}: audio file too short")
+                            return@run file.body
+                        }
                         val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.tts", 10_000L)) {
                             transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs) }
                         // A rejected key (401) never reached the plan's counter: don't spend the small day on it.
