@@ -78,7 +78,7 @@
           },
           "timeouts": {
             "connectMs": 6000,
-            "callMs": 40000
+            "callMs": 90000
           },
           "cacheEntries": 64
         },
