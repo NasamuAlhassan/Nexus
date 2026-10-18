@@ -85,6 +85,7 @@ object PinCurtain {
         val v = view ?: return
         view = null
         try { (v.context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v) } catch (_: Throwable) {}
+        if (why == "dialog gone") try { com.tekyerema.agent.helper.HelperGate.dialogGone() } catch (_: Throwable) {}
         Log.i(TAG, "[PIN] screen curtain off ($why)")
     }
 }

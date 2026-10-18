@@ -77,6 +77,11 @@ object HelperGate {
 
     @Volatile private var pinAt = 0L
     @Volatile private var markedThisRun = false
+    @Volatile private var dialogGoneAt = 0L
+
+    /** The phone's PIN dialog closed (the PIN entered, or the menu cancelled) after the last PIN mark. */
+    fun dialogGone(now: Long = System.currentTimeMillis()) { dialogGoneAt = now }
+    fun dialogGoneSincePin(): Boolean = pinAt > 0L && dialogGoneAt >= pinAt
 
     fun runStarted() { markedThisRun = false }
     /** The task in flight reached a PIN / credential screen (Secure Input, or momo_send's hand-off). */
@@ -92,7 +97,7 @@ object HelperGate {
     fun blocked(secureNow: Boolean, credentialOnScreen: Boolean, now: Long = System.currentTimeMillis()): Boolean =
         secureNow || credentialOnScreen || pinPending(now)
 
-    internal fun resetForTest() { pinAt = 0L; markedThisRun = false }
+    internal fun resetForTest() { pinAt = 0L; markedThisRun = false; dialogGoneAt = 0L }
 }
 
 /** The last finished task, in the few facts a helper summary needs. [status] = AgentStatus name. */

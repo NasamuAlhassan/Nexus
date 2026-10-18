@@ -65,12 +65,13 @@ object TrustFast {
         // helper can be reached again. A text to the helper was refused with the PIN line minutes after a send had
         // stopped at MTN's PIN and been cancelled (QA TW03, A20e, 3 October 2026).
         if (!com.tekyerema.core.Privacy.secureStep && !pinScreenInFront(ctx.controller)) { HelperGate.pinDone(); return null }
+        android.util.Log.i("Tekyerema", "[PIN] helper hold: pinPending=${HelperGate.pinPending()} secureStep=${com.tekyerema.core.Privacy.secureStep} dialogGone=${HelperGate.dialogGoneSincePin()}")
         return ToolResult(false, HelperGate.PIN_LINE, recoverable = false)
     }
 
     /** A phone-app (USSD) window or a credential screen is in front. When the screen can't be seen, the hold stays. */
     private suspend fun pinScreenInFront(ctrl: AccessibilityController?): Boolean {
-        val snap = try { ctrl?.takeIf { it.ready }?.buildSnapshot() } catch (_: Throwable) { null } ?: return true
+        val snap = try { ctrl?.takeIf { it.ready }?.buildSnapshot() } catch (_: Throwable) { null } ?: return !HelperGate.dialogGoneSincePin()
         return com.tekyerema.accessibility.TelephonyWindows.matches(snap.appPackage) ||
             com.tekyerema.policy.TargetSemantics.isCredentialScreen(snap)
     }
