@@ -12,7 +12,7 @@ import com.tekyerema.core.config.AppConfig
  */
 data class VadStrategy(val name: String, val hangoverMs: Int, val maxUtteranceMs: Int, val noSpeechMs: Int) {
     companion object {
-        val QUICK = VadStrategy("quick", 350, 10_000, 4_000)
+        val QUICK = VadStrategy("quick", 450, 10_000, 7_000)
         // Normal: ~1.2 s of silence ends a request (900 ms here + Silero's own 300 ms). It was ~0.7 s, and people were cut
         // off mid-request — between the groups of a phone number ("send money to 055 … 323 …"), or while finding the next
         // word. The owner (A20e 2026-09-29, after a judge's session): "it stops listening early … fix the time of

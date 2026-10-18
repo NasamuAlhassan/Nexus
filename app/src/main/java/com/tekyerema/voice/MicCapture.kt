@@ -35,7 +35,7 @@ class MicCapture(
     private val vadGuardMs: Int = 400,
     /** The listening tone itself: frames in this window are dropped entirely (never pre-roll), so the beep is
      *  never handed to the recognizer (B-14). */
-    private val toneGuardMs: Int = 250,
+    private val toneGuardMs: Int = 350,
     /** B-03: this mic's silence strategy when a capture doesn't name one (null = constructor timings). */
     private val defaultStrategy: (() -> VadStrategy)? = null,
     /** B-07: the barge-in mic listens WHILE our own voice plays — prefer the echo-cancelled voice-call source and

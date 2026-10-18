@@ -307,7 +307,7 @@ class WakeWordService : Service() {
         private const val NOTIF_ID = 4202
         /** How long after our own voice stops a wake detection is still taken to be that voice: the scorer looks at the
          *  last 2.7 s of sound, and a room keeps ringing a little. */
-        private const val OWN_VOICE_TAIL_MS = 3000L
+        private const val OWN_VOICE_TAIL_MS = 1200L
         @Volatile private var running = false
         @Volatile private var instance: WakeWordService? = null
         /** Monitor mode (debug): stream scores + save/transcribe candidate clips. Runtime-only, never persisted. */
