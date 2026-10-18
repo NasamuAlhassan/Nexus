@@ -64,7 +64,7 @@ object RunUssdTool : Tool {
         val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
             ?: return ToolResult(false, "Telephony not available on this device.")
 
-        val response = withTimeoutOrNull(30_000L) {
+        suspend fun ask(timeoutMs: Long) = withTimeoutOrNull(timeoutMs) {
             suspendCancellableCoroutine<String?> { cont ->
                 try {
                     val handler = Handler(Looper.getMainLooper())
@@ -81,12 +81,16 @@ object RunUssdTool : Tool {
                 }
             }
         }
+        // A refusal that comes back at once is usually the network's momentary hiccup: ask once more (a timeout is not retried).
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        var response = ask(30_000L)
+        if (response == null && android.os.SystemClock.elapsedRealtime() - t0 < 8_000L) { kotlinx.coroutines.delay(1_500L); response = ask(25_000L) }
         // Paced and in words (money/UssdSpeech): the carrier's run-on blob was unfollowable read raw (owner, 2026-09-30).
         // The network's checked balance code gets the short answer (airtime first, then data); any other code is read in full.
         val balance = code.replace(Regex("\\s"), "") in com.tekyerema.policy.PolicyConfig.freeReadOnlyCodes()
         return if (response != null) ToolResult(true, (if (balance) com.tekyerema.money.UssdSpeech.airtimeBalance(response) else null)
             ?: com.tekyerema.money.UssdSpeech.forEar(response), channel = "native")
-        else ToolResult(false, "USSD $code did not return a response (network refused, timed out, or SIM/carrier not supported).")
+        else ToolResult(false, "USSD $code did not return a response (network refused, timed out, or SIM/carrier not supported). Do not dial it in the Phone app or search the screens: tell the user the network did not answer and offer to try again.")
     }
 
     /** The network's reply IS the outcome — a one-shot code changes nothing on screen, and the screen-based verifier

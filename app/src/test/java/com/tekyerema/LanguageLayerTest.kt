@@ -352,6 +352,27 @@ class LanguageLayerTest {
         assertNull(r2.mt.getValue("space_mt").translate("Soma", Lang.TWI, Lang.GH_EN))
     }
 
+    /** Our own Twi hearing model on the Space (asr_b64): base64 WAV + language in, the text as a plain string out. */
+    @Test fun our_own_twi_hearing_on_the_space_is_called_the_gradio_way() = runTest {
+        AppConfig.loadFrom(shippedConfig())
+        val clients = AppConfig.obj("providers.speech.clients")
+        val space = FakeTransport { r ->
+            if (r.method == "POST") json(200, """{"event_id":"ev9"}""")
+            else HttpReply(200, "event: complete
+data: [\"wosika a aka y\u025b sidi duono\"]
+
+".toByteArray(), "text/event-stream", null)
+        }
+        val r = LanguageLayer.build(clients, mapOf("SPEECH_SPACE_URL" to "https://princealhassannasamu-tekyerema-lang.hf.space"), space, { FakeSink() })
+        val asr = r.asr.getValue("space_asr")
+        val heard = asr.transcribe(ByteArray(64) { 1 }, Lang.TWI, Lang.TWI)
+        assertTrue(heard.raw, heard.raw.startsWith("wosika"))
+        val (call, result) = space.requests
+        assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/asr_b64", call.url.toString())
+        assertTrue(bodyText(call).endsWith(""","twi"]}"""))
+        assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/asr_b64/ev9", result.url.toString())
+    }
+
     /** Money in Twi goes to the translator in plain form — "sidi du" was "a dime" / "cents" in every model on 2 October 2026. */
     @Test fun twi_money_is_made_plain_before_translation() {
         assertEquals("Soma 10 cedis ma Ama", com.tekyerema.voice.Normalizer.forTranslation("Soma sidi du ma Ama"))

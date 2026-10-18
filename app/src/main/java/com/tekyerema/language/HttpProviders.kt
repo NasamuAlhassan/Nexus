@@ -89,6 +89,17 @@ class HttpAsrProvider(
         val t0 = SystemClock.elapsedRealtime()
         val reply = try {
             guard.run {
+                if (spec.dialect == "gradio") {
+                    // Our own Twi hearing model on the language Space (asr_b64: base64 WAV + language → text).
+                    val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
+                        org.json.JSONArray().put(java.util.Base64.getEncoder().encodeToString(wav)).put(code ?: "twi")),
+                        spec.connectMs, spec.callMs)
+                    HttpSpeech.failureOf(spec, call)?.let { throw it }
+                    val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), HttpSpeech.gradioEventId(spec, call)),
+                        spec.connectMs, spec.callMs)
+                    HttpSpeech.failureOf(spec, result)?.let { throw it }
+                    return@run (HttpSpeech.parseGradio(spec, result.text()) ?: "") to null
+                }
                 val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.asr", 14_000L)) {
                     transport.send(HttpSpeech.asrRequest(spec, secrets(), wav, code), spec.connectMs, spec.callMs) }
                 // It reached the gateway's counter — except a rejected key (401), which is refused before any counting.

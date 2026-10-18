@@ -30,7 +30,8 @@
     "hedgeMs": 7000,
     "online": {
      "twi": [
-      "hcilab_asr"
+      "hcilab_asr",
+      "space_asr"
      ],
      "gh_en": [],
      "auto": []
