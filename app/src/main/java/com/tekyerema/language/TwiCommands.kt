@@ -80,7 +80,7 @@ object TwiCommands {
         Regex("^kenkan\\s+(?:me\\s+)?nkra\\s+no$") to "read my message",
         Regex("^kenkan\\s+(?:ne|ɔno)\\s+nkra(?:\\s+no)?$") to "read his message",
         // the wife's message, said both ways [owner: verify the Twi]: "the message my wife sent" / "my wife's message"
-        Regex("^kenkan\\s+nkra\\s+a\\s+me\\s+yere\\s+(?:so)?maa\\s+me(?:\\s+no)?$") to "read the message my wife sent",
+        Regex("^kenkan\\s+nkra\\s+a\\s+me\\s+yere\\s+(?:so\\s?)?maa?\\s+me(?:\\s+no)?$") to "read the message my wife sent",
         Regex("^kenkan\\s+me\\s+yere\\s+nkra(?:\\s+no)?$") to "read the message my wife sent",
         Regex("^soma\\s+(?:no|ɔno)\\s+sika(?:\\s+no)?$") to "send money to him",
         Regex("^fa\\s+sika\\s+no\\s+(?:kɔ\\s?ma|ma)\\s+(?:no|ɔno)$") to "send money to him",
@@ -336,7 +336,7 @@ object TwiCommands {
             return "remind me at $at" + if (day == "ɔkyena") " tomorrow" else ""
         }
         // "Frɛ me yere seesei" (call my wife now): the "seesei" is not part of the name — it was a call to "me yere seesei"
-        CALL.find(low)?.let { m -> return "call ${who(m.g(1).replace(Regex("\\s+(?:seesei|sesei|seisei)$", RegexOption.IGNORE_CASE), ""))}" }
+        CALL.find(low)?.let { m -> return "call ${who(m.g(1).replace(Regex("\\s+(?:seese\\w*|sesei\\w*|seisei\\w*)$", RegexOption.IGNORE_CASE), ""))}" }
         OPEN.find(low)?.let { m -> return "open ${m.g(1).trim()}" }
         // "abɔ sɛn?" (what time is it) — too short for the near-miss match below; Khaya may write it as one word
         if (low in setOf("abɔ sɛn", "abosɛn", "abɔsɛn", "abɔ sen", "abo sɛn")) return "what's the time"

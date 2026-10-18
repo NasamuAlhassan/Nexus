@@ -27,4 +27,14 @@ class TwiWifeFlowTest {
         for (y in listOf("Aane.", "Aane!", "Aane aane", "Yoo.", "Ɛyɛ.")) assertEquals(y, Confirmation.Answer.YES, Confirmation.interpret(y))
         for (n in listOf("Daabi.", "Daabi!", "Dabi")) assertEquals(n, Confirmation.Answer.NO, Confirmation.interpret(n))
     }
+
+    /** The owner's five demo recordings (18 Oct 2026, Demo Records/), as OUR OWN Twi model on the Space wrote them. */
+    @Test fun `the owner's demo recordings as our own model hears them`() {
+        assertEquals("read the message my wife sent", gloss("kenkan nkra a me yere so ma me no"))
+        assertEquals("send 5 cedis to my wife", gloss("soma cedi enum ma me yere"))
+        assertEquals("call my wife", gloss("frɛ me yere seeseir"))
+        assertEquals(Confirmation.Answer.YES, Confirmation.interpret("aduane aane"))
+        assertEquals("aduane", com.tekyerema.money.MoneyFlow.referenceOf("aduane"))
+        assertEquals(Confirmation.Answer.NO, Confirmation.interpret("daabi se di du"))
+    }
 }
