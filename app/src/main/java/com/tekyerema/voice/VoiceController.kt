@@ -909,7 +909,11 @@ class VoiceController(
         // A fresh confirmation is asked for the first time (the screen's "asking again" note belongs to the previous one).
         _state.update { it.copy(confirmRetry = ConfirmRetry.NONE) }
         try {
-            var spokenQuestion = if (useTwi) promptTwi!! else Confirmation.question(prompt)
+            // An announced call ("Calling Ama, ending …. Say stop to cancel.") is said as it is — wrapped as a question it read "You want me
+            // to calling …?" and the cancel window could end before the sentence did (council review, 19 Oct 2026).
+            var spokenQuestion = if (useTwi) promptTwi!!
+                else if (prompt.startsWith("Calling ") && prompt.trimEnd().endsWith("Say stop to cancel.")) prompt
+                else Confirmation.question(prompt)
             // B-09: "wait"/"hold on" keeps the question pending and listens patiently; it isn't an attempt (≤3 holds).
             var attempt = 0
             var holds = 0

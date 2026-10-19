@@ -107,6 +107,8 @@ object PinCurtain {
     private fun cancelByPower(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
         Log.i(TAG, "[PIN] power button pressed at the PIN — cancelling; nothing is sent")
         closePending = true
+        try { com.tekyerema.money.ussd.AfterPin.cancel() } catch (_: Throwable) {}
+        try { com.tekyerema.money.TxLedger.abandon() } catch (_: Throwable) {}
         try { com.tekyerema.money.TelcoSession.end() } catch (_: Throwable) {}
         try { com.tekyerema.money.ussd.PushedPin.cancel() } catch (_: Throwable) {}
         try { com.tekyerema.agent.AgentEngine.stop() } catch (_: Throwable) {}
@@ -117,10 +119,18 @@ object PinCurtain {
     private fun closeDialog(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
         scope.launch {
             val now = com.tekyerema.money.UssdDialog.awaitCurrent(svc, 1_500L)
-            if (now == null) { closePending = false; stopListening(svc); return@launch }
+            if (now == null) {
+                // The screen is off: the window list is not readable — keep trying when it is unlocked (USER_PRESENT), not before.
+                val on = try { (svc.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager).isInteractive } catch (_: Throwable) { true }
+                if (on) { closePending = false; stopListening(svc) }
+                return@launch
+            }
             val closed = com.tekyerema.money.UssdDialog.close(svc, now)
             Log.i(TAG, "[PIN] dialog closed by the power button (gone=$closed)")
-            if (closed) { closePending = false; stopListening(svc) }
+            if (closed) {
+                closePending = false; stopListening(svc)
+                try { com.tekyerema.voice.VoiceEngine.announce("Cancelled. Nothing was sent.") } catch (_: Throwable) {}
+            }
         }
     }
 

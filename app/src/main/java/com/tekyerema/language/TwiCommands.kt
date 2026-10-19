@@ -77,11 +77,11 @@ object TwiCommands {
     /** The owner's demo (14 Oct 2026), said in Twi: "no"/"ɔno" after the verb is him or her — the person just talked about
      *  (the caller). Exact phrases only (money, calls and messages are never matched loosely). [owner: verify the Twi] */
     private val DEMO_HIM = listOf(
-        Regex("^kenkan\\s+(?:me\\s+)?nkra\\s+no$") to "read my message",
+        Regex("^kenkan\\s+(?:me\\s+)?nkran?\\s+no$") to "read my message",
         Regex("^kenkan\\s+(?:ne|ɔno)\\s+nkra(?:\\s+no)?$") to "read his message",
         // the wife's message, said both ways [owner: verify the Twi]: "the message my wife sent" / "my wife's message"
-        Regex("^kenkan\\s+nkra\\s+a\\s+me\\s+yere\\s+(?:so\\s?)?maa?\\s+me(?:\\s+no)?$") to "read the message my wife sent",
-        Regex("^kenkan\\s+me\\s+yere\\s+nkra(?:\\s+no)?$") to "read the message my wife sent",
+        Regex("^kenkan\\s+nkran?\\s+a\\s+me\\s+yere\\s+(?:so\\s?)?maa?\\s+me(?:\\s+no)?$") to "read the message my wife sent",
+        Regex("^kenkan\\s+me\\s+yere\\s+nkran?(?:\\s+no)?$") to "read the message my wife sent",
         Regex("^soma\\s+(?:no|ɔno)\\s+sika(?:\\s+no)?$") to "send money to him",
         Regex("^fa\\s+sika\\s+no\\s+(?:kɔ\\s?ma|ma)\\s+(?:no|ɔno)$") to "send money to him",
         Regex("^ka\\s+kyerɛ\\s+(?:no|ɔno)\\s+sɛ\\s+(?:ma|me)?soma(?:\\s+no)?(?:\\s+(?:dedaw|seesei))?$") to "tell him I've sent it",

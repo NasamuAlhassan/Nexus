@@ -118,6 +118,15 @@ class DemoStepsTest {
         assertTrue(com.tekyerema.agent.FastIntentClassifier.classify("read my message please") is com.tekyerema.agent.FastIntent.ReadMessage)
     }
 
+    @Test fun a_correction_after_no_is_a_change_of_amount_never_a_plain_no() {
+        val prompt = "Send 5 cedis to My wife, ending 3 6 9 0, an MTN number, with Mobile Money, reference food?"
+        for (said in listOf("no, 10 cedis", "no 10", "daabi 10 cedis", "no, ten cedis")) {
+            assertTrue(said, com.tekyerema.voice.Confirmation.looksLikeRevision(said, prompt))
+        }
+        assertEquals(false, com.tekyerema.voice.Confirmation.looksLikeRevision("no", prompt))
+        assertEquals(false, com.tekyerema.voice.Confirmation.looksLikeRevision("no, cancel", prompt))
+    }
+
     @Test fun reading_the_message_a_person_sent_is_the_phones_own_read() {
         val c = com.tekyerema.agent.FastIntentClassifier
         for (say in listOf("read the message my wife sent", "read the message my wife sent me", "read my wife's message",
@@ -165,6 +174,11 @@ class DemoStepsTest {
         assertEquals("tell him I've sent it", g("ka kyerɛ no sɛ masoma"))
         assertEquals("now call him", g("frɛ no seesei"))
         assertEquals("read my messages", g("kenkan me nkra"))   // the plural catch-up is unchanged
+        // 19 Oct 2026: the recogniser wrote "nkran" for "nkra" (owner's live session) — still the demo commands
+        assertEquals("read my message", g("kenkan me nkran no"))
+        assertEquals("read the message my wife sent", g("kenkan nkran a me yere somaa me no"))
+        assertEquals("read the message my wife sent", g("kenkan nkra a me yere somaa me"))
+        assertEquals("read the message my wife sent", g("kenkan me yere nkran"))
         // the rehearsal's other phrasings (twi 11: "kenkan ne nkra" went to the translator and the cloud instead)
         assertEquals("read his message", g("kenkan ne nkra"))
         assertEquals("send money to him", g("fa sika no kɔma no"))

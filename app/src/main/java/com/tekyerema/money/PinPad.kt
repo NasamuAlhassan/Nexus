@@ -85,6 +85,8 @@ object PinPad {
         "A press while I'm talking only stops me." else " The volume keys work too."   // taught three times, then short
 
     @Volatile private var armed = false
+    /** When the volume keys last SENT a PIN (0 = never): the post-PIN watcher says "PIN sent" only after this. */
+    @Volatile var lastSentAt = 0L; private set
     @Volatile private var counter: Counter? = null
     private val pressedAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
     private val silencing: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
@@ -158,6 +160,7 @@ object PinPad {
         // The box already holds the digits; a dialog without a Send button takes them with the box's own submit.
         val sent = box.sendId?.let { ctrl.clickElement(it) } ?: ctrl.setText(box.inputId!!, c.text(), submit = true)
         c.wipe()
+        lastSentAt = System.currentTimeMillis()
         android.util.Log.i("Tekyerema", "[PINPAD] sent with the volume keys (${if (sent) "Send pressed" else "no Send button"})")
         disarm()
     }

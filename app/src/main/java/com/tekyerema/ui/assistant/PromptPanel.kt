@@ -41,7 +41,9 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -163,7 +165,7 @@ internal fun PromptPanel(
                                 onSpeak = { onCloseTyping(); if (prompt.kind == PromptSurface.Kind.QUESTION) onAnswerByVoice() })
                         }
                     }
-                    notice?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = GlassColors.Warm, modifier = Modifier.padding(top = 10.dp)) }
+                    notice?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = GlassColors.Warm, modifier = Modifier.padding(top = 10.dp).semantics { liveRegion = LiveRegionMode.Polite }) }
                 }
             }
         }

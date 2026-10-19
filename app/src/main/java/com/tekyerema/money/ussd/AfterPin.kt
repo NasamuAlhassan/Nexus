@@ -92,6 +92,7 @@ object AfterPin {
             val deadline = android.os.SystemClock.uptimeMillis() + SecureStep.MAX_MS
             var gone = 0
             var told = false
+            val started = System.currentTimeMillis()
             while (android.os.SystemClock.uptimeMillis() < deadline) {
                 delay(900)
                 val s = try { UssdDialog.read(ctrl) } catch (_: Throwable) { null }
@@ -102,7 +103,12 @@ object AfterPin {
                     if (gone == 5 && !told) {
                         told = true
                         Log.i(TAG, "[MONEY] the dialog closed after the PIN with no answer on screen — told the user the result comes by text")
-                        try { VoiceEngine.announce("PIN sent. MTN will text you the result, and I'll read it out when it comes.") } catch (_: Throwable) {}
+                        // Council review, 19 Oct 2026: after a CANCEL this said "PIN sent" — wrong, and it could make a user think money
+                        // had moved. "PIN sent" only when the volume keys sent one; otherwise what is known: the screen closed.
+                        val line = if (com.tekyerema.money.PinPad.lastSentAt >= started)
+                            "PIN sent. MTN will text you the result, and I'll read it out when it comes."
+                        else "The MTN screen closed. If you entered your PIN, MTN will text you the result. If you cancelled, nothing was sent."
+                        try { VoiceEngine.announce(line) } catch (_: Throwable) {}
                     }
                     if (gone > 25) { PinPad.disarm(); SecureStep.end(); return@launch }   // no dialog for ~22 s: closed or cancelled
                     continue

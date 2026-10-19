@@ -217,6 +217,15 @@ object TxLedger {
     }
 
     /** The follow-up said "nothing seen yet" for [tx] — it isn't said twice. */
+    /** The user abandoned the newest hand-off at the PIN screen (Cancel, the power button): its open entry is dropped, so the repeat
+     *  guard does not say "this would pay twice" about a payment that never happened (council review, 19 Oct 2026). */
+    @Synchronized fun abandon(): Boolean {
+        val open = entries.lastOrNull { it.state == State.AT_PIN } ?: return false
+        entries.removeAll { it.at == open.at }
+        save()
+        return true
+    }
+
     @Synchronized fun markTold(tx: Tx) { entries.firstOrNull { it.at == tx.at }?.let { replace(it, it.copy(told = true)) } }
 
     // ------------------------------------------------------------------ questions

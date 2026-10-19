@@ -756,7 +756,9 @@ class LocalFastRouter(
             }
             else -> "Okay."
         }
-        return handled(p, line)
+        // "speak English" is answered in English by the phone's own voice — it used to go to the Twi translator and the Twi voice
+        // (council review, 19 Oct 2026: 3.5 s of dead air, the answer in the language being left).
+        return if (line == "Okay, English.") FastOutcome(p.name, line, systemVoice = true) else handled(p, line)
     }
 
     // ---------------------------------------------------------------- Overnight [S]
