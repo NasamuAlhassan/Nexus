@@ -419,9 +419,11 @@ private fun GlassSurface(
     LaunchedEffect(orbPause) { onOrbPause(orbPause) }
 
     // ---------------------------------------------------------------- the light: real state only
-    val listening = state.mode == Mode.WAITING && VoiceReflect.cue(state.waiting!!.kind, voice, false, twi) is VoiceReflect.Cue.Listening
+    val listening = (state.mode == Mode.WAITING && VoiceReflect.cue(state.waiting!!.kind, voice, false, twi) is VoiceReflect.Cue.Listening) ||
+        (state.mode == Mode.PROCESSING && voice.state == com.tekyerema.voice.VoiceState.LISTENING)
     val mood = when {
         state.mode == Mode.WAITING -> if (listening) LightMood.LISTENING else LightMood.CALM
+        state.mode == Mode.PROCESSING && listening -> LightMood.LISTENING
         (state.mode == Mode.WORKING || state.mode == Mode.PROCESSING) && !state.paused -> LightMood.WORKING
         state.mode == Mode.FAILED || state.mode == Mode.CANCELLED -> LightMood.FAILURE
         state.mode == Mode.PRESENTING && (state.preview as? SurfaceModel.Preview.Action)?.verified != false -> LightMood.SUCCESS

@@ -90,6 +90,9 @@ object SurfaceModel {
             return if (active == null) State(run, Mode.PROCESSING, "Working on it", steps)
             else State(run, Mode.WORKING, active.label, steps)
         }
+        // The microphone is open and nothing else is waiting (a follow-up after a reply, the icon pressed): say so — a beep alone
+        // is easy to miss (owner, 19 Oct 2026: "always show that it is listening").
+        if (voice.state == VoiceState.LISTENING) return State(run, Mode.PROCESSING, if (twi) "Meretie…" else "Listening…")
         // Understanding what was said (no run yet): a quiet processing state, nothing more to claim.
         if (voice.state == VoiceState.CAPTURED || voice.state == VoiceState.TRANSCRIBING || voice.state == VoiceState.UNDERSTANDING)
             return State(run, Mode.PROCESSING, "Understanding")

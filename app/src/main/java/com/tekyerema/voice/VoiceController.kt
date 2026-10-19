@@ -397,8 +397,12 @@ class VoiceController(
                 // A question that wants a phone number or an amount is answered in digits — heard by the recogniser that
                 // is good at them (voice/io LanguageRoutedInput; owner's Twi test, 2 October 2026).
                 val digits = DIGITS_ASKED.containsMatchIn(question)
+                // Owner, 19 Oct 2026: a question showed no sign that the microphone was open (only the beep). The voice state is
+                // LISTENING while it is, so the panel's listening cue and light follow the real microphone.
                 val heard = voiceIn.listen(com.tekyerema.voice.io.ListenSpec(com.tekyerema.voice.io.ListenPurpose.ANSWER, digits = digits),
-                    events(ready = { listenCue() }, speech = onSpeech, captured = { cues.captured() }))
+                    events(ready = { listenCue(); _state.update { it.copy(state = VoiceState.LISTENING) } }, speech = onSpeech,
+                        captured = { cues.captured(); _state.update { it.copy(state = VoiceState.CAPTURED) } }))
+                _state.update { if (it.state == VoiceState.LISTENING || it.state == VoiceState.CAPTURED) it.copy(state = VoiceState.CONFIRMATION_REQUIRED) else it }
                 if (heard is com.tekyerema.voice.io.Heard.Cancelled) return
                 var text = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.canonical.orEmpty()
                 // voice/io: a recognizer that ends the turn on its own short pause can't be patient — an answer cut off
