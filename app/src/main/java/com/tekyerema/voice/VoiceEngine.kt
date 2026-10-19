@@ -238,6 +238,23 @@ object VoiceEngine {
     suspend fun twiLine(text: String): String? =
         if (!speaksTwi()) null else try { englishToTwi?.invoke(text) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
 
+    @Volatile private var englishToKus: (suspend (String) -> String?)? = null
+
+    /**
+     * What the screen shows while a reply is spoken in Twi or Kusaal (owner, 19 Oct 2026: the panel showed the English
+     * while the voice said it in the language). The same translation the voice uses — the phone's cache makes the voice's own
+     * call instant — with the English-voice markers removed. Null: English conversation, no translator, or not trusted.
+     */
+    suspend fun localLine(text: String): String? {
+        val plain = SpokenText.plain(Verbalize.apply(text))
+        val out = when (conversationLanguage()) {
+            Lang.TWI -> try { englishToTwi?.invoke(plain) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
+            Lang.KUS -> try { englishToKus?.invoke(plain) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
+            else -> null
+        }
+        return out?.let { com.tekyerema.language.EntityTags.display(it) }?.takeIf { it.isNotBlank() }
+    }
+
     /** Twi words that are never a contact's name, however a contact is saved ("Ma", "Sika"…). */
     private val NOT_A_NAME = setOf("ma", "me", "wo", "no", "na", "ne", "sɛ", "kɔ", "frɛ", "soma", "sika", "aka", "sɛn", "bɛn",
         "tɔ", "bue", "mu", "yɛ", "de", "fa", "nkra", "data", "airtime", "kredit", "cedi", "cedis", "message", "momo", "mepɛ")
@@ -359,6 +376,7 @@ object VoiceEngine {
                 englishToKusMt = enKus
                 val kusLocalizer = com.tekyerema.language.ReplyLocalizer(enKus, target = Lang.KUS,
                     waitMs = { com.tekyerema.core.config.AppConfig.long("providers.speech.mt.kusReplyWaitMs", 6_000L) })
+                englishToKus = { kusLocalizer.toTwi(it) }
                 android.util.Log.i("Tekyerema", "[STARTUP] Kusaal: voice=${others[Lang.KUS]?.name ?: "none"} " +
                     "mt in=${kusToEnglish?.name ?: "none"} out=${enKus?.name ?: "none"} hear=${SpeechProviders.onlineAsrIds(Lang.KUS)}")
                 val englishIds = if (own != null) listOf("ghvoice", "system") else listOf("system")

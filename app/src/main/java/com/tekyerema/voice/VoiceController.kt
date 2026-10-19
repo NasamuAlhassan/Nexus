@@ -1363,8 +1363,11 @@ class VoiceController(
                 tel.mark("route"); tel.update { tier = com.tekyerema.agent.RouterTiers.FAST_PATH }   // Q-01 / Q-02
                 if (fast.listenAfter) {} else if (fast.ok) cues.done() else cues.error()   // K-03: a failure line never plays the "done" sound
                 // A line with an English stretch for the English voice (⟦en:…⟧) is SHOWN without the markers.
-                val shown = com.tekyerema.language.EntityTags.display(fast.spoken)
+                var shown = com.tekyerema.language.EntityTags.display(fast.spoken)
                 set(VoiceState.SPEAKING, shown)
+                // Twi / Kusaal: the screen shows what the voice says, not the English it came from.
+                if (!fast.systemVoice && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken)?.let { shown = it + "
+" + shown; set(VoiceState.SPEAKING, shown) }
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
                 val useSystem = fast.systemVoice && systemVoice != null
@@ -1424,6 +1427,10 @@ class VoiceController(
             }
 
             set(VoiceState.SPEAKING, outcome.spoken)
+            // The language on top (what the voice says), the original English under it.
+            val outcomeShown = if (outcome.spoken.isBlank()) null else VoiceEngine.localLine(outcome.spoken)?.let { it + "
+" + outcome.spoken }
+            if (outcomeShown != null) set(VoiceState.SPEAKING, outcomeShown)
             var interruption: com.tekyerema.voice.io.BargeIn? = null
             tel.mark("reply_start")
             val spoke = if (!speakAloud() || outcome.spoken.isBlank()) false else try {
@@ -1434,7 +1441,7 @@ class VoiceController(
             } catch (c: CancellationException) { throw c } catch (e: Exception) { false }
             tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
-                it.copy(state = VoiceState.IDLE, spoken = outcome.spoken, spokenAt = System.currentTimeMillis(),
+                it.copy(state = VoiceState.IDLE, spoken = outcomeShown ?: outcome.spoken, spokenAt = System.currentTimeMillis(),
                     partialHint = if (spoke || !speakAloud() || outcome.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
             }
             // B-07: the user spoke over the reply — what they said is the next turn.
