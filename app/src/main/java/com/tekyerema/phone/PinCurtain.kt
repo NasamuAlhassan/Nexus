@@ -11,6 +11,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
+import kotlinx.coroutines.launch
 
 /**
  * Demo step 4 (owner, 14 Oct 2026): "sensitive screen content, including the balance, is hidden or masked during PIN entry".
@@ -76,14 +77,63 @@ object PinCurtain {
                 PixelFormat.TRANSLUCENT)
             wm.addView(curtain, lp)
             view = curtain; shownAt = System.currentTimeMillis()
+            listenForPower(svc)
             Log.i(TAG, "[PIN] screen curtain on")
             main.postDelayed({ if (view === curtain && System.currentTimeMillis() - shownAt >= MAX_MS) removeNow("max") }, MAX_MS)
         } catch (t: Throwable) { Log.w(TAG, "[PIN] curtain unavailable: ${t.message}") }
     }
 
+    /** Owner, 19 Oct 2026: Home and Back don't leave the network's PIN dialog, so the power button does — pressing it while the
+     *  curtain is up cancels the payment (nothing is typed or sent; closing the dialog never pays). The close is tried as the
+     *  screen goes off and again when the phone is unlocked, until the dialog is gone. */
+    @Volatile private var powerReceiver: android.content.BroadcastReceiver? = null
+    @Volatile private var closePending = false
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default)
+
+    private fun listenForPower(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
+        if (powerReceiver != null) return
+        val r = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: android.content.Intent) {
+                if (i.action == android.content.Intent.ACTION_SCREEN_OFF && view != null) cancelByPower(svc)
+                else if (closePending) closeDialog(svc)
+            }
+        }
+        val f = android.content.IntentFilter().apply {
+            addAction(android.content.Intent.ACTION_SCREEN_OFF); addAction(android.content.Intent.ACTION_USER_PRESENT)
+        }
+        try { svc.registerReceiver(r, f); powerReceiver = r } catch (t: Throwable) { Log.w(TAG, "[PIN] power-button cancel unavailable: ${t.message}") }
+    }
+
+    private fun cancelByPower(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
+        Log.i(TAG, "[PIN] power button pressed at the PIN — cancelling; nothing is sent")
+        closePending = true
+        try { com.tekyerema.money.TelcoSession.end() } catch (_: Throwable) {}
+        try { com.tekyerema.money.ussd.PushedPin.cancel() } catch (_: Throwable) {}
+        try { com.tekyerema.agent.AgentEngine.stop() } catch (_: Throwable) {}
+        try { com.tekyerema.voice.SecureStep.end() } catch (_: Throwable) {}
+        closeDialog(svc)
+    }
+
+    private fun closeDialog(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
+        scope.launch {
+            val now = com.tekyerema.money.UssdDialog.awaitCurrent(svc, 1_500L)
+            if (now == null) { closePending = false; stopListening(svc); return@launch }
+            val closed = com.tekyerema.money.UssdDialog.close(svc, now)
+            Log.i(TAG, "[PIN] dialog closed by the power button (gone=$closed)")
+            if (closed) { closePending = false; stopListening(svc) }
+        }
+    }
+
+    private fun stopListening(svc: Context) {
+        val r = powerReceiver ?: return
+        powerReceiver = null
+        try { svc.unregisterReceiver(r) } catch (_: Throwable) {}
+    }
+
     private fun removeNow(why: String) {
         val v = view ?: return
         view = null
+        if (!closePending) try { stopListening(v.context) } catch (_: Throwable) {}
         try { (v.context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v) } catch (_: Throwable) {}
         if (why == "dialog gone") try { com.tekyerema.agent.helper.HelperGate.dialogGone() } catch (_: Throwable) {}
         Log.i(TAG, "[PIN] screen curtain off ($why)")
