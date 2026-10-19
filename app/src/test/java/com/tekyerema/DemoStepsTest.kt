@@ -118,6 +118,17 @@ class DemoStepsTest {
         assertTrue(com.tekyerema.agent.FastIntentClassifier.classify("read my message please") is com.tekyerema.agent.FastIntent.ReadMessage)
     }
 
+    @Test fun reading_the_message_a_person_sent_is_the_phones_own_read() {
+        val c = com.tekyerema.agent.FastIntentClassifier
+        for (say in listOf("read the message my wife sent", "read the message my wife sent me", "read my wife's message",
+            "read the last message from my wife", "please read the message that my wife texted")) {
+            val i = c.classify(say)
+            assertTrue("$say -> $i", i is com.tekyerema.agent.FastIntent.ReadMessage)
+            assertTrue(say, (i as com.tekyerema.agent.FastIntent.ReadMessage).from!!.endsWith("wife"))
+        }
+        assertEquals(null, (c.classify("read my message") as com.tekyerema.agent.FastIntent.ReadMessage).from)
+    }
+
     @Test fun send_money_to_him_please_is_still_the_message_request() {
         com.tekyerema.core.config.AppConfig.loadFrom(emptyList())
         MoneyRequest.note(MoneyRequest.parse("Kofi Demo", "Please send me 5 cedis. My MoMo number is 050 000 2222.")!!)

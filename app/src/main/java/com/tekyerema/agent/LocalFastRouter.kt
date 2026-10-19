@@ -837,7 +837,8 @@ class LocalFastRouter(
         fun whoOf(m: com.tekyerema.notifications.IndexedMessage) = (m.sender ?: m.title)?.trim().orEmpty()
         val want = intent.from ?: References.recentPerson()
         val m = want?.let { w -> msgs.firstOrNull { whoOf(it).isNotEmpty() && (whoOf(it).contains(w, true) || w.contains(whoOf(it), true)) } }
-            ?: msgs.firstOrNull() ?: return handled(intent, "You have no new messages.")
+            ?: (if (intent.from != null) null else msgs.firstOrNull())
+            ?: return handled(intent, if (intent.from != null) "I can't find a message from ${intent.from}." else "You have no new messages.")
         val who = whoOf(m).ifEmpty { "someone" }
         References.noteRead(who, channelOf(m.pkg))
         val text = m.text!!.trim()
