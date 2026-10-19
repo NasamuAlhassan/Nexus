@@ -23,7 +23,7 @@ class LanguageRoutedInput(
     override val id: String get() = "gh_mixed(${pick().id})"
 
     /** The recognizer for the next listen. Pure given [language]. */
-    internal fun pick(): VoiceInput = if (language() == Lang.TWI || !isOnline()) twi else english
+    internal fun pick(): VoiceInput = if (language() == Lang.TWI || language() == Lang.KUS || !isOnline()) twi else english
 
     override val caps: InputCaps get() = pick().caps
 
@@ -47,6 +47,22 @@ class LanguageRoutedInput(
                 if (!(heard is Heard.Unavailable && heard.cause in FALL_BACK)) return heard
             }
             return twi.listen(spec.copy(language = Lang.TWI), events)
+        }
+        if (lang == Lang.KUS) {
+            // Kusaal (19 October 2026) is heard by our language Space through the captured path. Two answers go to the phone's
+            // English recogniser instead: a yes / no at a confirmation (the question tells the user to answer yes or no — no
+            // Kusaal yes / no is verified yet, and a money step must never hang on a guess) and a number or an amount the app
+            // asked for. `speech.kus.yesNoOnPhoneRecognizer` / `speech.kus.digitsOnPhoneRecognizer` turn either off.
+            val yesNoOnPhone = spec.purpose == ListenPurpose.YES_NO &&
+                com.tekyerema.core.config.AppConfig.bool("speech.kus.yesNoOnPhoneRecognizer", true)
+            val digitsOnPhone = spec.digits && com.tekyerema.core.config.AppConfig.bool("speech.kus.digitsOnPhoneRecognizer", true)
+            if ((yesNoOnPhone || digitsOnPhone) && isOnline()) {
+                try { android.util.Log.i("Tekyerema", "[VOICE] Kusaal session: ${if (digitsOnPhone) "a number / amount" else "yes / no"} " +
+                    "is heard by the phone's recogniser") } catch (_: Throwable) {}
+                val heard = english.listen(spec.copy(language = Lang.GH_EN), events)
+                if (!(heard is Heard.Unavailable && heard.cause in FALL_BACK)) return heard
+            }
+            return twi.listen(spec.copy(language = Lang.KUS), events)
         }
         val en = spec.copy(language = Lang.GH_EN)
         if (!isOnline()) return twi.listen(en, events)          // on-device English (Whisper) — works with no internet

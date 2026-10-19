@@ -35,7 +35,7 @@ class CapturedAudioInput(
         mayLeavePhone = true,          // an online ASR may be configured — but never at the secure step (HybridAsr)
         partials = false,
         transcribesAudio = true,
-        languages = setOf(Lang.GH_EN, Lang.TWI),
+        languages = setOf(Lang.GH_EN, Lang.TWI, Lang.KUS),
         secureListen = true,
         patientEndpointing = true
     )

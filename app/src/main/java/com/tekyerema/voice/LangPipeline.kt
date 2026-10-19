@@ -461,9 +461,18 @@ object Entities {
  */
 object LanguagePipeline {
     fun process(raw: String, sessionLanguage: String, forceLanguage: String? = null, backend: String = "", asrMs: Long = 0): Transcript {
+        // Kusaal (19 October 2026) is only ever the user's explicit choice and is understood through the Space's translator:
+        // the words go on exactly as heard — the English/Twi repairs below (numbers, network and money words, contact names
+        // by sound) would rewrite Kusaal words they don't know. Names and amounts are kept by the translator's tags instead.
+        if (forceLanguage == Lang.KUS) {
+            val said = raw.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+            return Transcript(raw = raw, canonical = said, language = Lang.KUS, reason = "explicit", backend = backend, asrMs = asrMs)
+        }
+        // …and never a guess: a remembered Kusaal session is English for the detector.
+        val session = if (sessionLanguage == Lang.KUS) Lang.GH_EN else sessionLanguage
         val (lang, reason) = when (forceLanguage) {
             Lang.GH_EN, Lang.TWI -> forceLanguage to "explicit"
-            else -> Lid.resolve(raw, sessionDefault = sessionLanguage)
+            else -> Lid.resolve(raw, sessionDefault = session)
         }
         val numbers = Normalizer.normalize(raw, lang)
         // The robustness layer around the recognisers (voice/understand): in a request about money or a network, the

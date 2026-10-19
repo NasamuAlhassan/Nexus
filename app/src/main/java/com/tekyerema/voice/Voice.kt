@@ -11,12 +11,14 @@ package com.tekyerema.voice
  * future on-device tiny model can slot in behind [AsrProvider] with no controller change.
  */
 
-/** The two — and only two — supported languages (Phase-2 scope). */
+/** The app's languages: Ghanaian English and Twi (Phase-2 scope), and Kusaal (owner, 19 October 2026: selectable, heard,
+ *  translated and spoken by our own language Space — never the HCI Lab, which has no Kusaal). */
 object Lang {
     const val GH_EN = "gh_en"
     const val TWI = "twi"
+    const val KUS = "kus"
     const val AUTO = "auto"
-    fun label(code: String) = when (code) { GH_EN -> "Ghanaian English"; TWI -> "Twi"; else -> code }
+    fun label(code: String) = when (code) { GH_EN -> "Ghanaian English"; TWI -> "Twi"; KUS -> "Kusaal"; else -> code }
 }
 
 /**

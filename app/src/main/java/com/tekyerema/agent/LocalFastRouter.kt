@@ -732,7 +732,14 @@ class LocalFastRouter(
             "patience" -> { s.vadStrategy = p.value; s.profile = "custom"; "Okay, I'll wait longer for you to finish speaking." }
             // gh_mixed (2026-09-29): English is heard by the phone's recognizer, Twi by the UG HCI Lab — the phone's English
             // recognizer can't hear Twi, so the switch is said, not guessed. The next listen goes to the other recognizer.
-            "language" -> if (p.value == "twi") {
+            // Kusaal (19 October 2026): heard, translated and voiced by our language Space. The Kusaal recogniser can't
+            // hear "speak English", so the way back is said plainly.
+            "language" -> if (p.value == "kus") {
+                s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_KUS; s.sessionLanguage = com.tekyerema.voice.Lang.KUS
+                com.tekyerema.voice.VoiceEngine.warmTranslator()
+                "Okay, Kusaal. I'll listen for Kusaal and answer in Kusaal; it needs the internet. To go back to English, " +
+                    "open Settings, then Language, or type 'speak English'."
+            } else if (p.value == "twi") {
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_TWI; s.sessionLanguage = com.tekyerema.voice.Lang.TWI
                 com.tekyerema.voice.VoiceEngine.warmTranslator()   // the Space sleeps when idle — wake it now, not on the first request
                 // Honest from the start (Abena study, 3 October 2026): Twi hearing still makes mistakes, and typing works.

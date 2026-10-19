@@ -137,6 +137,11 @@ class HybridAsr(
                     Log.w("Tekyerema", "[ASR] Twi online provider failed and offline Twi is off — failing honestly: ${e.message}")
                     throw AsrException(TWI_SERVICE_DOWN)
                 }
+                // Kusaal is heard only by the Space: the on-device English/Twi models would write confident nonsense.
+                if (lang == Lang.KUS) {
+                    Log.w("Tekyerema", "[ASR] Kusaal online provider failed — failing honestly: ${e.message}")
+                    throw AsrException(KUS_SERVICE_DOWN)
+                }
                 Log.w("Tekyerema", "[ASR] online failed → on-device fallback: ${e.message}")
                 if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage).copy(fallbackUsed = true)
                 throw e
@@ -144,6 +149,7 @@ class HybridAsr(
         }
         // Twi is heard online only for now (owner, 3 October 2026 — SherpaAsr.offlineTwi): say what to do instead.
         if (lang == Lang.TWI && !onDevice.trustedFor("twi")) throw AsrException(TWI_NEEDS_INTERNET)
+        if (lang == Lang.KUS) throw AsrException(KUS_NEEDS_INTERNET)
         if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage)   // offline / no endpoint
         // Nothing available: fail FAST and honestly (never a silent hang), steering the user to the fix.
         throw AsrException(
@@ -152,6 +158,10 @@ class HybridAsr(
         )
     }
 }
+
+/** What the user hears when Kusaal can't be heard (the Space is its only recogniser). */
+const val KUS_SERVICE_DOWN = "The Kusaal voice service isn't answering right now. Try again in a moment, or type it."
+const val KUS_NEEDS_INTERNET = "Kusaal needs the internet. Try again when you're connected, or type it."
 
 /** What the user hears when Twi can't be heard. */
 const val TWI_SERVICE_DOWN = "The Twi voice service isn't answering right now. Say it in English, or try again in a moment."

@@ -157,7 +157,13 @@ private fun controlSummary(): String {
 private fun languageLabel(mode: String) = when (mode) {
     Settings.LANG_MODE_ENGLISH -> "English"
     Settings.LANG_MODE_TWI -> "Twi"
+    Settings.LANG_MODE_KUS -> "Kusaal"
     else -> "English + Twi"
+}
+
+/** Kusaal is never guessed (no auto-detection): leaving it puts the remembered language back to English. */
+private fun leaveKusaal(settings: Settings) {
+    if (settings.sessionLanguage == com.tekyerema.voice.Lang.KUS) settings.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
 }
 
 private fun rateLabel(rate: Int) = when (rate) { 0 -> "Slow"; 2 -> "Fast"; else -> "Normal" }
@@ -195,9 +201,14 @@ private fun LanguagePage(settings: Settings, onBack: () -> Unit) {
         Note("Choose how you want to speak to Tɛkyerɛma.")
         GlassGroup {
             Column(Modifier.selectableGroup()) {
-                ChoiceRow("English", "Ghanaian English only.", mode == Settings.LANG_MODE_ENGLISH) { settings.languageMode = Settings.LANG_MODE_ENGLISH }
-                ChoiceRow("Twi", "Twi only. Replies in Twi where a Twi voice is available.", mode == Settings.LANG_MODE_TWI) { settings.languageMode = Settings.LANG_MODE_TWI }
-                ChoiceRow("English + Twi", "Mix both freely. Tɛkyerɛma follows the language you use.", mode == Settings.LANG_MODE_BOTH, divider = false) { settings.languageMode = Settings.LANG_MODE_BOTH }
+                ChoiceRow("English", "Ghanaian English only.", mode == Settings.LANG_MODE_ENGLISH) { settings.languageMode = Settings.LANG_MODE_ENGLISH; leaveKusaal(settings) }
+                ChoiceRow("Twi", "Twi only. Replies in Twi where a Twi voice is available.", mode == Settings.LANG_MODE_TWI) { settings.languageMode = Settings.LANG_MODE_TWI; leaveKusaal(settings) }
+                ChoiceRow("English + Twi", "Mix both freely. Tɛkyerɛma follows the language you use.", mode == Settings.LANG_MODE_BOTH) { settings.languageMode = Settings.LANG_MODE_BOTH; leaveKusaal(settings) }
+                ChoiceRow("Kusaal", "Kusaal only. Needs the internet: heard, translated and spoken by Tɛkyerɛma's own language service.",
+                    mode == Settings.LANG_MODE_KUS, divider = false) {
+                    settings.languageMode = Settings.LANG_MODE_KUS; settings.sessionLanguage = com.tekyerema.voice.Lang.KUS
+                    com.tekyerema.voice.VoiceEngine.warmTranslator()
+                }
             }
         }
     }

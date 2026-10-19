@@ -28,7 +28,9 @@ class ReplyLocalizer(
     private val maxChars: () -> Int = { AppConfig.int("providers.speech.mt.maxChars", 400) },
     /** How long a reply may wait for the translator before it is spoken in English: a read-back waited 6.8 s on the
      *  Space (ZeroGPU, cold) and then discarded the answer (QA R_TW05, A20e, 3 October 2026). `providers.speech.mt.replyWaitMs`. */
-    private val waitMs: () -> Long = { AppConfig.long("providers.speech.mt.replyWaitMs", 3_500L) }
+    private val waitMs: () -> Long = { AppConfig.long("providers.speech.mt.replyWaitMs", 3_500L) },
+    /** The language replies are put into: Twi, or Kusaal (19 October 2026 — the same rules, the Space's English→Kusaal). */
+    private val target: String = Lang.TWI
 ) {
     /**
      * The Twi line for an English [text], or null (speak the original). Since 2 October 2026 (owner: names as tags, amounts
@@ -44,7 +46,7 @@ class ReplyLocalizer(
         val tagged = EntityTags.protectEnglish(src, protectedTerms(src))
         if (hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N|Q)\\d+\\]"), " "))) return null
         val t0 = System.currentTimeMillis()
-        val out = try { kotlinx.coroutines.withTimeoutOrNull(wait) { translator.translate(EntityTags.forTranslator(tagged.text), Lang.GH_EN, Lang.TWI) } }
+        val out = try { kotlinx.coroutines.withTimeoutOrNull(wait) { translator.translate(EntityTags.forTranslator(tagged.text), Lang.GH_EN, target) } }
             catch (e: CancellationException) { throw e } catch (_: Exception) { null }
             ?.trim()?.takeIf { it.isNotEmpty() }
             ?.let { EntityTags.mend(it, tagged.entities) }

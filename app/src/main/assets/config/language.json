@@ -290,6 +290,58 @@
           "timeouts": {"connectMs": 6000, "callMs": 30000},
           "cacheEntries": 64
         },
+        "space_asr_kus": {
+          "_note": "19 Oct 2026 (owner: Kusaal selectable, 'it will use the online spaces'): OUR Kusaal hearing model on the language Space (asr_b64 with language 'kus'). Its own quota group, so a Kusaal failure never rests the Twi backup. Kusaal is never sent to the HCI Lab (no Kusaal there).",
+          "kind": "asr",
+          "dialect": "gradio",
+          "enabled": true,
+          "quotaGroup": "space_asr_kus",
+          "endpoint": "${SPEECH_SPACE_URL}",
+          "languages": {"kus": "kus"},
+          "fixedLanguage": "kus",
+          "request": {"api": "asr_b64"},
+          "response": {"kind": "json", "path": "text"},
+          "timeouts": {"connectMs": 6000, "callMs": 60000}
+        },
+        "space_tts_kus": {
+          "_note": "19 Oct 2026: OUR Kusaal voice (tekyerema-tts-kus v3) on the language Space (api tts, language 'kus'; the Space reads numbers in Kusaal words). Behind it, the same voice on the phone (kusvoice).",
+          "kind": "tts",
+          "dialect": "gradio",
+          "enabled": true,
+          "quotaGroup": "space_tts_kus",
+          "endpoint": "${SPEECH_SPACE_URL}",
+          "languages": {"kus": "kus"},
+          "request": {"api": "tts", "maxChars": 250, "maxParts": 3},
+          "response": {"kind": "audio"},
+          "timeouts": {"connectMs": 6000, "callMs": 30000},
+          "cacheEntries": 64
+        },
+        "space_mt_kus": {
+          "_note": "19 Oct 2026: Kusaal <-> English through the language Space's translator (tekyerema-nllb600m-v3: Kusaal chrF++ up ~5 over v2). Its own quota group (the Twi translator's breaker is untouched).",
+          "kind": "mt",
+          "dialect": "gradio",
+          "enabled": true,
+          "quotaGroup": "space_mt_kus",
+          "endpoint": "${SPEECH_SPACE_URL}",
+          "languages": {"gh_en": "eng", "kus": "kus"},
+          "request": {"api": "translate"},
+          "response": {"kind": "json", "path": "translation"},
+          "timeouts": {"connectMs": 6000, "callMs": 25000},
+          "cacheEntries": 256
+        },
+        "space_tts_eng": {
+          "_note": "19 Oct 2026 (owner: 'Is it possible you add his voice?'): ENGLISH replies in Kafui Dey's voice — the language Space's English is ONLY the F5 Kafui voice (an error, never another voice, when its ZeroGPU fails). Used through providers.speech.tts.ghEnglish: RoutingTts fetches sentence by sentence, the first within speech.ghEnglish.firstWaitMs (6 s), and the English chain (own on-device voice, the phone's engine) speaks when it is off, resting, slow or failing. speech.ghEnglish.enabled=false turns it off at once.",
+          "kind": "tts",
+          "dialect": "gradio",
+          "enabled": true,
+          "quotaGroup": "space_tts_eng",
+          "endpoint": "${SPEECH_SPACE_URL}",
+          "languages": {"gh_en": "eng"},
+          "request": {"api": "tts", "maxChars": 250, "maxParts": 1},
+          "response": {"kind": "audio"},
+          "timeouts": {"connectMs": 5000, "callMs": 20000},
+          "cacheEntries": 64
+        },
         "khaya_web_tts": {
           "_note": "Khaya web platform — Twi voice. POST {text, language:'twi'} to /tts/v1/synthesize → audio/wav, ~1.3 s. Owner, 16 Oct 2026: the backup behind hcilab_tts (models.json tts.twi).",
           "kind": "tts",
@@ -344,6 +396,8 @@
         "_note": "Translator ids per direction, tried in order (a client without its key isn't built and is skipped). enToTwi localizes English replies for a Twi speaker (ReplyLocalizer: never text with numbers/money, names must survive, else the original is spoken). twiToEn puts a Twi request into English for the cloud planner, which gets BOTH (VoiceEngine.goalInEnglish → RoutingBrain.cloudGoalFor).",
         "enToTwi": ["space_mt", "nllb_mt"],
         "twiToEn": ["space_mt", "nllb_mt"],
+        "kusToEn": ["space_mt_kus"],
+        "enToKus": ["space_mt_kus"],
         "localizeReplies": true,
         "maxChars": 400
       }

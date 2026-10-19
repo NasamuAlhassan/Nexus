@@ -40,11 +40,11 @@ class LanguageSession(
         return habitual()
     }
 
-    fun habitual(): String = loadHabitual().takeIf { it == Lang.GH_EN || it == Lang.TWI } ?: Lang.GH_EN
+    fun habitual(): String = loadHabitual().takeIf { it in TURN_LANGS } ?: Lang.GH_EN
 
-    /** Record the resolved language of a user turn. Anything but gh_en/twi (e.g. "auto") is ignored. */
+    /** Record the resolved language of a user turn. Anything but gh_en/twi/kus (e.g. "auto") is ignored. */
     @Synchronized fun onTurn(lang: String) {
-        if (lang != Lang.GH_EN && lang != Lang.TWI) return
+        if (lang !in TURN_LANGS) return
         lastTurnLang = lang
         lastTurnAt = clock()
         val habitual = habitual()
@@ -55,6 +55,8 @@ class LanguageSession(
             saveHabitual(lang); streakLang = null; streak = 0
         }
     }
+
+    private companion object { val TURN_LANGS = setOf(Lang.GH_EN, Lang.TWI, Lang.KUS) }
 
     /** For logs/debug: "twi (habitual gh_en, 1/2 toward twi)". */
     fun describe(): String = "${current()} (habitual ${habitual()}" +

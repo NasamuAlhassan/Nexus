@@ -411,7 +411,7 @@ class VoiceController(
                 // Read as what the question asked for — an amount, a number, one of the options, a name, or a reference left
                 // as said (voice/understand/AnswerContext).
                 if (text.isNotBlank()) {
-                    val said = englishReply(text)
+                    val said = englishReply(kusaalAnswer(text, (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.language))
                     if (newRequestInsteadOfAnswer(said, (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript?.takeIf { it.canonical == text },
                             InputSource.ASR)) return
                     val read = com.tekyerema.voice.understand.AnswerContext.read(said, question, SpeechVocabulary.current())
@@ -674,6 +674,15 @@ class VoiceController(
         if (t.isEmpty()) return false
         val language = forceLanguage() ?: sessionLanguage()
         val st = agent.state.value
+        if (st.status == AgentStatus.ASKING && language == Lang.KUS) {
+            // A Kusaal answer goes through the translator first, as a spoken one does (askByVoice → kusaalAnswer).
+            askJob?.cancel(); hideAsking(); cues.captured()
+            observerScope.launch {
+                val said = kusaalAnswer(LanguagePipeline.process(t, language, forceLanguage()).canonical, Lang.KUS)
+                agent.answer(com.tekyerema.voice.understand.AnswerContext.read(said, st.pendingQuestion, SpeechVocabulary.current()))
+            }
+            return true
+        }
         if (st.status == AgentStatus.ASKING) {
             val q = st.pendingQuestion
             val heard = LanguagePipeline.process(t, language, forceLanguage()).canonical
@@ -860,6 +869,17 @@ class VoiceController(
     private val OFFLINE_TWI_LIMIT = "Offline, I understand simple Twi requests — sending money, airtime, calls, your " +
         "balance, the time, volume and music. For anything else, say it in English, or connect to the internet."
     private val SECURE_TAP_DONE = "When you've finished, tap Done, or type done."
+    /** A Kusaal request with no trustworthy English (the translator is the only way in). Said in English: the line that
+     *  would carry it into Kusaal is the very service that just failed. */
+    private val KUS_NOT_UNDERSTOOD = "I couldn't understand that in Kusaal just now. Please say it again, or type it."
+    /** After a confirmation asked in Kusaal: the answer is heard by the phone's English recogniser. */
+    private val KUS_SAY_YES_NO = "Answer yes or no, in English."
+
+    /** A Kusaal answer to a question, in the English the answer paths read; the words as heard when there is no translation
+     *  (a name or a number said alone often needs none). */
+    private suspend fun kusaalAnswer(text: String, heardLang: String?): String =
+        if (heardLang != Lang.KUS) text      // not Kusaal (a number heard by the phone's English recogniser, typed English)
+        else VoiceEngine.kusaalInEnglish(text) ?: text
 
     /**
      * Ask the pending question aloud, listen for a spoken yes/no, and answer the agent.
@@ -877,7 +897,11 @@ class VoiceController(
         // is spoken in Lang.TWI (an online Twi voice if one is configured, else the system voice reads the Twi words — the
         // words are Twi even when the voice is not), never MT'd at runtime.
         val useTwi = lang == Lang.TWI && !promptTwi.isNullOrBlank()
-        val askLang = if (useTwi) Lang.TWI else Lang.GH_EN
+        // Kusaal (19 October 2026): the question is put into Kusaal by the translator (the name and the amount said by the
+        // English voice, exactly as written), then the English voice asks for a plain English yes or no — heard by the phone's
+        // English recogniser (LanguageRoutedInput). No Kusaal yes/no is verified yet, and an unclear answer is never a yes.
+        val kus = lang == Lang.KUS
+        val askLang = if (useTwi) Lang.TWI else if (kus) Lang.KUS else Lang.GH_EN
         // A fresh confirmation is asked for the first time (the screen's "asking again" note belongs to the previous one).
         _state.update { it.copy(confirmRetry = ConfirmRetry.NONE) }
         try {
@@ -893,7 +917,10 @@ class VoiceController(
                 if (quiet) quiet = false
                 else {
                     promptSpeaking = true
-                    try { tts.speak(spokenQuestion, askLang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                    try {
+                        tts.speak(spokenQuestion, askLang)
+                        if (kus) tts.speak(KUS_SAY_YES_NO, Lang.GH_EN)
+                    } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                     finally { promptSpeaking = false }
                 }
                 if (!hasMicPermission()) { _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }; return }
@@ -934,7 +961,14 @@ class VoiceController(
                             catch (c: CancellationException) { throw c } catch (_: Exception) {}
                             return
                         }
-                        com.tekyerema.voice.io.YesNo.decide(heard, alternatives)
+                        com.tekyerema.voice.io.YesNo.decide(heard, alternatives).let { a ->
+                            // A Kusaal answer heard by the English recogniser could come back as a "yes"-like English word
+                            // ("okay", "yeah"); in a Kusaal session only a plain English yes approves (KusaalYes).
+                            if (kus && a == Confirmation.Answer.YES && !KusaalYes.strict(heard)) {
+                                Log.i("Tekyerema", "[VOICE] Kusaal session: not a plain English yes — asked again")
+                                Confirmation.Answer.UNCLEAR
+                            } else a
+                        }
                     }
                     com.tekyerema.voice.io.Heard.Cancelled -> throw CancellationException("confirmation cancelled")
                     else -> Confirmation.Answer.UNCLEAR
@@ -1264,7 +1298,26 @@ class VoiceController(
         }?.also {
             Log.i("Tekyerema", "[TWI] understood on the phone → '${com.tekyerema.core.Privacy.content(it)}'")
         } else null
-        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = glossed ?: repaired)
+        // Kusaal (owner, 19 October 2026): understood through our Space's translator — the phone's fast path and the planner
+        // get the ENGLISH, while the conversation stays Kusaal so the answer is put back into Kusaal (RoutingTts). The words go
+        // as heard (the English/Twi repairs above don't know Kusaal); with no trustworthy English nothing is acted on.
+        // (Typed ENGLISH in a Kusaal session — "speak English", a contact's name — goes as typed: the Kusaal translator would
+        // only garble it.)
+        val typedEnglish = heard.language == Lang.KUS && source == InputSource.TYPED &&
+            com.tekyerema.language.ReplyLocalizer.looksEnglish(masked)
+        val kusEnglish = if (heard.language == Lang.KUS) (if (typedEnglish) masked else VoiceEngine.kusaalInEnglish(masked)) else null
+        if (heard.language == Lang.KUS && kusEnglish == null) {
+            onLanguageResolved(Lang.KUS)
+            Log.i("Tekyerema", "[KUS] no English for the Kusaal request (translator unreachable, slow or unsure) — said so")
+            set(VoiceState.SPEAKING, KUS_NOT_UNDERSTOOD)
+            cues.error()
+            try { if (speakAloud()) tts.speak(KUS_NOT_UNDERSTOOD, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+            com.tekyerema.core.telemetry.Telemetry.endTurn("failed", byVoice = source == InputSource.ASR)
+            _state.update { it.copy(state = VoiceState.IDLE, spoken = KUS_NOT_UNDERSTOOD, spokenAt = System.currentTimeMillis()) }
+            return
+        }
+        if (kusEnglish != null) Log.i("Tekyerema", "[KUS] understood through the translator → '${com.tekyerema.core.Privacy.content(kusEnglish)}'")
+        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = kusEnglish ?: glossed ?: repaired)
         try {
             hideAsking()   // a new turn (e.g. the answer to a question) clears any "asking" card
             // Session language context (§11): adopt the LID-resolved language (low-signal already

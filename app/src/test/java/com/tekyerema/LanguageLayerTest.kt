@@ -343,7 +343,8 @@ class LanguageLayerTest {
                 "\\\"src\\\": \\\"twi\\\", \\\"tgt\\\": \\\"eng\\\", \\\"engine\\\": \\\"nllb600m-v1\\\"}\"]\n\n").toByteArray(), "text/event-stream", null)
         }
         val r = LanguageLayer.build(clients, mapOf("SPEECH_SPACE_URL" to "https://princealhassannasamu-tekyerema-lang.hf.space"), space, { FakeSink() })
-        assertEquals(setOf("space_mt"), r.mt.keys)
+        // (19 October 2026: the same Space also translates Kusaal, as its own client with its own breaker)
+        assertEquals(setOf("space_mt", "space_mt_kus"), r.mt.keys)
         assertEquals("Send money to Kwame", r.mt.getValue("space_mt").translate("Soma sika ma Kwame", Lang.TWI, Lang.GH_EN))
         val (call, result) = space.requests
         assertEquals("https://princealhassannasamu-tekyerema-lang.hf.space/gradio_api/call/translate", call.url.toString())

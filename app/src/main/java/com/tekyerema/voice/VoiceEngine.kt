@@ -137,6 +137,40 @@ object VoiceEngine {
         return english
     }
 
+    /** Kusaal → English (`providers.speech.mt.kusToEn`, the Space), set when the voice stack is built (19 October 2026). */
+    @Volatile private var kusToEnglish: com.tekyerema.language.TranslationProvider? = null
+    /** English → Kusaal, raw (warm-up only). */
+    @Volatile private var englishToKusMt: com.tekyerema.language.TranslationProvider? = null
+
+    /**
+     * A Kusaal request or answer as the English the phone and the planner run (the Space's translator), or null — no
+     * translator, offline, too slow, or a name / amount / number lost on the way (then nothing is acted on: the caller says
+     * it didn't understand). Names, amounts and numbers travel as tags and come back as said (language/EntityTags).
+     */
+    suspend fun kusaalInEnglish(text: String): String? {
+        val mt = kusToEnglish ?: return null
+        val tagged = com.tekyerema.language.EntityTags.protect(text, ::contactName)
+        val waitMs = com.tekyerema.core.config.AppConfig.long("providers.speech.mt.goalWaitMs", 8_000L)
+        val t0 = System.currentTimeMillis()
+        val out = try {
+            kotlinx.coroutines.withTimeoutOrNull(waitMs) { mt.translate(tagged.text, Lang.KUS, Lang.GH_EN) }?.trim()?.takeIf { it.isNotBlank() }
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Throwable) { null }
+        if (out == null) {
+            android.util.Log.i("Tekyerema", "[MT] Kusaal→English: no translation (${System.currentTimeMillis() - t0} ms)")
+            return null
+        }
+        val mended = com.tekyerema.language.EntityTags.mend(out, tagged.entities)
+        if (!tagged.isEmpty && !com.tekyerema.language.EntityTags.intact(tagged.text, mended, tagged.entities)) {
+            android.util.Log.w("Tekyerema", "[MT] Kusaal→English lost a name/amount tag — not used")
+            return null
+        }
+        android.util.Log.i("Tekyerema", "[MT] Kusaal→English ok in ${System.currentTimeMillis() - t0} ms")
+        return com.tekyerema.language.EntityTags.restore(mended, tagged.entities)
+    }
+
+    /** The user is speaking Kusaal right now. */
+    fun speaksKusaal(): Boolean = conversationLanguage() == Lang.KUS
+
     /** English → Twi with names as tags and amounts / numbers kept in English (ReplyLocalizer), set with the voice stack. */
     @Volatile private var englishToTwi: (suspend (String) -> String?)? = null
 
@@ -153,6 +187,8 @@ object VoiceEngine {
      *  Each warm-up line is new ("… 2", "… 3"): the fixed line was answered from the translator's own cache in 8 ms and
      *  never reached the Space, which then timed out on the real request (A20e, 4 October 2026). */
     fun warmTranslator() {
+        // Kusaal is chosen, never detected: the setting decides (the turn that chose it was itself English).
+        if (speaksKusaal() || (::settings.isInitialized && settings.forcedLanguage == Lang.KUS)) { warmKusaal(); return }
         val mt = twiToEnglish ?: return
         val now = System.currentTimeMillis()
         if (now - warmedAt < 10 * 60_000L) return
@@ -168,6 +204,25 @@ object VoiceEngine {
             val ok2 = try { englishToTwiMt?.translate("Please wait a moment $n.", Lang.GH_EN, Lang.TWI) != null }
                 catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
             android.util.Log.i("Tekyerema", "[MT] English→Twi warm-up ${if (ok2) "ok" else "failed"} in ${System.currentTimeMillis() - t1}ms")
+        }
+    }
+
+    @Volatile private var kusWarmedAt = 0L
+
+    /** Wake the Space's Kusaal translator both ways (it sleeps when idle), in the background — when Kusaal is chosen. */
+    private fun warmKusaal() {
+        val inMt = kusToEnglish ?: return
+        val now = System.currentTimeMillis()
+        if (now - kusWarmedAt < 10 * 60_000L) return
+        kusWarmedAt = now
+        val n = warmCount.incrementAndGet()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            val t0 = System.currentTimeMillis()
+            val ok = try { englishToKusMt?.translate("Please wait a moment $n.", Lang.GH_EN, Lang.KUS) != null }
+                catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { false }
+            // (one model serves both directions on the Space: this call wakes the Kusaal→English side too)
+            android.util.Log.i("Tekyerema", "[MT] English→Kusaal warm-up ${if (ok) "ok" else "failed"} in ${System.currentTimeMillis() - t0}ms" +
+                " (Kusaal→English ${inMt.name})")
         }
     }
 
@@ -293,10 +348,19 @@ object VoiceEngine {
                     langVoices.entries.associate { "${it.key}voice" to (it.value as TtsProvider) }
                 // A further language speaks through its configured chain (`providers.speech.tts.<lang>`, default its own
                 // on-device voice); RoutingTts sends whatever that chain cannot say to the English voice.
-                val others = langVoices.keys.mapNotNull { l ->
+                // Kusaal (owner, 19 October 2026: "it will use the online spaces"): the Space's Kusaal voice first, the
+                // on-device one when offline or the Space can't (`providers.speech.tts.kus`).
+                val others = (langVoices.keys + Lang.KUS).distinct().mapNotNull { l ->
                     SpeechProviders.resolve(SpeechProviders.ttsIds(l, listOf("${l}voice")), ttsRegistry)
                         .takeIf { it.isNotEmpty() }?.let { l to (if (it.size == 1) it[0] else FallbackTts(it)) }
                 }.toMap()
+                kusToEnglish = com.tekyerema.language.LanguageLayer.translator(Lang.KUS, Lang.GH_EN, layer.mt, isOnline)
+                val enKus = com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.KUS, layer.mt, isOnline)
+                englishToKusMt = enKus
+                val kusLocalizer = com.tekyerema.language.ReplyLocalizer(enKus, target = Lang.KUS,
+                    waitMs = { com.tekyerema.core.config.AppConfig.long("providers.speech.mt.kusReplyWaitMs", 6_000L) })
+                android.util.Log.i("Tekyerema", "[STARTUP] Kusaal: voice=${others[Lang.KUS]?.name ?: "none"} " +
+                    "mt in=${kusToEnglish?.name ?: "none"} out=${enKus?.name ?: "none"} hear=${SpeechProviders.onlineAsrIds(Lang.KUS)}")
                 val englishIds = if (own != null) listOf("ghvoice", "system") else listOf("system")
                 val enTw = com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline)
                 val localizer = com.tekyerema.language.ReplyLocalizer(enTw)
@@ -314,8 +378,11 @@ object VoiceEngine {
                     ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
                         .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
                     isOnline = isOnline,
-                    others = others
+                    others = others,
+                    toOthers = mapOf<String, suspend (String) -> String?>(Lang.KUS to { s -> kusLocalizer.toTwi(s) })
                 )
+                android.util.Log.i("Tekyerema", "[STARTUP] English network voice (providers.speech.tts.ghEnglish): " +
+                    SpeechProviders.ttsIds("ghEnglish", emptyList()))
                 // B-05: reply in the language the user last spoke; the persisted habitual language only moves after a streak.
                 val language = com.tekyerema.language.LanguageSession(
                     loadHabitual = { settings.sessionLanguage }, saveHabitual = { settings.sessionLanguage = it })

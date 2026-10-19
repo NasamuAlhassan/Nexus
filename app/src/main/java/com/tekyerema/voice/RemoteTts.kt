@@ -1,6 +1,7 @@
 package com.tekyerema.voice
 
 import android.util.Log
+import kotlinx.coroutines.async
 
 /**
  * Routes TTS by language. English → the English voice (the phone's engine today); Twi → the preferred Twi voice.
@@ -23,9 +24,20 @@ class RoutingTts(
     private val isOnline: () -> Boolean = { true },
     /** Tracks whether the Twi voice works, and decides when the user is told it doesn't (once per session). */
     private val twiStatus: TwiVoiceStatus = TwiVoiceStatus.shared,
-    /** Voices for further languages by code — "kus" → the on-device Kusaal voice (owner, 19 October 2026). A line such a
-     *  voice cannot say falls to the English voice, as Twi's does: never silent. */
-    private val others: Map<String, TtsProvider> = emptyMap()
+    /** Voices for further languages by code — "kus" → the Space's Kusaal voice, then the on-device one (owner, 19 October
+     *  2026). A line such a voice cannot say falls to the English voice, as Twi's does: never silent. */
+    private val others: Map<String, TtsProvider> = emptyMap(),
+    /** English → that language for [others] (Kusaal: the Space's translator, with Twi's rules — names and amounts as tags,
+     *  amounts said by the English voice). Null answer = the English voice reads the English line. */
+    private val toOthers: Map<String, suspend (String) -> String?> = emptyMap(),
+    /** The Ghanaian-English network voice (Kafui Dey on our Space, 19 October 2026): on/off, read at speak time so
+     *  `set_config speech.ghEnglish.enabled false` turns it off at once. */
+    private val ghEnabled: () -> Boolean = { com.tekyerema.core.config.AppConfig.bool("speech.ghEnglish.enabled", true) },
+    /** How long a reply waits for the network voice's FIRST sentence before the phone's voice says the line instead; the
+     *  next sentences are fetched while the one before plays, each within [ghNextWaitMs]. */
+    private val ghFirstWaitMs: () -> Long = { com.tekyerema.core.config.AppConfig.long("speech.ghEnglish.firstWaitMs", 6_000L) },
+    private val ghNextWaitMs: () -> Long = { com.tekyerema.core.config.AppConfig.long("speech.ghEnglish.nextWaitMs", 9_000L) },
+    private val clock: () -> Long = { System.currentTimeMillis() }
 ) : TtsProvider {
     override val name = "routing(en=${english.name}; ghEn=${ghEnglish?.name ?: "-"}; twi=${twi.name}" +
         others.entries.joinToString("") { "; ${it.key}=${it.value.name}" } + ")"
@@ -40,11 +52,7 @@ class RoutingTts(
         val text = rawText.replace(Regex("[*_`#]+"), "").replace(Regex("[ \\t]+"), " ").trim()
         // Pause marks (SpokenText) are silences on the system voice only; network voices and the Twi localizer get plain text.
         val plain = SpokenText.plain(text)
-        others[language]?.let { voice ->
-            if (voice.speak(plain, language)) { Log.i("Tekyerema", "[TTS] spoke $language via ${voice.name}"); return true }
-            Log.w("Tekyerema", "[TTS] $language voice ${voice.name} could not speak; the English voice reads the line")
-            return english.speak(text, Lang.GH_EN)
-        }
+        others[language]?.let { voice -> return speakOther(voice, text, plain, language) }
         if (language == Lang.TWI) {
             // Localize English response text to Twi so the Twi VOICE speaks Twi WORDS (not English read by
             // a Twi voice). Already-Twi text (e.g. LocalBrain "Mabue no.") is left as-is by enToTw. The language
@@ -93,14 +101,137 @@ class RoutingTts(
             Log.i("Tekyerema", "[TTS] spoke the Twi reply with the English voice (${english.name}) ok=$ok")
             return ok
         }
-        // English: prefer a Ghanaian-accented voice when online; fall back to the system engine (offline, no
-        // provider, or a failure) so we're never silent and never stall offline.
-        if (ghEnglish != null && isOnline()) {
-            if (ghEnglish.speak(plain, Lang.GH_EN)) { Log.i("Tekyerema", "[TTS] spoke Gh-English via ${ghEnglish.name}"); return true }
-            Log.w("Tekyerema", "[TTS] Gh-English voice unavailable → system-engine fallback (${english.name})")
+        // English: prefer the Ghanaian-accented network voice when online (Kafui Dey on our Space); the English chain (the own
+        // on-device voice, the phone's engine) says the line — or what's left of it — when that voice is off, resting, slow
+        // or fails, so English is never silent and never waits long.
+        val gh = speakGhEnglish(plain)
+        if (gh == GhResult.SPOKE) return true
+        if (gh == GhResult.STOPPED) return false
+        if (gh is GhResult.Partly) {
+            Log.w("Tekyerema", "[TTS] the Gh-English voice stopped mid-reply — ${english.name} finishes it")
+            return english.speak(gh.rest, Lang.GH_EN)
         }
         Log.i("Tekyerema", "[TTS] spoke $language via ${english.name}")
         return english.speak(text, language)
+    }
+
+    /** What the network English voice did with a line. */
+    private sealed class GhResult {
+        object SPOKE : GhResult()
+        /** Not used at all (off, offline, resting, no first sentence in time): the English chain says the whole line. */
+        object NOT_USED : GhResult()
+        /** Playback ended early (the user stopped it): nothing more is said. */
+        object STOPPED : GhResult()
+        /** The first sentences were said; [rest] wasn't fetched in time. */
+        class Partly(val rest: String) : GhResult()
+    }
+
+    @Volatile private var ghRestUntil = 0L
+    @Volatile private var ghSlowTrips = 0
+
+    /**
+     * The line in the Ghanaian-English network voice, sentence by sentence: the first sentence is fetched within
+     * [ghFirstWaitMs]; each next one is fetched while the one before plays. A first sentence that misses its time rests the
+     * voice (1 min, doubling to 10) — a cancelled call is not held against the provider by its own breaker, and a sleeping or
+     * broken Space must not cost every reply the wait. Pure routing; the clips come from [PrefetchTts].
+     */
+    private suspend fun speakGhEnglish(plain: String): GhResult {
+        val gh = ghEnglish ?: return GhResult.NOT_USED
+        if (!isOnline() || !ghEnabled() || plain.isBlank()) return GhResult.NOT_USED
+        if (clock() < ghRestUntil) return GhResult.NOT_USED
+        if (gh !is PrefetchTts) {
+            if (gh.speak(plain, Lang.GH_EN)) { Log.i("Tekyerema", "[TTS] spoke Gh-English via ${gh.name}"); return GhResult.SPOKE }
+            return GhResult.NOT_USED
+        }
+        val pieces = sentences(plain)
+        if (pieces.isEmpty()) return GhResult.NOT_USED
+        val t0 = clock()
+        return kotlinx.coroutines.coroutineScope {
+            fun fetchAsync(i: Int, waitMs: Long) = async {
+                kotlinx.coroutines.withTimeoutOrNull(waitMs) { gh.fetch(pieces[i], Lang.GH_EN) }
+            }
+            var next = fetchAsync(0, ghFirstWaitMs())
+            for (i in pieces.indices) {
+                val clips = next.await()
+                if (clips == null) {
+                    if (i == 0) {
+                        ghSlowTrips++
+                        ghRestUntil = clock() + (60_000L shl (ghSlowTrips - 1).coerceAtMost(4)).coerceAtMost(10 * 60_000L)
+                        Log.w("Tekyerema", "[TTS] Gh-English voice ${gh.name}: no first sentence in ${clock() - t0} ms — " +
+                            "the English chain speaks; network voice rests ${(ghRestUntil - clock()) / 1000}s")
+                        return@coroutineScope GhResult.NOT_USED
+                    }
+                    return@coroutineScope GhResult.Partly(pieces.drop(i).joinToString(" "))
+                }
+                if (i == 0) {
+                    ghSlowTrips = 0
+                    Log.i("Tekyerema", "[TTS] Gh-English voice ${gh.name}: first sentence ready in ${clock() - t0} ms (${pieces.size} sentence(s))")
+                }
+                if (i + 1 < pieces.size) next = fetchAsync(i + 1, ghNextWaitMs())
+                if (!gh.play(clips)) {
+                    next.cancel()
+                    Log.i("Tekyerema", "[TTS] Gh-English playback ended early (stopped)")
+                    return@coroutineScope GhResult.STOPPED
+                }
+            }
+            Log.i("Tekyerema", "[TTS] spoke Gh-English via ${gh.name} in ${clock() - t0} ms")
+            GhResult.SPOKE
+        }
+    }
+
+    /**
+     * A line in [others]' language. A reply is English (the planner, the app's own lines): it is put into the language first
+     * ([toOthers]); a line the translator can't be trusted with is said by the English voice — never English read by the
+     * Kusaal voice. Text already in the language (no English in it) is said as it is. Amounts and numbers marked for the
+     * English voice are said by it, between the language's own pieces.
+     */
+    private suspend fun speakOther(voice: TtsProvider, text: String, plain: String, language: String): Boolean {
+        val englishLine = com.tekyerema.language.ReplyLocalizer.looksEnglish(plain)
+        val line: String? = when {
+            englishLine -> toOthers[language]?.let { localize ->
+                try { localize(plain)?.takeIf { it.isNotBlank() } }
+                catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
+            }
+            com.tekyerema.language.ReplyLocalizer.englishForVoice(plain) -> null   // a list of names: the English voice
+            else -> plain
+        }
+        if (line == null) {
+            Log.i("Tekyerema", "[TTS] an English line in a ${Lang.label(language)} conversation → the English voice")
+            return speakEnglishPiece(plain, network = true)
+        }
+        if (com.tekyerema.language.EntityTags.hasEnglishSpans(line)) {
+            val pieces = com.tekyerema.language.EntityTags.segments(line)
+            for ((i, piece) in pieces.withIndex()) {
+                val (words, isEnglish) = piece
+                val ok = if (isEnglish) speakEnglishPiece(words, network = true) else voice.speak(words, language)
+                if (!ok && !isEnglish) {
+                    Log.w("Tekyerema", "[TTS] the ${Lang.label(language)} voice stopped mid-line — finishing it in English")
+                    return if (i == 0) speakEnglishPiece(plain, network = true)
+                        else english.speak(pieces.drop(i).joinToString(" ") { it.first }, Lang.GH_EN)
+                }
+            }
+            Log.i("Tekyerema", "[TTS] spoke $language with English amounts (${pieces.size} pieces) via ${voiceName(voice)}")
+            return true
+        }
+        if (voice.speak(com.tekyerema.language.EntityTags.display(line), language)) {
+            Log.i("Tekyerema", "[TTS] spoke $language via ${voiceName(voice)}"); return true
+        }
+        Log.w("Tekyerema", "[TTS] $language voice ${voice.name} could not speak; the English voice reads the line")
+        return speakEnglishPiece(plain, network = true)
+    }
+
+    private fun voiceName(v: TtsProvider) = (v as? FallbackTts)?.lastVoice ?: v.name
+
+    /** A line or a piece of one for the English voice: the network English voice first when [network] (or the Twi-line
+     *  setting) allows, then the English chain. */
+    private suspend fun speakEnglishPiece(text: String, network: Boolean): Boolean {
+        if (network) when (val gh = speakGhEnglish(SpokenText.plain(text))) {
+            GhResult.SPOKE -> return true
+            GhResult.STOPPED -> return false
+            is GhResult.Partly -> return english.speak(gh.rest, Lang.GH_EN)
+            GhResult.NOT_USED -> {}
+        }
+        return english.speak(text, Lang.GH_EN)
     }
     /**
      * A Twi line with English stretches, spoken piece by piece in order: Twi pieces by the Twi voice, English pieces
@@ -127,9 +258,27 @@ class RoutingTts(
         return true
     }
 
-    private suspend fun speakEnglishPiece(text: String): Boolean {
-        if (ghEnglish != null && isOnline() && ghEnglish.speak(text, Lang.GH_EN)) return true
-        return english.speak(text, Lang.GH_EN)
+    /** An English piece of a TWI line (an amount, or a line the translator couldn't take). Twi's demo behaviour is kept: the
+     *  English chain, unless `speech.ghEnglish.inTwiLines` lets the network English voice say these pieces too. */
+    private suspend fun speakEnglishPiece(text: String): Boolean =
+        speakEnglishPiece(text, network = com.tekyerema.core.config.AppConfig.bool("speech.ghEnglish.inTwiLines", false))
+
+    companion object {
+        private val SENTENCE_END = Regex("(?<=[.!?])\\s+")
+
+        /** A line as the network voice fetches it: sentence by sentence — a short one (< 40 chars) joined to the next, so
+         *  "Okay." isn't a request of its own — each at most 180 chars. Pure. */
+        internal fun sentences(text: String): List<String> {
+            val out = ArrayList<String>()
+            var carry = ""
+            for (s in SENTENCE_END.split(text.trim()).map { it.trim() }.filter { it.isNotEmpty() }) {
+                val joined = if (carry.isEmpty()) s else "$carry $s"
+                if (joined.length < 40) { carry = joined; continue }
+                out += SpeechChunks.split(joined, 180); carry = ""
+            }
+            if (carry.isNotEmpty()) { if (out.isNotEmpty() && out.last().length + carry.length < 180) out[out.size - 1] = out.last() + " " + carry else out += carry }
+            return out
+        }
     }
 
     override fun stop() { english.stop(); twi.stop(); ghEnglish?.stop(); others.values.forEach { it.stop() } }

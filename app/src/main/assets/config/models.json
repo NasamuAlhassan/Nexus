@@ -21,8 +21,12 @@
      "space_tts",
      "system"
     ],
-    "ghEnglish": [],
+    "ghEnglish": [
+     "space_tts_eng"
+    ],
+    "_ghEnglishNote": "19 Oct 2026: English replies in Kafui Dey's voice from the language Space first (RoutingTts: sentence by sentence, the first within speech.ghEnglish.firstWaitMs); the english chain above when it is off (speech.ghEnglish.enabled=false), offline, resting or slow. Twi lines keep their English pieces on the english chain unless speech.ghEnglish.inTwiLines=true.",
     "kus": [
+     "space_tts_kus",
      "kusvoice"
     ],
     "_kusNote": "19 Oct 2026 (owner: Kusaal is the main language): kusvoice = the Kusaal v3 Space voice on the phone (sherpa-onnx, assets/models/ondevice/kus/tts, 114 MB, offline). A line it cannot say goes to the English voice (RoutingTts others) — never silent."
@@ -37,6 +41,9 @@
      "twi": [
       "hcilab_asr",
       "space_asr"
+     ],
+     "kus": [
+      "space_asr_kus"
      ],
      "gh_en": [],
      "auto": []

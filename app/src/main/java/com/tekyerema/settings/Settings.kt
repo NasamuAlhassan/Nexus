@@ -212,7 +212,7 @@ class Settings(context: Context) {
         set(v) = put { putString(KEY_LANG_MODE, v) }
 
     /** Language to force for ASR/TTS, or null to follow the speaker (auto LID). */
-    val forcedLanguage: String? get() = when (languageMode) { LANG_MODE_ENGLISH -> "gh_en"; LANG_MODE_TWI -> "twi"; else -> null }
+    val forcedLanguage: String? get() = when (languageMode) { LANG_MODE_ENGLISH -> "gh_en"; LANG_MODE_TWI -> "twi"; LANG_MODE_KUS -> "kus"; else -> null }
 
     /** Read every reply aloud (off = rely on TalkBack / on-screen text only). */
     var speakAloud: Boolean
@@ -357,6 +357,9 @@ class Settings(context: Context) {
         fun notifyChanged() { sharedChanges.value = sharedChanges.value + 1 }
         const val LANG_MODE_ENGLISH = "english"
         const val LANG_MODE_TWI = "twi"
+        /** Kusaal only (19 October 2026): heard, translated and voiced by our language Space; there is no auto-detection
+         *  of Kusaal, so it is always this explicit choice. */
+        const val LANG_MODE_KUS = "kus"
         const val LANG_MODE_BOTH = "both"
         private const val KEY_LANG_MODE = "language_mode"
         private const val KEY_SPEAK = "speak_aloud"

@@ -126,12 +126,13 @@ object LanguageLayer {
         return when (chain.size) { 0 -> null; 1 -> chain[0]; else -> FallbackAsr(chain) }
     }
 
-    /** Config key for a translation direction: `providers.speech.mt.enToTwi` / `twiToEn`. */
+    /** Config key for a translation direction: `providers.speech.mt.enToTwi` / `twiToEn` / `kusToEn` / `enToKus`. */
     fun mtIds(from: String, to: String): List<String> =
         AppConfig.stringList("providers.speech.mt.${direction(from, to)}", emptyList())
 
-    private fun direction(from: String, to: String) =
-        (if (from == Lang.TWI) "twi" else "en") + "To" + (if (to == Lang.TWI) "Twi" else "En")
+    private fun direction(from: String, to: String) = side(from) + "To" + side(to).replaceFirstChar { it.uppercase() }
+
+    private fun side(lang: String) = when (lang) { Lang.TWI -> "twi"; Lang.KUS -> "kus"; else -> "en" }
 
     /** The configured translator for a direction (resting providers skipped at call time), or null. */
     fun translator(from: String, to: String, registry: Map<String, TranslationProvider>, isOnline: () -> Boolean): TranslationProvider? {
