@@ -399,7 +399,9 @@
         "kusToEn": ["space_mt_kus"],
         "enToKus": ["space_mt_kus"],
         "localizeReplies": true,
-        "replyWaitMs": 12000,
+        "replyWaitMs": 20000,
+        "promptWaitMs": 15000,
+        "kusReplyWaitMs": 20000,
         "maxChars": 400
       }
     }
