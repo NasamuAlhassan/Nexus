@@ -14,11 +14,20 @@ object MessageReading {
 
     data class Msg(val who: String?, val where: String?, val whenSpoken: String?, val text: String)
 
+    /** A Twi or Kusaal conversation (owner, 19 Oct 2026): the machine translation is not strong enough for a long frame, so the
+     *  line is kept to who and the words — no app, no time ("10 minutes ago"), no "in the last 12 hours" — and only those
+     *  few words go through it. English keeps the full line (the English voice says times and names well). */
+    fun plain(): Boolean = try {
+        com.tekyerema.voice.VoiceEngine.speaksTwi() || com.tekyerema.voice.VoiceEngine.speaksKusaal()
+    } catch (_: Throwable) { false }
+
     /** "From Ama, on WhatsApp, 10 minutes ago." ⏸ "Are you coming?" */
     fun item(m: Msg): String {
         val head = StringBuilder("From ").append(m.who?.trim()?.takeIf { it.isNotEmpty() } ?: "someone")
-        m.where?.trim()?.takeIf { it.isNotEmpty() }?.let { head.append(", on ").append(it) }
-        m.whenSpoken?.trim()?.takeIf { it.isNotEmpty() }?.let { head.append(", ").append(it) }
+        if (!plain()) {
+            m.where?.trim()?.takeIf { it.isNotEmpty() }?.let { head.append(", on ").append(it) }
+            m.whenSpoken?.trim()?.takeIf { it.isNotEmpty() }?.let { head.append(", ").append(it) }
+        }
         head.append('.')
         return head.toString() + SpokenText.PAUSE + SpokenText.forEar(m.text)
     }
@@ -30,7 +39,7 @@ object MessageReading {
         val shown = msgs.take(per)
         val rest = msgs.drop(per)
         val parts = ArrayList<String>()
-        intro?.trim()?.takeIf { it.isNotEmpty() }?.let { parts += it }
+        if (!plain()) intro?.trim()?.takeIf { it.isNotEmpty() }?.let { parts += it }
         shown.forEach { parts += item(it) }
         if (rest.isNotEmpty()) parts += more(rest.size)
         return Page(parts.joinToString(SpokenText.BREAK.toString()), rest)

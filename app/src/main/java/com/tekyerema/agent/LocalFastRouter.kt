@@ -845,7 +845,9 @@ class LocalFastRouter(
         if (req != null) { com.tekyerema.money.MoneyRequest.note(req); References.noteNumber(req.number) }
         // Numbers only — never the words, the amount or the number (the rehearsal scores step 2 from this line).
         Log.i(TAG, "[MSG] read 1 message; money request noted=${req != null} amount=${req?.amount != null} number=${req?.number != null}")
-        val line = "You have a message from $who. It says: “$text”." + (req?.let { " " + com.tekyerema.money.MoneyRequest.summary(it) } ?: "")
+        // Twi / Kusaal: just who and the words (the translator is weak; the frame is not needed to understand it).
+        val line = if (com.tekyerema.notifications.MessageReading.plain()) "From $who. $text"
+            else "You have a message from $who. It says: “$text”." + (req?.let { " " + com.tekyerema.money.MoneyRequest.summary(it) } ?: "")
         return handled(intent, line)
     }
 
