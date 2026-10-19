@@ -844,6 +844,12 @@ class VoiceController(
         com.tekyerema.voice.io.Heard.Cause.NOT_ALLOWED_HERE, com.tekyerema.voice.io.Heard.Cause.LOW_MEMORY)
     private val CANT_LISTEN_CONFIRM = "I can't hear answers right now. Tap Yes or No when you're ready."
     /** A question whose answer is a phone number or an amount. */
+    /** The agent's result line after it placed a call ("Calling my wife now.", "Right — calling Ama now.", Twi "Merefrɛ …"). */
+    private val CALL_PLACED = Regex("(?i)^(?:right\\s*[—-]\\s*)?(?:calling\\b.*\\bnow|merefrɛ|mefrɛ)")
+    private fun callInProgress(): Boolean = try {
+        val ctx = com.tekyerema.agent.AgentEngine.appContext()
+        ctx != null && (ctx.getSystemService(android.content.Context.TELECOM_SERVICE) as android.telecom.TelecomManager).isInCall
+    } catch (_: Throwable) { false }
     private val DIGITS_ASKED = Regex("(?i)\\b(?:phone number|number|digits|how much|amount|how many cedis)\\b")
 
     /** A reply given in Twi, as the English the answer / revise paths read ("daabi, soma pesewa aduonu" → "no, 20 pesewas";
@@ -1439,7 +1445,10 @@ class VoiceController(
             if (outcomeShown != null) set(VoiceState.SPEAKING, outcomeShown)
             var interruption: com.tekyerema.voice.io.BargeIn? = null
             tel.mark("reply_start")
-            val spoke = if (!speakAloud() || outcome.spoken.isBlank()) false else try {
+            // The call is up: "Calling my wife now." read over the ringing / connected call is noise on the loudspeaker (council review).
+            val quietCall = callInProgress() && CALL_PLACED.containsMatchIn(outcome.spoken)
+            if (quietCall) Log.i("Tekyerema", "[VOICE] the call is already up — its 'calling now' line is not spoken")
+            val spoke = if (!speakAloud() || outcome.spoken.isBlank() || quietCall) false else try {
                 val b = speakInterruptible(Verbalize.apply(outcome.spoken), tr.language)
                 // The interruption's own audio (captured stack), or just its onset (the phone's recognizer listens afresh).
                 interruption = b.takeIf { it.interrupted && (it.wav != null || !voiceIn.caps.transcribesAudio) }
@@ -1448,7 +1457,7 @@ class VoiceController(
             tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
                 it.copy(state = VoiceState.IDLE, spoken = outcomeShown ?: outcome.spoken, spokenAt = System.currentTimeMillis(),
-                    partialHint = if (spoke || !speakAloud() || outcome.spoken.isBlank()) "" else "(no ${Lang.label(tr.language)} voice yet)")
+                    partialHint = if (spoke || !speakAloud() || outcome.spoken.isBlank() || quietCall) "" else "(no ${Lang.label(tr.language)} voice yet)")
             }
             // B-07: the user spoke over the reply — what they said is the next turn.
             interruption?.let { b ->

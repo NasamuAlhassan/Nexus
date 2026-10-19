@@ -104,7 +104,24 @@ object PinCurtain {
         try { svc.registerReceiver(r, f); powerReceiver = r } catch (t: Throwable) { Log.w(TAG, "[PIN] power-button cancel unavailable: ${t.message}") }
     }
 
+    @Volatile private var lastCancelAt = 0L
+
+    /** The user pressed Cancel on the network's own dialog at the PIN step (TekyeremaAccessibilityService): the same ending as the
+     *  power button — nothing was sent, the open hand-off is dropped, no "PIN sent" and no "no word from the network" later. */
+    fun onUserCancelled() {
+        val now = System.currentTimeMillis()
+        if (now - lastCancelAt < 8_000) return
+        lastCancelAt = now
+        Log.i(TAG, "[PIN] the user pressed Cancel on the network's dialog — nothing is sent")
+        try { com.tekyerema.money.ussd.AfterPin.cancel() } catch (_: Throwable) {}
+        try { com.tekyerema.money.TxLedger.abandon() } catch (_: Throwable) {}
+        try { com.tekyerema.money.ussd.PushedPin.cancel() } catch (_: Throwable) {}
+        try { com.tekyerema.voice.SecureStep.end() } catch (_: Throwable) {}
+        try { com.tekyerema.voice.VoiceEngine.announce("Cancelled. Nothing was sent.") } catch (_: Throwable) {}
+    }
+
     private fun cancelByPower(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
+        lastCancelAt = System.currentTimeMillis()   // the dialog's Cancel it clicks next is not a second cancel
         Log.i(TAG, "[PIN] power button pressed at the PIN — cancelling; nothing is sent")
         closePending = true
         try { com.tekyerema.money.ussd.AfterPin.cancel() } catch (_: Throwable) {}

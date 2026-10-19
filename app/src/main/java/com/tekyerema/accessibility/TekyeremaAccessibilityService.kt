@@ -116,6 +116,13 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 "src.click=${src?.isClickable} src.children=${src?.childCount}")
         }
         event?.let { noteAnnouncement(it) }   // F-17: "Message sent", toasts — evidence for verification
+        // The user pressed Cancel on the network's dialog while the PIN step was open: nothing is sent — say so and drop the
+        // open hand-off (council review, 19 Oct 2026: after a cancel the app said "PIN sent" / "no word from the network").
+        if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED && com.tekyerema.voice.SecureStep.active()) {
+            val pkg = event.packageName?.toString()
+            val label = (event.text.joinToString(" ") + " " + (event.contentDescription ?: "")).trim()
+            if (pkg != null && TelephonyWindows.matches(pkg) && Regex("(?i)^cancel$").matches(label)) com.tekyerema.phone.PinCurtain.onUserCancelled()
+        }
         // Hide the trigger while a Tɛkyerɛma screen is in front; show it over everything else.
         // Decided from the window that actually has focus, so our own overlay windows, the
         // keyboard, the shade and permission dialogs (which all report window-state changes
