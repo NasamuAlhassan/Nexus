@@ -237,7 +237,7 @@ class HttpTtsProvider(
                         if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
                         HttpSpeech.failureOf(spec, r)?.let { throw it }
                         HttpSpeech.parseAudio(spec, r)
-                    }.also { if (spec.cacheEntries > 0) cache[key] = it; if (language == Lang.TWI) TtsDiskCache.put(spec.id, key, it) }
+                    }.also { if (spec.cacheEntries > 0) cache[key] = it; if (language == Lang.TWI || (language == Lang.GH_EN && TtsDiskCache.keepsEnglish(key))) TtsDiskCache.put(spec.id, key, it) }
                 } catch (e: CancellationException) { throw e }
                 catch (e: Exception) {
                     (e as? ProviderFailure)?.window?.let { ledger.exhaust(spec.id, spec.limits, it) }
@@ -333,6 +333,19 @@ object TtsDiskCache {
     fun get(id: String, key: String): ByteArray? = try {
         dir(id)?.let { java.io.File(it, name(key)) }?.takeIf { it.isFile }?.also { it.setLastModified(System.currentTimeMillis()) }?.readBytes()
     } catch (_: Throwable) { null }
+
+    /**
+     * The Kafui English voice is slow when the Space's GPU is busy (a CPU line took 24 s on 19 Oct 2026), so the app's own FIXED
+     * lines — a question, a read-back, a call announcement — are kept across restarts and play at once next time. Only those
+     * frames: a message, a balance or anything the user said is never written to disk. `speech.ghEnglish.keepPrefixes` overrides.
+     */
+    internal fun keepsEnglish(key: String): Boolean {
+        val text = key.substringAfter('|').trim()
+        val prefixes = com.tekyerema.core.config.AppConfig.stringList("speech.ghEnglish.keepPrefixes", DEFAULT_ENGLISH_FRAMES)
+        return prefixes.any { text.startsWith(it, ignoreCase = true) }
+    }
+    private val DEFAULT_ENGLISH_FRAMES = listOf("What should the reference", "How much do you want", "Which one is", "Send ", "Calling ",
+        "Do you want me to", "Okay", "Yes", "No,", "I'll stop at the PIN", "MTN shows", "I'll wait", "Say yes or no", "Done", "Sent")
 
     fun put(id: String, key: String, clip: ByteArray) {
         if (key.substringAfter('|').any { it.isDigit() }) return
