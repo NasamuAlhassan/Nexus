@@ -186,10 +186,17 @@ class KusaalLanguageTest {
             ghEnabled = { true }, ghFirstWaitMs = { 6_000L }, clock = { testScheduler.currentTime })
         assertTrue(routing.speak("The time is six.", Lang.GH_EN))
         assertEquals("the English chain spoke after the first sentence's time ran out", listOf("The time is six." to Lang.GH_EN), phone.said)
-        kafui.fetchMs = 0
+        // Resting: a line the phone does NOT hold (a real fetch, 20 s) is not waited for — the English chain speaks at once
+        kafui.fetchMs = 20_000
+        val before = testScheduler.currentTime
         routing.speak("The time is seven.", Lang.GH_EN)
-        assertTrue("resting: the next reply doesn't wait on it", kafui.fetched.isEmpty())
+        assertTrue("resting: the next reply doesn't wait on a real fetch", testScheduler.currentTime - before < 1_000)
         assertEquals(2, phone.said.size)
+        // …but a line the phone already holds (answers at once, like the disk cache) still plays in the network voice
+        kafui.fetchMs = 0
+        routing.speak("The time is eight.", Lang.GH_EN)
+        assertEquals("a held line plays even while the voice rests", 2, phone.said.size)
+        assertTrue(kafui.fetched.contains("The time is eight."))
     }
 
     @Test fun aNetworkVoiceThatFailsLaterHandsTheRestOver() = runTest {
