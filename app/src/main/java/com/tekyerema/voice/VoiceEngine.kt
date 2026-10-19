@@ -611,8 +611,16 @@ object VoiceEngine {
     fun announce(text: String, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
         scope.launch {
-            val ok = try { englishVoice.speak(Verbalize.apply(text), Lang.GH_EN) } catch (_: Throwable) { false }
-            android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok (${text.length} chars)")   // no words in the log
+            // Owner, 19 Oct 2026: in a Twi or Kusaal conversation every spoken line is in that language — the money outcome
+            // and the other announcements went to the English voice. The reply voice puts the line into the language
+            // (ReplyLocalizer) and speaks it; a line it cannot put into the language is still said in English there.
+            val lang = settings.forcedLanguage ?: conversationLanguage()
+            val local = lang == Lang.TWI || lang == Lang.KUS
+            val ok = try {
+                if (local && replyVoice != null) replyVoice!!.speak(Verbalize.apply(text), lang)
+                else englishVoice.speak(Verbalize.apply(text), Lang.GH_EN)
+            } catch (_: Throwable) { false }
+            android.util.Log.i("Tekyerema", "[ANNOUNCE] spoke=$ok lang=$lang (${text.length} chars)")   // no words in the log
             // The line ended with a question (agent/NextStep's offer): the microphone opens once for the answer.
             if (ok && listenAfter) try { controller.followUp() } catch (_: Throwable) {}
         }

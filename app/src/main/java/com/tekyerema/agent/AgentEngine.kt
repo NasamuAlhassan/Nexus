@@ -2263,7 +2263,11 @@ object AgentEngine {
     /** C-13 / G-12: ask the user and WAIT for the answer inside the task. null = no answer in time, or the task was stopped. */
     /** @param twiWording the question's own Twi wording when the app made the question (ContactChoice) — used in a Twi
      *  conversation instead of a translation. */
-    private suspend fun askUser(question: String, spoken: String, twiWording: String? = null): String? {
+    private suspend fun askUser(question: String, spokenIn: String, twiWording: String? = null): String? {
+        // Owner, 19 Oct 2026: in Twi / Kusaal a question is just the question — the planner's bracketed hints
+        // ("(You can leave blank for none)", "(Enter the amount for 0 cedis)") are English the translator leaves behind.
+        val spoken = if (com.tekyerema.notifications.MessageReading.plain())
+            spokenIn.replace(Regex("\\s*\\([^)]*\\)"), "").trim().ifEmpty { spokenIn } else spokenIn
         log(LogEntry.Kind.CONFIRM, "Asking: $spoken")
         pushConvo("Tɛkyerɛma asked: $question")
         drain(answerChannel)
