@@ -24,6 +24,8 @@ import kotlinx.coroutines.launch
  * and TTS, so triggering Tɛkyerɛma from anywhere never races a second recorder.
  */
 object VoiceEngine {
+    /** Languages that may carry their own on-device voice in the APK (assets/models/ondevice/<code>/tts). */
+    private val ON_DEVICE_LANGS = listOf("kus")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var settings: Settings
     private lateinit var systemTts: AndroidTts
@@ -39,6 +41,17 @@ object VoiceEngine {
     @Volatile private var ownVoice: SherpaTts? = null
     /** Whether this build carries the own Ghanaian voice (Settings › Voice says so beside the "Ghanaian English" choice). */
     val hasOwnVoice: Boolean get() = ownVoice != null
+    /** On-device voices for further languages, by code ("kus" → the Kusaal v3 voice, assets/models/ondevice/kus/tts —
+     *  owner, 19 October 2026). Loaded on first use, not at start-up: the Kusaal model alone is 114 MB. */
+    @Volatile private var langVoices: Map<String, SherpaTts> = emptyMap()
+
+    /** The bundled on-device voice for [language], if this build has one (debug hooks and diagnostics). */
+    fun onDeviceVoice(language: String): SherpaTts? =
+        if (language == Lang.GH_EN || language.equals("eng", true)) ownVoice else langVoices[language.lowercase()]
+
+    /** Say [text] in [language] the way a reply would be said (RoutingTts: "kus" → the Kusaal voice, Twi, English). */
+    suspend fun speakIn(text: String, language: String): Boolean =
+        if (!initialized) false else (replyVoice ?: englishVoice).speak(Verbalize.apply(text), language)
     /** What says an English line outside a voice turn: [AccentTts] — the accent chosen in Settings decides whether the
      *  own voice goes first; the phone's engine is always behind it (never silent). */
     private lateinit var englishVoice: TtsProvider
@@ -219,8 +232,10 @@ object VoiceEngine {
         // and the phone's engine stays behind it, so a missing or failed model is never silence.
         val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
         englishVoice = if (own != null) AccentTts(own, systemVoice) else systemVoice
+        langVoices = ON_DEVICE_LANGS.mapNotNull { l -> SherpaTts(app, OnDeviceVoice.dirFor(l)).takeIf { it.present }?.let { l to it } }.toMap()
         stage("ownVoice")
-        android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}")
+        android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}" +
+            langVoices.entries.joinToString("") { " | ${it.key}: ${it.value.name}" })
         val levels = ArrayList<StateFlow<Float>>()
         val mics = ArrayList<MicCapture>()   // warmed (neural VAD loaded) on a background thread after start-up — P3-02
         // B-19: contact names + app labels for post-ASR name correction, loaded off the voice path (READ_CONTACTS only
@@ -274,7 +289,14 @@ object VoiceEngine {
                 // any REST API) from config + local.properties; with the shipped config there are none, so everything is the
                 // system engine and a Twi reply is spoken from its text (no MT).
                 asrRegistry = layer.asr
-                val ttsRegistry = layer.tts + ("system" to systemVoice) + (own?.let { mapOf("ghvoice" to it) } ?: emptyMap())
+                val ttsRegistry = layer.tts + ("system" to systemVoice) + (own?.let { mapOf("ghvoice" to it) } ?: emptyMap()) +
+                    langVoices.entries.associate { "${it.key}voice" to (it.value as TtsProvider) }
+                // A further language speaks through its configured chain (`providers.speech.tts.<lang>`, default its own
+                // on-device voice); RoutingTts sends whatever that chain cannot say to the English voice.
+                val others = langVoices.keys.mapNotNull { l ->
+                    SpeechProviders.resolve(SpeechProviders.ttsIds(l, listOf("${l}voice")), ttsRegistry)
+                        .takeIf { it.isNotEmpty() }?.let { l to (if (it.size == 1) it[0] else FallbackTts(it)) }
+                }.toMap()
                 val englishIds = if (own != null) listOf("ghvoice", "system") else listOf("system")
                 val enTw = com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline)
                 val localizer = com.tekyerema.language.ReplyLocalizer(enTw)
@@ -291,7 +313,8 @@ object VoiceEngine {
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
                     ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
                         .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
-                    isOnline = isOnline
+                    isOnline = isOnline,
+                    others = others
                 )
                 // B-05: reply in the language the user last spoke; the persisted habitual language only moves after a streak.
                 val language = com.tekyerema.language.LanguageSession(
@@ -491,6 +514,7 @@ object VoiceEngine {
             level != android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
         if (pressing && !controller.isRunning) sherpa?.let { s -> scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
         if (pressing && !controller.isRunning) ownVoice?.let { v -> scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
+        if (pressing && !controller.isRunning) langVoices.values.forEach { v -> scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
     }
 
     private fun applyVoiceSettings() {
@@ -498,6 +522,7 @@ object VoiceEngine {
         systemTts.setRate(when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f })
         ReadingPace.rate = when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }   // readings sized in seconds
         ownVoice?.rate = ReadingPace.rate
+        langVoices.values.forEach { it.rate = ReadingPace.rate }
         systemTts.setPitch(when (settings.speechPitch) { 0 -> 0.85f; 2 -> 1.15f; else -> 1.0f })   // B-13
         Welcome.userName = settings.preferredName   // spoken greetings use the name from the welcome
     }

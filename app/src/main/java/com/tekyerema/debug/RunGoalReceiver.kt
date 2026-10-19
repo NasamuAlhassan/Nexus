@@ -286,7 +286,8 @@ class RunGoalReceiver : BroadcastReceiver() {
             return
         }
         intent.getStringExtra("tts_test")?.let { text ->
-            com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"))
+            com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"),
+                save = intent.getStringExtra("tts_save") == "1")
             return
         }
         // Design review: force the Home visual into a state.  --es preview_presence THINKING | off

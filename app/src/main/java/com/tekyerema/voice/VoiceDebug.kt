@@ -210,7 +210,25 @@ object VoiceDebug {
 
     /** `--es tts_test "<text>" [--es lang gh_en|twi]` — speaks via the phone's system TTS engine (the Abena/
      *  Khaya cloud voices were removed 2026-09-27; the UG HCI Lab TTS API drops into RoutingTts later). */
-    fun ttsTest(ctx: Context, text: String, lang: String?) {
+    fun ttsTest(ctx: Context, text: String, lang: String?, save: Boolean = false) {
+        // A language with its own on-device voice (`--es lang kus`): spoken the way a reply is (VoiceEngine → RoutingTts →
+        // the bundled voice), and with `--es tts_save 1` also written to files/tts_test_<lang>.wav for evidence.
+        val own = lang?.lowercase()?.takeIf { it != Lang.TWI && it != Lang.GH_EN }
+        if (own != null) {
+            scope.launch {
+                val t0 = android.os.SystemClock.uptimeMillis()
+                val spoke = try { VoiceEngine.speakIn(text, own) }
+                    catch (e: Exception) { Log.w("Tekyerema", "[VOICE-DEBUG] tts error: ${e.message}"); false }
+                Log.i("Tekyerema", "[VOICE-DEBUG] tts_test spoke=$spoke lang=$own via=${VoiceEngine.onDeviceVoice(own)?.name ?: "no on-device voice"} " +
+                    "in ${android.os.SystemClock.uptimeMillis() - t0} ms (${text.length} chars)")
+                if (save) {
+                    val out = File(ctx.getExternalFilesDir(null), "tts_test_$own.wav")
+                    val ok = VoiceEngine.onDeviceVoice(own)?.renderWav(text, own, out) ?: false
+                    Log.i("Tekyerema", "[VOICE-DEBUG] tts_test saved=$ok ${if (ok) "${out.length()} B → ${out.absolutePath}" else ""}")
+                }
+            }
+            return
+        }
         val tts = AndroidTts(ctx)
         val language = lang?.takeIf { it == Lang.TWI } ?: Lang.GH_EN
         scope.launch {

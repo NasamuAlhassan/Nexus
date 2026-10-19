@@ -22,9 +22,13 @@ class RoutingTts(
     private val ghEnglish: TtsProvider? = null,
     private val isOnline: () -> Boolean = { true },
     /** Tracks whether the Twi voice works, and decides when the user is told it doesn't (once per session). */
-    private val twiStatus: TwiVoiceStatus = TwiVoiceStatus.shared
+    private val twiStatus: TwiVoiceStatus = TwiVoiceStatus.shared,
+    /** Voices for further languages by code — "kus" → the on-device Kusaal voice (owner, 19 October 2026). A line such a
+     *  voice cannot say falls to the English voice, as Twi's does: never silent. */
+    private val others: Map<String, TtsProvider> = emptyMap()
 ) : TtsProvider {
-    override val name = "routing(en=${english.name}; ghEn=${ghEnglish?.name ?: "-"}; twi=${twi.name})"
+    override val name = "routing(en=${english.name}; ghEn=${ghEnglish?.name ?: "-"}; twi=${twi.name}" +
+        others.entries.joinToString("") { "; ${it.key}=${it.value.name}" } + ")"
     override suspend fun speak(rawText: String, language: String): Boolean {
         NowSpeaking.begin()
         try { return speakInner(rawText, language) } finally { NowSpeaking.end() }
@@ -36,6 +40,11 @@ class RoutingTts(
         val text = rawText.replace(Regex("[*_`#]+"), "").replace(Regex("[ \\t]+"), " ").trim()
         // Pause marks (SpokenText) are silences on the system voice only; network voices and the Twi localizer get plain text.
         val plain = SpokenText.plain(text)
+        others[language]?.let { voice ->
+            if (voice.speak(plain, language)) { Log.i("Tekyerema", "[TTS] spoke $language via ${voice.name}"); return true }
+            Log.w("Tekyerema", "[TTS] $language voice ${voice.name} could not speak; the English voice reads the line")
+            return english.speak(text, Lang.GH_EN)
+        }
         if (language == Lang.TWI) {
             // Localize English response text to Twi so the Twi VOICE speaks Twi WORDS (not English read by
             // a Twi voice). Already-Twi text (e.g. LocalBrain "Mabue no.") is left as-is by enToTw. The language
@@ -123,6 +132,6 @@ class RoutingTts(
         return english.speak(text, Lang.GH_EN)
     }
 
-    override fun stop() { english.stop(); twi.stop(); ghEnglish?.stop() }
-    override fun shutdown() { english.shutdown(); twi.shutdown(); ghEnglish?.shutdown() }
+    override fun stop() { english.stop(); twi.stop(); ghEnglish?.stop(); others.values.forEach { it.stop() } }
+    override fun shutdown() { english.shutdown(); twi.shutdown(); ghEnglish?.shutdown(); others.values.forEach { it.shutdown() } }
 }

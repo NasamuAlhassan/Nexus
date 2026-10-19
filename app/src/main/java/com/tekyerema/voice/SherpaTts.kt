@@ -58,6 +58,9 @@ object OnDeviceVoice {
         val language: String? = null
     )
 
+    /** Where a bundled voice lives: `models/ondevice/<language>/tts/` (English = "eng", Kusaal = "kus"). */
+    fun dirFor(language: String): String = "models/ondevice/${language.trim().lowercase()}/tts"
+
     /** Whether this voice may say a line in [language]: a Piper voice is English (never Twi); an MMS voice only its own. */
     fun speaks(s: Spec, language: String): Boolean =
         if (s.type == VITS_MMS) s.language != null && language.equals(s.language, ignoreCase = true) else language != Lang.TWI
@@ -143,7 +146,7 @@ object OnDeviceVoice {
  * Threads: every call into the native model (load, generate, release) happens on ONE worker thread — the model is not
  * safe to free while it synthesises. A second thread only feeds the speaker.
  */
-class SherpaTts(context: Context, private val dir: String = "models/ondevice/eng/tts") : TtsProvider, VoiceAvailability {
+class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor("eng")) : TtsProvider, VoiceAvailability {
     private val app = context.applicationContext
 
     /** The bundled voice, or null when this build has none. Read once. */
@@ -213,6 +216,41 @@ class SherpaTts(context: Context, private val dir: String = "models/ondevice/eng
     }
 
     override fun stop() { current.get()?.let { cancel(it) } }
+
+    /** Debug evidence (RUN_GOAL `tts_test … tts_save 1`): the whole line as a 16-bit mono WAV in [out], made on the
+     *  worker thread like a spoken line. False when this voice cannot say [language] or the model will not load. */
+    suspend fun renderWav(text: String, language: String, out: File): Boolean {
+        val s = spec ?: return false
+        if (text.isBlank() || !OnDeviceVoice.speaks(s, language)) return false
+        return suspendCancellableCoroutine { cont ->
+            worker.execute {
+                val ok = try {
+                    val tts = load(s)
+                    if (tts == null) false else {
+                        val audio = tts.generate(OnDeviceVoice.forModel(s, OnDeviceVoice.say(text, s.say)), 0, rate.coerceIn(0.5f, 1.6f))
+                        val pcm = OnDeviceVoice.pcm16(audio.samples)
+                        out.parentFile?.mkdirs()
+                        out.writeBytes(wav16(pcm, audio.sampleRate))
+                        Log.i("Tekyerema", "[TTS] on-device voice rendered ${pcm.size} samples at ${audio.sampleRate} Hz → ${out.name}")
+                        pcm.isNotEmpty()
+                    }
+                } catch (t: Throwable) {
+                    Log.w("Tekyerema", "[TTS] on-device render failed: ${t.javaClass.simpleName}: ${t.message}"); false
+                }
+                if (cont.isActive) cont.resume(ok)
+            }
+        }
+    }
+
+    private fun wav16(pcm: ShortArray, hz: Int): ByteArray {
+        val data = pcm.size * 2
+        val b = java.nio.ByteBuffer.allocate(44 + data).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        b.put("RIFF".toByteArray()).putInt(36 + data).put("WAVE".toByteArray())
+        b.put("fmt ".toByteArray()).putInt(16).putShort(1).putShort(1).putInt(hz).putInt(hz * 2).putShort(2).putShort(16)
+        b.put("data".toByteArray()).putInt(data)
+        for (v in pcm) b.putShort(v)
+        return b.array()
+    }
 
     override fun shutdown() {
         stop()
@@ -284,12 +322,17 @@ class SherpaTts(context: Context, private val dir: String = "models/ondevice/eng
                     if (line.cancelled || !player.isAlive) break
                     val words = p.text
                     if (words == null) { queue.put(Chunk(ShortArray((hz * p.silenceMs / 1000).toInt()), speech = false)); continue }
-                    tts.generateWithCallback(words, 0, speed) { samples ->
-                        if (line.cancelled || !player.isAlive) return@generateWithCallback 0
-                        if (first) { first = false; lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0 }
-                        queue.put(Chunk(OnDeviceVoice.pcm16(samples), speech = true))
-                        1
-                    }
+                    // An object, not a lambda: sherpa-onnx's JNI looks up the TYPED method invoke([F)Ljava/lang/Integer;, and
+                    // Kotlin 2 compiles a lambda to a class with only the erased invoke(Object) — the native side then aborts
+                    // the whole app (SIGABRT, "JNI NewFloatArray called with pending NoSuchMethodError"; emulator, 19 Oct 2026).
+                    tts.generateWithCallback(words, 0, speed, object : (FloatArray) -> Int {
+                        override fun invoke(samples: FloatArray): Int {
+                            if (line.cancelled || !player.isAlive) return 0
+                            if (first) { first = false; lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0 }
+                            queue.put(Chunk(OnDeviceVoice.pcm16(samples), speech = true))
+                            return 1
+                        }
+                    })
                 }
             } catch (t: Throwable) {
                 // out of memory, a native failure: what was already said stays said — see the return value

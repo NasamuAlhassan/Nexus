@@ -21,7 +21,11 @@
      "space_tts",
      "system"
     ],
-    "ghEnglish": []
+    "ghEnglish": [],
+    "kus": [
+     "kusvoice"
+    ],
+    "_kusNote": "19 Oct 2026 (owner: Kusaal is the main language): kusvoice = the Kusaal v3 Space voice on the phone (sherpa-onnx, assets/models/ondevice/kus/tts, 114 MB, offline). A line it cannot say goes to the English voice (RoutingTts others) — never silent."
    },
    "_ttsHedgeNote": "16 Oct 2026: when the first two Twi voices are network voices, the first gets ttsHedgeMs to fetch a line; still fetching, the second is asked too and the first audio back is played (recorded lab clips and cached lines play at once). 0 = strictly one after the other.",
    "ttsHedgeMs": 45000,
