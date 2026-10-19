@@ -39,7 +39,8 @@ class OnDeviceKusaalVoiceTest {
 
     @Test fun kusaalLettersReachTheModelInLowerCase() {
         val k = OnDeviceVoice.parse(kus)!!
-        assertEquals("ɛ ɔ ʋ bɛ", OnDeviceVoice.forModel(k, "Ɛ Ɔ Ʋ BƐ"))
+        assertEquals("ɛ ɔ u bɛ", OnDeviceVoice.forModel(k, "Ɛ Ɔ Ʋ BƐ"))      // no ʋ token yet: read as u
+        assertEquals("puusim", OnDeviceVoice.forModel(k, "Pʋʋsim"))
         assertEquals("Hello Accra", OnDeviceVoice.forModel(OnDeviceVoice.parse(piper)!!, "Hello Accra"))
     }
 }

@@ -65,8 +65,9 @@ object OnDeviceVoice {
     fun speaks(s: Spec, language: String): Boolean =
         if (s.type == VITS_MMS) s.language != null && language.equals(s.language, ignoreCase = true) else language != Lang.TWI
 
-    /** The text as the model's front-end wants it: an MMS voice's letters are lower-case tokens (ɛ, ɔ, ʋ included). */
-    fun forModel(s: Spec, text: String): String = if (s.type == VITS_MMS) text.lowercase() else text
+    /** The text as the model's front-end wants it: an MMS voice's letters are lower-case tokens (ɛ, ɔ included). The
+     *  Kusaal phone voice has no ʋ token (the model would drop the letter), so it reads ʋ as u for now (owner, 19 Oct). */
+    fun forModel(s: Spec, text: String): String = if (s.type == VITS_MMS) text.lowercase().replace('ʋ', 'u') else text
 
     /** A `voice.json`, or null when it names a type this build can't run or lacks a file it needs. */
     fun parse(json: String): Spec? {
