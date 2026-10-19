@@ -30,8 +30,12 @@ class TwiMoneyConfirmTest {
 
     @Test fun `a warning keeps the English read-back`() {
         assertNull("a number the user never said", UssdNavigatorTool.twiSpec(send("_unsaid" to true)))
-        assertNull("a reference", UssdNavigatorTool.twiSpec(send("reference" to "rent")))
         assertNull("another network than the SIM", UssdNavigatorTool.twiSpec(send("number" to "0508797323")))
+    }
+
+    @Test fun `a reference is read back in the Twi frame, not machine-translated`() {
+        val twi = ConfirmTemplates.twi(UssdNavigatorTool.twiSpec(send("reference" to "aduane"))!!)
+        assertEquals("Menbue Mobile Money sɛ wode sidi anum kɔma Prince Alhassan? Nkyerɛkyerɛmu: aduane. Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi.", twi)
     }
 
     @Test fun `a balance check has no template`() {

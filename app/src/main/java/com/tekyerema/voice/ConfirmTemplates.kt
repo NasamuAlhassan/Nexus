@@ -21,7 +21,8 @@ object ConfirmTemplates {
         val number: String? = null,   // phone number — read digit by digit, in 3-3-4 groups
         val amount: String? = null,   // cedi amount — read digit by digit
         val message: String? = null,  // message body — passed through VERBATIM
-        val firstTime: Boolean = false // a send to a number this phone has never paid (money/KnownRecipients)
+        val firstTime: Boolean = false, // a send to a number this phone has never paid (money/KnownRecipients)
+        val reference: String? = null  // the payment reference the user said, kept as said (the Twi frame reads it back)
     ) {
         enum class Kind { CALL, SEND_MONEY, BUY_AIRTIME, SEND_MESSAGE, GENERIC }
     }
@@ -134,7 +135,9 @@ object ConfirmTemplates {
             Spec.Kind.CALL -> "Wopɛ sɛ mefrɛ ${who ?: return null}?"
             Spec.Kind.SEND_MONEY -> "Menbue Mobile Money sɛ wode ${amount ?: "sika"} kɔma ${who ?: return null}?" +
                 // "This number is new." [owner: verify the Twi] — the first-time warning, which used to force the English line
-                (if (spec.firstTime) " Nɔma yi yɛ foforɔ." else "") + " Wo ankasa na wobɛhyɛ PIN."
+                (if (spec.firstTime) " Nɔma yi yɛ foforɔ." else "") +
+                // the reference is read back too [owner: verify "Nkyerɛkyerɛmu"]
+                (spec.reference?.trim()?.takeIf { it.isNotEmpty() }?.let { " Nkyerɛkyerɛmu: $it." } ?: "") + " Wo ankasa na wobɛhyɛ PIN."
             Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime${amount?.let { " $it" } ?: ""}? Wo ankasa na wobɛhyɛ PIN."
             else -> return null
         }
