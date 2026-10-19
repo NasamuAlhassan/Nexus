@@ -138,22 +138,28 @@ class RoutingTts(
     private suspend fun speakGhEnglish(plain: String): GhResult {
         val gh = ghEnglish ?: return GhResult.NOT_USED
         if (!isOnline() || !ghEnabled() || plain.isBlank()) return GhResult.NOT_USED
-        if (clock() < ghRestUntil) return GhResult.NOT_USED
+        // While the network voice "rests" after a slow first sentence, a line the phone ALREADY HOLDS (the app's fixed lines are kept on
+        // disk, HttpProviders.TtsDiskCache) is still played: the first sentence gets a quarter of a second, which a cache hit needs
+        // and a real fetch cannot meet — and that miss costs no further rest (council review, 19 Oct 2026).
+        val resting = clock() < ghRestUntil
+        if (resting && gh !is PrefetchTts) return GhResult.NOT_USED
         if (gh !is PrefetchTts) {
             if (gh.speak(plain, Lang.GH_EN)) { Log.i("Tekyerema", "[TTS] spoke Gh-English via ${gh.name}"); return GhResult.SPOKE }
             return GhResult.NOT_USED
         }
         val pieces = sentences(plain)
         if (pieces.isEmpty()) return GhResult.NOT_USED
+        if (com.tekyerema.BuildConfig.DEBUG) pieces.forEach { Log.d("Tekyerema", "[TTS-LINE] eng|$it") }   // the exact keys, for pre-generating fixed lines
         val t0 = clock()
         return kotlinx.coroutines.coroutineScope {
             fun fetchAsync(i: Int, waitMs: Long) = async {
                 kotlinx.coroutines.withTimeoutOrNull(waitMs) { gh.fetch(pieces[i], Lang.GH_EN) }
             }
-            var next = fetchAsync(0, ghFirstWaitMs())
+            var next = fetchAsync(0, if (resting) 250L else ghFirstWaitMs())
             for (i in pieces.indices) {
                 val clips = next.await()
                 if (clips == null) {
+                    if (i == 0 && resting) return@coroutineScope GhResult.NOT_USED   // not held by the phone: the English chain speaks, rest unchanged
                     if (i == 0) {
                         ghSlowTrips++
                         ghRestUntil = clock() + (60_000L shl (ghSlowTrips - 1).coerceAtMost(4)).coerceAtMost(10 * 60_000L)
