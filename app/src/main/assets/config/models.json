@@ -36,11 +36,11 @@
    "_ttsNote": "ghvoice = the app's own on-device Ghanaian-English voice (voice/SherpaTts, assets/models/ondevice/eng/tts/voice.json). A build without that voice has no 'ghvoice' provider and the id is skipped — English is then the phone's engine, as before.",
    "asr": {
     "_hedgeNote": "16 Oct 2026: the first recogniser in a chain gets hedgeMs to answer; still busy, the next is asked beside it and the first answer wins (the lab answers in 4-6 s; that day it timed out at 15 s every turn). 0 = strictly one after the other.",
-    "hedgeMs": 40000,
+    "hedgeMs": 12000,
     "online": {
      "twi": [
-      "hcilab_asr",
-      "space_asr"
+      "space_asr",
+      "hcilab_asr"
      ],
      "kus": [
       "space_asr_kus"

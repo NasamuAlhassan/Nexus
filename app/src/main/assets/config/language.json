@@ -399,6 +399,7 @@
         "kusToEn": ["space_mt_kus"],
         "enToKus": ["space_mt_kus"],
         "localizeReplies": true,
+        "replyWaitMs": 12000,
         "maxChars": 400
       }
     }
