@@ -214,7 +214,14 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
     private fun enabled() = AppConfig.bool("speech.tts.onDevice.enabled", true)
 
     /** Load the model now (off the main thread), so the first reply doesn't wait for it. */
-    fun warm() { if (present && enabled()) worker.execute { spec?.let { load(it) } } }
+    fun warm() {
+        if (present && enabled()) worker.execute {
+            val s = spec ?: return@execute
+            // One throw-away sentence after the load: the first synthesis allocates and optimises, so the owner's first real line
+            // (20 Oct 2026: "it takes a bit of time to load") would otherwise pay for it.
+            try { load(s)?.generate(OnDeviceVoice.forModel(s, "Ready."), 0, (rate * s.speed).coerceIn(0.5f, 1.6f)) } catch (_: Throwable) {}
+        }
+    }
 
     /** Give the model's memory back when nothing is being said (the system is short of RAM); it reloads on the next
      *  line. Queued on the worker, so it can never free the model under a line that is being synthesised. */

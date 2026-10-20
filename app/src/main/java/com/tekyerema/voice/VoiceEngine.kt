@@ -393,6 +393,7 @@ object VoiceEngine {
                     english = SpeechProviders.tts("english", ttsRegistry, systemVoice, englishIds),
                     twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
+                    enToTwAll = { localizer.toTwiAll(it) },
                     ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
                         .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
                     isOnline = isOnline,

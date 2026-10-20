@@ -94,6 +94,7 @@ fun LivingVoice(
     var frame by remember { mutableLongStateOf(0L) }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val orbLite = remember { orbIsLite() }
     LaunchedEffect(sim, reduceMotion, lifecycle) {
         // Only while the screen is visible: a task running with our screen in the background costs no frames.
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -105,6 +106,8 @@ fun LivingVoice(
                     delay(100); last = -1L; continue
                 }
                 withFrameNanos { now ->
+                    // 30 frames a second is plenty for a slow swirl and halves the GPU's work on an entry phone (20 Oct 2026, A20e).
+                    if (orbLite && last >= 0 && now - last < 27_000_000L) return@withFrameNanos
                     val dt = if (last < 0) 0f else (now - last) / 1e9f
                     last = now
                     sim.step(dt, currentLevel(), currentPressed, reduceMotion)
@@ -190,6 +193,10 @@ private class OrbKit(
 )
 
 private const val UNIT = 100f
+private val orbIsLiteCached: Boolean by lazy { orbIsLite() }
+
+/** `ui.glassLite` (default true): two lights instead of four in the aura and inside the sphere, and 30 frames a second. */
+private fun orbIsLite(): Boolean = try { com.tekyerema.core.config.AppConfig.string("ui.glassLite", "true").lowercase() != "false" } catch (_: Throwable) { true }
 
 /** Tint filters reused frame to frame (a colour only changes during a state's cross-fade): no allocation per frame at rest. */
 private val TINTS = HashMap<Int, ColorFilter>()
@@ -233,8 +240,9 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
 
     // 1. The aura — four soft lights orbiting behind the glass, brighter and wider with the voice.
     val auraAlpha = if (pal.dark) 0.30f else 0.26f
-    for (b in 0 until 4) {
-        val phase = b * (twoPi / 4f)
+    val lights = if (orbIsLiteCached) 2 else 4
+    for (b in 0 until lights) {
+        val phase = b * (twoPi / lights)
         val ang = swirl * (if (b % 2 == 0) 1f else -0.8f) + phase
         val orbit = r * (0.28f + 0.10f * sin(time * 0.33f + phase) * (if (calm) 0f else 1f))
         val radius = r * (1.18f + 0.07f * sin(time * 0.5f + phase * 1.3f) + 0.30f * s.voiceGlow.value).coerceAtMost(r * 1.6f)
@@ -274,8 +282,8 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
     kit.clip.reset()
     kit.clip.addOval(androidx.compose.ui.geometry.Rect(Offset(cx, cy), r))
     clipPath(kit.clip) {
-        for (b in 0 until 4) {
-            val phase = b * (twoPi / 4f) + 0.6f
+        for (b in 0 until lights) {
+            val phase = b * (twoPi / lights) + 0.6f
             val ang = swirl * 1.4f * (if (b % 2 == 0) -1f else 1f) + phase
             val orbit = r * (0.42f + 0.12f * sin(time * 0.41f + phase) * (if (calm) 0f else 1f))
             val radius = r * (0.86f + 0.14f * s.voiceGlow.value)

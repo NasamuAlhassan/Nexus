@@ -4,6 +4,8 @@ import android.util.Log
 import com.tekyerema.core.config.AppConfig
 import com.tekyerema.voice.Lang
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 
 /**
  * B-11 — answering a Twi speaker in Twi when the reply text is English (cloud-brain results, errors), through
@@ -39,12 +41,15 @@ class ReplyLocalizer(
      * (`⟦en:5 Ghana cedis⟧`, see [EntityTags.segments]). A tag lost or doubled → the original is spoken. A quantity that
      * can't be tagged (a percentage, a code) still keeps the line in English.
      */
-    suspend fun toTwi(text: String, wait: Long = waitMs()): String? {
+    suspend fun toTwi(text: String, wait: Long = waitMs(), everything: Boolean = false): String? {
         val src = text.trim()
         if (translator == null || !enabled() || src.isEmpty() || src.length > maxChars()) return null
-        if (!looksEnglish(src)) return null
-        val tagged = EntityTags.protectEnglish(src, protectedTerms(src))
-        if (hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N|Q)\\d+\\]"), " "))) return null
+        if (!everything && !looksEnglish(src)) return null
+        // everything = the owner's rule (20 Oct 2026): whatever is said in Twi is Twi. The words of a message are translated
+        // too (only names, app names and short quotes are kept), and a number the tagger could not take stays in the line
+        // for the Twi number words (TwiSpeechText) instead of sending the whole line back to English.
+        val tagged = EntityTags.protectEnglish(src, protectedTerms(src, keepLongQuotes = !everything))
+        if (!everything && hasQuantity(tagged.text.replace(Regex("\\[(?:P|A|N|Q)\\d+\\]"), " "))) return null
         val t0 = System.currentTimeMillis()
         val out = try { kotlinx.coroutines.withTimeoutOrNull(wait) { translator.translate(EntityTags.forTranslator(tagged.text), Lang.GH_EN, target) } }
             catch (e: CancellationException) { throw e } catch (_: Exception) { null }
@@ -64,7 +69,50 @@ class ReplyLocalizer(
         return EntityTags.restore(out, tagged.entities, EntityTags::inTwi)
     }
 
+    /**
+     * A whole English reply of any length into Twi (owner, 20 Oct 2026: "reading my message should translate it to the
+     * language the person is speaking", "no English fallback"). The text is cut into pieces at sentence ends, the pieces are
+     * translated at the same time, and the Twi is put back in order. A piece that fails is tried once more; if any piece still
+     * fails the answer is null (the caller then says so in Twi). At most [MAX_PIECES] pieces are spoken: the rest stays on the
+     * screen (the Twi voice says about three requests of text).
+     */
+    suspend fun toTwiAll(text: String, wait: Long = AppConfig.long("providers.speech.mt.allWaitMs", 9_000L)): String? {
+        if (translator == null || !enabled()) return null
+        val pieces = pieces(text.trim(), 220).take(MAX_PIECES)
+        if (pieces.isEmpty()) return null
+        val out = kotlinx.coroutines.coroutineScope {
+            pieces.map { piece ->
+                async { toTwi(piece, wait, everything = true) ?: toTwi(piece, wait, everything = true) }
+            }.awaitAll()
+        }
+        if (out.any { it == null }) { Log.w("Tekyerema", "[MT] ${out.count { it == null }} of ${pieces.size} pieces could not be put into Twi"); return null }
+        return out.joinToString(" ")
+    }
+
     companion object {
+        /** Pieces of the reply read aloud in Twi in one go. */
+        const val MAX_PIECES = 3
+
+        /** Whole sentences gathered into pieces of at most [limit] characters (a longer sentence is cut at a comma or space). */
+        fun pieces(text: String, limit: Int): List<String> {
+            val sentences = text.split(Regex("(?<=[.!?])\\s+|\\n+|\\s*\\|\\s*")).map { it.trim() }.filter { it.isNotEmpty() }
+            val out = ArrayList<String>()
+            val cur = StringBuilder()
+            fun flush() { if (cur.isNotEmpty()) { out.add(cur.toString().trim()); cur.setLength(0) } }
+            for (sent in sentences) {
+                var rest = sent
+                while (rest.length > limit) {
+                    val cut = rest.lastIndexOf(',', limit).takeIf { it > 40 } ?: rest.lastIndexOf(' ', limit).takeIf { it > 40 } ?: limit
+                    flush(); out.add(rest.substring(0, cut).trim()); rest = rest.substring(cut).trimStart(',', ' ')
+                }
+                if (cur.length + rest.length + 1 > limit) flush()
+                if (cur.isNotEmpty()) cur.append(' ')
+                cur.append(rest)
+            }
+            flush()
+            return out
+        }
+
         private val NUMBER_WORDS = setOf(
             // no "one": runs of number words are tagged before this check, so a "one" left over is a word ("which one").
             "zero", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
@@ -134,10 +182,12 @@ class ReplyLocalizer(
          * Protected spans: quoted text, and capitalised words that are not the first word of a sentence (names, app
          * names), plus mixed-case words anywhere (WhatsApp, MoMo). "I" is not a name.
          */
-        fun protectedTerms(s: String): Set<String> {
+        fun protectedTerms(s: String, keepLongQuotes: Boolean = true): Set<String> {
             val out = LinkedHashSet<String>()
-            DOUBLE_QUOTED.findAll(s).forEach { out.add(it.groupValues[1].trim()) }
-            SINGLE_QUOTED.findAll(s).forEach { out.add(it.groupValues[1].trim()) }
+            // A quoted message ("It says: “Send me the money”") is words to translate; only a short quote (a name, a title) is kept.
+            fun quoted(t: String) = if (keepLongQuotes || t.trim().split(Regex("\\s+")).size <= 2) out.add(t.trim()) else false
+            DOUBLE_QUOTED.findAll(s).forEach { quoted(it.groupValues[1]) }
+            SINGLE_QUOTED.findAll(s).forEach { quoted(it.groupValues[1]) }
             val words = WORD.findAll(s).toList()
             for ((i, m) in words.withIndex()) {
                 val w = m.value.trim('\'')

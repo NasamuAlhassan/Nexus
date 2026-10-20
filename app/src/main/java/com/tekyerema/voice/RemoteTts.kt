@@ -18,6 +18,8 @@ class RoutingTts(
      *  (confirmations, errors, cloud-brain results). Returns null to leave text as-is (already Twi, or no MT).
      *  App-authored Twi strings pass through untouched. None is wired until the HCI Lab offers MT. */
     private val enToTw: (suspend (String) -> String?)? = null,
+    /** The WHOLE English reply into Twi, long text in pieces ([com.tekyerema.language.ReplyLocalizer.toTwiAll]). */
+    private val enToTwAll: (suspend (String) -> String?)? = null,
     /** A Ghanaian-accented English voice, used for English replies when online; the phone's own engine has no
      *  Ghanaian voice. Null ⇒ system engine only. */
     private val ghEnglish: TtsProvider? = null,
@@ -71,8 +73,20 @@ class RoutingTts(
             // (…and a list of names — "Which Prince: Prince Melanin, Prince Alhassan ending 690…" — is English too: no Twi
             // letter or word in it, and English words around the names. The A20e, 3 October 2026, spent a Twi call on it.)
             if (localized == null && com.tekyerema.language.ReplyLocalizer.englishForVoice(plain)) {
-                Log.i("Tekyerema", "[TTS] an English line in a Twi conversation → the English voice")
-                return speakEnglishPiece(plain)
+                // Owner, 20 Oct 2026: everything said in Twi is Twi, the fallback too. An English reply (a message read aloud, a
+                // web answer) is put into Twi piece by piece; if that fails the Twi voice says so in Twi (the words stay on the
+                // screen). `speech.twi.noEnglishFallback` false = the old way (the English voice reads it).
+                if (com.tekyerema.core.config.AppConfig.bool("speech.twi.noEnglishFallback", true)) {
+                    val all = try { enToTwAll?.invoke(plain)?.takeIf { it.isNotBlank() } }
+                        catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
+                    val say = all?.let { com.tekyerema.voice.understand.TwiSpeechText.prepare(it) } ?: com.tekyerema.core.config.AppConfig.string("speech.twi.cannotTranslate", "Mintumi nkyerɛ eyi ase seesei. San bisa bio.")
+                    Log.i("Tekyerema", "[TTS] an English line in a Twi conversation → ${if (all != null) "translated, the Twi voice" else "the Twi notice (no translation)"}")
+                    val twiText = com.tekyerema.language.TwiText.canonical(com.tekyerema.language.EntityTags.display(say))
+                    if (twi.speak(twiText, language)) { twiStatus.onSpoke(); return true }
+                } else {
+                    Log.i("Tekyerema", "[TTS] an English line in a Twi conversation → the English voice")
+                    return speakEnglishPiece(plain)
+                }
             }
             // Owner's option B (2 October 2026): amounts and phone numbers inside a Twi line are spoken by the ENGLISH voice
             // ("Wopɛ sɛ mesoma | five Ghana cedis | ma Ama?") — the Twi voice says the Twi words.

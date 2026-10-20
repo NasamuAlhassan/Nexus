@@ -137,6 +137,7 @@ fun Modifier.liquidGlass(
     val rimPath = liquidPath(Size(w - 2 * inset, h - 2 * inset), (radius - inset).coerceAtLeast(0f)).apply { translate(Offset(inset, inset)) }
 
     val hc = style.border != null
+    val lite = glassLite()
     val body = tint ?: style.fill
     val thickness = Brush.verticalGradient(0f to style.thickTop, 0.45f to Color.Transparent, 1f to style.thickBottom)
     // The refraction band: light gathered just inside the edge, strongest at the top, a faint caustic at the bottom.
@@ -173,6 +174,34 @@ fun Modifier.liquidGlass(
     }
     val shadowDy = (if (depth == GlassDepth.FLOATING) 5.dp else 2.dp).toPx()
 
+    if (lite && !hc) {
+        // The light version (owner, 20 Oct 2026: the glass lags on the A20e). The same look from far away, a handful of fills and
+        // no clip: one soft shadow, the thickness, a plain sheen, the light rim. No refraction strokes, glint, grain or ellipse.
+        val liteShadow = if (depth == GlassDepth.FLAT) emptyList() else {
+            val a = style.shadowKey * (if (depth == GlassDepth.FLOATING) 1f else 0.6f)
+            listOf(3.dp.toPx() to a * 0.30f, 12.dp.toPx() to a * 0.12f).map { (wd, al) -> Stroke(width = wd) to al }
+        }
+        val liteSheen = Brush.radialGradient(0f to Color.White.copy(alpha = style.specular), 1f to Color.Transparent,
+            center = Offset(w / 2f, 0f), radius = sheenR)
+        val rimShaderLite = rimShader
+        return@drawWithCache onDrawBehind {
+            if (liteShadow.isNotEmpty()) clipPath(path, ClipOp.Difference) {
+                translate(top = shadowDy) { liteShadow.forEach { (st, alpha) -> drawPath(path, Color.Black, alpha = alpha, style = st) } }
+            }
+            drawPath(path, body)
+            drawPath(path, thickness)
+            val g = glow()
+            if (g.alpha > 0.001f) drawPath(path, Brush.radialGradient(0f to g, 1f to Color.Transparent, center = Offset(w / 2f, 0f), radius = w * 0.7f))
+            drawPath(path, liteSheen)
+            val p = press(); val at = pressAt()
+            if (p > 0.001f && at != Offset.Unspecified)
+                drawPath(path, Brush.radialGradient(0f to Color.White.copy(alpha = 0.18f * p), 1f to Color.Transparent, center = at, radius = h * 1.5f))
+            rimMatrix.setRotate(lightDegrees(), w / 2f, h / 2f)
+            rimShaderLite.setLocalMatrix(rimMatrix)
+            drawPath(rimPath, rimBrush, style = rimStroke)
+        }
+    }
+
     onDrawBehind {
         if (shadowRings.isNotEmpty()) clipPath(path, ClipOp.Difference) {
             translate(top = shadowDy) {
@@ -201,6 +230,9 @@ fun Modifier.liquidGlass(
         drawPath(rimPath, rimBrush, style = rimStroke)
     }
 }
+
+/** `ui.glassLite` (default true): draw the glass with a few fills instead of the full stack of strokes and clips. Read once per size. */
+private fun glassLite(): Boolean = try { com.tekyerema.core.config.AppConfig.string("ui.glassLite", "true").lowercase() != "false" } catch (_: Throwable) { true }
 
 /** The glass outline as a path (continuous corners; a capsule when [radius] ≥ half the short side). */
 fun liquidPath(size: Size, radius: Float): Path = com.tekyerema.ui.assistant.continuousPath(size, radius)
