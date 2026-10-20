@@ -1334,6 +1334,7 @@ class VoiceController(
         val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = kusEnglish ?: glossed ?: repaired)
         try {
             hideAsking()   // a new turn (e.g. the answer to a question) clears any "asking" card
+            com.tekyerema.ui.ReplyCard.hide()
             // Session language context (§11): adopt the LID-resolved language (low-signal already
             // guarded server-side by lid.resolve → session default / previous language).
             onLanguageResolved(tr.language)
@@ -1379,8 +1380,9 @@ class VoiceController(
                 // A line with an English stretch for the English voice (⟦en:…⟧) is SHOWN without the markers.
                 var shown = com.tekyerema.language.EntityTags.display(fast.spoken)
                 set(VoiceState.SPEAKING, shown)
+                com.tekyerema.ui.ReplyCard.show(shown, speakAloud())
                 // Twi / Kusaal: the screen shows what the voice says, not the English it came from.
-                if (!fast.systemVoice && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken)?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown) }
+                if (!fast.systemVoice && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken)?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown); com.tekyerema.ui.ReplyCard.show(shown, speakAloud()) }
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
                 val useSystem = fast.systemVoice && systemVoice != null
@@ -1394,6 +1396,7 @@ class VoiceController(
                 val spoke = if (!speakAloud() || fast.spoken.isBlank()) false
                     else try { engine.speak(Verbalize.apply(fast.spoken), lang) }
                     catch (c: CancellationException) { throw c } catch (e: Exception) { false }
+                if (!fast.listenAfter) com.tekyerema.ui.ReplyCard.hideAfter(3_500L + shown.length * 45L)
                 tel.endTurn(if (fast.ok) "full" else "failed", byVoice = true)
                 _state.update {
                     // A command with nothing to say (the camera reader announces itself) is not a missing voice.
@@ -1447,6 +1450,8 @@ class VoiceController(
             // The language on top (what the voice says), the original English under it.
             val outcomeShown = if (outcome.spoken.isBlank()) null else VoiceEngine.localLine(outcome.spoken)?.let { it + "\n" + outcome.spoken }
             if (outcomeShown != null) set(VoiceState.SPEAKING, outcomeShown)
+            val cardText = outcomeShown ?: outcome.spoken
+            if (!outcome.spoken.trimEnd().endsWith("?")) com.tekyerema.ui.ReplyCard.show(cardText, speakAloud())
             var interruption: com.tekyerema.voice.io.BargeIn? = null
             tel.mark("reply_start")
             // The call is up: "Calling my wife now." read over the ringing / connected call is noise on the loudspeaker (council review).
@@ -1458,6 +1463,7 @@ class VoiceController(
                 interruption = b.takeIf { it.interrupted && (it.wav != null || !voiceIn.caps.transcribesAudio) }
                 b.spokeFully || interruption != null
             } catch (c: CancellationException) { throw c } catch (e: Exception) { false }
+            if (!outcome.spoken.trimEnd().endsWith("?")) com.tekyerema.ui.ReplyCard.hideAfter(3_500L + cardText.length * 45L)
             tel.endTurn(com.tekyerema.agent.AgentEngine.gradeOf(outcome.status), byVoice = true)   // before any follow-up turn
             _state.update {
                 it.copy(state = VoiceState.IDLE, spoken = outcomeShown ?: outcome.spoken, spokenAt = System.currentTimeMillis(),

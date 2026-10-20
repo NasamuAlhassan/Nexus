@@ -87,6 +87,8 @@ object OverlayConfirm {
 
     /** True while Tɛkyerɛma's own screen is resumed with its assistant surface (set by the surface host). */
     @Volatile private var appSurface = false
+    /** Tɛkyerɛma's own screen is in front (its surface shows replies and prompts itself). */
+    fun appSurfaceShowing(): Boolean = appSurface
     /** The task's prompt while our surface shows it instead of the panel; null when none is waiting. */
     @Volatile private var held: PromptSurface.Prompt? = null
     @Volatile private var heldCtx: Context? = null

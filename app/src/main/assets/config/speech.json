@@ -1,7 +1,7 @@
 {
  "schema_version": 1,
  "speech": {
-  "ghEnglish": {"_note": "19 Oct 2026: the Kafui Dey English voice from the language Space is the default English voice. A CPU line takes ~24 s when the Space GPU is busy, so a first sentence gets 12 s (then the phone voice speaks), and the app's fixed lines are kept on disk (HttpProviders.TtsDiskCache.keepsEnglish) so they play at once after one slow fetch.", "firstWaitMs": 12000, "nextWaitMs": 12000},
+  "ghEnglish": {"_note": "19 Oct 2026: the Kafui Dey English voice from the language Space is the default English voice. A CPU line takes ~24 s when the Space GPU is busy, so a first sentence gets 12 s (then the phone voice speaks), and the app's fixed lines are kept on disk (HttpProviders.TtsDiskCache.keepsEnglish) so they play at once after one slow fetch.", "firstWaitMs": 3000, "nextWaitMs": 3000},
   "voiceLayer": {
    "profile": "gh_mixed",
    "_note": "gh_mixed (owner's choice 2026-09-29, the default) = English: Android SpeechRecognizer + system TTS; Twi: UG HCI Lab ASR (on-device Twi Whisper fallback) + HCI Lab TTS — one recognizer per listen, chosen by the language setting ('speak Twi' / 'speak English'). builtin_en = Android SpeechRecognizer + system TTS, English only (SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
