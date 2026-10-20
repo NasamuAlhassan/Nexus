@@ -31,7 +31,8 @@ object Closers {
     fun warm(line: String, twi: Boolean, rnd: Random = Random.Default): String {
         if (line.isBlank() || ALREADY_WARM.containsMatchIn(line)) return line
         return next(if (twi) "o_tw" else "o_en", if (twi) openTw else openEn, rnd) + " " +
-            line.replaceFirstChar { it.lowercase() }
+            // an acronym or a name keeps its capital: "Alright — mTN shows" was said as if "mTN" were a word (19 Oct 2026)
+            (if (line.length > 1 && line[1].isUpperCase()) line else line.replaceFirstChar { it.lowercase() })
     }
 
     private val ALREADY_WARM = Regex("^(?:alright|okay|ok\\b|right|yoo|sorry|hm)", RegexOption.IGNORE_CASE)
