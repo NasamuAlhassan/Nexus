@@ -108,7 +108,9 @@ object WalkGuide {
         val context = ctx.applicationContext
         if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
             return "I need permission to use your location to tell you how far it is. You can allow it in Tɛkyerɛma's settings."
-        val here = currentLocation(context) ?: return "I can't tell where you are right now, so I can't say how far it is."
+        // a distance needs no exact fix: the last one the phone knows if it is under 2 hours old, else a new one (10 s)
+        val here = currentLocation(context, 2 * 3_600_000L, waitMs = 20_000L)
+            ?: return "I can't tell where you are right now, so I can't say how far it is."
         val place = OsmClient.search(destination, here.latitude, here.longitude)
             ?: return "I couldn't find $destination on the map."
         val straight = NavMath.distance(here.latitude, here.longitude, place.lat, place.lon)
@@ -191,14 +193,14 @@ object WalkGuide {
 
     /** A fresh fix: a recent last-known one, else one new fix within 10 s. */
     @SuppressLint("MissingPermission")
-    private suspend fun currentLocation(ctx: Context): Location? {
+    private suspend fun currentLocation(ctx: Context, maxAgeMs: Long = 120_000L, waitMs: Long = 10_000L): Location? {
         val lm = ctx.getSystemService(LocationManager::class.java) ?: return null
-        val recent = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        val recent = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER, "fused")
             .mapNotNull { p -> try { lm.getLastKnownLocation(p) } catch (_: Throwable) { null } }
-            .filter { System.currentTimeMillis() - it.time < 120_000L }
+            .filter { System.currentTimeMillis() - it.time < maxAgeMs }
             .minByOrNull { it.accuracy }
         if (recent != null) return recent
-        return withTimeoutOrNull(10_000L) {
+        return withTimeoutOrNull(waitMs) {
             suspendCancellableCoroutine { cont ->
                 val l = object : LocationListener {
                     override fun onLocationChanged(location: Location) {
@@ -209,7 +211,7 @@ object WalkGuide {
                     override fun onProviderEnabled(provider: String) {}
                     override fun onProviderDisabled(provider: String) {}
                 }
-                listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).forEach { p ->
+                listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, "fused").forEach { p ->
                     try { if (lm.isProviderEnabled(p)) lm.requestLocationUpdates(p, 0L, 0f, l, Looper.getMainLooper()) } catch (_: Throwable) {}
                 }
                 cont.invokeOnCancellation { try { lm.removeUpdates(l) } catch (_: Throwable) {} }
