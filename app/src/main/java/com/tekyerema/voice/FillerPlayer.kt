@@ -32,7 +32,9 @@ class FillerPlayer(
     /** Speech rate and pitch, matched to the reply voice. */
     private val voice: () -> Pair<Float, Float> = { 1.0f to 1.0f }
 ) {
+    private val app = appContext.applicationContext
     private val tts by lazy { AndroidTts(appContext) }
+    @Volatile private var clip: android.media.MediaPlayer? = null
     private var job: Job? = null
     @Volatile private var active = false
     private var last: String? = null
@@ -66,7 +68,7 @@ class FillerPlayer(
                     val (rate, pitch) = voice()
                     tts.setRate(rate); tts.setPitch(pitch)
                     Log.i("Tekyerema", "[FILLER] say #${i + 1} lang=$language")
-                    try { tts.speak(line, Lang.GH_EN) } catch (_: Throwable) {}
+                    say(line)
                 }
                 if (i < maxChain() - 1) delay(gapMs())
             }
@@ -83,10 +85,36 @@ class FillerPlayer(
             for ((i, line) in pool.withIndex()) {
                 if (!active) return@launch
                 Log.i("Tekyerema", "[FILLER] audition ${i + 1}/${pool.size} lang=$language")
-                try { tts.speak(line, Lang.GH_EN) } catch (_: Throwable) {}
+                say(line)
                 delay(450)
             }
         }
+    }
+
+    /** The filler in the on-device Kafui voice (assets/fillers/<slug>.wav, made by scripts/make_fillers.py) so it never plays in
+     *  the phone's own (British) voice — owner, 20 Oct 2026; a phrase with no clip falls back to the phone's engine. */
+    private suspend fun say(line: String) {
+        val opened = try { app.assets.openFd("fillers/" + slug(line) + ".wav") } catch (_: Throwable) { null }
+        if (opened == null) { try { tts.speak(line, Lang.GH_EN) } catch (_: Throwable) {}; return }
+        try {
+            releaseClip()
+            val mp = android.media.MediaPlayer()
+            mp.setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build())
+            mp.setDataSource(opened.fileDescriptor, opened.startOffset, opened.length)
+            mp.setOnCompletionListener { releaseClip() }
+            mp.prepare(); mp.start()
+            clip = mp
+        } catch (_: Throwable) {
+            try { tts.speak(line, Lang.GH_EN) } catch (_: Throwable) {}
+        } finally { try { opened.close() } catch (_: Throwable) {} }
+    }
+
+    private fun releaseClip() {
+        val c = clip ?: return
+        clip = null
+        try { c.stop() } catch (_: Throwable) {}
+        try { c.release() } catch (_: Throwable) {}
     }
 
     /** Stop immediately — the moment the real reply / confirmation is about to be spoken, and on cancel. Only this
@@ -94,12 +122,16 @@ class FillerPlayer(
     fun stop() {
         active = false
         job?.cancel(); job = null
+        releaseClip()
         try { tts.stop() } catch (_: Throwable) {}
     }
 
     fun release() { stop(); try { tts.shutdown() } catch (_: Throwable) {} }
 
     companion object {
+        /** assets/fillers file name of a phrase: its lower-case letters and digits joined by "_". */
+        fun slug(phrase: String): String = Regex("[a-z0-9]+").findAll(phrase.lowercase()).joinToString("_") { it.value }
+
         val DEFAULT_EN = listOf(
             "One moment please.", "Let me check that for you.", "Alright, let me take a look.", "Okay, I'm on it.",
             "Just a moment please.", "Let me find that for you.", "Hold on a moment.", "Sure, working on that now."

@@ -77,4 +77,28 @@ class OnDeviceVoiceTest {
         assertEquals(32767, pcm[5].toInt())          // louder than full scale is clipped, not wrapped to a negative click
         assertEquals(-32767, pcm[6].toInt())
     }
+
+    @Test fun `a reply is read clause by clause with a breath after each, short pieces joined to their neighbour`() {
+        val p = OnDeviceVoice.breathe("You have a message from My wife. It says: please buy bread on your way home, and call me. Okay.")
+        val spoken = p.mapNotNull { it.text }
+        assertEquals(listOf("You have a message from My wife.", "It says: please buy bread on your way home,", "and call me. Okay."), spoken)
+        // a breath (silence) sits between the spoken pieces, longer after a full stop than after a comma
+        assertEquals(listOf(420L, 190L), p.filter { it.text == null }.map { it.silenceMs })
+    }
+
+    @Test fun `a bare short line is never cut up`() {
+        assertEquals(listOf("Cancelled. Nothing was sent."), OnDeviceVoice.breathe("Cancelled. Nothing was sent.").mapNotNull { it.text })
+        assertEquals(listOf("Say your answer."), OnDeviceVoice.breathe("Say your answer.").mapNotNull { it.text })
+    }
+
+    @Test fun `plan with breaths keeps the old way when breaths are off`() {
+        val t = "You have three new messages. The first is from Kofi Mensah, the second is from Ama."
+        assertTrue(OnDeviceVoice.plan(t, breaths = false).count { it.text != null } <= 2)   // the opening clause, then the rest
+        assertTrue(OnDeviceVoice.plan(t, breaths = true).count { it.text != null } >= 3)
+    }
+
+    @Test fun `voice json carries this voice's own speed`() {
+        assertEquals(0.7f, OnDeviceVoice.parse("""{"type":"vits-piper","model":"m.onnx","speed":0.7}""")!!.speed, 0.0001f)
+        assertEquals(1f, OnDeviceVoice.parse("""{"type":"vits-piper","model":"m.onnx"}""")!!.speed, 0.0001f)
+    }
 }

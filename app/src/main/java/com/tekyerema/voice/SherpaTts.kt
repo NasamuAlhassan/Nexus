@@ -111,11 +111,12 @@ object OnDeviceVoice {
      * rest are sentence-sized ([maxChars]) and made while the earlier ones play. The reading's pause marks
      * ([SpokenText]) become silences.
      */
-    fun plan(text: String, pauseMs: Long = 450, breakMs: Long = 900, maxChars: Int = 140, firstChars: Int = 60): List<Piece> {
+    fun plan(text: String, pauseMs: Long = 450, breakMs: Long = 900, maxChars: Int = 140, firstChars: Int = 60, breaths: Boolean = false): List<Piece> {
         val out = ArrayList<Piece>()
         for (seg in SpokenText.segments(text, pauseMs, breakMs)) {
             for (chunk in SpeechChunks.split(seg.text, maxChars)) {
-                if (out.none { it.text != null }) out += opening(chunk, firstChars).map { Piece(it) }
+                if (breaths) out += breathe(chunk)
+                else if (out.none { it.text != null }) out += opening(chunk, firstChars).map { Piece(it) }
                 else out += Piece(chunk)
             }
             if (seg.pauseAfterMs > 0) out += Piece(null, seg.pauseAfterMs)
@@ -124,6 +125,35 @@ object OnDeviceVoice {
     }
 
     private val CLAUSE_END = Regex("(?<=[,.!?;:])\\s+")
+    private val WORDISH = Regex("[\\p{L}\\p{N}']+")
+
+    /** The silence a listener expects after a piece ending in [mark] (ms): the voice's own duration model barely pauses at
+     *  punctuation (a line of three sentences ran together), so the breaths are made here (owner, 20 Oct 2026: "like taking
+     *  breath, noticing punctuation"). */
+    fun breathMs(mark: Char): Long = when (mark) { '.', '!' -> 420L; '?' -> 480L; ';', ':' -> 300L; ',' -> 190L; else -> 0L }
+
+    /**
+     * [chunk] as clause-sized pieces with a breath between them: split after . ! ? ; : and ,; a piece of fewer than
+     * [minWords] words ("Cancelled.", "Say yes or no.") is joined to its neighbour, because this voice garbles very short
+     * lines (scored with Whisper on the app's own lines, 20 Oct 2026: whole 0.21 WER, split 0.22, a bare one-word line 1.0).
+     */
+    fun breathe(chunk: String, minWords: Int = 4): List<Piece> {
+        val parts = chunk.trim().split(CLAUSE_END).filter { it.isNotBlank() }
+        val merged = ArrayList<String>()
+        var carry = ""
+        for (part in parts) {
+            val cur = if (carry.isEmpty()) part else "$carry $part"
+            if (WORDISH.findAll(cur).count() < minWords) carry = cur
+            else { merged += cur; carry = "" }
+        }
+        if (carry.isNotEmpty()) { if (merged.isEmpty()) merged += carry else merged[merged.lastIndex] = merged.last() + " " + carry }
+        val out = ArrayList<Piece>()
+        for ((i, m) in merged.withIndex()) {
+            out += Piece(m)
+            if (i < merged.lastIndex) breathMs(m.trimEnd().last()).takeIf { it > 0 }?.let { out += Piece(null, it) }
+        }
+        return out
+    }
 
     /** [chunk] as (opening clause, the rest) when it is long and has a clause break early enough; else itself. */
     internal fun opening(chunk: String, firstChars: Int): List<String> {
@@ -274,7 +304,8 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
         val tts = load(s) ?: return false
         val pieces = OnDeviceVoice.plan(OnDeviceVoice.forModel(s, OnDeviceVoice.say(raw, s.say)),
             AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
-            AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60))
+            AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60),
+            breaths = s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.breaths", true))
         if (pieces.none { it.text != null }) return false
         val hz = tts.sampleRate()
         val speed = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate * s.speed).coerceIn(0.5f, 1.6f)
