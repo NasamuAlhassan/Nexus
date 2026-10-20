@@ -461,6 +461,7 @@ class LanguageLayerTest {
     }
 
     @Test fun twi_falling_back_to_the_phone_voice_is_read_in_plain_letters_and_english_is_untouched() = runTest {
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("speech.json" to """{"speech":{"twi":{"noEnglishFallback":false}}}"""))   // the old English fallback, behind its switch (20 Oct 2026)
         val phone = RecTts("system", setOf(Lang.GH_EN))
         val voice = PlainLatinVoice(phone)
         val routing = RoutingTts(english = voice, twi = voice)

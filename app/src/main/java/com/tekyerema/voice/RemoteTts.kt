@@ -107,6 +107,9 @@ class RoutingTts(
             val declinedOnly = twi is VoiceAvailability && why == null
             val tell = !declinedOnly && twiStatus.onUnavailable(why)
             Log.w("Tekyerema", "[TTS] Twi voice (${twi.name}) unavailable${why?.let { " — $it" } ?: ""} → English system-engine fallback (${english.name}) (§28)")
+            // In Twi, no English (owner, 20 Oct 2026): the line is on the screen; with the phone's own Twi voice in the chain this
+            // only happens when every Twi voice failed. `speech.twi.noEnglishFallback` false = the old English read-out.
+            if (noEnglish()) { Log.w("Tekyerema", "[TTS] no Twi voice could say this line — shown, not read in English"); return false }
             if (tell) {
                 val told = english.speak(TwiVoiceStatus.NOTICE, Lang.GH_EN)
                 Log.i("Tekyerema", "[TTS] Twi-voice notice spoken=$told (once per session; ${twiStatus.status()})")
@@ -264,11 +267,15 @@ class RoutingTts(
         var spokeTwi = false
         for ((i, piece) in pieces.withIndex()) {
             val (text, isEnglish) = piece
-            val ok = if (isEnglish) speakEnglishPiece(text)
-                else twi.speak(com.tekyerema.language.TwiText.canonical(text), language).also { if (it) spokeTwi = true }
+            // Owner, 20 Oct 2026: in Twi everything is Twi — an English piece (an amount, a name) is put into Twi words and said
+            // by the Twi voice too (`speech.twi.noEnglishFallback` false = the old English pieces).
+            val ok = if (isEnglish && !noEnglish()) speakEnglishPiece(text)
+                else twi.speak(com.tekyerema.language.TwiText.canonical(
+                    if (isEnglish) com.tekyerema.voice.understand.TwiSpeechText.prepare(text) else text), language).also { if (it) spokeTwi = true }
             if (!ok && !isEnglish) {
                 if (!spokeTwi && i == pieces.indexOfFirst { !it.second }) return null
                 val rest = pieces.drop(i).joinToString(" ") { it.first }
+                if (noEnglish()) { Log.w("Tekyerema", "[TTS] the Twi voice stopped mid-line — not finished in English"); return false }
                 Log.w("Tekyerema", "[TTS] the Twi voice stopped mid-line — finishing it in English")
                 return english.speak(rest, Lang.GH_EN)
             }
@@ -280,6 +287,8 @@ class RoutingTts(
 
     /** An English piece of a TWI line (an amount, or a line the translator couldn't take). Twi's demo behaviour is kept: the
      *  English chain, unless `speech.ghEnglish.inTwiLines` lets the network English voice say these pieces too. */
+    private fun noEnglish() = com.tekyerema.core.config.AppConfig.bool("speech.twi.noEnglishFallback", true)
+
     private suspend fun speakEnglishPiece(text: String): Boolean =
         speakEnglishPiece(text, network = com.tekyerema.core.config.AppConfig.bool("speech.ghEnglish.inTwiLines", false))
 

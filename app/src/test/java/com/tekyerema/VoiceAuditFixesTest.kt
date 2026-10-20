@@ -59,6 +59,7 @@ class VoiceAuditFixesTest {
     }
 
     @Test fun a_twi_reply_is_never_silent_and_the_user_is_told_once_per_session() = runTest {
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("speech.json" to """{"speech":{"twi":{"noEnglishFallback":false}}}"""))   // the old English fallback, behind its switch (20 Oct 2026)
         var now = 1_000L
         val status = TwiVoiceStatus(clock = { now }, sessionGapMs = { 30 * 60_000L })
         val phone = Voice("system", setOf(Lang.GH_EN))
@@ -82,6 +83,7 @@ class VoiceAuditFixesTest {
     }
 
     @Test fun the_notice_is_due_again_after_the_twi_voice_has_worked_in_between() = runTest {
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("speech.json" to """{"speech":{"twi":{"noEnglishFallback":false}}}"""))   // the old English fallback, behind its switch (20 Oct 2026)
         val status = TwiVoiceStatus(clock = { 0L }, sessionGapMs = { Long.MAX_VALUE })
         val phone = Voice("system", setOf(Lang.GH_EN))
         val lab = Voice("http:lab", emptySet(), why = "service not reachable")
@@ -138,6 +140,7 @@ class VoiceAuditFixesTest {
     }
 
     @Test fun a_rejected_key_costs_one_call_then_the_lab_voice_rests_and_the_reply_is_still_heard() = runTest {
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("speech.json" to """{"speech":{"twi":{"noEnglishFallback":false}}}"""))   // the old English fallback, behind its switch (20 Oct 2026)
         val secrets = mapOf("SPEECH_LAB_URL" to "https://lab.example.test/v1/tts", "SPEECH_LAB_KEY" to "k-123")
         val spec = HttpSpeechSpec.parse("lab", JSONObject("""
             {"kind":"tts","enabled":true,"endpoint":"${'$'}{SPEECH_LAB_URL}",

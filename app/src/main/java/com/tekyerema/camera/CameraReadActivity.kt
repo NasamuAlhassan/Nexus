@@ -120,6 +120,7 @@ class CameraReadActivity : ComponentActivity() {
 
     // --- speech (main thread only) ---
     private var tts: TextToSpeech? = null
+    private val twiVoice by lazy { TwiReaderVoice(lifecycleScope, main) }
     private var ttsReady = false
     private var ttsFailed = false
     private val pending = ArrayList<Speech>()
@@ -326,6 +327,7 @@ class CameraReadActivity : ComponentActivity() {
         try { analysis?.clearAnalyzer() } catch (_: Throwable) {}
         analysisExecutor?.shutdown()
         if (recognizerLazy.isInitialized()) try { recognizer.close() } catch (_: Throwable) {}
+        twiVoice.stop()
         tts?.let { try { it.stop(); it.shutdown() } catch (_: Throwable) {} }
         tts = null
         super.onDestroy()
@@ -716,6 +718,8 @@ class CameraReadActivity : ComponentActivity() {
     private fun utter(line: String, flush: Boolean, then: (() -> Unit)?) {
         val engine = tts
         if (line.isBlank()) { then?.invoke(); return }
+        // In a Twi conversation the app's Twi voice reads it (translated), never the phone's English engine (20 Oct 2026).
+        if (com.tekyerema.voice.VoiceEngine.speaksTwi()) { twiVoice.say(line, flush, then); return }
         if (ttsFailed || engine == null) { sayWithAppVoice(line, then); return }
         if (!ttsReady) {
             if (flush) pending.clear()

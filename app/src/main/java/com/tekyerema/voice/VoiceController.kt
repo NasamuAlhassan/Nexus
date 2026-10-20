@@ -961,7 +961,7 @@ class VoiceController(
                         if (result is com.tekyerema.voice.io.Heard.Unavailable && result.cause in UNRECOVERABLE) {
                             Log.i("Tekyerema", "[VOICE] confirmation: can't listen (${result.cause}) — waiting for the buttons")
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
-                            try { tts.speak(CANT_LISTEN_CONFIRM, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                            try { tts.speak(CANT_LISTEN_CONFIRM, if (twiNow()) Lang.TWI else Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                             return
                         }
                         // J-02: n-best alternatives that mean the opposite make the answer unclear (asked again, then declined).
@@ -1081,7 +1081,7 @@ class VoiceController(
                         }
                         // Trust (2026-09-29): "call my helper" at the PIN is answered, never acted on (agent/helper/HelperGate).
                         if (com.tekyerema.agent.helper.HelperCommands.involvesHelper(heard)) {
-                            try { tts.speak(com.tekyerema.agent.helper.HelperGate.PIN_LINE, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                            try { tts.speak(com.tekyerema.agent.helper.HelperGate.PIN_LINE, if (twiNow()) Lang.TWI else Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         }
                         // Not a completion word → gently re-prompt (do NOT treat anything else as the PIN).
                     }

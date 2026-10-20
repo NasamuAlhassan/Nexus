@@ -51,6 +51,7 @@ class DocumentReadActivity : Activity() {
     /** The previous page's words as read, for the running header/footer check (PageFurniture). */
     private var lastRaw: String? = null
     private var tts: TextToSpeech? = null
+    private val twiVoice by lazy { TwiReaderVoice(scope, main) }
     private var ttsReady = false
     private val pending = ArrayList<Pair<String, (() -> Unit)?>>()
     private val afterSpeech = HashMap<String, () -> Unit>()
@@ -178,6 +179,8 @@ class DocumentReadActivity : Activity() {
     private fun utter(line: String, flush: Boolean, then: (() -> Unit)?) {
         val engine = tts
         if (line.isBlank()) { then?.invoke(); return }
+        // In a Twi conversation the app's Twi voice reads the page (translated), never the phone's English engine (20 Oct 2026).
+        if (com.tekyerema.voice.VoiceEngine.speaksTwi()) { twiVoice.say(line, flush, then); return }
         if (!ttsReady || engine == null) { if (flush) pending.clear(); pending.add(line to then); return }
         val id = "doc-" + (++utteranceSeq)
         if (then != null) afterSpeech[id] = then
@@ -221,6 +224,7 @@ class DocumentReadActivity : Activity() {
         closing = true
         main.removeCallbacks(idleTimeout)
         prefetch?.cancel()
+        twiVoice.stop()
         scope.cancel()
         try { tts?.stop(); tts?.shutdown() } catch (_: Throwable) {}
         try { reader?.close() } catch (_: Throwable) {}
