@@ -100,8 +100,11 @@ object AfterPin {
                     gone++
                     // The PIN went in and the dialog closed with no answer on the screen: MTN replies by TEXT. It used to end in
                     // silence (the owner's Mashup, 17 Oct 2026: "I didn't complete it") — say so, once.
-                    if (gone == 5 && !told) {
+                    // ~7 s, not ~4.5 s: the click on the dialog's Cancel can reach the service a moment after the dialog has gone, and a
+                    // cancel must not be followed by "the MTN screen closed…" (A20e Twi take 22, 20 Oct 2026).
+                    if (gone == 8 && !told) {
                         told = true
+                        if (com.tekyerema.phone.PinCurtain.cancelledSince(started)) { PinPad.disarm(); SecureStep.end(); return@launch }
                         Log.i(TAG, "[MONEY] the dialog closed after the PIN with no answer on screen — told the user the result comes by text")
                         // Council review, 19 Oct 2026: after a CANCEL this said "PIN sent" — wrong, and it could make a user think money
                         // had moved. "PIN sent" only when the volume keys sent one; otherwise what is known: the screen closed.

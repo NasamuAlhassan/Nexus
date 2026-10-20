@@ -105,6 +105,8 @@ object PinCurtain {
     }
 
     @Volatile private var lastCancelAt = 0L
+    /** The user cancelled at the PIN (Cancel on the network's dialog or the power button) at or after [t]. */
+    fun cancelledSince(t: Long): Boolean = lastCancelAt >= t
 
     /** The user pressed Cancel on the network's own dialog at the PIN step (TekyeremaAccessibilityService): the same ending as the
      *  power button — nothing was sent, the open hand-off is dropped, no "PIN sent" and no "no word from the network" later. */
