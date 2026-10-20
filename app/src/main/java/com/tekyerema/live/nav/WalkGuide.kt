@@ -99,6 +99,26 @@ object WalkGuide {
         return "${NavWords.distance(u.remainingM)} to ${g.destination}, about $mins minute${if (mins == 1) "" else "s"}."
     }
 
+    /**
+     * "How far is Atlantic Mall (from here)?" — from the phone's own location, never asking where "here" is (owner, 20 Oct 2026:
+     * the assistant asked "From which location?"). Straight-line distance, plus the walk when the route service answers. Starts
+     * no guidance.
+     */
+    suspend fun distanceTo(ctx: Context, destination: String): String {
+        val context = ctx.applicationContext
+        if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
+            return "I need permission to use your location to tell you how far it is. You can allow it in Tɛkyerɛma's settings."
+        val here = currentLocation(context) ?: return "I can't tell where you are right now, so I can't say how far it is."
+        val place = OsmClient.search(destination, here.latitude, here.longitude)
+            ?: return "I couldn't find $destination on the map."
+        val straight = NavMath.distance(here.latitude, here.longitude, place.lat, place.lon)
+        val route = OsmClient.walkRoute(here.latitude, here.longitude, place)
+        val far = "${place.name} is about ${NavWords.distance(straight)} from you"
+        if (route == null) return "$far, in a straight line."
+        val mins = (route.durationS / 60.0).toInt().coerceAtLeast(1)
+        return "$far. Walking it is ${NavWords.distance(route.totalM)}, about ${if (mins >= 90) "${mins / 60} hours" else "$mins minutes"}."
+    }
+
     private fun end() {
         stopUpdates()
         guidance = null; target = null

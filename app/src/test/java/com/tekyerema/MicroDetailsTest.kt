@@ -36,6 +36,8 @@ class MicroDetailsTest {
         assertEquals("Okay, I won't.", Closers.warm("Okay, I won't.", twi = false))
         assertEquals("Sorry, that failed.", Closers.warm("Sorry, that failed.", twi = false))
         assertEquals("", Closers.warm("", twi = false))
+        // the pronoun I keeps its capital ("Alright — i’m …" was shown on the screen)
+        assertTrue(Regex("^(Alright|Okay|Right) — I’m Tekyerema\\.$").matches(Closers.warm("I’m Tekyerema.", twi = false, rnd = Random(3))))
     }
 
     // ---- escalating no-input (win 5)

@@ -32,7 +32,9 @@ object Closers {
         if (line.isBlank() || ALREADY_WARM.containsMatchIn(line)) return line
         return next(if (twi) "o_tw" else "o_en", if (twi) openTw else openEn, rnd) + " " +
             // an acronym or a name keeps its capital: "Alright — mTN shows" was said as if "mTN" were a word (19 Oct 2026)
-            (if (line.length > 1 && line[1].isUpperCase()) line else line.replaceFirstChar { it.lowercase() })
+            // …and so does the pronoun "I" and its contractions ("Alright — i’m …" showed on the screen, 20 Oct 2026)
+            (if ((line.length > 1 && line[1].isUpperCase()) || line == "I" || line.startsWith("I ") || line.startsWith("I'") || line.startsWith("I’")) line
+            else line.replaceFirstChar { it.lowercase() })
     }
 
     private val ALREADY_WARM = Regex("^(?:alright|okay|ok\\b|right|yoo|sorry|hm)", RegexOption.IGNORE_CASE)

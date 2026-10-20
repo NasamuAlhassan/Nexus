@@ -68,7 +68,7 @@ object ToolSelector {
         ),
         "walk" to Group(
             listOf("walk_directions"),
-            Regex("(?i)\\b(directions?|navigate|navigation|route|walk me|take me|get to|way to|nearest|closest|where is the)\\b")
+            Regex("(?i)\\b(directions?|navigate|navigation|route|walk me|take me|get to|way to|nearest|closest|where is the|how far|how long to get|distance (?:to|from))\\b")
         ),
         "media" to Group(
             listOf("play_music"),

@@ -86,7 +86,7 @@ object BrainPrompts {
             val convo = conversationForPrompt(ctx.conversation)
             if (convo.isNotEmpty()) append("CONVERSATION SO FAR (recent turns, oldest first):\n").append(convo.joinToString("\n") { "- $it" }).append("\n\n")
             append("USER GOAL (the newest thing the user said — trusted): ").append(ctx.goal).append("\n\n")
-            commsRules(ctx.goal)?.let { append(it).append("\n\n") }
+            goalRules(ctx.goal)?.let { append(it).append("\n\n") }
             append("ACTIONS SO FAR THIS GOAL (most recent last):\n").append(historyText).append("\n\n")
             if (ctx.progress.isNotBlank())
                 append("PROGRESS SO FAR (what you already know this task — don't re-derive it):\n").append(ctx.progress).append("\n\n")
@@ -103,7 +103,7 @@ object BrainPrompts {
                 append(convo.joinToString("\n") { "- $it" }).append("\n\n")
             }
             append("USER GOAL (the newest thing the user said — trusted): ").append(ctx.goal).append("\n\n")
-            commsRules(ctx.goal)?.let { append(it).append("\n\n") }
+            goalRules(ctx.goal)?.let { append(it).append("\n\n") }
             append("ACTIONS SO FAR THIS GOAL (most recent last):\n").append(historyText).append("\n\n")
             if (ctx.progress.isNotBlank())
                 append("PROGRESS SO FAR (what you already know this task — don't re-derive it):\n").append(ctx.progress).append("\n\n")
@@ -128,6 +128,24 @@ object BrainPrompts {
 
     /** [COMMS_RULES] when [goal] is about sending a message or calling, else null. Pure. */
     internal fun commsRules(goal: String): String? = if (COMMS_GOAL.containsMatchIn(goal)) COMMS_RULES else null
+
+    // "From here", "near me", "how far is X": the phone's own location, never a question back (owner, 20 Oct 2026: asked "how
+    // far is the Atlantic mall from here", the assistant asked "From which location?"). Same idea as the messaging rules.
+    private val PLACE_GOAL = Regex("(?i)\\b(from here|near me|nearby|around me|close to me|from where i am|how far|how long (?:to|does it take to) get|distance (?:to|from)|nearest|closest)\\b")
+
+    internal const val PLACE_RULES =
+        "PLACE RULES: \"here\", \"near me\", \"from where I am\" mean the phone's own location: never ask where from. " +
+        "\"How far is X\" → walk_directions action=distance with the place name; \"nearest X\" → walk_directions."
+
+    /**
+     * The extra guidance that rides right after the goal, only for the kinds of request it is about — one table, so the next
+     * kind of request is one more row (pattern → rule), not a new code path, and nothing is paid on other requests.
+     */
+    private val GOAL_RULES: List<Pair<Regex, String>> = listOf(COMMS_GOAL to COMMS_RULES, PLACE_GOAL to PLACE_RULES)
+
+    /** Every rule in [GOAL_RULES] whose pattern matches [goal], joined; null when none does. Pure. */
+    internal fun goalRules(goal: String): String? =
+        GOAL_RULES.filter { (re, _) -> re.containsMatchIn(goal) }.joinToString("\n").ifEmpty { null }
 
     // ---------------------------------------------------------------- context compaction
     // Each request is stateless (system + tools + one message), so only the step record carries memory between steps.
