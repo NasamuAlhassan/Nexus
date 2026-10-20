@@ -88,6 +88,11 @@ class LocalFastRouter(
             }
             return FastOutcome("WALK", said, systemVoice = true)
         }
+        // "How far is X (from here)": the phone's own location, no planner (live/nav/DistanceAsk; owner, 20 Oct 2026).
+        if (language != Lang.TWI) com.tekyerema.live.nav.DistanceAsk.parse(text)?.let { place ->
+            runTool("walk_directions", org.json.JSONObject().put("action", "distance").put("destination", place), action = true)
+                ?.let { return it }
+        }
         // Our own timer (live/LiveTimer): while it rings, "stop" / "okay" / "dismiss" stops it; "how long is left" any time.
         com.tekyerema.live.TimerSpeech.match(text, com.tekyerema.live.LiveTimer.isRinging(), com.tekyerema.live.LiveTimer.running().isNotEmpty())?.let { m ->
             val said = when (m) {

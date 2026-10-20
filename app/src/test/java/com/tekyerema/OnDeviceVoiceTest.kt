@@ -83,7 +83,10 @@ class OnDeviceVoiceTest {
         val spoken = p.mapNotNull { it.text }
         assertEquals(listOf("You have a message from My wife.", "It says: please buy bread on your way home,", "and call me. Okay."), spoken)
         // a breath (silence) sits between the spoken pieces, longer after a full stop than after a comma
-        assertEquals(listOf(420L, 190L), p.filter { it.text == null }.map { it.silenceMs })
+        assertEquals(listOf(550L, 280L), p.filter { it.text == null }.map { it.silenceMs })
+        // the owner can scale every breath at run time (speech.tts.onDevice.breathScale)
+        assertEquals(listOf(275L, 140L), OnDeviceVoice.breathe("You have a message from My wife. It says: please buy bread on your way home, and call me. Okay.", scale = 0.5)
+            .filter { it.text == null }.map { it.silenceMs })
     }
 
     @Test fun `a bare short line is never cut up`() {

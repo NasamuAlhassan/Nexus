@@ -111,11 +111,11 @@ object OnDeviceVoice {
      * rest are sentence-sized ([maxChars]) and made while the earlier ones play. The reading's pause marks
      * ([SpokenText]) become silences.
      */
-    fun plan(text: String, pauseMs: Long = 450, breakMs: Long = 900, maxChars: Int = 140, firstChars: Int = 60, breaths: Boolean = false): List<Piece> {
+    fun plan(text: String, pauseMs: Long = 450, breakMs: Long = 900, maxChars: Int = 140, firstChars: Int = 60, breaths: Boolean = false, breathScale: Double = 1.0): List<Piece> {
         val out = ArrayList<Piece>()
         for (seg in SpokenText.segments(text, pauseMs, breakMs)) {
             for (chunk in SpeechChunks.split(seg.text, maxChars)) {
-                if (breaths) out += breathe(chunk)
+                if (breaths) out += breathe(chunk, scale = breathScale)
                 else if (out.none { it.text != null }) out += opening(chunk, firstChars).map { Piece(it) }
                 else out += Piece(chunk)
             }
@@ -130,14 +130,15 @@ object OnDeviceVoice {
     /** The silence a listener expects after a piece ending in [mark] (ms): the voice's own duration model barely pauses at
      *  punctuation (a line of three sentences ran together), so the breaths are made here (owner, 20 Oct 2026: "like taking
      *  breath, noticing punctuation"). */
-    fun breathMs(mark: Char): Long = when (mark) { '.', '!' -> 420L; '?' -> 480L; ';', ':' -> 300L; ',' -> 190L; else -> 0L }
+    fun breathMs(mark: Char, scale: Double = 1.0): Long =
+        (when (mark) { '.', '!' -> 550L; '?' -> 600L; ';', ':' -> 380L; ',' -> 280L; else -> 0L } * scale).toLong()
 
     /**
      * [chunk] as clause-sized pieces with a breath between them: split after . ! ? ; : and ,; a piece of fewer than
      * [minWords] words ("Cancelled.", "Say yes or no.") is joined to its neighbour, because this voice garbles very short
      * lines (scored with Whisper on the app's own lines, 20 Oct 2026: whole 0.21 WER, split 0.22, a bare one-word line 1.0).
      */
-    fun breathe(chunk: String, minWords: Int = 4): List<Piece> {
+    fun breathe(chunk: String, minWords: Int = 4, scale: Double = 1.0): List<Piece> {
         val parts = chunk.trim().split(CLAUSE_END).filter { it.isNotBlank() }
         val merged = ArrayList<String>()
         var carry = ""
@@ -150,7 +151,7 @@ object OnDeviceVoice {
         val out = ArrayList<Piece>()
         for ((i, m) in merged.withIndex()) {
             out += Piece(m)
-            if (i < merged.lastIndex) breathMs(m.trimEnd().last()).takeIf { it > 0 }?.let { out += Piece(null, it) }
+            if (i < merged.lastIndex) breathMs(m.trimEnd().last(), scale).takeIf { it > 0 }?.let { out += Piece(null, it) }
         }
         return out
     }
@@ -307,7 +308,8 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
         val pieces = OnDeviceVoice.plan(raw,
             AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
             AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60),
-            breaths = s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.breaths", true))
+            breaths = s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.breaths", true),
+            breathScale = AppConfig.double("speech.tts.onDevice.breathScale", 1.0).coerceIn(0.0, 3.0))
             .map { pc -> pc.text?.let { t -> pc.copy(text = OnDeviceVoice.forModel(s, OnDeviceVoice.say(t, s.say))) } ?: pc }
         if (pieces.none { it.text != null }) return false
         val hz = tts.sampleRate()

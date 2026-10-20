@@ -106,10 +106,12 @@ object WebSearch {
     suspend fun search(query: String, ctx: Context): SearchResult? {
         val q = query.trim().replace(Regex("\\s+"), " ").take(MAX_QUERY_CHARS)
         if (q.isEmpty()) return null
-        val budgetMs = AppConfig.long("answers.search.budgetSec", 35L) * 1000L
+        // 20 Oct 2026: 20 s a provider and 35 s in all made "how far..." take 88 s when one stalled; now 8 s each, 18 s in all
+        val budgetMs = AppConfig.long("answers.search.budgetSec", 18L) * 1000L
+        val perProviderMs = AppConfig.long("answers.search.perProviderSec", 8L) * 1000L
         return withTimeoutOrNull(budgetMs) {
             for (p in providers(ctx)) {
-                val r = try { p.search(q, ctx) }
+                val r = try { withTimeoutOrNull(perProviderMs) { p.search(q, ctx) } }
                     catch (ce: CancellationException) { throw ce }
                     catch (t: Throwable) { warn("${p.name} failed: ${t.javaClass.simpleName}"); null }
                 if (r != null && r.answer.isNotBlank())
