@@ -182,3 +182,33 @@ object SpeechProviders {
         return when (chain.size) { 0 -> null; 1 -> chain[0]; else -> FallbackAsr(chain) }
     }
 }
+
+/**
+ * A language's network voices with the phone's own voice for the SAME language (offline Twi, owner 20 Oct 2026: "the fallback
+ * should be in the same language"). Offline: the phone's voice speaks at once (no waiting on dead links). Online: the network
+ * chain first; if it cannot say the line, the phone's voice says it — before any other-language fallback in [network].
+ */
+class OfflineFirstTts(
+    private val network: TtsProvider,
+    private val local: TtsProvider,
+    private val isOnline: () -> Boolean,
+    /** The network chain without its last-resort voice (the system engine), so the phone's own voice comes before it. */
+    private val networkOnly: TtsProvider = network
+) : TtsProvider, VoiceAvailability {
+    override val name = "offline-first(${local.name} | ${network.name})"
+    @Volatile var lastVoice: String? = null
+        private set
+    override fun whyUnavailable(): String? = null
+    override suspend fun speak(text: String, language: String): Boolean {
+        if (!isOnline()) {
+            if (local.speak(text, language)) { lastVoice = local.name; return true }
+            return network.speak(text, language).also { if (it) lastVoice = network.name }
+        }
+        if (networkOnly.speak(text, language)) { lastVoice = (networkOnly as? FallbackTts)?.lastVoice ?: networkOnly.name; return true }
+        if (local.speak(text, language)) { lastVoice = local.name; return true }
+        if (networkOnly !== network && network.speak(text, language)) { lastVoice = network.name; return true }
+        return false
+    }
+    override fun stop() { network.stop(); local.stop(); if (networkOnly !== network) networkOnly.stop() }
+    override fun shutdown() { network.shutdown(); local.shutdown(); if (networkOnly !== network) networkOnly.shutdown() }
+}

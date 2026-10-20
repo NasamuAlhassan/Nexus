@@ -26,6 +26,8 @@ import kotlinx.coroutines.launch
 object VoiceEngine {
     /** Languages that may carry their own on-device voice in the APK (assets/models/ondevice/<code>/tts). */
     private val ON_DEVICE_LANGS = listOf("kus")
+    /** The phone's own Twi voice when the build has one (offline Twi, 20 Oct 2026). */
+    private var twiLocal: SherpaTts? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var settings: Settings
     private lateinit var systemTts: AndroidTts
@@ -304,6 +306,7 @@ object VoiceEngine {
         // and the phone's engine stays behind it, so a missing or failed model is never silence.
         val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
         englishVoice = if (own != null) AccentTts(own, systemVoice) else systemVoice
+        twiLocal = SherpaTts(app, OnDeviceVoice.dirFor(Lang.TWI)).takeIf { it.present }?.also { it.warm() }
         langVoices = ON_DEVICE_LANGS.mapNotNull { l -> SherpaTts(app, OnDeviceVoice.dirFor(l)).takeIf { it.present }?.let { l to it } }.toMap()
         stage("ownVoice")
         android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}" +
@@ -391,7 +394,15 @@ object VoiceEngine {
                 englishToTwi = { localizer.toTwi(it, promptWaitMs()) }
                 tts = RoutingTts(
                     english = SpeechProviders.tts("english", ttsRegistry, systemVoice, englishIds),
-                    twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
+                    twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice).let { chain ->
+                        // The phone's own Twi voice (models/ondevice/twi/tts, our Space's MMS-VITS voice): first when offline,
+                        // right after the network voices when online — never the English engine while it can speak.
+                        twiLocal?.let { local ->
+                            val networkOnly = SpeechProviders.resolve(SpeechProviders.ttsIds("twi", listOf("system")), ttsRegistry)
+                                .filter { it !== systemVoice }.let { l -> when (l.size) { 0 -> null; 1 -> l[0]; else -> FallbackTts(l) } }
+                            OfflineFirstTts(chain, local, isOnline, networkOnly ?: chain)
+                        } ?: chain
+                    },
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
                     enToTwAll = { localizer.toTwiAll(it) },
                     ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)

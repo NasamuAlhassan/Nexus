@@ -483,6 +483,10 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     }
 
     private fun decodeSamples(lang: String, raw: FloatArray, sr: Int): String? {
+        ortFor(lang)?.let { m ->
+            return try { guardRepetition(trimRestart(m.decode(raw, sr))) }
+            catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx decode failed: ${t.message}"); null }
+        }
         val (key, r) = recWithFallback(lang) ?: return null
         val samples = padFor(key, raw, sr)                        // §3.9 per-model padding (not a fixed 30 s)
         val words = if (beams[key] == true) ModelSpec.hotwordLine(try { hotwords() } catch (_: Throwable) { emptyList() }) else ""
@@ -496,6 +500,24 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         } finally {
             try { s.release() } catch (_: Throwable) {}
         }
+    }
+
+    /** Models run by ONNX Runtime instead of sherpa ([ModelSpec.W2VBERT_CTC]), by language. */
+    private val ortModels = HashMap<String, OrtCtcAsr>()
+
+    /** The ONNX Runtime model for [lang] when its model.json names one (offline Twi only, behind `speech.asr.offlineTwi`). */
+    private fun ortFor(lang: String): OrtCtcAsr? = synchronized(ResidentModels.monitor) {
+        ortModels[lang]?.let { return it }
+        if (lang != "twi" || !offlineTwi()) return null
+        val d = modelDir(lang) ?: return null
+        val spec = specOf(d)?.takeIf { it.type == ModelSpec.W2VBERT_CTC && hasModel(d) } ?: return null
+        admit(lang, d, spec)
+        val threads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads.${spec.type}", spec.threads ?: 4).coerceIn(1, 8)
+        return try {
+            OrtCtcAsr(File(d, spec.files.getValue("model")), File(d, spec.tokens), threads).also {
+                ortModels[lang] = it; loaded[lang] = spec.label; ResidentModels.types[lang] = spec.type
+            }
+        } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx load failed ($lang, ${spec.label}): ${t.message}"); null }
     }
 
     /** B-19: the last speculative decode (one at a time; consumed by the next real decode, hit or miss). */
