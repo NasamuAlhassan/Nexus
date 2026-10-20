@@ -55,7 +55,9 @@ object OnDeviceVoice {
         val noiseScaleW: Float = 0.8f,
         val say: Map<String, String> = emptyMap(),
         /** The one language a [VITS_MMS] voice speaks (voice.json "language", e.g. "kus"); null = English (Piper). */
-        val language: String? = null
+        val language: String? = null,
+        /** This voice's own pace (1.0 = as trained); sherpa-onnx "speed", multiplied by the user's rate setting. */
+        val speed: Float = 1f
     )
 
     /** Where a bundled voice lives: `models/ondevice/<language>/tts/` (English = "eng", Kusaal = "kus"). */
@@ -86,7 +88,7 @@ object OnDeviceVoice {
             lengthScale = o.optDouble("lengthScale", 1.0).toFloat().coerceIn(0.5f, 2f),
             noiseScale = o.optDouble("noiseScale", 0.667).toFloat().coerceIn(0f, 1.5f),
             noiseScaleW = o.optDouble("noiseScaleW", 0.8).toFloat().coerceIn(0f, 1.5f),
-            say = say, language = language)
+            say = say, language = language, speed = o.optDouble("speed", 1.0).toFloat().coerceIn(0.5f, 1.6f))
     }
 
     /** [text] with this voice's own pronunciations put in: whole words only, any case, longest entry first (so
@@ -228,7 +230,7 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
                 val ok = try {
                     val tts = load(s)
                     if (tts == null) false else {
-                        val audio = tts.generate(OnDeviceVoice.forModel(s, OnDeviceVoice.say(text, s.say)), 0, rate.coerceIn(0.5f, 1.6f))
+                        val audio = tts.generate(OnDeviceVoice.forModel(s, OnDeviceVoice.say(text, s.say)), 0, (rate * s.speed).coerceIn(0.5f, 1.6f))
                         val pcm = OnDeviceVoice.pcm16(audio.samples)
                         out.parentFile?.mkdirs()
                         out.writeBytes(wav16(pcm, audio.sampleRate))
@@ -275,7 +277,7 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
             AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60))
         if (pieces.none { it.text != null }) return false
         val hz = tts.sampleRate()
-        val speed = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate).coerceIn(0.5f, 1.6f)
+        val speed = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate * s.speed).coerceIn(0.5f, 1.6f)
         val heard = AtomicLong(0)                               // speech frames the speaker actually took
         val token = focus.acquire(AudioFocus.Kind.SPEAK)
         var track: AudioTrack? = null
