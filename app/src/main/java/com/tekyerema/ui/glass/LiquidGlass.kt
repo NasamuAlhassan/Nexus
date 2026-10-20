@@ -232,7 +232,7 @@ fun Modifier.liquidGlass(
 }
 
 /** `ui.glassLite` (default true): draw the glass with a few fills instead of the full stack of strokes and clips. Read once per size. */
-private fun glassLite(): Boolean = try { com.tekyerema.core.config.AppConfig.string("ui.glassLite", "true").lowercase() != "false" } catch (_: Throwable) { true }
+fun glassLite(): Boolean = try { com.tekyerema.core.config.AppConfig.string("ui.glassLite", "true").lowercase() != "false" } catch (_: Throwable) { true }
 
 /** The glass outline as a path (continuous corners; a capsule when [radius] ≥ half the short side). */
 fun liquidPath(size: Size, radius: Float): Path = com.tekyerema.ui.assistant.continuousPath(size, radius)

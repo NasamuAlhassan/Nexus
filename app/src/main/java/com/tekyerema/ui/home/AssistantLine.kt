@@ -82,7 +82,7 @@ fun AssistantLine(
             label = "assistant line"
         ) { l ->
             if (l.text.isEmpty()) Spacer(Modifier.fillMaxWidth())
-            else RevealText(l.text, reveal = l.reveal && !calm, cps = LineMotion.charsPerSecond(speechRate), secondary = l.secondary)
+            else RevealText(l.text, revealAsked = l.reveal && !calm, cps = LineMotion.charsPerSecond(speechRate), secondary = l.secondary)
         }
     }
 }
@@ -113,7 +113,10 @@ fun HintLine(hint: String, color: Color, announce: Boolean, modifier: Modifier =
 }
 
 @Composable
-private fun RevealText(text: String, reveal: Boolean, cps: Float, secondary: Boolean) {
+private fun RevealText(text: String, revealAsked: Boolean, cps: Float, secondary: Boolean) {
+    // Light UI (ui.glassLite, owner 20 Oct 2026: "make everything fast"): the whole line at once — the word-by-word reveal
+    // redraws an offscreen layer every frame while the voice speaks, which an entry phone's GPU feels.
+    val reveal = revealAsked && !remember { com.tekyerema.ui.glass.glassLite() }
     // I-08: a long answer keeps ALL its words (smaller type, up to 8 lines) instead of being cut at 3 lines.
     val long = text.length > 90
     val style = if (long) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium
