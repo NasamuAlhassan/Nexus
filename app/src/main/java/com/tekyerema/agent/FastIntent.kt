@@ -641,7 +641,8 @@ object FastIntentClassifier {
         RE_PREF_PATIENT.matches(g) -> FastIntent.Preference("patience", "patient")
         RE_PREF_TWI.matches(g) -> FastIntent.Preference("language", "twi")
         RE_PREF_ENGLISH.matches(g) -> FastIntent.Preference("language", "english")
-        RE_PREF_KUSAAL.matches(g) -> FastIntent.Preference("language", "kus")
+        // Kusaal removed from the build (owner, 20 Oct 2026): "speak Kusaal" is no longer a language switch.
+        false && RE_PREF_KUSAAL.matches(g) -> FastIntent.Preference("language", "kus")
         else -> null
     }
 

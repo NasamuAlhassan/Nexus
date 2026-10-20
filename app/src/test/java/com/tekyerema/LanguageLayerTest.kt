@@ -476,10 +476,12 @@ class LanguageLayerTest {
         val routing = RoutingTts(english = phone, twi = twiVoice, enToTw = { if (it == "Good morning") "Mema wo akye" else null })
         routing.speak("Good morning", Lang.TWI)
         assertEquals("Mema wo akye", twiVoice.said.last().first)
-        // No translation for an ENGLISH line → the English voice says it (2 October 2026: English read by the Twi voice
-        // sounded wrong and spent the HCI Lab's 15-a-day quota). App-authored Twi still goes to the Twi voice.
+        // No translation for an ENGLISH line → the Twi voice says, in Twi, that it can't translate it now (owner, 20 Oct
+        // 2026: no English fallback in a Twi conversation). App-authored Twi still goes to the Twi voice.
+        val phoneBefore = phone.said.size
         routing.speak("Opening WhatsApp now", Lang.TWI)
-        assertEquals("no translation → the English voice", "Opening WhatsApp now", phone.said.last().first)
+        assertEquals("no translation → nothing in English", phoneBefore, phone.said.size)
+        assertTrue("no translation → the Twi notice", twiVoice.said.last().first.startsWith("Mintumi"))
         routing.speak("Mabue no.", Lang.TWI)
         assertEquals("Mabue no.", twiVoice.said.last().first)
         val throwing = RoutingTts(english = phone, twi = twiVoice, enToTw = { throw IllegalStateException("boom") })

@@ -82,10 +82,10 @@ class KusaalLanguageTest {
         assertEquals(Lang.GH_EN, t.language)
     }
 
-    @Test fun saySpeakKusaalToSwitch() {
+    @Test fun speakKusaalNoLongerSwitches() {
         val c = { s: String -> com.tekyerema.agent.FastIntentClassifier.classify(s) }
         for (s in listOf("speak kusaal", "speak kusal", "switch to kusaal", "use kusaal", "kusaal mode", "talk to me in kusasi"))
-            assertEquals(s, com.tekyerema.agent.FastIntent.Preference("language", "kus"), c(s))
+            org.junit.Assert.assertNotEquals(s, com.tekyerema.agent.FastIntent.Preference("language", "kus"), c(s))   // Kusaal removed from the build (20 Oct 2026)
         assertEquals(com.tekyerema.agent.FastIntent.Preference("language", "english"), c("speak english"))
     }
 
