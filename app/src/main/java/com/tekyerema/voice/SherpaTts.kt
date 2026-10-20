@@ -302,10 +302,13 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
     private fun play(line: Line, s: OnDeviceVoice.Spec, raw: String): Boolean {
         if (line.cancelled) return true
         val tts = load(s) ?: return false
-        val pieces = OnDeviceVoice.plan(OnDeviceVoice.forModel(s, OnDeviceVoice.say(raw, s.say)),
+        // The pronunciations go in AFTER the text is cut into pieces: a respelling may carry commas ("teh, cheh, reh, mah") that
+        // must stay inside one piece, not become breaths.
+        val pieces = OnDeviceVoice.plan(raw,
             AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
             AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60),
             breaths = s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.breaths", true))
+            .map { pc -> pc.text?.let { t -> pc.copy(text = OnDeviceVoice.forModel(s, OnDeviceVoice.say(t, s.say))) } ?: pc }
         if (pieces.none { it.text != null }) return false
         val hz = tts.sampleRate()
         val speed = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate * s.speed).coerceIn(0.5f, 1.6f)
