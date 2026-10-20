@@ -878,6 +878,10 @@ class VoiceController(
     /** Offline in Twi: what the phone CAN do, said in English (there is no Twi voice offline). */
     private val OFFLINE_TWI_LIMIT = "Offline, I understand simple Twi requests — sending money, airtime, calls, your " +
         "balance, the time, volume and music. For anything else, say it in English, or connect to the internet."
+    /** The same, in Twi, for the phone's own Twi voice (20 Oct 2026). "No internet. I can do small things like calling,
+     *  sending money, the time and music. Say it again, or wait for the internet." [owner: a native speaker to verify] */
+    private val OFFLINE_TWI_LIMIT_TWI = "Intanɛt nni hɔ seesei. Metumi ayɛ nneɛma nketenkete te sɛ frɛ, sika soma, bere ne nnwom. " +
+        "San ka bio, anaa twɛn ma intanɛt mmra."
     private val SECURE_TAP_DONE = "When you've finished, tap Done, or type done."
     /** A Kusaal request with no trustworthy English (the translator is the only way in). Said in English: the line that
      *  would carry it into Kusaal is the very service that just failed. */
@@ -1420,11 +1424,12 @@ class VoiceController(
             // with what DOES work, instead of a vague failure (Abena study, 3 October 2026: its honest "Twi recognition is
             // limited… you can type"). [owner: verify the wording]
             if (tr.language == Lang.TWI && glossed == null && !com.tekyerema.core.NetworkMonitor.isOnline()) {
-                val line = OFFLINE_TWI_LIMIT
+                // In Twi, in Twi (owner, 20 Oct 2026: no English fallback): the phone's own Twi voice says it offline.
+                val line = Phrases.get("twiOfflineLimit", true, OFFLINE_TWI_LIMIT_TWI)
                 Log.i("Tekyerema", "[TWI] offline and not one of the phone's Twi commands — said so")
                 set(VoiceState.SPEAKING, line)
                 cues.error()
-                try { if (speakAloud()) tts.speak(line, Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                try { if (speakAloud()) tts.speak(line, Lang.TWI) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                 tel.endTurn("failed", byVoice = source == InputSource.ASR)
                 _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
                 return

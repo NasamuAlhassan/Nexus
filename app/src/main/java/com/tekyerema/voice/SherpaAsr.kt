@@ -416,7 +416,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             return
         }
         withContext(Dispatchers.Default) {
-            lock.withLock { try { rec(langKey(sessionLanguage)) } catch (_: AsrLowMemoryException) { null } }   // a warm-up never insists
+            lock.withLock { try { val l = langKey(sessionLanguage); ortFor(l) ?: rec(l) } catch (_: AsrLowMemoryException) { null } }   // a warm-up never insists
         }
     }
 
