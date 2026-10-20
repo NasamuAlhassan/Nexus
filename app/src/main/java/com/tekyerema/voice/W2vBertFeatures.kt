@@ -14,7 +14,7 @@ import kotlin.math.sqrt
  * 2026: "let's make the Twi offline too"). A line-for-line port of transformers' SeamlessM4TFeatureExtractor: 16 kHz samples
  * scaled to 16-bit, 25 ms Povey-windowed frames every 10 ms, DC removed, pre-emphasis 0.97, 512-point power spectrum, 80 Kaldi
  * mel filters triangular in mel space (20 Hz - 8 kHz), natural log (floor 1.19e-7), then each mel bin normalised over the clip
- * (mean 0, variance 1 with ddof 1) and two frames stacked into one row of 160. Checked against the Python output
+ * (mean 0, variance 1 with ddof 1), padded to an even frame count, and two frames stacked into one row of 160. Checked against the Python output
  * (W2vBertFeaturesTest, fixture made by transformers 4.57). Pure.
  */
 object W2vBertFeatures {
@@ -34,7 +34,7 @@ object W2vBertFeatures {
     private val sinT = DoubleArray(NFFT / 2) { sin(-2 * PI * it / NFFT) }
 
     /** Rows of 160 features for [samples] (16 kHz, -1..1), or an empty array when the clip is shorter than two frames. */
-    fun compute(samples: FloatArray): Array<FloatArray> {
+    fun compute(samples: FloatArray, padValue: Float = 1f): Array<FloatArray> {
         val frames = if (samples.size < FRAME) 0 else 1 + (samples.size - FRAME) / HOP
         if (frames < STRIDE) return emptyArray()
         val logMel = Array(frames) { DoubleArray(MELS) }
@@ -68,9 +68,14 @@ object W2vBertFeatures {
             val sd = sqrt(v / (frames - 1) + 1e-7)
             for (f in 0 until frames) logMel[f][m] = (logMel[f][m] - mu) / sd
         }
-        val rows = frames / STRIDE
+        // The extractor pads to a multiple of the stride (pad_to_multiple_of=2) with the model's padding_value (1 in this
+        // model's preprocessor_config.json) AFTER normalising, so an odd frame count gains one row of padValue.
+        val rows = (frames + STRIDE - 1) / STRIDE
         return Array(rows) { r ->
-            FloatArray(MELS * STRIDE) { j -> logMel[r * STRIDE + j / MELS][j % MELS].toFloat() }
+            FloatArray(MELS * STRIDE) { j ->
+                val f = r * STRIDE + j / MELS
+                if (f < frames) logMel[f][j % MELS].toFloat() else padValue
+            }
         }
     }
 
