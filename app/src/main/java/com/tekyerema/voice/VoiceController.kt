@@ -1385,7 +1385,11 @@ class VoiceController(
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
                 val useSystem = fast.systemVoice && systemVoice != null
                 val engine = if (useSystem) systemVoice!! else tts
-                val lang = if (useSystem) Lang.GH_EN else tr.language
+                // "speak Twi" said in English is answered in Twi ("Yoo, mɛsesa…"): through the English path it waited 12 s for the network
+                // English voice first (A20e, 20 Oct 2026).
+                val lang = if (useSystem) Lang.GH_EN
+                    else if (fast.intent == "PREFERENCE" && fast.spoken.startsWith("Yoo, mɛsesa")) Lang.TWI
+                    else tr.language
                 tel.mark("reply_start")
                 val spoke = if (!speakAloud() || fast.spoken.isBlank()) false
                     else try { engine.speak(Verbalize.apply(fast.spoken), lang) }
