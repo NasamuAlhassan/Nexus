@@ -19,7 +19,7 @@ object TwiRespell {
 
     /** [line] with the lexicon's phrases and the not-Twi words respelled. */
     fun apply(line: String, lexicon: Map<String, String> = configured()): String {
-        var s = endings(line)
+        var s = kinNames(endings(line))
         // Longest phrases first, whole words only, case-insensitive ("Mobile Money" and "mobile money").
         for ((k, v) in lexicon.entries.sortedByDescending { it.key.length }) {
             if (k.isBlank() || k.startsWith("_")) continue
@@ -39,6 +39,20 @@ object TwiRespell {
         else Phrases.get("twiNumberEnding", true, ", nɔma a n'awieɛ yɛ {digits}", "digits" to ConfirmTemplates.twiDigits(digits))
             .trimStart(',', ' ') + m.value.takeLastWhile { it.isWhitespace() || it == ',' }
     }
+
+    /**
+     * A contact saved as "My wife", "My mum"… said inside a Twi line as the Twi for it, from the listener's side: "wo yere" (your
+     * wife). The name is kept as saved everywhere else (the screen, the read-back's English); the translator half-translated it
+     * ("Ɛfiri My yere hɔ") — judge's review of take A1, 21 Oct 2026.
+     */
+    fun kinNames(line: String): String = KIN_NAME.replace(line) { m ->
+        val twi = KIN_TWI[m.groupValues[1].lowercase()] ?: return@replace m.value
+        if (m.value.first().isUpperCase() && m.range.first == 0) "Wo $twi" else "wo $twi"
+    }
+    private val KIN_TWI = mapOf("wife" to "yere", "yere" to "yere", "husband" to "kunu", "kunu" to "kunu",
+        "mum" to "maame", "mom" to "maame", "mother" to "maame", "maame" to "maame", "dad" to "papa", "father" to "papa",
+        "papa" to "papa", "brother" to "nuabarima", "sister" to "nuabaa")
+    private val KIN_NAME = Regex("(?i)(?<![\\p{L}])my\\s+(wife|yere|husband|kunu|mum|mom|mother|maame|dad|father|papa|brother|sister)(?![\\p{L}])")
 
     private const val DIGIT_WORDS = "zero|oh|one|two|three|four|five|six|seven|eight|nine|baako|mmienu|abien|mmiɛnsa|abiɛsa|anan|" +
         "anum|nsia|nson|nwɔtwe|nkron"
