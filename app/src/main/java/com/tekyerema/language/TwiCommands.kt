@@ -134,6 +134,9 @@ object TwiCommands {
      * near miss costs nothing worse than reading the wrong thing aloud. Money, calls and messages stay exact-match only.
      */
     private val NEAR = listOf(
+        // speech rate in Twi (research, 21 Oct 2026) [native check]
+        "kasa brɛoo" to "speak slower", "kasa brɛ ase" to "speak slower", "brɛ wo ho ase" to "speak slower",
+        "kasa ntɛm" to "speak faster", "kasa ntɛmntɛm" to "speak faster",
         "kenkan me nkra" to "read my messages", "kenkan no nyinaa" to "read all of it", "hena na ɔsomaa no" to "who sent it",
         "hwɛ me sika a aka" to "check my mobile money balance", "mewɔ sika sɛn" to "check my mobile money balance",
         "me momo mu sika aka sɛn" to "check my mobile money balance", "me airtime aka sɛn" to "check my airtime balance",

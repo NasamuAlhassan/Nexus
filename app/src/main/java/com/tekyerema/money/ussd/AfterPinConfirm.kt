@@ -35,7 +35,7 @@ object AfterPinConfirm {
     val armed: Boolean get() = pending?.let { android.os.SystemClock.uptimeMillis() < it.until } == true
 
     /** Wait for the user's key on [screen]; the power button cancels (also when it turns the screen off). */
-    fun arm(ctrl: AccessibilityController, screen: UssdDialog.Screen, app: Context?) {
+    internal fun arm(ctrl: AccessibilityController, screen: UssdDialog.Screen, app: Context?) {
         pending = Pending(ctrl, screen, android.os.SystemClock.uptimeMillis() + 90_000L)
         cancelOnScreenOn = false
         if (app != null && receiver == null) {

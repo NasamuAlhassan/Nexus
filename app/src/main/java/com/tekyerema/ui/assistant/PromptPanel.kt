@@ -93,7 +93,17 @@ internal fun PromptPanel(
     val micLevel = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(listening) {
         if (!listening) { micLevel.floatValue = 0f; return@LaunchedEffect }
-        while (true) withFrameNanos { micLevel.floatValue += (VoiceEngine.level.value.coerceIn(0f, 1f) - micLevel.floatValue) * 0.3f }
+        // Lite (UI audit, 21 Oct 2026): ~15 updates a second and only on a visible change — a 60 fps write here redrew the window
+        // every frame while listening and cancelled the orb's 30 fps cap.
+        val lite = com.tekyerema.ui.glass.glassLite()
+        var last = 0L
+        while (true) withFrameNanos { now ->
+            if (!lite || now - last >= 66_000_000L) {
+                last = now
+                val v = micLevel.floatValue + (VoiceEngine.level.value.coerceIn(0f, 1f) - micLevel.floatValue) * (if (lite) 0.6f else 0.3f)
+                if (!lite || kotlin.math.abs(v - micLevel.floatValue) > 0.02f) micLevel.floatValue = v
+            }
+        }
     }
 
     // Arrival, as the surface arrives: down from the top on its spring (SurfaceMotion.Arrive) with a little scale, then the

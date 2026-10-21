@@ -146,7 +146,15 @@ private fun Waveform(live: Boolean, level: () -> Float, modifier: Modifier = Mod
     val currentLevel by rememberUpdatedState(level)
     LaunchedEffect(live) {
         if (!live) { smooth = 0f; return@LaunchedEffect }
-        while (true) withFrameNanos { smooth += (currentLevel().coerceIn(0f, 1f) - smooth) * 0.35f }
+        val lite = com.tekyerema.ui.glass.glassLite()
+        var last = 0L
+        while (true) withFrameNanos { now ->
+            if (!lite || now - last >= 66_000_000L) {
+                last = now
+                val v = smooth + (currentLevel().coerceIn(0f, 1f) - smooth) * (if (lite) 0.6f else 0.35f)
+                if (!lite || kotlin.math.abs(v - smooth) > 0.02f) smooth = v
+            }
+        }
     }
     val weights = remember { floatArrayOf(0.45f, 0.75f, 1f, 0.75f, 0.45f) }
     Canvas(modifier.clearAndSetSemantics { }) {

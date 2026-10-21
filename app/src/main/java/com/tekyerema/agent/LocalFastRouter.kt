@@ -862,6 +862,11 @@ class LocalFastRouter(
         // Twi / Kusaal: just who and the words (the translator is weak; the frame is not needed to understand it).
         val line = if (com.tekyerema.notifications.MessageReading.plain()) "From $who. $text"
             else "You have a message from $who. It says: “$text”." + (req?.let { " " + com.tekyerema.money.MoneyRequest.summary(it) } ?: "")
+        // A message from a person, not asking for money: offer to reply, and listen once for the answer (a complete exchange —
+        // research, 21 Oct 2026). A money request already says what to do next.
+        val offer = if (req == null && NextStep.enabled() && who != "someone" && who.none(Char::isDigit) && who.length in 2..40)
+            NextStep.Offer("reply to $who", "Shall I reply to $who?", "Wopɛ sɛ mebua $who?", System.currentTimeMillis(), "reply") else null
+        if (offer != null) { NextStep.offer(offer); return handled(intent, "$line ${offer.english}").copy(listenAfter = true) }
         return handled(intent, line)
     }
 
@@ -998,7 +1003,9 @@ class LocalFastRouter(
 
     /** K-01 / K-10: what works in the app in front (the app under our own screen when that's what shows). */
     private fun help(i: FastIntent.Help): FastOutcome {
-        if (!i.here) return handled(i, ContextHelp.GENERAL)
+        if (!i.here) return handled(i, if (turnLanguage == Lang.TWI) com.tekyerema.voice.Phrases.get("twiHelp", true,
+            "Metumi frɛ obi, kenkan wo nkra, soma Mobile Money sika (wo ankasa na wobɛhyɛ PIN no), ka bere ne wo batri, na mede " +
+            "kamera no ahwɛ biribi ama wo. Ka sɛ: “Frɛ me yere”, anaa “Abɔ sɛn?”") else ContextHelp.GENERAL)
         val c = controller()
         val own = appContext.packageName
         val pkg = c?.foregroundPackage()?.takeUnless { it == own } ?: c?.priorForegroundPackage()

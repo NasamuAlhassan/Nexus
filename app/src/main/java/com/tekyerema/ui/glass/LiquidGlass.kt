@@ -185,8 +185,10 @@ fun Modifier.liquidGlass(
             center = Offset(w / 2f, 0f), radius = sheenR)
         val rimShaderLite = rimShader
         return@drawWithCache onDrawBehind {
-            if (liteShadow.isNotEmpty()) clipPath(path, ClipOp.Difference) {
-                translate(top = shadowDy) { liteShadow.forEach { (st, alpha) -> drawPath(path, Color.Black, alpha = alpha, style = st) } }
+            // Drawn before the body and unclipped: the body (≥ 58 % opaque) hides the inner half, and a clip on a smoothed path
+            // costs a software path clip every redraw below Android 13 (UI audit, 21 Oct 2026).
+            if (liteShadow.isNotEmpty()) translate(top = shadowDy) {
+                liteShadow.forEach { (st, alpha) -> drawPath(path, Color.Black, alpha = alpha, style = st) }
             }
             drawPath(path, body)
             drawPath(path, thickness)
