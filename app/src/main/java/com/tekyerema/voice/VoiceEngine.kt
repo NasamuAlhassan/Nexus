@@ -178,6 +178,10 @@ object VoiceEngine {
 
     /** The user is speaking Twi right now. */
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
+    /** The conversation's language (the user's setting, or the one they are speaking in Both mode). */
+    fun language(): String = conversationLanguage()
+    /** The voices are built ([speakIn] can speak). */
+    fun ready(): Boolean = initialized
 
     @Volatile private var warmedAt = 0L
     /** The raw English→Twi translator (no tags), for the warm-up only. */

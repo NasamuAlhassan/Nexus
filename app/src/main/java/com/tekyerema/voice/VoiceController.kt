@@ -1411,10 +1411,12 @@ class VoiceController(
                 set(VoiceState.SPEAKING, shown)
                 com.tekyerema.ui.ReplyCard.show(shown, speakAloud())
                 // Twi / Kusaal: the screen shows what the voice says, not the English it came from.
-                if (!fast.systemVoice && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken)?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown); com.tekyerema.ui.ReplyCard.show(shown, speakAloud()) }
+                if ((!fast.systemVoice || tr.language == Lang.TWI) && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken)?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown); com.tekyerema.ui.ReplyCard.show(shown, speakAloud()) }
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
-                val useSystem = fast.systemVoice && systemVoice != null
+                // Never in a Twi conversation: the line is said in the language the user set, by the Twi voice (owner, 21 Oct 2026:
+                // "everything that will come of Tɛkyerɛma be the voice the user set").
+                val useSystem = fast.systemVoice && systemVoice != null && tr.language != Lang.TWI
                 val engine = if (useSystem) systemVoice!! else tts
                 // "speak Twi" said in English is answered in Twi ("Yoo, mɛsesa…"): through the English path it waited 12 s for the network
                 // English voice first (A20e, 20 Oct 2026).

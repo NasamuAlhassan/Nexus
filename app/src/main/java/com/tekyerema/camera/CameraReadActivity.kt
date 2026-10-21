@@ -128,7 +128,8 @@ class CameraReadActivity : ComponentActivity() {
 
     // --- speech (main thread only) ---
     private var tts: TextToSpeech? = null
-    private val twiVoice by lazy { TwiReaderVoice(lifecycleScope, main) }
+    /** The app's voice in the user's language (Kafui in English, the Twi voice in Twi); the phone's engine only behind it. */
+    private val appVoice by lazy { ReaderVoice(lifecycleScope, main) { line, then -> systemUtter(line, true, then) } }
     private var ttsReady = false
     private var ttsFailed = false
     private val pending = ArrayList<Speech>()
@@ -343,7 +344,7 @@ class CameraReadActivity : ComponentActivity() {
         try { analysis?.clearAnalyzer() } catch (_: Throwable) {}
         analysisExecutor?.shutdown()
         if (recognizerLazy.isInitialized()) try { recognizer.close() } catch (_: Throwable) {}
-        twiVoice.stop()
+        appVoice.stop()
         tts?.let { try { it.stop(); it.shutdown() } catch (_: Throwable) {} }
         tts = null
         super.onDestroy()
@@ -790,10 +791,16 @@ class CameraReadActivity : ComponentActivity() {
     }
 
     private fun utter(line: String, flush: Boolean, then: (() -> Unit)?) {
-        val engine = tts
         if (line.isBlank()) { then?.invoke(); return }
-        // In a Twi conversation the app's Twi voice reads it (translated), never the phone's English engine (20 Oct 2026).
-        if (com.tekyerema.voice.VoiceEngine.speaksTwi()) { twiVoice.say(line, flush, then); return }
+        // The app's own voice in the language the user set — Kafui's Ghanaian English, or Twi (translated) — never the phone's
+        // generic English engine while that voice is up (owner, 20 + 21 Oct 2026).
+        if (ReaderVoice.use()) { logSpoke(line, true); appVoice.say(line, flush, then); return }
+        systemUtter(line, flush, then)
+    }
+
+    /** The phone's own engine: only when the app's voice is not up, or could not say a line ([ReaderVoice] fallback). */
+    private fun systemUtter(line: String, flush: Boolean, then: (() -> Unit)?) {
+        val engine = tts
         if (ttsFailed || engine == null) { sayWithAppVoice(line, then); return }
         if (!ttsReady) {
             if (flush) pending.clear()
@@ -839,7 +846,7 @@ class CameraReadActivity : ComponentActivity() {
         if (then != null) main.postDelayed({ then() }, CameraSpeech.hearingMs(line))
     }
 
-    private fun isSpeaking(): Boolean = try { tts?.isSpeaking == true } catch (_: Throwable) { false }
+    private fun isSpeaking(): Boolean = appVoice.speaking || try { tts?.isSpeaking == true } catch (_: Throwable) { false }
 
     private fun onTtsInit(status: Int) {
         val engine = tts ?: return

@@ -51,7 +51,8 @@ class DocumentReadActivity : Activity() {
     /** The previous page's words as read, for the running header/footer check (PageFurniture). */
     private var lastRaw: String? = null
     private var tts: TextToSpeech? = null
-    private val twiVoice by lazy { TwiReaderVoice(scope, main) }
+    /** The app's voice in the user's language (Kafui in English, the Twi voice in Twi); the phone's engine only behind it. */
+    private val appVoice by lazy { ReaderVoice(scope, main) { line, then -> systemUtter(line, true, then) } }
     private var ttsReady = false
     private val pending = ArrayList<Pair<String, (() -> Unit)?>>()
     private val afterSpeech = HashMap<String, () -> Unit>()
@@ -177,10 +178,15 @@ class DocumentReadActivity : Activity() {
     private fun speak(text: String, flush: Boolean = false, then: (() -> Unit)? = null) = utter(Verbalize.apply(text), flush, then)
 
     private fun utter(line: String, flush: Boolean, then: (() -> Unit)?) {
-        val engine = tts
         if (line.isBlank()) { then?.invoke(); return }
-        // In a Twi conversation the app's Twi voice reads the page (translated), never the phone's English engine (20 Oct 2026).
-        if (com.tekyerema.voice.VoiceEngine.speaksTwi()) { twiVoice.say(line, flush, then); return }
+        // The app's own voice in the language the user set (Kafui's Ghanaian English, or Twi translated) — owner, 20 + 21 Oct 2026.
+        if (ReaderVoice.use()) { appVoice.say(line, flush, then); return }
+        systemUtter(line, flush, then)
+    }
+
+    /** The phone's own engine: only when the app's voice is not up, or could not say a line ([ReaderVoice] fallback). */
+    private fun systemUtter(line: String, flush: Boolean, then: (() -> Unit)?) {
+        val engine = tts
         if (!ttsReady || engine == null) { if (flush) pending.clear(); pending.add(line to then); return }
         val id = "doc-" + (++utteranceSeq)
         if (then != null) afterSpeech[id] = then
@@ -224,7 +230,7 @@ class DocumentReadActivity : Activity() {
         closing = true
         main.removeCallbacks(idleTimeout)
         prefetch?.cancel()
-        twiVoice.stop()
+        appVoice.stop()
         scope.cancel()
         try { tts?.stop(); tts?.shutdown() } catch (_: Throwable) {}
         try { reader?.close() } catch (_: Throwable) {}
