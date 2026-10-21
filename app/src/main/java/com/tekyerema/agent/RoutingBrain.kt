@@ -153,6 +153,9 @@ class RoutingBrain(
          * the planner asks for the number again. AgentEngine checks this at the top of every step, before the screen is
          * looked at, so the confirmation is said BEFORE the PIN rather than after the Secure Input hand-off. Pure.
          */
+        /** A history line that records a tool step ("tool(args) → ok/fail: …"). */
+        fun isStepLine(line: String): Boolean = STEP_LINE.containsMatchIn(line)
+
         fun moneyEnd(history: List<String>): Pair<AgentStatus, String>? {
             // Money safety round 2 (money/MoneyPlan): a send refused by the user's spending limit, and a guided bank step that
             // failed or reached a payment confirmation / PIN, end here too.

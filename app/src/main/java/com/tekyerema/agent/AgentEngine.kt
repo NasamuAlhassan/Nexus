@@ -736,6 +736,10 @@ object AgentEngine {
                 // Money safety (2026-09-29): momo_send ended the task — MTN's confirmation is said before the PIN, before any
                 // pause or look at the screen (endAtMoneyStep).
                 if (endAtMoneyStep(history, stats)) return
+                // Our camera opened (look_with_camera): it answers out loud by itself — the task ends here, so the planner does
+                // not step on, look at the screen and close the camera (A20e, 21 Oct 2026: it called it twice, the camera shut
+                // after ~3 s).
+                if (endAtCamera(history, stats)) return
                 // C-12: a pause holds the task HERE, between steps — never mid-action.
                 if (paused.value) {
                     setStatus(AgentStatus.PAUSED)
@@ -2524,6 +2528,14 @@ object AgentEngine {
      * the Secure Input boundary used to take over first, so MTN's confirmation was only spoken after the PIN was typed.
      * True when the task was finished here.
      */
+    private fun endAtCamera(history: List<String>, stats: RunStats): Boolean {
+        val last = history.lastOrNull { RoutingBrain.isStepLine(it) } ?: return false
+        if (!last.startsWith("look_with_camera(") || last.contains("→ fail")) return false
+        log(LogEntry.Kind.RESULT, "")   // nothing said over the camera: it speaks for itself
+        finish(AgentStatus.COMPLETED, stats)
+        return true
+    }
+
     private fun endAtMoneyStep(history: List<String>, stats: RunStats): Boolean {
         val (status, line) = RoutingBrain.moneyEnd(history) ?: return false
         log(LogEntry.Kind.RESULT, line)
