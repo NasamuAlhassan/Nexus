@@ -34,12 +34,38 @@ object SettingsPages {
         Regex("notifications?") to Page("notifications", "Notification", "Notifications")
     )
 
+    private val DISPLAY = Page("display", "Display", "Display")
+    private val ABOUT = Page("about_phone", "About", "About phone")
+
+    /**
+     * Pages with no intent of their own, by the page that holds them — one tap away instead of a hunt from the Settings front
+     * page (A20e suite, 21 Oct 2026: "font size" took 71 s, "software information" 28 s). Font size sits on Display on One UI
+     * and on Android 13+ ("Display size and text"); Software information sits on About phone.
+     */
+    private val HELD: List<Pair<Regex, Page>> = listOf(
+        Regex("(?:font|text)(?: size)?(?: and style)?|font style|display size(?: and text)?") to DISPLAY,
+        Regex("software (?:information|info|version|details)") to ABOUT
+    )
+
+    /** What a clause ASKS ABOUT inside Settings ("tell me my font size") → the page that holds it ([HELD]). */
+    private val TOPICS: List<Pair<Regex, Page>> = listOf(
+        Regex("(?i)\\b(?:font|text) size\\b|\\bfont(?:s| style)?\\b|\\bdisplay size\\b") to DISPLAY,
+        Regex("(?i)\\bsoftware (?:information|info|version|details)\\b") to ABOUT
+    )
+
     /** The page a navigation label ("battery", "the About phone page", "Do Not Disturb") names, or null when it is not one Android opens directly. */
-    fun find(label: String): Page? {
+    fun find(label: String): Page? = norm(label)?.let { l -> PAGES.firstOrNull { (re, _) -> re.matches(l) }?.second }
+
+    /** The page that HOLDS a label with no intent of its own ("software information" → About phone), or null. */
+    fun holderOf(label: String): Page? = norm(label)?.let { l -> HELD.firstOrNull { (re, _) -> re.matches(l) }?.second }
+
+    /** The page holding what [clause] asks about ([TOPICS]), or null. */
+    fun topicIn(clause: String): Page? = TOPICS.firstOrNull { (re, _) -> re.containsMatchIn(clause) }?.second
+
+    private fun norm(label: String): String? {
         var l = label.trim().lowercase().replace("&", " and ").replace(Regex("\\s+"), " ")
         l = l.replace(Regex("^(?:the |my |its )+"), "")
         l = l.replace(Regex(" (?:settings?|page|screen|section|menu|tab|options?)$"), "").replace(Regex("^(?:the |my )+"), "").trim()
-        if (l.isEmpty()) return null
-        return PAGES.firstOrNull { (re, _) -> re.matches(l) }?.second
+        return l.ifEmpty { null }
     }
 }

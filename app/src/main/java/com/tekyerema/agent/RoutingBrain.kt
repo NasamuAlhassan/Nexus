@@ -364,8 +364,9 @@ class RoutingBrain(
         val clauses = LocalBrain.splitClauses(goal) ?: return null
         val i = clauses.indexOfFirst { OPENS_SETTINGS.containsMatchIn(it) }
         if (i < 0 || i + 1 >= clauses.size) return null
-        val label = LocalBrain.inAppNavTarget(clauses[i + 1]) ?: return null
-        return SettingsPages.find(label)
+        val label = LocalBrain.inAppNavTarget(clauses[i + 1])
+            ?: return SettingsPages.topicIn(clauses[i + 1])   // "… and tell me my font size": the page that shows it
+        return SettingsPages.find(label) ?: SettingsPages.holderOf(label)
     }
     private val OPENS_SETTINGS = Regex("(?i)^(?:please\\s+|kindly\\s+)?(?:open|launch|start|go\\s+to|bring\\s+up|bue\\S*)\\b.*\\bsettings\\b")
     /** The default launcher, by package name — every stock and OEM launcher carries the word (nexuslauncher, launcher3,

@@ -46,6 +46,8 @@ private object ResidentModels {
     val types = java.util.concurrent.ConcurrentHashMap<String, String>()
     /** lang → the model fits only just: let it go again after each use ([AsrMemory.Decision.unloadAfterUse]). */
     val unloadAfterUse = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+    /** elapsedRealtime of the last [unloadAfterUse] release: the phone takes a few seconds to hand that memory back. */
+    @Volatile var lastTightUnloadAt = 0L
     /** model location → its files' total size (never changes while the app runs). */
     val sizes = java.util.concurrent.ConcurrentHashMap<String, Long>()
     /** Models run by ONNX Runtime ([ModelSpec.W2VBERT_CTC]) by language — released with the sherpa ones (low memory, LRU). */
@@ -349,6 +351,20 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             Log.i("Tekyerema", "[ASR] memory short for ${spec.label}: released $others other recogniser(s) and $hooks cache(s), " +
                 "closed $closed background app(s) → ${avail / AsrMemory.MB} MB available, ${decision.neededBytes / AsrMemory.MB} MB needed")
         }
+        // Right after a tight model was let go its memory is still coming back (A20e, 21 Oct 2026: a second offline Twi
+        // command 0.7 s later was 32 MB short; ~20 s to recover fully). Wait a little for it instead of refusing at once.
+        val sinceUnload = android.os.SystemClock.elapsedRealtime() - ResidentModels.lastTightUnloadAt
+        if (decision.verdict == AsrMemory.Verdict.REFUSE && sinceUnload in 0 until 30_000L) {
+            val waitMs = com.tekyerema.core.config.AppConfig.long("speech.asr.recoverWaitMs", 6000L).coerceIn(0L, 15_000L)
+            val until = android.os.SystemClock.elapsedRealtime() + waitMs
+            while (decision.verdict == AsrMemory.Verdict.REFUSE && android.os.SystemClock.elapsedRealtime() < until) {
+                try { Thread.sleep(400) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); break }
+                memoryNow().let { avail = it.first; low = it.second }
+                decision = AsrMemory.decide(avail, low, bytes, alreadyReleased = true, limits = limits)
+            }
+            Log.i("Tekyerema", "[ASR] waited for memory after the last unload: ${avail / AsrMemory.MB} MB available, " +
+                "${decision.neededBytes / AsrMemory.MB} MB needed → ${decision.verdict}")
+        }
         if (decision.verdict == AsrMemory.Verdict.REFUSE) {
             Log.w("Tekyerema", "[ASR] NOT loading ${spec.label} ($lang, ${bytes / AsrMemory.MB} MB): ${avail / AsrMemory.MB} MB available" +
                 "${if (low) " (system low on memory)" else ""} < ${decision.neededBytes / AsrMemory.MB} MB needed — refused, the app would be killed")
@@ -405,7 +421,10 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     private fun unloadIfTight(lang: String) {
         if (ResidentModels.unloadAfterUse[lang] != true) return
         synchronized(ResidentModels.monitor) {
-            if (releaseLocked { it == lang } > 0) Log.i("Tekyerema", "[ASR] unloaded the $lang recogniser after use (memory is tight)")
+            if (releaseLocked { it == lang } > 0) {
+                ResidentModels.lastTightUnloadAt = android.os.SystemClock.elapsedRealtime()
+                Log.i("Tekyerema", "[ASR] unloaded the $lang recogniser after use (memory is tight)")
+            }
         }
     }
 

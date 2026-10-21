@@ -39,6 +39,8 @@ class LocalBrain : AgentBrain {
     private val planNav = HashSet<Int>()
     /** N-09 (3): plan clauses that open a Settings page DIRECTLY (its own intent) instead of "open Settings, then tap" — see [deepStep]. */
     private val planDeep = HashMap<Int, SettingsPages.Page>()
+    /** [planDeep] entries that only HOLD the next clause's row (SettingsPages.holderOf): reached silently, then the tap. */
+    private val planVia = HashSet<Int>()
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         step++
@@ -361,6 +363,7 @@ class LocalBrain : AgentBrain {
         val resolved = ArrayList<String>()
         val nav = HashSet<Int>()
         val deep = HashMap<Int, SettingsPages.Page>()
+        val via = HashSet<Int>()        // deep pages that only lead to the next step's row (said nothing when reached)
         var inApp = false
         var settingsJustOpened = -1     // index of an "open Settings" clause with nothing after it yet
         for (c in clauses) {
@@ -374,6 +377,10 @@ class LocalBrain : AgentBrain {
                 // intent to the page instead of a launch, a scroll and a tap (emulator, 13 October 2026: 20 s → under 10).
                 val page = if (settingsJustOpened >= 0) SettingsPages.find(navLabel) else null
                 if (page != null) { deep[settingsJustOpened] = page; settingsJustOpened = -1; continue }
+                // A page with no intent of its own: the page holding it by ITS intent, then the tap on the row — not a hunt
+                // from the front page (A20e, 21 Oct 2026: "Software information" sits under About phone on One UI).
+                val holder = if (settingsJustOpened >= 0) SettingsPages.holderOf(navLabel) else null
+                if (holder != null) { deep[settingsJustOpened] = holder; via.add(settingsJustOpened) }
                 settingsJustOpened = -1
                 resolved.add("tap $navLabel"); nav.add(resolved.size - 1); continue
             }
@@ -387,6 +394,7 @@ class LocalBrain : AgentBrain {
         plan = resolved; planIdx = 0; planChild = LocalBrain(); planMark = ctx.history.size; planSaid.clear()
         planNav.clear(); planNav.addAll(nav)
         planDeep.clear(); planDeep.putAll(deep)
+        planVia.clear(); planVia.addAll(via)
         return continuePlan(ctx)
     }
 
@@ -396,7 +404,7 @@ class LocalBrain : AgentBrain {
         while (true) {
             val clause = steps[planIdx]
             val deepPage = planDeep[planIdx]
-            val d = if (deepPage != null) deepStep(deepPage, ctx.history.drop(planMark), ctx.screen)
+            val d = if (deepPage != null) deepStep(deepPage, ctx.history.drop(planMark), ctx.screen, silent = planIdx in planVia)
                 else if (planIdx in planNav) navStep(clause, ctx.history.drop(planMark), ctx.screen)
                 else (planChild ?: LocalBrain().also { planChild = it })
                     .decide(ctx.copy(goal = clause, history = ctx.history.drop(planMark)))
@@ -467,8 +475,8 @@ class LocalBrain : AgentBrain {
      * named; the shortcut refused, or the page not in front → the rest is the planner's, from wherever Settings landed (a
      * DEFER with the history), exactly as a page that is not one tap away.
      */
-    private fun deepStep(page: SettingsPages.Page, stepHistory: List<String>, screen: JSONObject): AgentDecision {
-        val opened = "Settings is open, on ${page.spoken}."
+    private fun deepStep(page: SettingsPages.Page, stepHistory: List<String>, screen: JSONObject, silent: Boolean = false): AgentDecision {
+        val opened = if (silent) "" else "Settings is open, on ${page.spoken}."
         val last = stepHistory.lastOrNull { STEP_LINE.containsMatchIn(it) }
         if (last == null) {
             // Already there: Settings reopens where it was left.
