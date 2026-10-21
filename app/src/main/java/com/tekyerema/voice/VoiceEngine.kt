@@ -178,6 +178,38 @@ object VoiceEngine {
 
     /** The user is speaking Twi right now. */
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
+
+    @Volatile private var readyLocalAt = 0L
+    @Volatile private var readyNetAt = 0L
+
+    /**
+     * Get everything warm so the first request is quick (owner, 21 Oct 2026: "warm the phone up immediately … after restart to
+     * be ready for use"; "our offline models … start slow"). In the background, nothing said: the phone's own voices are loaded
+     * again (the A20e takes them back under memory pressure) and given a throw-away sentence; online, the brain's connection is
+     * opened, the translator woken both ways and the language Space's voices and Twi hearing loaded ([com.tekyerema.language.SpaceWarm]
+     * — it sleeps when idle and its first call took ~28 s). At most every 2 min for the phone part and 8 min for the network part
+     * (`speech.warm.*`). The offline Twi hearing model (~380 MB) is NOT kept loaded: the phone has no room to hold it.
+     */
+    fun getReady(reason: String) {
+        if (!initialized || !com.tekyerema.core.config.AppConfig.bool("speech.warm.enabled", true)) return
+        val now = System.currentTimeMillis()
+        if (now - readyLocalAt > com.tekyerema.core.config.AppConfig.long("speech.warm.localEveryMs", 120_000L)) {
+            readyLocalAt = now
+            try { ownVoice?.warm() } catch (_: Throwable) {}
+            try { twiLocal?.warm() } catch (_: Throwable) {}
+        }
+        if (!com.tekyerema.core.NetworkMonitor.isOnline()) { com.tekyerema.language.SpaceWarm.log("$reason: phone voices warm; offline, so nothing online"); return }
+        if (now - readyNetAt < com.tekyerema.core.config.AppConfig.long("speech.warm.netEveryMs", 8 * 60_000L)) return
+        readyNetAt = now
+        val twi = !::settings.isInitialized || settings.forcedLanguage != Lang.GH_EN
+        try { com.tekyerema.agent.AgentEngine.prewarm() } catch (_: Throwable) {}
+        if (twi) warmTranslator()
+        if (com.tekyerema.core.config.AppConfig.bool("speech.warm.space", true)) scope.launch(Dispatchers.IO) {
+            val t0 = System.currentTimeMillis()
+            val r = com.tekyerema.language.SpaceWarm.wake(twi)
+            com.tekyerema.language.SpaceWarm.log("$reason: ${System.currentTimeMillis() - t0} ms — $r")
+        }
+    }
     /** The conversation's language (the user's setting, or the one they are speaking in Both mode). */
     fun language(): String = conversationLanguage()
     /** The voices are built ([speakIn] can speak). */
@@ -559,6 +591,14 @@ object VoiceEngine {
             mics.forEach { m -> try { m.warm() } catch (_: Throwable) {} }
             android.util.Log.i("Tekyerema", "[STARTUP] VAD warm for ${mics.size} microphones in ${android.os.SystemClock.uptimeMillis() - t} ms")
         }
+        // Ready for use straight after a restart and whenever the phone is unlocked (owner, 21 Oct 2026): see [getReady].
+        scope.launch { kotlinx.coroutines.delay(4_000); getReady("start-up") }
+        try {
+            val unlock = object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context?, i: android.content.Intent?) { getReady("unlock") }
+            }
+            app.registerReceiver(unlock, android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT))
+        } catch (_: Throwable) {}
         scope.launch { settings.changes.collect { applyVoiceSettings() } }
         // History: one row per finished task, written on the transition into a terminal status.
         scope.launch {
