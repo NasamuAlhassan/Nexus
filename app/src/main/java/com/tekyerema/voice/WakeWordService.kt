@@ -264,11 +264,15 @@ class WakeWordService : Service() {
                     withContext(Dispatchers.Main) { VoiceEngine.start() }
                 // Wait for the turn to ACTUALLY start (not a fixed timer: a slow activity launch would let the
                 // wake mic reopen first and re-fire — V2 audit BUG 1), then for it to finish.
+                // POLLED, not `state.first {}` (owner, 21 Oct 2026: "the wake doesn't work a few seconds after I'm done making
+                // a request"): a turn sets IDLE and only THEN its job ends, with no new state emission, so `first {}` kept
+                // waiting for the next emission — up to 180 s — and the wake mic stayed closed (A20e log 03:49: mic=false for
+                // 10 s+ after the reply, the owner had to tap).
                 withTimeoutOrNull(8_000) {
-                    VoiceEngine.state.first { VoiceEngine.isRunning || it.state != VoiceState.IDLE }
+                    while (!(VoiceEngine.isRunning || VoiceEngine.state.value.state != VoiceState.IDLE)) delay(100)
                 }
                 withTimeoutOrNull(180_000) {
-                    VoiceEngine.state.first { !VoiceEngine.isRunning && it.state == VoiceState.IDLE }
+                    while (VoiceEngine.isRunning || VoiceEngine.state.value.state != VoiceState.IDLE) delay(150)
                 }
                 delay(400)
             } finally { handling = false }
