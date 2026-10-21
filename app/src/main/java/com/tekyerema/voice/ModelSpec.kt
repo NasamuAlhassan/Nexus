@@ -28,7 +28,10 @@ data class ModelSpec(
     /** Whisper: the language token to decode with ("" = let the model detect it). Null = the app's default for the
      *  language (Swahili as Twi's proxy — what the old tiny-twi was trained through). The clean whisper-base Twi model
      *  (tekyerema-asr-twi) was trained and scored with auto-detect, so its model.json says "". */
-    val language: String? = null
+    val language: String? = null,
+    /** ONNX Runtime models only: the file is already optimised (EXTENDED, by the same ORT version) — opened with no graph
+     *  rewriting at load, which saves seconds on the A20e. */
+    val preoptimized: Boolean = false
 ) {
     /** Every file this model needs. */
     fun required(): List<String> = files.values + tokens + listOfNotNull(bpeVocab.takeIf { hotwords })
@@ -69,7 +72,8 @@ data class ModelSpec(
                 threads = if (o.has("threads")) o.optInt("threads") else null,
                 hotwords = o.optBoolean("hotwords", false),
                 fromAssets = o.optBoolean("fromAssets", false),
-                language = if (o.has("language")) o.optString("language").trim() else null)
+                language = if (o.has("language")) o.optString("language").trim() else null,
+                preoptimized = o.optBoolean("preoptimized", false))
         }
 
         /**

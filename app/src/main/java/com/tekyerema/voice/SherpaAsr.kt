@@ -524,7 +524,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         admit(lang, d, spec)
         val threads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads.${spec.type}", spec.threads ?: 4).coerceIn(1, 8)
         return try {
-            OrtCtcAsr(File(d, spec.files.getValue("model")), File(d, spec.tokens), threads).also {
+            OrtCtcAsr(File(d, spec.files.getValue("model")), File(d, spec.tokens), threads, spec.preoptimized).also {
                 ResidentModels.ort[lang] = it; loaded[lang] = spec.label; ResidentModels.types[lang] = spec.type
             }
         } catch (t: Throwable) {

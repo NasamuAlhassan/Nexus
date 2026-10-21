@@ -17,7 +17,7 @@ import java.nio.LongBuffer
  * asks for one) and returns logits [1, T', vocab]. Greedy CTC: best token per frame, repeats merged, the blank ("[PAD]")
  * dropped, "|" between words. The vocabulary is the model's own vocab.json ({"a": 2, "|": 0, …}).
  */
-class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable {
+class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Boolean = false) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession
     private val vocab: Array<String>
@@ -29,7 +29,8 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable 
         // transforms), no CPU arena and no memory pattern, so the peak stays near the model's own size.
         val opts = OrtSession.SessionOptions().apply {
             setIntraOpNumThreads(threads)
-            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
+            // A file already optimised at EXTENDED by ORT 1.17.1 (model.json "preoptimized") skips the rewrite: seconds saved at load.
+            setOptimizationLevel(if (preoptimized) OrtSession.SessionOptions.OptLevel.NO_OPT else OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
             setCPUArenaAllocator(false)
             setMemoryPatternOptimization(false)
             // No second, prepacked copy of the weights (Kaggle 1.17.1 measurements, 21 Oct 2026: load RAM is mostly copied
