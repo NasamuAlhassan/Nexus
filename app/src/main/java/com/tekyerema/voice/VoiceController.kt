@@ -931,6 +931,11 @@ class VoiceController(
             val fullQuestion = spokenQuestion
             var repeats = 0
             var repeatAsked = false
+            // A money read-back answered with a bare "no": ask what to change once (owner, 21 Oct 2026: "I can't change the
+            // amount… it doesn't ask"). A second no, or "cancel", drops it as before.
+            val moneyReadBack = Regex("(?i)cedi|pesewa|mobile money|momo|sidi").containsMatchIn(prompt + " " + (promptTwi ?: ""))
+            var askedWhatToChange = false
+            var lastHeard = ""
             while (attempt < 2) {
                 _state.update { it.copy(confirmPhase = ConfirmPhase.ASKING, speechDetected = false) }
                 // English confirmations are spoken in English; a Twi session with a structured Twi line is
@@ -959,6 +964,7 @@ class VoiceController(
                         val tr = (result as? com.tekyerema.voice.io.Heard.Speech)?.transcript
                         // A Twi reply ("daabi, soma pesewa aduonu") in the English the revise path reads (language/TwiReply).
                         val heard = englishReply(tr?.canonical.orEmpty().ifBlank { tr?.raw.orEmpty() })
+                        lastHeard = tr?.raw.orEmpty()
                         // voice/io: a recognizer that can't run here at all (offline, no service) won't answer on a second
                         // try either — say the buttons still work and leave the question waiting for them (never a yes).
                         if (result is com.tekyerema.voice.io.Heard.Unavailable && result.cause in UNRECOVERABLE) {
@@ -996,19 +1002,29 @@ class VoiceController(
                     else -> Confirmation.Answer.UNCLEAR
                 }
                 when (answer) {
-                    Confirmation.Answer.YES -> {
+                    Confirmation.Answer.YES -> if (askedWhatToChange && spokenQuestion != fullQuestion) {
+                        // "Yes" to "what should I change?" is not a yes to the send: the read-back again.
+                        spokenQuestion = fullQuestion
+                    } else {
                         agent.confirmFor(seq, true)   // J-02: approves only the confirmation that was spoken
                         _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                         try { tts.speak(if (lang == Lang.TWI) "Yoo." else "Okay.", lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         return
                     }
-                    Confirmation.Answer.NO -> {
+                    Confirmation.Answer.NO -> if (moneyReadBack && !askedWhatToChange && Confirmation.isBareNo(lastHeard)) {
+                        askedWhatToChange = true
+                        spokenQuestion = if (lang == Lang.TWI) Phrases.get("whatToChange", true,
+                                "Dɛn na mensesa: sika dodoɔ no, onipa no, anaa reference no? Sɛ wopɛ sɛ megyae a, ka sɛ gyae.")
+                            else Phrases.get("whatToChange", false, "What should I change: the amount, the person, or the reference? Or say cancel.")
+                        Log.i("Tekyerema", "[VOICE] confirmation: a bare no to a money read-back — asking what to change")
+                    } else {
                         stopAlreadySaid = true
                         agent.confirmFor(seq, false)
                         _state.update { it.copy(confirmPhase = ConfirmPhase.NONE) }
                         try { tts.speak(if (lang == Lang.TWI) "Yoo, merenyɛ." else "Okay, I won't.", lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                         return
                     }
+
                     Confirmation.Answer.HOLD -> if (++holds <= 3) {
                         patient = true
                         spokenQuestion = Phrases.get("confirmHold", lang == Lang.TWI, if (lang == Lang.TWI) "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."

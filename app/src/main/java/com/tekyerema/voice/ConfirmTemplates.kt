@@ -133,7 +133,7 @@ object ConfirmTemplates {
         val amount = spec.amount?.let { twiAmount(it) ?: return null }
         val body = when (spec.kind) {
             Spec.Kind.CALL -> "Wopɛ sɛ mefrɛ ${who ?: return null}?"
-            Spec.Kind.SEND_MONEY -> "Menbue Mobile Money sɛ wode ${amount ?: "sika"} kɔma ${who ?: return null}?" +
+            Spec.Kind.SEND_MONEY -> "Menbue Mobile Money sɛ wode ${amount ?: "sika"} kɔma ${who ?: return null}${endingTwi(name, spec.number)}?" +
                 // "This number is new." [owner: verify the Twi] — the first-time warning, which used to force the English line
                 (if (spec.firstTime) " Nɔma yi yɛ foforɔ." else "") +
                 // the reference is read back too [owner: verify "Nkyerɛkyerɛmu"]
@@ -142,6 +142,16 @@ object ConfirmTemplates {
             else -> return null
         }
         return body + TWI_YESNO
+    }
+
+    /** ", nɔma a n'awieɛ yɛ 3 6 9 0" — the last four digits after a NAME, as the English read-back says "ending 3 6 9 0"
+     *  (two contacts can share a name). The digits as Twi words (the lab voice skips figures).
+     *  Empty for a bare number (already said whole) or when the number is unknown. [owner: verify the Twi] */
+    internal fun endingTwi(name: String?, number: String?): String {
+        if (name == null) return ""
+        val digits = number?.filter(Char::isDigit).orEmpty()
+        if (digits.length < 4) return ""
+        return Phrases.get("twiNumberEnding", true, ", nɔma a n'awieɛ yɛ {digits}", "digits" to twiDigits(digits.takeLast(4)))
     }
 
     private val TWI_UNITS = arrayOf("", "baako", "mmienu", "mmiɛnsa", "anan", "anum", "nsia", "nson", "nwɔtwe", "nkron")

@@ -43,6 +43,7 @@ class ReplyLocalizer(
      */
     suspend fun toTwi(text: String, wait: Long = waitMs(), everything: Boolean = false): String? {
         val src = text.trim()
+        fixedTwi(src)?.let { return it }
         if (translator == null || !enabled() || src.isEmpty() || src.length > maxChars()) return null
         if (!everything && !looksEnglish(src)) return null
         // everything = the owner's rule (20 Oct 2026): whatever is said in Twi is Twi. The words of a message are translated
@@ -77,6 +78,7 @@ class ReplyLocalizer(
      * screen (the Twi voice says about three requests of text).
      */
     suspend fun toTwiAll(text: String, wait: Long = AppConfig.long("providers.speech.mt.allWaitMs", 7_000L)): String? {
+        fixedTwi(text.trim())?.let { return it }
         if (translator == null || !enabled()) return null
         val src = text.trim()
         // One request when it fits (the translator takes maxChars); longer text in pieces at sentence ends. ONE budget for the
@@ -93,6 +95,11 @@ class ReplyLocalizer(
     }
 
     companion object {
+        /** The app's own fixed line in Twi (`locales.twFixed`, exact English → Twi), or null. Instant and offline. */
+        fun fixedTwi(english: String): String? = try {
+            AppConfig.obj("locales.twFixed")?.optString(english.trim())?.takeIf { it.isNotBlank() }
+        } catch (_: Throwable) { null }
+
         /** Pieces of the reply read aloud in Twi in one go. */
         const val MAX_PIECES = 3
 

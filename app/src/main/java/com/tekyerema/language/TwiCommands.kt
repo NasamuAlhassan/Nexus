@@ -13,7 +13,7 @@ package com.tekyerema.language
  */
 object TwiCommands {
     private const val AMOUNT = "(\\d+(?:\\.\\d+)?)\\s+(cedis?|pesewas?)"
-    private const val WANT = "(?:me\\s?pɛ\\s+sɛ\\s+me\\s?|mepɛ\\s+sɛ\\s+|mepɛ\\s+)?"   // "Mepɛ sɛ me…" / "Mepɛ …" — "I want (to)…"
+    private const val WANT = "(?:me\\s?pɛ\\s*sɛ\\s*(?:me\\s?)?|mepɛ\\s+)?"   // "Mepɛ sɛ me…" / "Mepɛ …" — "I want (to)…"
     private val END = Regex("[\\s.!?]+$")
     /** "Mesrɛ wo," (please), "Mepa wo kyɛw," (please), "Yɛ ma me," (do for me) — said before the request itself. */
     private val POLITE = Regex("^(?i:mesr[ɛe]\\s+wo|me\\s*pa\\s+wo\\s+ky[ɛe]w|y[ɛe]\\s+ma\\s+me|wo\\s*b[ɛe]tumi(?:\\s+a)?)[,\\s]+")
@@ -22,19 +22,22 @@ object TwiCommands {
 
     /** "Kɔ MoMo na soma …" (go to MoMo and send …) — the same send. */
     private const val VIA = "(?:kɔ\\s+(?:momo|mobile money)\\s+na\\s+)?"
-    private val SEND_AMOUNT = Regex("^$VIA${WANT}soma\\s+$AMOUNT\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    /** "soma", "wosoma" (you send), "mesoma", and how the recogniser bends it ("mesesuma") — owner's A20e run, 21 Oct 2026:
+     *  "mepɛsɛ wosoma … kɔma me yere" went to the cloud planner, which asked for the wife's phone number. */
+    private const val SOMA = "(?:\\S*s[ou]ma)\\s+"
+    private val SEND_AMOUNT = Regex("^$VIA${WANT}${SOMA}$AMOUNT\\s+(?:kɔ\\s?ma|ma|ama(?=\\s+(?:me|wo|ne|ɔno|no)\\b))\\s+(.+)$")
     /** "soma sidi anum ama": the recogniser swallowed the "ma" of "ma Ama" — only taken with a known person after it. */
-    private val SEND_AMOUNT_NO_MA = Regex("^$VIA${WANT}soma\\s+$AMOUNT\\s+(\\S+(?:\\s+\\S+)?)$")
+    private val SEND_AMOUNT_NO_MA = Regex("^$VIA${WANT}${SOMA}$AMOUNT\\s+(\\S+(?:\\s+\\S+)?)$")
     /** "soma sidi du" — an amount and no one (yet): the money flow asks who. */
-    private val SEND_AMOUNT_ONLY = Regex("^$VIA${WANT}soma\\s+$AMOUNT(?:\\s+.*)?$")
+    private val SEND_AMOUNT_ONLY = Regex("^$VIA${WANT}${SOMA}$AMOUNT(?:\\s+.*)?$")
     /** "soma sika (cedi) kɔma Prince" — money, with a currency word but no figure ("cedi" alone used to break the match and
      *  send the request to the translator, which dropped it: "Send money to Prince" — A20e, 5 October 2026). */
-    private val SEND_MONEY = Regex("^$VIA${WANT}soma\\s+sika(?:\\s+(?:cedis?|pesewas?))?(?:\\s+$AMOUNT)?\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    private val SEND_MONEY = Regex("^$VIA${WANT}${SOMA}sika(?:\\s+(?:cedis?|pesewas?))?(?:\\s+$AMOUNT)?\\s+(?:kɔ\\s?ma|ma|ama(?=\\s+(?:me|wo|ne|ɔno|no)\\b))\\s+(.+)$")
     /** "soma pesee kɔma prinsmalane" — a unit and no figure (the translator made it "Send a bus to Princesman"): money to a
      *  person, amount still to be asked. */
-    private val SEND_UNIT = Regex("^$VIA${WANT}soma\\s+(?:sika\\s+)?(?:cedis?|pesewas?|pes[eɛ]e|pɛs[eɛ]e|pes[eɛ]wa|pɛs[eɛ]wa)\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    private val SEND_UNIT = Regex("^$VIA${WANT}${SOMA}(?:\\S{1,2}\\s+)?(?:sika\\s+)?(?:cedis?|pesewas?|pes[eɛ]e|pɛs[eɛ]e|pes[eɛ]wa|pɛs[eɛ]wa)\\s+(?:kɔ\\s?ma|ma|ama(?=\\s+(?:me|wo|ne|ɔno|no)\\b))\\s+(.+)$")
     /** "10 pesewas kɔma 055…" — the amount and the person with the verb lost: a send ("tempɛsos kɔma …", 5 October 2026). */
-    private val SEND_NO_VERB = Regex("^$AMOUNT\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    private val SEND_NO_VERB = Regex("^$AMOUNT\\s+(?:kɔ\\s?ma|ma|ama(?=\\s+(?:me|wo|ne|ɔno|no)\\b))\\s+(.+)$")
     /** "katweɛrichmond", "ka tweɛ Richmond", "kakyerɛ Kofi" — "ka kyerɛ" (tell) as the lab recogniser writes it, often glued
      *  to the name after it (A20e, 5 October 2026). Split back into "ka kyerɛ <name>". */
     private val KA_KYERE = Regex("(?i)(?<![\\p{L}])ka\\s?(?:ky|ty|tw|kw)(?:[ɛe]r[ɛe]|[ɛe][ɛe]|[ɛe]|ere)(?=\\p{L}{3,}|\\s)")
@@ -47,7 +50,7 @@ object TwiCommands {
      *  (3 October 2026), and a message dictated in Twi should reach the other person in Twi anyway. */
     private val MESSAGE_SAY = Regex("^(?:(?:twerɛ|twɛrɛ|soma)\\s+(?:nkra|message|mɛsege)\\s+(?:kɔ\\s?ma|ma)|ka\\s+kyerɛ)\\s+(.+?)\\s+sɛ\\s+(.+)$")
     /** "Soma message ma Kwame" — a message with no words yet: the flow asks what to say. */
-    private val MESSAGE_TO = Regex("^soma\\s+(?:message|mɛsege|nkra)\\s+(?:kɔ\\s?ma|ma)\\s+(.+)$")
+    private val MESSAGE_TO = Regex("^soma\\s+(?:message|mɛsege|nkra)\\s+(?:kɔ\\s?ma|ma|ama(?=\\s+(?:me|wo|ne|ɔno|no)\\b))\\s+(.+)$")
     private val VOLUME_UP = Regex("^ma\\s+(?:volume|nne)(?:\\s+no)?\\s+so$")
     private val VOLUME_DOWN = Regex("^brɛ\\s+(?:volume|nne)(?:\\s+no)?\\s+ase$")
     private val MUSIC = Regex("^bɔ\\s+(?:nnwom|ndwom)(?:\\s+bi)?$")

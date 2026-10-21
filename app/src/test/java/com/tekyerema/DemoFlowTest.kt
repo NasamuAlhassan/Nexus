@@ -18,7 +18,7 @@ object DemoFlow {
     const val CALL = "Wopɛ sɛ mefrɛ Kwame? Ka aane anaa daabi."
     const val CALLING = "Merefrɛ Kwame."
     const val OKAY = "Yoo."
-    const val SEND = "Menbue Mobile Money sɛ wode sidi baako kɔma Kwame? Nɔma yi yɛ foforɔ. Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi."
+    const val SEND = "Menbue Mobile Money sɛ wode sidi baako kɔma Kwame, nɔma a n'awieɛ yɛ mmiɛnsa anan anum nsia? Nɔma yi yɛ foforɔ. Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi."
     const val AIRTIME = "Menbue Mobile Money sɛ wobɛtɔ airtime sidi baako? Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi."
     /** The PIN line for the airtime, as the voice gets it (Verbalize spells "MTN" out). */
     val AIRTIME_PIN: String get() = com.tekyerema.voice.Verbalize.apply("MTN se: airtime sidi baako ma wo fɔn yi. Wo ankasa na wobɛhyɛ PIN.")

@@ -59,7 +59,10 @@ private val TWI_NUMBERS: Map<String, Int> = mapOf(
     "mmeɛnsa" to 3, "mmeensa" to 3,
     // …and of 4 on the rest of the GOLD clips (3 October 2026: "du nnan" = 14). Its 9, "nkuro", is also a word ("towns"):
     // read as 9 only beside another numeral, in normalizeTwi.
-    "nnan" to 4
+    "nnan" to 4,
+    // 21 Oct 2026 (owner: "when someone mentions a number… it'll recognise it and use the number"): 15 and 14 as many
+    // speakers say them, and the "-num" of compounds ("aduanan num" = 45, said after a ten). "nan" (also "leg") is NOT added.
+    "dunum" to 15, "dunan" to 14, "num" to 5, "ɛnum" to 5
 )
 
 /** The same tables keyed by [com.tekyerema.language.TwiText.fold], so plain-Latin and tone-marked spellings

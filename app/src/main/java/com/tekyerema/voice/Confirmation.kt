@@ -86,10 +86,16 @@ object Confirmation {
     private val REDIRECT = listOf(
         "instead", "rather", "actually", "i meant", "i mean", "make it", "change it", "change that",
         "different", "wrong number", "wrong person", "wrong one", "not him", "not her", "not that",
-        "mmom"   // Twi: rather / instead
+        "mmom",   // Twi: rather / instead
+        // Owner's A20e run (21 Oct 2026): "no let the reference be food" was taken as a plain no and the send was dropped.
+        "reference", "let it be", "let the", "change the", "make the", "the amount", "the person", "the name",
+        "sesa", "nkyerɛkyerɛmu"   // Twi: change; reference
     )
     private val AMOUNT_AFTER_NO = Regex("^(?:no|nope|nah|daabi|dabi)\\b.*\\b(?:\\d+(?:[.,]\\d+)?|one|two|three|four|five|six|seven|eight|nine|" +
-        "ten|twenty|thirty|forty|fifty|hundred)\\s*(?:cedis?|pesewas?|ghs|ghc)\\b")
+        "ten|twenty|thirty|forty|fifty|hundred)\\s*(?:cedis?|pesewas?|pesos?|ghs|ghc|sidi)\\b")
+    /** A bare decline ("no", "daabi") — on a money read-back it asks what to change before dropping the send. */
+    fun isBareNo(text: String): Boolean = text.trim().lowercase().replace(Regex("[^\\p{L}\\s]"), " ").trim()
+        .matches(Regex("(?:no|nope|nah|daabi|dabi|oh no|no no|daabi daabi)"))
     private val STOPPING = Regex("\\b(?:cancel|stop|never mind|nevermind|forget it|leave it|gyae)\\b")
 
     // The owner's live test (A20e, 14 October 2026): "I said you should send it to Mom and then 2019" corrected the number,
@@ -153,8 +159,18 @@ object Confirmation {
         // "No, 20 pesewas" / "no, 2 cedis": a new amount after the no is a change of plan, re-proposed and confirmed
         // again — not a decline (QA TR10, 3 October 2026, where the Twi form of it was taken as a plain no).
         if (ans == Answer.NO && AMOUNT_AFTER_NO.containsMatchIn(norm) && !STOPPING.containsMatchIn(norm)) return true
+        // Owner, 21 Oct 2026: "make the brain be involved… it would have known what the user wanted and changed the reference".
+        // A "no" followed by more than a stop ("no, let the reference be food", "daabi, fa ma Kofi") is the user saying what
+        // to change: the planner re-plans with these words and the new read-back is confirmed again — never run on this reply.
+        // A bare "no", "no thanks" or "no, cancel / don't" stays a decline.
+        if (ans == Answer.NO && !STOPPING.containsMatchIn(norm) && !DECLINING.containsMatchIn(norm)) {
+            val afterNo = norm.replace(Regex("^.*?\\b(?:no|nope|nah|daabi|dabi)\\b"), "").trim()
+            if (afterNo.split(" ").count { it.isNotBlank() } >= 2 && !Regex("^(?:thanks|thank you|please)$").matches(afterNo)) return true
+        }
         // A plain decline with no redirect stays a decline; a clean yes stays a yes.
         if (ans != Answer.UNCLEAR) return false
+        // "No, don't send it" (a no and a send-ish word) is a decline, never a change of plan.
+        if (DECLINING.containsMatchIn(norm) || STOPPING.containsMatchIn(norm)) return false
         // Otherwise: reroute only a coherent phrase (≥3 words), never a one-word filler.
         return norm.split(" ").filter { it.isNotBlank() }.size >= 3
     }

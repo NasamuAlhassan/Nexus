@@ -1,16 +1,26 @@
 {
-  "schema_version": 1,
-  "locales": {
-    "_note": "X-06 language packs: spoken phrases per locale. Keys missing here fall back to the wording in code. Twi lines are marked [owner: verify with a native speaker] until reviewed.",
-    "en": {
-      "progress": "Still working on it.",
-      "holdAck": "Okay, take your time.",
-      "confirmHold": "Okay, take your time. Say yes or no when you're ready."
-    },
-    "tw": {
-      "progress": "Mereyɛ ho adwuma da.",
-      "holdAck": "Yoo, twɛn.",
-      "confirmHold": "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
-    }
+ "schema_version": 1,
+ "locales": {
+  "_note": "X-06 language packs: spoken phrases per locale. Keys missing here fall back to the wording in code. Twi lines are marked [owner: verify with a native speaker] until reviewed.",
+  "en": {
+   "progress": "Still working on it.",
+   "holdAck": "Okay, take your time.",
+   "confirmHold": "Okay, take your time. Say yes or no when you're ready."
+  },
+  "tw": {
+   "progress": "Mereyɛ ho adwuma da.",
+   "holdAck": "Yoo, twɛn.",
+   "confirmHold": "Yoo, twɛn. Sɛ woawie a, ka aane anaa daabi."
+  },
+  "twFixed": {
+   "_note": "21 Oct 2026 (owner: 'the reading… the Twi asked…'): the app's own fixed English lines, said in a Twi conversation, use these Twi lines instead of machine translation (which left 'reference', 'transport', 'Cancelled.' in English). Exact English line -> Twi. [native speaker to verify every line]",
+   "Cancelled. Nothing was sent.": "Magyae. Mansoma hwee.",
+   "What should the reference say? For example, say “transport” or “school fees”.": "Dɛn na wopɛ sɛ reference no ka? Ka sɛ “aduane” anaa “sukuu ka”.",
+   "What should the reference say, in a word or two? Or say “no reference”.": "Dɛn na wopɛ sɛ reference no ka? Asɛmfua baako anaa mmienu. Anaa ka sɛ “reference biara nni hɔ”.",
+   "Okay, let me change that.": "Yoo, ma mensesa.",
+   "Okay, I won't.": "Yoo, merenyɛ.",
+   "I didn't catch that. Please say it again.": "Mante. Mepa wo kyɛw, ka bio.",
+   "I didn't get an answer, so I stopped. Ask me again when you're ready.": "Mantie mmuaeɛ biara, enti magyae. Sɛ woawie a, bisa me bio."
   }
+ }
 }
