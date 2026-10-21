@@ -612,6 +612,21 @@ object VoiceEngine {
             app.registerReceiver(unlock, android.content.IntentFilter(android.content.Intent.ACTION_USER_PRESENT))
         } catch (_: Throwable) {}
         scope.launch { settings.changes.collect { applyVoiceSettings() } }
+        // The voice of the language just chosen loads now, not on its first line (judge, take A2, 21 Oct 2026: "speak English" →
+        // the camera's answer waited 10 s for Kafui, evicted under memory pressure, to load again).
+        scope.launch {
+            var last = settings.forcedLanguage
+            settings.changes.collect {
+                val now = settings.forcedLanguage
+                if (now != last) {
+                    last = now
+                    when (now) {
+                        Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
+                        Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
+                    }
+                }
+            }
+        }
         // History: one row per finished task, written on the transition into a terminal status.
         scope.launch {
             var wasActive = false
