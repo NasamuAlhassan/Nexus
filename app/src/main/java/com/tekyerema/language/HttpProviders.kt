@@ -95,9 +95,12 @@ class HttpAsrProvider(
                         org.json.JSONArray().put(java.util.Base64.getEncoder().encodeToString(wav)).put(code ?: "twi")),
                         spec.connectMs, spec.callMs)
                     HttpSpeech.failureOf(spec, call)?.let { throw it }
+                    val tSent = SystemClock.elapsedRealtime()
                     val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), HttpSpeech.gradioEventId(spec, call)),
                         spec.connectMs, spec.callMs)
                     HttpSpeech.failureOf(spec, result)?.let { throw it }
+                    // Where the time goes — sending the audio, or the Space's queue and model (judge's latency audit, 21 Oct 2026).
+                    Log.i("Tekyerema", "[ASR] $name: audio ${wav.size / 1024} KB sent in ${tSent - t0} ms, answer ${SystemClock.elapsedRealtime() - tSent} ms later")
                     return@run (HttpSpeech.parseGradio(spec, result.text()) ?: "") to null
                 }
                 val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.asr", 14_000L)) {
