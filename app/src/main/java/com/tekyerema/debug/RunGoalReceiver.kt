@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
  */
 class RunGoalReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (!BuildConfig.DEBUG) return
+        if (!BuildConfig.DEV_HOOKS) return
         AgentEngine.init(context.applicationContext)
         // Zero-LLM-cost diagnostic: report the real attached-controller/brain state, so
         // Accessibility binding can be verified without spending any model quota.

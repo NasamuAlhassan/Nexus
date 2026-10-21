@@ -492,7 +492,7 @@ object SendSmsTool : Tool {
             sentIntents.add(PendingIntent.getBroadcast(app, i, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE))
         }
         // Privacy: the number and the words go to logcat only in debug builds.
-        if (com.tekyerema.BuildConfig.DEBUG) Log.i(TAG, "[SMS] sending $n part(s) to $number: $message")
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[SMS] sending $n part(s) to $number: $message")
         else Log.i(TAG, "[SMS] sending $n part(s)")
 
         registerPrivately(app, receiver, IntentFilter(action))

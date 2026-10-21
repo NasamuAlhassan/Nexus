@@ -19,7 +19,7 @@ object Privacy {
     fun trajectoryDays() = AppConfig.int("privacy.retention.trajectoryDays", 30)
 
     /** Full text in logcat? Debug builds yes (development); release builds only with an explicit config opt-in. */
-    fun logContent(): Boolean = com.tekyerema.BuildConfig.DEBUG || AppConfig.bool("privacy.logcatContent", false)
+    fun logContent(): Boolean = com.tekyerema.BuildConfig.DEV_HOOKS || AppConfig.bool("privacy.logcatContent", false)
 
     /**
      * Secure Input Mode is running: the user is typing a PIN / password / one-time code and the agent is blind. Set by
@@ -62,7 +62,7 @@ object Privacy {
     private val CRED_WORD = Regex("(?i)(\\b(?:pass ?word|pass ?code)\\b\\s*(?:is|was|=|:)\\s*)(?!\\[hidden])\\S{3,40}")
 
     /** Redact trace files? Release builds always; debug builds when config asks (default: keep detail for development). */
-    fun redactTraces(): Boolean = !com.tekyerema.BuildConfig.DEBUG || AppConfig.bool("privacy.retention.redactTraces", false)
+    fun redactTraces(): Boolean = !com.tekyerema.BuildConfig.DEV_HOOKS || AppConfig.bool("privacy.retention.redactTraces", false)
 
     /** Delete files in [dir] older than [days] (0 or less = keep). Returns how many were removed. */
     fun sweep(dir: File, days: Int, nowMs: Long = System.currentTimeMillis()): Int {

@@ -32,7 +32,7 @@
     "_kusNote": "19 Oct 2026 (owner: Kusaal is the main language): kusvoice = the Kusaal v3 Space voice on the phone (sherpa-onnx, assets/models/ondevice/kus/tts, 114 MB, offline). A line it cannot say goes to the English voice (RoutingTts others) — never silent."
    },
    "_ttsHedgeNote": "16 Oct 2026: when the first two Twi voices are network voices, the first gets ttsHedgeMs to fetch a line; still fetching, the second is asked too and the first audio back is played (recorded lab clips and cached lines play at once). 0 = strictly one after the other.",
-   "ttsHedgeMs": 8000,
+   "ttsHedgeMs": 3000,
    "_ttsNote": "ghvoice = the app's own on-device Ghanaian-English voice (voice/SherpaTts, assets/models/ondevice/eng/tts/voice.json). A build without that voice has no 'ghvoice' provider and the id is skipped — English is then the phone's engine, as before.",
    "asr": {
     "_hedgeNote": "16 Oct 2026: the first recogniser in a chain gets hedgeMs to answer; still busy, the next is asked beside it and the first answer wins (the lab answers in 4-6 s; that day it timed out at 15 s every turn). 0 = strictly one after the other.",

@@ -172,6 +172,12 @@
     "local"
    ]
   },
+  "look_with_camera": {
+   "callers": [
+    "planner",
+    "local"
+   ]
+  },
   "install_app": {
    "feature": "E-01",
    "callers": [

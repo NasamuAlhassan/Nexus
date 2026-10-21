@@ -672,13 +672,17 @@ object VoiceEngine {
             // Twi only while the Twi voice is known to work: a lab that is down spends its retries and then has the English
             // voice read Twi words — the English line, at once, instead. An [urgent] line (a ringing phone) can't wait for a
             // new lab line either (~10–15 s even when it is up): English unless `phone.announceCallerTwiLive` says otherwise.
-            val inTwi = lang == Lang.TWI && twi != null && TwiVoiceStatus.shared.state == TwiVoiceStatus.State.OK &&
-                (!urgent || com.tekyerema.core.config.AppConfig.bool("phone.announceCallerTwiLive", false))
+            // Owner, 20 Oct 2026 (the A20e said "M T N says. Incorrect Mobile Money PIN." in English in a Twi conversation): in
+            // Twi, no English — the phone's own Twi voice is always there now, and an answer with no Twi wording goes to the
+            // reply voice AS Twi, which translates it. `speech.twi.noEnglishFallback` false = the old rule below.
+            val twiOnly = lang == Lang.TWI && com.tekyerema.core.config.AppConfig.bool("speech.twi.noEnglishFallback", true)
+            val inTwi = lang == Lang.TWI && twi != null && (twiOnly || (TwiVoiceStatus.shared.state == TwiVoiceStatus.State.OK &&
+                (!urgent || com.tekyerema.core.config.AppConfig.bool("phone.announceCallerTwiLive", false))))
             val text = if (inTwi) twi!! else english
-            var ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), if (inTwi) Lang.TWI else Lang.GH_EN) } catch (_: Throwable) { false }
+            var ok = try { (replyVoice ?: englishVoice).speak(Verbalize.apply(text), if (inTwi || twiOnly) Lang.TWI else Lang.GH_EN) } catch (_: Throwable) { false }
             // A line held up elsewhere (a Twi voice retrying for seconds) can cut the caller's name off mid-ring: while the
             // phone still rings, say it once more (rehearsal twi 17, 15 Oct 2026).
-            if (!ok && urgent && com.tekyerema.phone.IncomingCall.isRinging) {
+            if (!ok && urgent && !twiOnly && com.tekyerema.phone.IncomingCall.isRinging) {
                 kotlinx.coroutines.delay(300)
                 ok = try { englishVoice.speak(Verbalize.apply(english), Lang.GH_EN) } catch (_: Throwable) { false }
             }

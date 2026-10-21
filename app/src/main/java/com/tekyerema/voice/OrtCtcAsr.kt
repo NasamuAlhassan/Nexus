@@ -25,9 +25,13 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable 
 
     init {
         val t0 = SystemClock.uptimeMillis()
+        // Lean on a 3 GB phone (reliability audit, 20 Oct 2026): EXTENDED fusions (attention, GELU) but not ALL (x86 layout
+        // transforms), no CPU arena and no memory pattern, so the peak stays near the model's own size.
         val opts = OrtSession.SessionOptions().apply {
             setIntraOpNumThreads(threads)
-            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+            setOptimizationLevel(OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
+            setCPUArenaAllocator(false)
+            setMemoryPatternOptimization(false)
         }
         session = env.createSession(modelFile.absolutePath, opts)
         val (v, b) = readVocab(vocabFile.readText())
@@ -37,7 +41,9 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable 
 
     /** The words heard in [samples] at [sampleRate] ("" when nothing). */
     fun decode(samples: FloatArray, sampleRate: Int): String {
-        val pcm = if (sampleRate == W2vBertFeatures.SAMPLE_RATE) samples else resample(samples, sampleRate, W2vBertFeatures.SAMPLE_RATE)
+        val full = if (sampleRate == W2vBertFeatures.SAMPLE_RATE) samples else resample(samples, sampleRate, W2vBertFeatures.SAMPLE_RATE)
+        // Attention grows with the square of the length: a command is a few seconds, so at most MAX_SECONDS are heard.
+        val pcm = if (full.size > MAX_SECONDS * W2vBertFeatures.SAMPLE_RATE) full.copyOf(MAX_SECONDS * W2vBertFeatures.SAMPLE_RATE) else full
         val feats = W2vBertFeatures.compute(pcm)
         if (feats.isEmpty()) return ""
         val t = feats.size; val d = feats[0].size
@@ -58,6 +64,7 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable 
     override fun close() { try { session.close() } catch (_: Throwable) {} }
 
     companion object {
+        const val MAX_SECONDS = 15
         /** id → token, and the blank's id ("[PAD]", else "<pad>", else 0). Pure. */
         fun readVocab(json: String): Pair<Array<String>, Int> {
             val o = JSONObject(json)

@@ -48,6 +48,10 @@ private object ResidentModels {
     val unloadAfterUse = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     /** model location → its files' total size (never changes while the app runs). */
     val sizes = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    /** Models run by ONNX Runtime ([ModelSpec.W2VBERT_CTC]) by language — released with the sherpa ones (low memory, LRU). */
+    val ort = HashMap<String, OrtCtcAsr>()
+    /** A language whose ONNX model failed to load this run: not retried on every turn (a 20-40 s load each time). */
+    val ortFailed = java.util.concurrent.ConcurrentHashMap<String, String>()
     /** Guards [cache] (not thread-safe) for the short, non-suspending sections. */
     val monitor = Any()
     /** N-08: model load and decode are seconds of CPU work, serialised across every instance. */
@@ -386,7 +390,12 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
             cache.remove(k)?.let { try { it.release() } catch (_: Throwable) {} }
             loaded.remove(k); beams.remove(k); ResidentModels.types.remove(k); ResidentModels.unloadAfterUse.remove(k)
         }
-        return go.size
+        val goOrt = ResidentModels.ort.keys.filter(which)
+        for (k in goOrt) {
+            ResidentModels.ort.remove(k)?.close()
+            loaded.remove(k); ResidentModels.types.remove(k); ResidentModels.unloadAfterUse.remove(k)
+        }
+        return go.size + goOrt.size
     }
 
     /** After a decode: let a model that only just fitted go again, so the rest of the phone gets its memory back. */
@@ -502,22 +511,24 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         }
     }
 
-    /** Models run by ONNX Runtime instead of sherpa ([ModelSpec.W2VBERT_CTC]), by language. */
-    private val ortModels = HashMap<String, OrtCtcAsr>()
-
     /** The ONNX Runtime model for [lang] when its model.json names one (offline Twi only, behind `speech.asr.offlineTwi`). */
     private fun ortFor(lang: String): OrtCtcAsr? = synchronized(ResidentModels.monitor) {
-        ortModels[lang]?.let { return it }
+        ResidentModels.ort[lang]?.let { return it }
         if (lang != "twi" || !offlineTwi()) return null
+        ResidentModels.ortFailed[lang]?.let { throw AsrException("the on-device $lang model failed to load earlier: $it") }
         val d = modelDir(lang) ?: return null
         val spec = specOf(d)?.takeIf { it.type == ModelSpec.W2VBERT_CTC && hasModel(d) } ?: return null
         admit(lang, d, spec)
         val threads = com.tekyerema.core.config.AppConfig.int("speech.asr.numThreads.${spec.type}", spec.threads ?: 4).coerceIn(1, 8)
         return try {
             OrtCtcAsr(File(d, spec.files.getValue("model")), File(d, spec.tokens), threads).also {
-                ortModels[lang] = it; loaded[lang] = spec.label; ResidentModels.types[lang] = spec.type
+                ResidentModels.ort[lang] = it; loaded[lang] = spec.label; ResidentModels.types[lang] = spec.type
             }
-        } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx load failed ($lang, ${spec.label}): ${t.message}"); null }
+        } catch (t: Throwable) {
+            Log.w("Tekyerema", "[ASR] onnx load failed ($lang, ${spec.label}): ${t.message}")
+            ResidentModels.ortFailed[lang] = "${t.javaClass.simpleName}: ${t.message}"
+            throw AsrException("the on-device $lang model could not be loaded")
+        }
     }
 
     /** B-19: the last speculative decode (one at a time; consumed by the next real decode, hit or miss). */

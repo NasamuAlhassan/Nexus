@@ -192,17 +192,17 @@ class OpenAiCompatBrain(
 
             // SEC-P1-4: the request body carries the full screen snapshot (private messages, contacts, notif
             // text). Log it ONLY in debug builds — never in the shared/release APK.
-            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-REQ] ${payload.take(4000)}")
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.d("Tekyerema", "[LLM-REQ] ${payload.take(4000)}")
             // Prompt-cache forensics (13 October 2026): a fingerprint of the parts Groq's prefix cache sees before the step's
             // own message — the same two hashes on consecutive steps with cached=0 means the miss is on the provider's side
             // (per-organisation caching), a changed hash means our prefix moved. Debug builds only; hashes, never content.
-            if (com.tekyerema.BuildConfig.DEBUG) try {
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) try {
                 fun md5(s: String) = java.security.MessageDigest.getInstance("MD5").digest(s.toByteArray()).joinToString("") { "%02x".format(it) }.take(10)
                 android.util.Log.d("Tekyerema", "[LLM-FP] key#${chosen + 1} model=$model sys=${md5(messages.optJSONObject(0)?.toString().orEmpty())} " +
                     "tools=${md5(ctx.openAiTools.toString())} ntools=${ctx.openAiTools.length()} body=${payload.length} effort=${effort ?: "default"}")
             } catch (_: Throwable) {}
             // D-02: the request log is cut before the tool list, so name the tools this step offered (names only).
-            if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-TOOLS] " + (0 until ctx.openAiTools.length())
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.d("Tekyerema", "[LLM-TOOLS] " + (0 until ctx.openAiTools.length())
                 .joinToString(",") { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function")?.optString("name").orEmpty() })
             var remaining: Int? = null; var limitTok: Int? = null; var resetMs: Long? = null; var retryMs: Long? = null
             // N-15 hedge: the pooled connection is the usual suspect when a call hangs (A20e, 2026-09-28: seven Groq calls in a
@@ -303,7 +303,7 @@ class OpenAiCompatBrain(
                         val cool = minOf(deficitMs, resetMs ?: deficitMs).coerceIn(0L, 60_000L)
                         if (cool > 0) coolUntil[coolKey] = System.currentTimeMillis() + cool else coolUntil.remove(coolKey)
                     } else coolUntil.remove(coolKey)
-                    if (com.tekyerema.BuildConfig.DEBUG) android.util.Log.d("Tekyerema", "[LLM-RESP] ${text.take(4000)}")   // SEC-P1-4: debug-only
+                    if (com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.d("Tekyerema", "[LLM-RESP] ${text.take(4000)}")   // SEC-P1-4: debug-only
                     val d = parseResponse(text)
                     // gpt-oss (seen with the 20b) sometimes ends a turn with reasoning only — no tool call, no text.
                     // One nudged retry; otherwise the chain fell through to Gemini's 429 and the user heard

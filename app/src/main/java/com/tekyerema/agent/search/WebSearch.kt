@@ -171,7 +171,7 @@ object WebSearch {
     /** Never logs the user's query or the answer in release builds (privacy). */
     internal fun warn(msg: String) { try { android.util.Log.w(TAG, "[SEARCH] $msg") } catch (_: Throwable) {} }
     internal fun debug(msg: String) {
-        if (com.tekyerema.BuildConfig.DEBUG) try { android.util.Log.d(TAG, "[SEARCH] $msg") } catch (_: Throwable) {}
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) try { android.util.Log.d(TAG, "[SEARCH] $msg") } catch (_: Throwable) {}
     }
 }
 

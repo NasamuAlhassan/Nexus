@@ -39,7 +39,7 @@
           },
           "timeouts": {
             "connectMs": 6000,
-            "callMs": 150000
+            "callMs": 30000
           }
         },
         "hcilab_tts": {
@@ -78,7 +78,7 @@
           },
           "timeouts": {
             "connectMs": 6000,
-            "callMs": 90000
+            "callMs": 30000
           },
           "cacheEntries": 64
         },
@@ -275,7 +275,7 @@
           "fixedLanguage": "twi",
           "request": {"api": "asr_b64"},
           "response": {"kind": "json", "path": "text"},
-          "timeouts": {"connectMs": 6000, "callMs": 100000}
+          "timeouts": {"connectMs": 6000, "callMs": 30000}
         },
         "space_tts": {
           "_note": "OUR OWN Twi voice (tekyerema-tts-twi) on the language Space — the backup behind hcilab_tts, whose new lines take 20-90+ s (18 Oct 2026). Gradio two-step API tts (text + language -> a WAV file to download), 1-2 s. Twi only.",
@@ -399,8 +399,8 @@
         "kusToEn": ["space_mt_kus"],
         "enToKus": ["space_mt_kus"],
         "localizeReplies": true,
-        "replyWaitMs": 20000,
-        "promptWaitMs": 15000,
+        "replyWaitMs": 6000, "allWaitMs": 7000, "_waitsNote": "20 Oct 2026 (reliability audit): every Twi translation wait capped so a reply is never 38-53 s of silence; rehearsed lines come from MtDiskCache at once.",
+        "promptWaitMs": 8000,
         "kusReplyWaitMs": 20000,
         "maxChars": 400
       }

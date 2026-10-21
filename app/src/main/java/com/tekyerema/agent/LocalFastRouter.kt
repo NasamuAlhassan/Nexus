@@ -45,7 +45,11 @@ class LocalFastRouter(
     }
 
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
+    /** The language of the turn being handled (the quick answers have fixed Twi lines: [TwiInfoLines]). */
+    @Volatile private var turnLanguage: String = ""
+
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
+        turnLanguage = language
         handOff = null
         // The answer to an offered next step (agent/NextStep: "Shall I text Kofi Demo that it's sent?"): yes hands its request
         // to the agent as if the user had said it — read back and confirmed there; no drops it; anything else is handled as
@@ -271,10 +275,11 @@ class LocalFastRouter(
     } catch (_: Throwable) { false }
 
     private suspend fun execute(intent: FastIntent): FastOutcome? = when (intent) {
-        FastIntent.Time -> handled(intent, timeText())
+        FastIntent.Time -> handled(intent, if (turnLanguage == Lang.TWI) java.util.Calendar.getInstance().let {
+            TwiInfoLines.time(it.get(java.util.Calendar.HOUR_OF_DAY), it.get(java.util.Calendar.MINUTE)) } else timeText())
         FastIntent.Date -> handled(intent, dateText())
         FastIntent.Day -> handled(intent, dayText())
-        FastIntent.Battery -> handled(intent, batteryText())
+        FastIntent.Battery -> handled(intent, if (turnLanguage == Lang.TWI) batteryTwi() ?: batteryText() else batteryText())
         FastIntent.Storage -> handled(intent, storageText())
         FastIntent.DeviceInfo -> handled(intent, deviceText())
 
@@ -364,7 +369,7 @@ class LocalFastRouter(
         is FastIntent.AskApp -> runTool("ask_app", org.json.JSONObject().put("app", intent.app).put("question", intent.question))
         FastIntent.LockQuery -> lockState()
         is FastIntent.Preference -> preference(intent)
-        is FastIntent.Camera -> openCameraReader(intent.mode)
+        is FastIntent.Camera -> openCameraReader(intent.mode, intent.question)
         is FastIntent.ReadPhoto -> openPhotoReader(intent.mode)
         FastIntent.WhatChanged -> whatChanged()
         is FastIntent.Magnify -> magnify(intent.action)
@@ -636,10 +641,10 @@ class LocalFastRouter(
 
     // ---------------------------------------------------------------- W6
     /** P-03 / P-06 / P-01: the camera reader, opened in front (CameraX needs a visible activity). */
-    private fun openCameraReader(mode: String): FastOutcome? {
+    private fun openCameraReader(mode: String, question: String? = null): FastOutcome? {
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled(when (mode) { "color" -> "P-06"; "describe" -> "P-01"; "currency" -> "P-11"; else -> "P-03" }, true)) return null
         return try {
-            appContext.startActivity(com.tekyerema.camera.CameraReadActivity.intent(appContext, mode))
+            appContext.startActivity(com.tekyerema.camera.CameraReadActivity.intent(appContext, mode, question))
             // The reader announces itself; nothing extra to say here.
             FastOutcome("CAMERA_${mode.uppercase()}", "", systemVoice = true)
         } catch (t: Throwable) { null }
@@ -1284,6 +1289,16 @@ class LocalFastRouter(
 
     /** The level, whether it is charging and — when the phone can estimate it — how long until it's full; when low
      *  and not charging ([lowHint]), the one thing to say to make it last. */
+    /** The battery in Twi ([TwiInfoLines]), or null when the level can't be read. */
+    private fun batteryTwi(): String? {
+        val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+        val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        if (pct < 0 || pct > 100) return null
+        val status = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+        return TwiInfoLines.battery(pct, status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
+    }
+
     private fun batteryText(lowHint: Boolean = true): String {
         val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1

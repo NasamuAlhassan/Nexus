@@ -29,7 +29,7 @@ object UssdSim {
     const val SIM_PACKAGE = "com.tekyerema.ussdsim"
     const val SIM_ACTIVITY = "com.tekyerema.ussdsim.SimActivity"
 
-    fun enabled(): Boolean = BuildConfig.DEBUG && (try { AppConfig.bool("money.ussd.simulator", false) } catch (_: Throwable) { false })
+    fun enabled(): Boolean = BuildConfig.DEV_HOOKS && (try { AppConfig.bool("money.ussd.simulator", false) } catch (_: Throwable) { false })
 
     /** The carrier the simulated SIM pretends to be ("MTN Ghana"), or null when the simulator is off. */
     fun carrier(): String? = if (enabled()) AppConfig.string("money.ussd.simCarrier", "MTN Ghana") else null

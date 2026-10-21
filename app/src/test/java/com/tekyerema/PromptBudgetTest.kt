@@ -39,7 +39,9 @@ class PromptBudgetTest {
         // Owner's round (2026-10-15): + walk_directions (Tɛkyerɛma's own walking guidance; "walk" group — loaded per step only
         // with directions words) measured 29,950; and one routing line (prefer own timer / music / directions, never open
         // Contacts) in the system prompt. Caps = measured + ~100.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 30_050)
+        // Owner's night round (2026-10-20): + look_with_camera (our camera answers a question about a physical thing; "vision"
+        // group — loaded per step only with seeing/holding/money words) measured 30,508. Cap = measured + ~100.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 30_610)
         assertTrue("system prompt grew to $system chars", system <= 5_760)
     }
 

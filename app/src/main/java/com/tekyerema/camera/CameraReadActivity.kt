@@ -91,10 +91,13 @@ class CameraReadActivity : ComponentActivity() {
         private const val SCREEN_READER_DELAY_MS = 1_200L
 
         /** Launch from anywhere (a service, the accessibility layer): its own task, see the manifest. */
-        fun intent(ctx: Context, mode: String): Intent =
+        fun intent(ctx: Context, mode: String, question: String? = null): Intent =
             Intent(ctx, CameraReadActivity::class.java)
                 .putExtra(EXTRA_MODE, mode)
+                .apply { if (!question.isNullOrBlank()) putExtra(EXTRA_QUESTION, question) }
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        /** The user's own question (VisionPrompts): the photo is answered for it instead of a general description. */
+        const val EXTRA_QUESTION = "question"
 
         /** P5-02: a picture the user already has, read (or described) instead of the camera. */
         const val EXTRA_IMAGE = "image"
@@ -110,6 +113,11 @@ class CameraReadActivity : ComponentActivity() {
     private lateinit var settings: Settings
     private lateinit var previewView: PreviewView
     private lateinit var caption: TextView
+
+    /** The user's question for this photo (VisionPrompts), or null for the general description. */
+    private var question: String? = null
+    /** Counting money with the vision model (several notes, a total) instead of the one-note classifier. */
+    private var moneyAsk = false
 
     /** What the analyser does now. Describe can fall back to text mid-session, so this is not final. */
     @Volatile private var mode = MODE_TEXT
@@ -189,6 +197,14 @@ class CameraReadActivity : ComponentActivity() {
             MODE_DESCRIBE -> MODE_DESCRIBE
             MODE_CURRENCY -> MODE_CURRENCY
             else -> MODE_TEXT
+        }
+        question = intent?.getStringExtra(EXTRA_QUESTION)?.trim()?.takeIf { it.isNotEmpty() }
+        // "How much am I holding": online, the vision model counts every note and the phone adds them up; offline (or with
+        // `camera.currency.vision` off) the on-phone classifier names one note at a time.
+        if ((mode == MODE_CURRENCY || (mode == MODE_DESCRIBE && VisionPrompts.isMoneyQuestion(question))) &&
+            AppConfig.bool("camera.currency.vision", true) && NetworkMonitor.isOnline() &&
+            settings.allowGeminiBackup && (settings.geminiApiKey.isNotBlank() || settings.groqApiKeys.isNotEmpty())) {
+            mode = MODE_DESCRIBE; moneyAsk = true
         }
         intervalMs = AppConfig.long("camera.analysis.intervalMs", 500L).coerceAtLeast(100L)
         setContentView(buildLayout())
@@ -355,6 +371,8 @@ class CameraReadActivity : ComponentActivity() {
                     mode = MODE_TEXT
                     announce(phrase("describeOffline", "I can't describe it offline, but I can read any text I see."))
                 }
+                moneyAsk -> announce(phrase("modeMoneyAsk", "Hold the money flat in front of the camera. I'll count it."))
+                question != null -> announce(phrase("modeAsk", "Point the camera at it and hold still. I'll look."))
                 else -> announce(phrase("modeDescribe", "Hold still, I'll describe what's in front of you."))
             }
         } else if (mode == MODE_CURRENCY) {
@@ -459,7 +477,7 @@ class CameraReadActivity : ComponentActivity() {
     }
 
     private fun logFrameError(t: Throwable) {
-        if (BuildConfig.DEBUG) Log.d(TAG, "[CAMERA] frame skipped: ${t.javaClass.simpleName}: ${t.message}")
+        if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] frame skipped: ${t.javaClass.simpleName}: ${t.message}")
     }
 
     // ------------------------------------------------------------------------------------------------ P-03 text
@@ -586,7 +604,7 @@ class CameraReadActivity : ComponentActivity() {
             val w = image.width
             val h = image.height
             val rotation = image.imageInfo.rotationDegrees
-            if (BuildConfig.DEBUG) Log.d(TAG, "[CAMERA] frame accepted blur=${q.blurScore.toInt()} luma=${q.meanLuma.toInt()} bestEffort=$bestEffort")
+            if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] frame accepted blur=${q.blurScore.toInt()} luma=${q.meanLuma.toInt()} bestEffort=$bestEffort")
             main.post { sendForDescription(nv21, w, h, rotation) }
         } else {
             val verdict = q.verdict
@@ -636,7 +654,9 @@ class CameraReadActivity : ComponentActivity() {
         speak(phrase("describing", "Got it, one moment."), flush = false)
         lifecycleScope.launch {
             val jpeg = withContext(Dispatchers.Default) {
-                FrameConvert.nv21ToJpeg(nv21, width, height, rotation, AppConfig.int("camera.describe.maxSide", 1024), 80)
+                FrameConvert.nv21ToJpeg(nv21, width, height, rotation,
+                    if (question != null || moneyAsk) VisionPrompts.maxSide(question, moneyAsk) else AppConfig.int("camera.describe.maxSide", 1024),
+                    if (question != null || moneyAsk) 80 else 80)
             }
             // P5-07: ML Kit reads the same frame while the cloud describes it — the authority for exact strings.
             val ocr = async(Dispatchers.Default) {
@@ -647,11 +667,20 @@ class CameraReadActivity : ComponentActivity() {
                 // Held (memory only, dropped when this screen closes) so a follow-up question — "what colour is
                 // the shirt?" — can go back to the cloud with THIS photo (VisionQa, the Be My AI pattern).
                 LastCapture.hold(jpeg)
-                VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Gemini first, Groq when it fails
+                val q = question
+                when {
+                    moneyAsk -> VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false)
+                    q != null -> VisionLadder.describe(jpeg, VisionPrompts.forQuestion(q), settings, structured = false)
+                    else -> VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Gemini first, Groq when it fails
+                }
             }
             if (closing) return@launch
             when (result) {
-                is VisionResult.Described -> deliver(StructuredDescribe.spokenFor(result.text, ocr.await(), TAG))
+                is VisionResult.Described -> deliver(when {
+                    moneyAsk -> VisionPrompts.spokenMoney(result.text) ?: VisionPrompts.spoken(result.text)
+                    question != null -> VisionPrompts.spoken(result.text)
+                    else -> StructuredDescribe.spokenFor(result.text, ocr.await(), TAG)
+                })
                 is VisionResult.Failed -> {
                     Log.w(TAG, "[CAMERA] describe failed: ${result.reason}")
                     fallBackToText(phrase("describeFailed", "I couldn't get a description just now. I'll read any text I see instead."))

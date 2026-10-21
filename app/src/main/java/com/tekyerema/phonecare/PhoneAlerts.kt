@@ -164,7 +164,7 @@ object PhoneAlerts {
     /** Debug builds only (debug/RunGoalReceiver `money_sim`): [body] treated as a message from the network's trusted
      *  sender, through the same parse → settle → speak path. Returns the line it queued, or null. */
     fun simulatedOutcome(app: Context, body: String): String? {
-        if (!com.tekyerema.BuildConfig.DEBUG) return null
+        if (!com.tekyerema.BuildConfig.DEV_HOOKS) return null
         if (com.tekyerema.money.MoMoOutcome.isSecret(body)) return null
         val msg = com.tekyerema.money.MoMoOutcome.parse(body) ?: return null
         val at = System.currentTimeMillis()

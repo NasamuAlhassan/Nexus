@@ -264,6 +264,9 @@ fun HomeContent(
             },
             onFocusChanged = { focused -> if (focused) VoiceEngine.beginTyping() else VoiceEngine.endTyping() },
             onMic = if (presence == Presence.IDLE || presence == Presence.DONE || presence == Presence.ERROR) startListening else null,
+            onCamera = if (com.tekyerema.core.config.AppConfig.bool("camera.homeButton", true)) {
+                { try { context.startActivity(com.tekyerema.camera.CameraReadActivity.intent(context, com.tekyerema.camera.CameraReadActivity.MODE_DESCRIBE)) } catch (_: Throwable) {} }
+            } else null,
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
             focusRequester = typeFocus
         )

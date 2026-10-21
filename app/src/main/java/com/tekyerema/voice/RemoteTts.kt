@@ -59,7 +59,10 @@ class RoutingTts(
             // Localize English response text to Twi so the Twi VOICE speaks Twi WORDS (not English read by
             // a Twi voice). Already-Twi text (e.g. LocalBrain "Mabue no.") is left as-is by enToTw. The language
             // layer's localizer also refuses anything with a quantity or a name it can't keep (ReplyLocalizer).
-            val localized = try { enToTw?.invoke(plain)?.takeIf { it.isNotBlank() } }
+            // An English reply goes straight to the whole-reply translator (one wait, not the narrow one first and then the
+            // whole one: that could be 6 + 7 s of silence — reliability audit, 20 Oct 2026).
+            val wholeReply = noEnglish() && enToTwAll != null && com.tekyerema.language.ReplyLocalizer.englishForVoice(plain)
+            val localized = if (wholeReply) null else try { enToTw?.invoke(plain)?.takeIf { it.isNotBlank() } }
                 catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Exception) { null }
             // ONE voice (owner, 4 October 2026) and no figure the lab voice would skip: amounts, numbers and phone numbers as
             // Twi words, English stretches put into Twi (voice/understand/TwiSpeechText). A line with neither is unchanged.
@@ -83,6 +86,9 @@ class RoutingTts(
                     Log.i("Tekyerema", "[TTS] an English line in a Twi conversation → ${if (all != null) "translated, the Twi voice" else "the Twi notice (no translation)"}")
                     val twiText = com.tekyerema.language.TwiText.canonical(com.tekyerema.language.EntityTags.display(say))
                     if (twi.speak(twiText, language)) { twiStatus.onSpoke(); return true }
+                    // Never the English words read by the Twi voice after this (that cost a second network wait, then silence).
+                    Log.w("Tekyerema", "[TTS] no Twi voice could say the translated line — it stays on the screen")
+                    return false
                 } else {
                     Log.i("Tekyerema", "[TTS] an English line in a Twi conversation → the English voice")
                     return speakEnglishPiece(plain)
@@ -166,7 +172,7 @@ class RoutingTts(
         }
         val pieces = sentences(plain)
         if (pieces.isEmpty()) return GhResult.NOT_USED
-        if (com.tekyerema.BuildConfig.DEBUG) pieces.forEach { Log.d("Tekyerema", "[TTS-LINE] eng|$it") }   // the exact keys, for pre-generating fixed lines
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) pieces.forEach { Log.d("Tekyerema", "[TTS-LINE] eng|$it") }   // the exact keys, for pre-generating fixed lines
         val t0 = clock()
         return kotlinx.coroutines.coroutineScope {
             fun fetchAsync(i: Int, waitMs: Long) = async {

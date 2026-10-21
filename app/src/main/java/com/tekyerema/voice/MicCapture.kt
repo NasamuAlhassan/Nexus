@@ -107,7 +107,7 @@ class MicCapture(
         onSpeechStart: () -> Unit
     ): CaptureResult = withContext(Dispatchers.IO) {
         // Debug builds only: a recording the tester queued (adb `inject_wav`) stands in for what the microphone would hear.
-        if (!echoCancelled && com.tekyerema.BuildConfig.DEBUG) DebugMicInject.next()?.let { f ->
+        if (!echoCancelled && com.tekyerema.BuildConfig.DEV_HOOKS) DebugMicInject.next()?.let { f ->
             onListening(); kotlinx.coroutines.delay(350); onSpeechStart(); kotlinx.coroutines.delay(150)
             val bytes = f.readBytes()
             android.util.Log.i("Tekyerema", "[VOICE] injected recording ${f.name} (${bytes.size} bytes)")

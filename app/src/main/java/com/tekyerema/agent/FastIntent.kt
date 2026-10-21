@@ -92,7 +92,10 @@ sealed class FastIntent(val name: String) {
     data class Preference(val key: String, val value: String) : FastIntent("PREFERENCE")
     // ---- W6 ----
     /** P-03 / P-06 / P-01: "text" | "color" | "describe". */
-    data class Camera(val mode: String) : FastIntent("CAMERA")
+    data class Camera(val mode: String) : FastIntent("CAMERA") {
+        /** The user's own question for the camera ("is the stove on?", "how much am I holding") — not part of equality. */
+        var question: String? = null
+    }
     /** P5-02: a picture the user already has — the phone's photo picker, then read ("text") or describe. */
     data class ReadPhoto(val mode: String) : FastIntent("READ_PHOTO")
     /** K-15: what changed on the screen since it was last described. */
@@ -300,10 +303,14 @@ object FastIntentClassifier {
             // this photo" would otherwise take to the live camera.
             RE_READ_PHOTO.containsMatchIn(g) -> FastIntent.ReadPhoto(if (RE_DESCRIBE_WORD.containsMatchIn(g)) "describe" else "text")
             // W6: camera, screen changes, magnification, emergency set-up.
-            RE_CAMERA_MONEY.containsMatchIn(g) -> FastIntent.Camera("currency")
+            RE_CAMERA_MONEY.containsMatchIn(g) -> FastIntent.Camera("currency").also { it.question = g }
             RE_CAMERA_COLOR.containsMatchIn(g) -> FastIntent.Camera("color")
             RE_CAMERA_TEXT.containsMatchIn(g) -> FastIntent.Camera("text")
             RE_CAMERA_DESCRIBE.containsMatchIn(g) -> FastIntent.Camera("describe")
+            // Any other question about a physical thing in front of the user (owner, 20 Oct 2026: "the app should be smart and
+            // understand the request"): our camera, with the words as the question. The planner's look_with_camera tool
+            // takes every phrasing this misses.
+            RE_CAMERA_ASK.containsMatchIn(g) -> FastIntent.Camera("describe").also { it.question = g }
             RE_WHAT_CHANGED.containsMatchIn(g) -> FastIntent.WhatChanged
             RE_MAGNIFY_IN.containsMatchIn(g) -> FastIntent.Magnify("in")
             RE_MAGNIFY_OUT.containsMatchIn(g) -> FastIntent.Magnify("out")
@@ -597,6 +604,13 @@ object FastIntentClassifier {
     private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")
     private val RE_CAMERA_DESCRIBE = Regex("\\bwhat(?:'s| is) in front of me\\b|\\bwhat am i holding\\b|\\bdescribe what (?:you see|is in front of me)\\b|" +
         "\\blook at this for me\\b|\\bwhat is this (?:thing|object)\\b")
+    /** A question about something physical: the hand, "in front of me", the camera, "look at / can you see". Never the
+     *  screen ("what's on my screen" is the screen reader's). */
+    private val RE_CAMERA_ASK = Regex("(?i)\\b(?:in my hands?|i(?:'m| am) holding|am i holding|i(?:'m| am) (?:looking at|pointing at|seeing)|" +
+        "am i (?:looking at|seeing|pointing at)|in front of (?:me|the camera|my camera)|(?:with|using|through) (?:the |my )?camera|" +
+        "can you see|do you see|look at (?:this|that|it|my)|have a look|take a look|use (?:the |my )?camera|" +
+        "(?:expiry|expiration|sell[- ]by|best[- ]before|use[- ]by) date|is (?:this|it) (?:expired|clean|dirty|ripe|cooked|burnt|broken|switched on|on or off))\\b")
+
     private val RE_WHAT_CHANGED = Regex("^(?:what(?:'s| has)? changed|what(?:'s| is) new on (?:the |my )?screen|anything new on (?:the |my )?screen)$")
     private val RE_MAGNIFY_IN = Regex("\\bmagnify\\b|\\bzoom (?:in )?(?:on )?the screen\\b|\\bmake the screen bigger\\b")
     private val RE_MAGNIFY_OUT = Regex("\\bzoom out (?:of )?the screen\\b|\\bmake the screen smaller\\b")

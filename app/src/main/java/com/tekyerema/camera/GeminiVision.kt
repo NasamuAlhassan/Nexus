@@ -105,7 +105,7 @@ object GeminiVision {
         }
         if (code !in 200..299) {
             Log.w(TAG, "[CAMERA] describe HTTP $code")
-            if (BuildConfig.DEBUG) Log.d(TAG, "[CAMERA] describe error body: ${text.take(300)}")
+            if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] describe error body: ${text.take(300)}")
             return@withContext VisionResult.Failed("HTTP $code")
         }
         val description = parse(text) ?: run {
@@ -117,7 +117,7 @@ object GeminiVision {
         val ms = (System.nanoTime() - t0) / 1_000_000
         Log.i(TAG, "[CAMERA] described (${description.length} chars, ${jpeg.size / 1024} KB image, ${ms} ms, structured=$structured" +
             (usage?.let { ", prompt=${it.optInt("promptTokenCount")} out=${it.optInt("candidatesTokenCount")} thought=${it.optInt("thoughtsTokenCount")}" } ?: "") + ")")
-        if (BuildConfig.DEBUG) Log.d(TAG, "[CAMERA] description: $description")
+        if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] description: $description")
         VisionResult.Described(description)
     }
 

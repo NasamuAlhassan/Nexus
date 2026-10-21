@@ -94,6 +94,9 @@ object GroqVision {
             .put("temperature", temperature)
             // A spoken answer is short; capping the reply also keeps the request under Groq's per-request token check.
             .put("max_completion_tokens", AppConfig.int("camera.describe.maxCompletion", 512))
+            // Instruct mode, no thinking: a camera answer must come back in a second or two (Groq: qwen3.8 reasoning_effort
+            // "none"; research, 20 Oct 2026). `providers.groq.visionReasoning` "" = leave it to the model's default.
+            .apply { AppConfig.string("providers.groq.visionReasoning", "none").takeIf { it.isNotBlank() }?.let { put("reasoning_effort", it) } }
     }
 
     /** choices[0].message.content → trimmed text, or null when there is none. */

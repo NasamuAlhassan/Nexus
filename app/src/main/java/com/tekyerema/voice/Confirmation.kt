@@ -9,6 +9,18 @@ package com.tekyerema.voice
  * unrelated is UNCLEAR, and the controller asks again once before declining. Pure Kotlin.
  */
 object Confirmation {
+    /**
+     * The user asks to hear the question again ("say that again", "pardon", "repeat", Twi "ka bio", "san ka", "mante"): the
+     * whole read-back is said again, and it is not counted as an unclear answer (research, 20 Oct 2026: re-hearing a money
+     * read-back is a basic of conversation design; before, "ka bio" used an attempt and gave only "Mante no…"). Pure.
+     */
+    fun asksToRepeat(vararg said: String?): Boolean = said.any { t ->
+        val s = t?.trim()?.lowercase()?.replace(Regex("[.!?,]"), " ")?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        s.isNotEmpty() && REPEAT_ASK.matches(s)
+    }
+    private val REPEAT_ASK = Regex("^(?:(?:please|sorry|eh|ei|hey)\\s+)*(?:repeat(?: (?:it|that))?|say (?:it|that) again|again|come again|pardon(?: me)?|" +
+        "what did you say|i didn'?t (?:hear|get|catch) (?:it|that|you)|(?:san )?ka (?:no )?bio|san ka|mante(?: no| ase)?|mente ase)(?:\\s+(?:please|mepa wo kyɛw|mepa wo kyew))?$")
+
     /** HOLD (B-09): "wait" / "hold on" alone — the user needs a moment; the question stays pending. */
     enum class Answer { YES, NO, UNCLEAR, HOLD }
 

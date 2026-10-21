@@ -1554,7 +1554,7 @@ object AgentEngine {
                                 val asked = callingLine ?: prompt
                                 log(LogEntry.Kind.CONFIRM, asked)
                                 // the Twi wording the user is asked in (debug builds only — the read-back names people and amounts)
-                                if (promptTwi != null && com.tekyerema.BuildConfig.DEBUG) android.util.Log.i("Tekyerema", "[CONFIRM-TWI] $promptTwi")
+                                if (promptTwi != null && com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.i("Tekyerema", "[CONFIRM-TWI] $promptTwi")
                                 pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
                                 drain(confirmChannel)   // only a reply to THIS prompt counts
                                 val seq = ++confirmSeq   // J-02: every surface's yes must name this number

@@ -34,6 +34,7 @@ import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -503,6 +504,8 @@ fun CommandField(
     onFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     onMic: (() -> Unit)? = null,
+    /** Tɛkyerɛma's own camera (camera/CameraReadActivity): shown beside the mic while the field is empty. */
+    onCamera: (() -> Unit)? = null,
     /** Lets the assistant surface put the cursor here ("Type" on a question, a typed follow-up). */
     focusRequester: androidx.compose.ui.focus.FocusRequester? = null
 ) {
@@ -565,13 +568,20 @@ fun CommandField(
                 }
             }
             // Gate G audit (emulator accessibility tree, 13 October 2026): this button read as "Button" — the glyph is drawn, not an Icon.
-            onMic != null -> IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to Tɛkyerɛma" }) {
+            onMic != null -> Row(verticalAlignment = Alignment.CenterVertically) {
+              // Our camera, one tap from home (owner, 20 Oct 2026): point at anything and ask, or count money.
+              if (onCamera != null) IconButton(onClick = onCamera, modifier = Modifier.size(48.dp).semantics { contentDescription = "Look with the camera" }) {
+                Icon(androidx.compose.material.icons.Icons.Outlined.PhotoCamera, contentDescription = null, tint = Tk.Text,
+                    modifier = Modifier.size(24.dp))
+              }
+              IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to Tɛkyerɛma" }) {
                 Box(
                     Modifier.size(40.dp).clip(CircleShape).background(
                         Brush.linearGradient(listOf(Spectrum.Aqua, Spectrum.Green), start = Offset.Zero, end = Offset(90f, 90f))
                     ),
                     contentAlignment = Alignment.Center
                 ) { MicGlyph(Color.White, Modifier.size(20.dp)) }
+              }
             }
             else -> Spacer(Modifier.width(14.dp))
         }

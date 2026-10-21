@@ -928,6 +928,9 @@ class VoiceController(
             var attempt = 0
             var holds = 0
             var patient = false
+            val fullQuestion = spokenQuestion
+            var repeats = 0
+            var repeatAsked = false
             while (attempt < 2) {
                 _state.update { it.copy(confirmPhase = ConfirmPhase.ASKING, speechDetected = false) }
                 // English confirmations are spoken in English; a Twi session with a structured Twi line is
@@ -979,7 +982,8 @@ class VoiceController(
                             catch (c: CancellationException) { throw c } catch (_: Exception) {}
                             return
                         }
-                        com.tekyerema.voice.io.YesNo.decide(heard, alternatives).let { a ->
+                        if (repeats < 2 && Confirmation.asksToRepeat(heard, tr?.raw)) { repeatAsked = true; Confirmation.Answer.UNCLEAR }
+                        else com.tekyerema.voice.io.YesNo.decide(heard, alternatives).let { a ->
                             // A Kusaal answer heard by the English recogniser could come back as a "yes"-like English word
                             // ("okay", "yeah"); in a Kusaal session only a plain English yes approves (KusaalYes).
                             if (kus && a == Confirmation.Answer.YES && !KusaalYes.strict(heard)) {
@@ -1015,7 +1019,12 @@ class VoiceController(
                         attempt++
                         _state.update { it.copy(confirmRetry = ConfirmRetry.UNCLEAR) }
                     }
-                    Confirmation.Answer.UNCLEAR -> {
+                    Confirmation.Answer.UNCLEAR -> if (repeatAsked) {
+                        // "Ka bio" / "say that again": the whole read-back again, not an attempt.
+                        repeatAsked = false; repeats++
+                        spokenQuestion = fullQuestion
+                        Log.i("Tekyerema", "[VOICE] confirmation: asked to hear it again ($repeats) — the read-back is said again")
+                    } else {
                         if (attempt == 0)
                             spokenQuestion = if (useTwi) "Mante no. Ka aane anaa daabi." else Confirmation.REPEAT  // §A.1 Twi repeat
                         attempt++
@@ -1348,7 +1357,7 @@ class VoiceController(
                     inputSource = source)
             }
             // SEC-P1-4: the spoken command ("send 50 to 024…") is sensitive — full text in debug only.
-            if (com.tekyerema.BuildConfig.DEBUG) Log.i("Tekyerema", "[INPUT] source=$source text='${tr.canonical}' lang=${tr.language}")
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i("Tekyerema", "[INPUT] source=$source text='${tr.canonical}' lang=${tr.language}")
             else Log.i("Tekyerema", "[INPUT] source=$source len=${tr.canonical.length} lang=${tr.language}")
 
             // First-run practice (voice/Welcome.kt): "send a practice message" REHEARSES the spoken confirmation for a text

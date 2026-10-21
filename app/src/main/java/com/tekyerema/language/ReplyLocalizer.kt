@@ -62,7 +62,7 @@ class ReplyLocalizer(
         if (!tagged.isEmpty && !EntityTags.intact(tagged.text, out, tagged.entities)) {
             Log.w("Tekyerema", "[MT] the translation lost a name/amount tag — speaking the original")
             // DEBUG builds: what went in and what came back, to see which tag a translator mangles (never in a release build)
-            if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[MT-TAGS] in='${tagged.text}' out='$out'")
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.d("Tekyerema", "[MT-TAGS] in='${tagged.text}' out='$out'")
             return null
         }
         if (out.length > tagged.text.length * 3 + 40) { Log.w("Tekyerema", "[MT] translation implausibly long — speaking the original"); return null }
@@ -76,15 +76,18 @@ class ReplyLocalizer(
      * fails the answer is null (the caller then says so in Twi). At most [MAX_PIECES] pieces are spoken: the rest stays on the
      * screen (the Twi voice says about three requests of text).
      */
-    suspend fun toTwiAll(text: String, wait: Long = AppConfig.long("providers.speech.mt.allWaitMs", 9_000L)): String? {
+    suspend fun toTwiAll(text: String, wait: Long = AppConfig.long("providers.speech.mt.allWaitMs", 7_000L)): String? {
         if (translator == null || !enabled()) return null
-        val pieces = pieces(text.trim(), 220).take(MAX_PIECES)
+        val src = text.trim()
+        // One request when it fits (the translator takes maxChars); longer text in pieces at sentence ends. ONE budget for the
+        // whole reply and no retry after a timeout (reliability audit, 20 Oct 2026: a retry doubled the silence).
+        val pieces = (if (src.length <= maxChars()) listOf(src) else pieces(src, 220)).filter { it.isNotBlank() }.take(MAX_PIECES)
         if (pieces.isEmpty()) return null
-        val out = kotlinx.coroutines.coroutineScope {
-            pieces.map { piece ->
-                async { toTwi(piece, wait, everything = true) ?: toTwi(piece, wait, everything = true) }
-            }.awaitAll()
-        }
+        val out = kotlinx.coroutines.withTimeoutOrNull(wait + 1_000L) {
+            kotlinx.coroutines.coroutineScope {
+                pieces.map { piece -> async { toTwi(piece, wait, everything = true) } }.awaitAll()
+            }
+        } ?: run { Log.w("Tekyerema", "[MT] the whole reply took longer than ${wait + 1_000L} ms — not translated"); return null }
         if (out.any { it == null }) { Log.w("Tekyerema", "[MT] ${out.count { it == null }} of ${pieces.size} pieces could not be put into Twi"); return null }
         return out.joinToString(" ")
     }

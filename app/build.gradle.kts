@@ -84,6 +84,12 @@ android {
     buildTypes {
         debug {
             isMinifyEnabled = false
+            // The adb test hooks, debug logging and dev tools. Not the same as `debuggable`: the "demo" build keeps them.
+            buildConfigField("boolean", "DEV_HOOKS", "true")
+            // `-PdemoSpeed`: the same debug build (keys, adb hooks, incremental compile) but NOT debuggable, so ART compiles the app
+            // (Compose in a debuggable app runs interpreted/JIT-only). Then `adb shell cmd package compile -m speed -f com.tekyerema`.
+            // `run-as` does not work on it: push files into app storage with a normal debug build first. (20 Oct 2026)
+            if (project.hasProperty("demoSpeed")) { isDebuggable = false; isJniDebuggable = false }
             secretBuildFields.forEach { (name, value) -> buildConfigField("String", name, "\"$value\"") }
             buildConfigField("String", "SPEECH_SECRETS_JSON", "\"" + speechSecretsJson.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
         }
@@ -92,6 +98,7 @@ android {
             // used to sit in defaultConfig and so shipped in release builds too (found 2026-09-29) — debug-only now.
             secretBuildFields.keys.forEach { name -> buildConfigField("String", name, "\"\"") }
             buildConfigField("String", "SPEECH_SECRETS_JSON", "\"{}\"")
+            buildConfigField("boolean", "DEV_HOOKS", "false")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

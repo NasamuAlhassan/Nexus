@@ -305,7 +305,9 @@ class PresenceSim {
 
     /** Nothing left to animate (only meaningful when calm — in full motion the visual always breathes). */
     fun atRest(calm: Boolean): Boolean =
-        calm && !spec.reactive && bloom == 0f && all.all { it.atRest } &&
+        // Calm and only SPEAKING, the drive is a fixed 0.3: nothing changes, so nothing is redrawn (UI audit, 20 Oct 2026 —
+        // it repainted the whole window 30-60 times a second with identical frames while the reply card was up).
+        calm && (!spec.reactive || !VisualSpec.listening(presence)) && bloom == 0f && all.all { it.atRest } &&
             appear.value == 1f && press.value == 1f && shake.value == 0f     // (a calm step snaps these three)
 
     /** Age 0..1 of ripple [i], or -1 if it is not showing. */

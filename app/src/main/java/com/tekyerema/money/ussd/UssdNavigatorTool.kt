@@ -138,6 +138,12 @@ object UssdNavigatorTool : Tool {
         val sim = Provider.current(ctx.appContext)
         if (sim.provider == null)
             return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't guess a Mobile Money code.", recoverable = false)
+        // Before any question or read-back (reliability audit, 20 Oct 2026): found only in execute(), these failed AFTER the
+        // reference, the read-back, the correction and the "yes" — the worst moment.
+        if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
+            return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open Mobile Money. Allow Phone for Tɛkyerɛma in Settings.", recoverable = false)
+        if (ctx.controller == null)
+            return ToolResult(false, "The accessibility service isn't running, so I can't read the menu. Turn on Tɛkyerɛma in Settings, under Accessibility.", recoverable = false)
         if (intent == TxIntent.CHECK_BALANCE) return null
         amountProblem(args.str("amount"))?.let { return ToolResult(false, it, recoverable = false) }
         val amount = com.tekyerema.money.MoneyLimits.parseAmount(args.str("amount"))!!

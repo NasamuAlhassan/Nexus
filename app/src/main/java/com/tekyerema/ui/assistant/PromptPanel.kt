@@ -135,7 +135,7 @@ internal fun PromptPanel(
                 .glassBody(radius, glass, mood = { currentMood },
                     light = { if (currentMood == LightMood.LISTENING) 0.25f + 0.75f * micLevel.floatValue else 0.22f },
                     sweep = { 0f }, glowShift = { 0f }, tier = tier, arrival = { arrival.value }, tilt = { tilt.value })
-                .clip(ContinuousShape(radius))
+                .clip(if (com.tekyerema.ui.glass.glassLite()) androidx.compose.foundation.shape.RoundedCornerShape(radius) else ContinuousShape(radius))
                 .semantics { paneTitle = title }
         ) {
             Column(

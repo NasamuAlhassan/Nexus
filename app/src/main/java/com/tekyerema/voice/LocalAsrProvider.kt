@@ -99,7 +99,7 @@ class HybridAsr(
                     catch (e: AsrException) {
                         // §10.3 — only a TRUSTED on-device Twi model (its own model.json; never the GOLD-trained tiny-twi)
                         // takes over; otherwise an online-Twi failure fails honestly, not to garbage.
-                        if (onDevice.trustedFor("twi")) return local.transcribe(wav, sessionLanguage, Lang.TWI).copy(fallbackUsed = true)
+                        if (onDevice.trustedFor("twi")) return twiLocal(wav, sessionLanguage, Lang.TWI, TWI_SERVICE_DOWN)
                         throw AsrException(TWI_SERVICE_DOWN)
                     }
                 }
@@ -131,7 +131,7 @@ class HybridAsr(
                 if (lang == Lang.TWI && onDevice.trustedFor("twi")) {
                     // The clean on-device Twi model (2 October 2026) answers when the HCI Lab can't — quota spent, outage.
                     Log.w("Tekyerema", "[ASR] Twi online provider failed → the trusted on-device Twi model: ${e.message}")
-                    return local.transcribe(wav, sessionLanguage, forceLanguage).copy(fallbackUsed = true)
+                    return twiLocal(wav, sessionLanguage, forceLanguage, TWI_SERVICE_DOWN)
                 }
                 if (lang == Lang.TWI) {
                     Log.w("Tekyerema", "[ASR] Twi online provider failed and offline Twi is off — failing honestly: ${e.message}")
@@ -149,6 +149,7 @@ class HybridAsr(
         }
         // Twi is heard online only for now (owner, 3 October 2026 — SherpaAsr.offlineTwi): say what to do instead.
         if (lang == Lang.TWI && !onDevice.trustedFor("twi")) throw AsrException(TWI_NEEDS_INTERNET)
+        if (lang == Lang.TWI) return twiLocal(wav, sessionLanguage, forceLanguage, TWI_NEEDS_INTERNET).copy(fallbackUsed = false)
         if (lang == Lang.KUS) throw AsrException(KUS_NEEDS_INTERNET)
         if (onDevice.ready) return local.transcribe(wav, sessionLanguage, forceLanguage)   // offline / no endpoint
         // Nothing available: fail FAST and honestly (never a silent hang), steering the user to the fix.
@@ -157,6 +158,20 @@ class HybridAsr(
             else "You're offline and the on-device voice model isn't available."
         )
     }
+
+    /**
+     * The on-device Twi model, for a Twi turn the online hearing could not take. Any failure of its own — no room to load it
+     * (AsrLowMemoryException), nothing heard, a load error — becomes [whenFails], which the controller says in Twi
+     * (TWI_SERVICE_DOWN_TWI / TWI_NEEDS_INTERNET_TWI): never the English low-memory or "couldn't understand" line
+     * (reliability audit, 20 Oct 2026).
+     */
+    private suspend fun twiLocal(wav: ByteArray, sessionLanguage: String, forceLanguage: String?, whenFails: String): Transcript =
+        try { local.transcribe(wav, sessionLanguage, forceLanguage ?: Lang.TWI).copy(fallbackUsed = true) }
+        catch (e: kotlinx.coroutines.CancellationException) { throw e }
+        catch (e: Exception) {
+            Log.w("Tekyerema", "[ASR] on-device Twi model could not answer (${e.javaClass.simpleName}: ${e.message}) → '$whenFails'")
+            throw AsrException(whenFails)
+        }
 }
 
 /** What the user hears when Kusaal can't be heard (the Space is its only recogniser). */

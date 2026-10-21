@@ -70,7 +70,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     } else null
 
     override fun onServiceConnected() {
-        if (com.tekyerema.BuildConfig.DEBUG) try {
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) try {
             // Gate G audit tooling: debug builds also hear accessibility-focus events (see onAccessibilityEvent); the manifest's
             // event list is the release one.
             serviceInfo = serviceInfo.apply { eventTypes = eventTypes or AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED }
@@ -109,7 +109,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         lastEventTime = SystemClock.uptimeMillis()
         // Gate G audit (debug builds only): where a screen reader puts its focus while it drives our screens — the node's own
         // text and description, which is what TalkBack speaks (13 October 2026). Never on in a release build.
-        if (com.tekyerema.BuildConfig.DEBUG && event?.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED) {
+        if (com.tekyerema.BuildConfig.DEV_HOOKS && event?.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED) {
             val src = try { event.source } catch (_: Throwable) { null }
             android.util.Log.i("Tekyerema", "[A11Y-FOCUS] pkg=${event.packageName} cls=${event.className?.toString()?.substringAfterLast('.')} " +
                 "text='${event.text.joinToString("|")}' desc='${event.contentDescription}' src.text='${src?.text}' src.desc='${src?.contentDescription}' " +
@@ -127,7 +127,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // Decided from the window that actually has focus, so our own overlay windows, the
         // keyboard, the shade and permission dialogs (which all report window-state changes
         // too) can't flip it the wrong way.
-        if (com.tekyerema.BuildConfig.DEBUG && (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+        if (com.tekyerema.BuildConfig.DEV_HOOKS && (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
                 event?.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED))
             android.util.Log.d("TkyWin", "type=${event.eventType} pkg=${event.packageName} cls=${event.className} ch=${event.contentChangeTypes} wch=${if (Build.VERSION.SDK_INT >= 28) event.windowChanges else -1}")
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -169,7 +169,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     /** Debug builds: a volume key delivered to [onKeyEvent] exactly as the key filter would (injected key events never reach
      *  it on the emulator) — RunGoalReceiver `volume_key up|down`. */
     fun debugKey(keyCode: Int) {
-        if (!com.tekyerema.BuildConfig.DEBUG) return
+        if (!com.tekyerema.BuildConfig.DEV_HOOKS) return
         val t = android.os.SystemClock.uptimeMillis()
         onKeyEvent(android.view.KeyEvent(t, t, android.view.KeyEvent.ACTION_DOWN, keyCode, 0))
         onKeyEvent(android.view.KeyEvent(t, t + 80, android.view.KeyEvent.ACTION_UP, keyCode, 0))
@@ -294,7 +294,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             !com.tekyerema.core.config.AppConfig.bool("activation.keys.enabled", true)) return false
         // Debug builds: one line per volume key-up, so "the buttons don't work" can be told apart from "they did the
         // wrong thing" (no content — a key name only).
-        if (com.tekyerema.BuildConfig.DEBUG && (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP))
+        if (com.tekyerema.BuildConfig.DEV_HOOKS && (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN || e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP))
             Log.i("Tekyerema", "[KEYS] ${if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) "volume_down" else "volume_up"} up")
         if (keyPattern.onKeyUp(e.keyCode, e.eventTime)) {
             restoreVolume(e.keyCode, steps = 2)   // the gesture's two presses moved the volume; put it back
@@ -421,7 +421,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         val ws = windows.orEmpty()
         val pick = ws.firstOrNull { it.isFocused } ?: ws.firstOrNull { it.isActive }
             ?: ws.firstOrNull { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION }
-        if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TREE] active root null; windows=" + ws.joinToString(" | ") { w ->
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.d("Tekyerema", "[TREE] active root null; windows=" + ws.joinToString(" | ") { w ->
             "${w.root?.packageName ?: "?"}/${w.title ?: "-"} type=${w.type} focused=${w.isFocused} active=${w.isActive}" }.take(400) +
             " → " + (pick?.root?.packageName ?: "none"))
         pick?.root
@@ -489,7 +489,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         if (first.bareWeb && retryMs > 0) {
             kotlinx.coroutines.delay(retryMs)
             val second = snapshotOnce()
-            if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TREE] bare WebView: second look after $retryMs ms → ${second.snapshot.elements.size} elements (was ${first.snapshot.elements.size})")
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.d("Tekyerema", "[TREE] bare WebView: second look after $retryMs ms → ${second.snapshot.elements.size} elements (was ${first.snapshot.elements.size})")
             return second.snapshot
         }
         return first.snapshot

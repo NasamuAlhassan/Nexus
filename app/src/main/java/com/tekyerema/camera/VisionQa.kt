@@ -71,11 +71,18 @@ object VisionLadder {
         var last: VisionResult = VisionResult.Failed("no vision key")
         val rungs = plan(settings.geminiApiKey, settings.groqApiKeys)
         for ((i, rung) in rungs.withIndex()) {
-            last = when (rung) {
-                Rung.GEMINI -> GeminiVision.describe(jpeg, settings.geminiApiKey,
-                    com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt, structured)   // N-06
-                Rung.GROQ -> GroqVision.describe(jpeg, settings.groqApiKeys, settings.groqBaseUrl, prompt)
+            val call: suspend () -> VisionResult = {
+                when (rung) {
+                    Rung.GEMINI -> GeminiVision.describe(jpeg, settings.geminiApiKey,
+                        com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt, structured)   // N-06
+                    Rung.GROQ -> GroqVision.describe(jpeg, settings.groqApiKeys, settings.groqBaseUrl, prompt)
+                }
             }
+            // A slow first rung hands over instead of holding the user (`camera.vision.firstRungMs`, 20 Oct 2026).
+            last = if (i < rungs.lastIndex)
+                kotlinx.coroutines.withTimeoutOrNull(com.tekyerema.core.config.AppConfig.long("camera.vision.firstRungMs", 7_000L)) { call() }
+                    ?: VisionResult.Failed("slower than the first-rung deadline")
+            else call()
             if (last is VisionResult.Described) return last
             if (i < rungs.lastIndex)
                 Log.w(TAG, "[CAMERA] $rung couldn't describe (${(last as VisionResult.Failed).reason}) → ${rungs[i + 1]}")

@@ -295,7 +295,7 @@ object CreateContactTool : Tool {
             val saved = try {
                 withContext(Dispatchers.IO) { insert(app, name, number) }
             } catch (t: Throwable) {
-                if (com.tekyerema.BuildConfig.DEBUG) Log.w(ORG_TAG, "[CONTACT] direct insert failed: ${t.javaClass.simpleName}")
+                if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.w(ORG_TAG, "[CONTACT] direct insert failed: ${t.javaClass.simpleName}")
                 false
             }
             if (saved) return ToolResult(
@@ -475,7 +475,7 @@ object LocationTool : Tool {
         }
 
         val addr = reverseGeocode(app, lat, lng, AppConfig.long("os.location.geocodeTimeoutMs", 8_000L))
-        if (com.tekyerema.BuildConfig.DEBUG)   // no coordinates or place names in logs, even in debug
+        if (com.tekyerema.BuildConfig.DEV_HOOKS)   // no coordinates or place names in logs, even in debug
             Log.d(ORG_TAG, "[LOCATION] provider=${loc.provider} acc=$acc ageMs=$age geocoded=${addr != null}")
         if (addr == null)
             return ToolResult(true, "${LocationFormat.NO_STREET} Map link: $link.$stale", data = data, channel = "native")
@@ -903,7 +903,7 @@ object OpenIntentTool : Tool {
             ?.let { return ToolResult(false, it, recoverable = false) }
         return try {
             ctx.appContext.startActivity(intent)
-            if (com.tekyerema.BuildConfig.DEBUG) Log.d(ORG_TAG, "[INTENT] $key → ${handler.packageName}")   // no slot values
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.d(ORG_TAG, "[INTENT] $key → ${handler.packageName}")   // no slot values
             val label = labelOf(pm, handler.packageName)
             val opened = if (label != null) "$label is open with everything filled in."
                 else "Android is asking which app to open it with."

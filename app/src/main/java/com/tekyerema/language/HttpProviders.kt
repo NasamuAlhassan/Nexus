@@ -213,7 +213,7 @@ class HttpTtsProvider(
                 val units = QuotaLedger.Units(chars = p.length)
                 // DEBUG builds: the line that has no recorded clip yet, so a rehearsal can list what to pre-record when the
                 // lab is up (owner's overnight mission, 14 Oct 2026). Never in a release build.
-                if (com.tekyerema.BuildConfig.DEBUG) Log.d("Tekyerema", "[TTS-UNCACHED] key=$key")
+                if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.d("Tekyerema", "[TTS-UNCACHED] key=$key")
                 ledger.refusal(spec.id, spec.limits, units)?.let { Log.i("Tekyerema", "[TTS] $name skipped — $it"); return null }
                 try {
                     guard.run {

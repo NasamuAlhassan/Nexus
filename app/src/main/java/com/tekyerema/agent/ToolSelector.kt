@@ -70,6 +70,12 @@ object ToolSelector {
             listOf("walk_directions"),
             Regex("(?i)\\b(directions?|navigate|navigation|route|walk me|take me|get to|way to|nearest|closest|where is the|how far|how long to get|distance (?:to|from))\\b")
         ),
+        // Our camera for a question about something physical (tools/LookWithCameraTool).
+        "vision" to Group(
+            listOf("look_with_camera"),
+            Regex("(?i)\\b(camera|holding|in my hands?|in front of me|look at|see|seeing|colou?r|label|sign|expir\\w*|money|cash|notes?|" +
+                "coins?|cedis?|photo of|picture of|medicine|tablet|bottle|box|food|clothes|shirt|dress|light)\\b")
+        ),
         "media" to Group(
             listOf("play_music"),
             Regex("(?i)\\b(music|song|songs|play|playlist|podcast|radio|youtube|spotify|boomplay|audiomack)\\b")

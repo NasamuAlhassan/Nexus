@@ -21,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -48,6 +49,9 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         setContent { TekyeremaTheme { App() } }
+        // The page draws its own full-screen background: the window's one under it is pure overdraw on every frame (UI audit,
+        // 20 Oct 2026). Dropped once the first frame is up, so the start-up still shows the themed colour, never black.
+        window.decorView.post { window.setBackgroundDrawable(null) }
         // A task that operates the phone started from here: get out of its way (to the app underneath, or home) and
         // keep working in the background — the reply is spoken, the notification shows the status (OwnUi).
         lifecycleScope.launch {
@@ -86,13 +90,20 @@ private fun App() {
     SystemBarsFollowTheme()
 
     val calm = LocalCalmMotion.current
-    Box(Modifier.fillMaxSize().pageBackground().systemBarsPadding().imePadding()) {
-        // Finishing onboarding fades through into the product rather than cutting to it.
-        AnimatedContent(targetState = onboarded, transitionSpec = { TkMotion.fadeThrough(calm) }, label = "onboarding") { done ->
-            if (!done) {
-                PermissionsScreen(onDone = { settings.onboardingDone = true; onboarded = true })
-            } else {
-                Shell(settings)
+    Box(Modifier.fillMaxSize()) {
+        // The page light in its OWN offscreen layer, a sibling under the content (UI audit, 20 Oct 2026): it is recorded once
+        // and reused as one image while the orb or a card moves, instead of four full-screen gradients redrawn every frame.
+        Box(Modifier.matchParentSize()
+            .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
+            .pageBackground())
+        Box(Modifier.fillMaxSize().systemBarsPadding().imePadding()) {
+            // Finishing onboarding fades through into the product rather than cutting to it.
+            AnimatedContent(targetState = onboarded, transitionSpec = { TkMotion.fadeThrough(calm) }, label = "onboarding") { done ->
+                if (!done) {
+                    PermissionsScreen(onDone = { settings.onboardingDone = true; onboarded = true })
+                } else {
+                    Shell(settings)
+                }
             }
         }
     }

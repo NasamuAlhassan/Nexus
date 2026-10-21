@@ -129,7 +129,7 @@ object MoMoSendTool : Tool {
         }
         // SEC-P1-4: recipient number + amount are money-sensitive — log the full detail only in debug (the
         // 10-pesewa live-tuning test runs a debug build); release logs a redacted number.
-        if (com.tekyerema.BuildConfig.DEBUG) Log.i(TAG, "[MOMO] opened $root — driving send-money to $number, amount $amount, ref '$reference'")
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[MOMO] opened $root — driving send-money to $number, amount $amount, ref '$reference'")
         else Log.i(TAG, "[MOMO] opened $root — driving send-money to …${number.takeLast(3)}, amount $amount")
 
         // FIXED OFFLINE SEQUENCE (owner-requested): NO screen-reading-to-decide. We fire the exact MTN Send

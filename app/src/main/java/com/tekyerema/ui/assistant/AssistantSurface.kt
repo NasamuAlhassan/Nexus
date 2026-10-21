@@ -529,7 +529,7 @@ private fun GlassSurface(
                             // (the glass draws its own soft shadow, outside its shape only — ui/glass/LiquidGlass)
                             .glassBody(radius, glass, mood = { currentMood }, light = lightLevel, sweep = { sweep?.value ?: 0f },
                                 glowShift = { visualPx() * 0.25f }, tier = tier, arrival = { arrival.value })
-                            .clip(ContinuousShape(radius))
+                            .clip(if (com.tekyerema.ui.glass.glassLite()) androidx.compose.foundation.shape.RoundedCornerShape(radius) else ContinuousShape(radius))
                             .handle(glass.idleBar) { allow.followUp && rest == Rest.COMPACT }
                     ) {
                         Column(

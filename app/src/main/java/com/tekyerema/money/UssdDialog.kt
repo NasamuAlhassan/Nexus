@@ -33,7 +33,7 @@ internal object UssdDialog {
         if (!isUssdWindow(snap.appPackage, snap.screenTitle)) {
             // Once per window, not on every poll: the pushed-PIN and receipt watches poll every 0.7 s and filled the phone's log
             // with the same line (A20e, 14 Oct 2026), pushing the useful lines out of its 5 MB buffer.
-            if (com.tekyerema.BuildConfig.DEBUG && snap.appPackage != lastNotPhone) {
+            if (com.tekyerema.BuildConfig.DEV_HOOKS && snap.appPackage != lastNotPhone) {
                 lastNotPhone = snap.appPackage
                 android.util.Log.d("Tekyerema", "[USSD] not a phone window: ${snap.appPackage}")
             }
