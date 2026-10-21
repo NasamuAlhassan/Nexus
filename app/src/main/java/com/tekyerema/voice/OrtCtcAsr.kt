@@ -46,7 +46,10 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable 
     fun decode(samples: FloatArray, sampleRate: Int): String {
         val full = if (sampleRate == W2vBertFeatures.SAMPLE_RATE) samples else resample(samples, sampleRate, W2vBertFeatures.SAMPLE_RATE)
         // Attention grows with the square of the length: a command is a few seconds, so at most MAX_SECONDS are heard.
-        val pcm = if (full.size > MAX_SECONDS * W2vBertFeatures.SAMPLE_RATE) full.copyOf(MAX_SECONDS * W2vBertFeatures.SAMPLE_RATE) else full
+        // 8 s by default (`speech.asr.ort.maxSeconds`): a command is short, and the peak RAM grows faster than the clip (ef, 21 Oct
+        // 2026: 587 MB at 8 s for the 353 MB model; a 15 s clip could reach ~700 MB on a phone with ~600 MB free).
+        val maxS = com.tekyerema.core.config.AppConfig.int("speech.asr.ort.maxSeconds", 8).coerceIn(2, MAX_SECONDS)
+        val pcm = if (full.size > maxS * W2vBertFeatures.SAMPLE_RATE) full.copyOf(maxS * W2vBertFeatures.SAMPLE_RATE) else full
         val feats = W2vBertFeatures.compute(pcm)
         if (feats.isEmpty()) return ""
         val t = feats.size; val d = feats[0].size
