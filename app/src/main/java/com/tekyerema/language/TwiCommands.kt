@@ -192,7 +192,9 @@ object TwiCommands {
         val w = raw.trim().trimEnd('.', '!', '?').replace(FOR_ME, "").trim().ifEmpty { raw.trim() }
         if (w.equals("me", true)) return "me"
         // "me nua barima" (my brother) is said in two words as often as one
-        Regex("^[Mm]e\\s+(\\S+(?:\\s+(?:barima|baa))?)$").find(w)?.let { m ->
+        // "ne yere" (his wife) is how the recognisers often hear "me yere": the owner's "Frɛ me yere" came back "call ne yere" and
+        // was a contact search for "ne yere" (A20e, 21 Oct 2026). A user asking the phone to call means their own.
+        Regex("^(?:[Mm]e\\s+|[Nn]e\\s+|[MmNn]['’]\\s*)(\\S+(?:\\s+(?:barima|baa))?)$").find(w)?.let { m ->
             KIN[m.groupValues[1].lowercase().replace(" ", "")]?.let { return "my $it" }
         }
         // The recogniser writes names in lower case: a common name gets its capital back ("ama" → "Ama").

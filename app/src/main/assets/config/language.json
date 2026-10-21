@@ -78,7 +78,7 @@
           },
           "timeouts": {
             "connectMs": 6000,
-            "callMs": 30000
+            "callMs": 8000
           },
           "cacheEntries": 64
         },
@@ -287,7 +287,7 @@
           "languages": {"twi": "twi"},
           "request": {"api": "tts", "maxChars": 250, "maxParts": 3},
           "response": {"kind": "audio"},
-          "timeouts": {"connectMs": 6000, "callMs": 30000},
+          "timeouts": {"connectMs": 6000, "callMs": 8000},
           "cacheEntries": 64
         },
         "space_asr_kus": {
