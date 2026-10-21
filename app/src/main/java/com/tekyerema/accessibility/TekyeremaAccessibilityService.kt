@@ -277,6 +277,8 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         val e = event ?: return false
         // On the network's PIN screen the volume keys are the PIN pad (money/PinPad): consumed, both down and up, so
         // the volume doesn't move and no other gesture reads them.
+        // MTN's confirmation after the PIN: volume up confirms (money/ussd/AfterPinConfirm), before the PIN pad reads the key.
+        if (com.tekyerema.money.ussd.AfterPinConfirm.onKey(e.keyCode, e.action)) return true
         if (com.tekyerema.money.PinPad.onKey(this, e.keyCode, e.action, e.eventTime)) return true
         // Demo step 1 (owner, 14 Oct 2026): the phone is ringing — Volume Up answers, on the loudspeaker (phone/IncomingCall).
         if (e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP && com.tekyerema.phone.IncomingCall.isRinging &&

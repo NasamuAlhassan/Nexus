@@ -92,6 +92,7 @@ object AfterPin {
             val deadline = android.os.SystemClock.uptimeMillis() + SecureStep.MAX_MS
             var gone = 0
             var told = false
+            var confirmAsked = false
             val started = System.currentTimeMillis()
             while (android.os.SystemClock.uptimeMillis() < deadline) {
                 delay(900)
@@ -117,6 +118,17 @@ object AfterPin {
                     continue
                 }
                 gone = 0
+                // MTN's confirmation AFTER the PIN ("1. Confirm 2. Cancel"): read out, answered with a key (AfterPinConfirm) —
+                // before 21 Oct 2026 any screen with a box was taken for the PIN again and the user was left in silence.
+                if (s.hasInput && !s.masked && !confirmAsked && AfterPinConfirm.looksLikeConfirm(s.text)) {
+                    confirmAsked = true
+                    PinPad.disarm()                                  // the volume keys answer this screen now, not a PIN
+                    AfterPinConfirm.arm(ctrl, s, app)
+                    val name = network?.let { NumberSpeech.networkName(it) } ?: "The network"
+                    try { VoiceEngine.announce(UssdSpeech.forEar(s.text, intro = "$name asks you to confirm") +
+                        " Press volume up to confirm, or the power button to cancel.") } catch (_: Throwable) {}
+                    continue
+                }
                 if (s.hasInput || s.masked) continue                              // still asking for something: not ours to read
                 val withBalance = app?.let { a -> try { com.tekyerema.phonecare.PhoneAlerts.balanceAloud(a) } catch (_: Throwable) { false } } ?: false
                 val twiConversation = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
@@ -150,5 +162,5 @@ object AfterPin {
     }
 
     /** The walk was cancelled or a new one started: nothing more is read from this dialog. */
-    fun cancel() { job?.cancel(); job = null }
+    fun cancel() { job?.cancel(); job = null; AfterPinConfirm.disarm() }
 }

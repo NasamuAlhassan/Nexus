@@ -372,8 +372,8 @@ class CameraReadActivity : ComponentActivity() {
                     announce(phrase("describeOffline", "I can't describe it offline, but I can read any text I see."))
                 }
                 moneyAsk -> announce(phrase("modeMoneyAsk", "Hold the money flat in front of the camera. I'll count it."))
-                question != null -> announce(phrase("modeAsk", "Point the camera at it and hold still. I'll look."))
-                else -> announce(phrase("modeDescribe", "Hold still, I'll describe what's in front of you."))
+                question != null -> announce(phrase("modeAsk", if (instantCapture) "Looking." else "Point the camera at it and hold still. I'll look."))
+                else -> announce(phrase("modeDescribe", if (instantCapture) "Looking." else "Hold still, I'll describe what's in front of you."))
             }
         } else if (mode == MODE_CURRENCY) {
             // No model in this build: say so at once, before the camera opens — not after a frame, and never by just
@@ -466,7 +466,8 @@ class CameraReadActivity : ComponentActivity() {
     /** Analyser thread. At most one frame per [intervalMs]; every path closes the ImageProxy exactly once. */
     private fun analyze(image: ImageProxy) {
         val now = SystemClock.elapsedRealtime()
-        if (closing || now - lastAnalysedAt < intervalMs) { image.close(); return }
+        val every = if (mode == MODE_DESCRIBE && instantCapture) minOf(intervalMs, AppConfig.long("camera.capture.frameEveryMs", 120L)) else intervalMs
+        if (closing || now - lastAnalysedAt < every) { image.close(); return }
         lastAnalysedAt = now
         when (mode) {
             MODE_TEXT -> readText(image)   // closes the image when OCR completes
@@ -584,8 +585,19 @@ class CameraReadActivity : ComponentActivity() {
     // ------------------------------------------------------------------------------------------------ P-01 / P-09 describe
 
     /** Analyser thread: grade the frame; the first good one (claimed once) is copied and sent. */
+    /** Owner, 21 Oct 2026: "it should capture the moment and analyse it… not I'll be pointing, waiting". The first moment is
+     *  taken as a short burst (`camera.capture.windowMs`, ~0.9 s once frames arrive); its sharpest well-lit frame is sent at
+     *  once. The vision answer itself says how to move the phone if the thing is cut off. `camera.capture.instant` false = the
+     *  old coached wait for a sharp frame. */
+    private val instantCapture: Boolean by lazy { AppConfig.bool("camera.capture.instant", true) }
+    private var burstStartAt = 0L
+    private var burstBest: ByteArray? = null
+    private var burstBestScore = -1.0
+    private var burstW = 0; private var burstH = 0; private var burstRot = 0
+
     private fun gateForDescribe(image: ImageProxy) {
         if (describeClaimed.get()) return
+        if (instantCapture) { captureMoment(image); return }
         val yP = image.planes[0]
         val luma = FrameConvert.planeBytes(yP, yBuf).also { yBuf = it }
         val q = QualityGate.assess(
@@ -610,6 +622,39 @@ class CameraReadActivity : ComponentActivity() {
             val verdict = q.verdict
             main.post { onGuidance(verdict) }
         }
+    }
+
+    /** Analyser thread: one frame of the burst. Too dark → the light goes on and the moment starts again (once). */
+    private fun captureMoment(image: ImageProxy) {
+        val now = SystemClock.elapsedRealtime()
+        if (burstStartAt == 0L) burstStartAt = now
+        val yP = image.planes[0]
+        val luma = FrameConvert.planeBytes(yP, yBuf).also { yBuf = it }
+        val q = QualityGate.assess(luma, image.width, image.height, yP.rowStride,
+            darkBelow = AppConfig.double("camera.quality.darkBelow", QualityGate.DARK_BELOW),
+            brightAbove = AppConfig.double("camera.quality.brightAbove", QualityGate.BRIGHT_ABOVE),
+            blurMin = AppConfig.double("camera.quality.blurMin", QualityGate.BLUR_MIN))
+        if (q.verdict == Verdict.TOO_DARK && !torchOn) {
+            main.post { if (turnTorchOn()) burstStartAt = SystemClock.elapsedRealtime() }
+        }
+        val usable = q.verdict != Verdict.TOO_DARK && q.verdict != Verdict.TOO_BRIGHT
+        if (usable && q.blurScore > burstBestScore) {
+            burstBestScore = q.blurScore
+            burstBest = FrameConvert.toNv21(image); burstW = image.width; burstH = image.height; burstRot = image.imageInfo.rotationDegrees
+        }
+        val window = AppConfig.long("camera.capture.windowMs", 900L)
+        val waited = now - burstStartAt
+        // The moment is over: send the best frame; with none usable after three windows, send this one anyway (the answer
+        // will say it is dark or blurred and how to fix it).
+        val pick = when {
+            waited >= window && burstBest != null -> burstBest
+            waited >= window * 3 -> FrameConvert.toNv21(image).also { burstW = image.width; burstH = image.height; burstRot = image.imageInfo.rotationDegrees }
+            else -> null
+        } ?: return
+        if (!describeClaimed.compareAndSet(false, true)) return
+        val w = burstW; val h = burstH; val rot = burstRot
+        if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] moment captured after ${waited} ms (best blur=${burstBestScore.toInt()})")
+        main.post { sendForDescription(pick, w, h, rot) }
     }
 
     /** Main thread. Coach only on a verdict seen twice in a row, never over other speech, at most every few seconds. */
