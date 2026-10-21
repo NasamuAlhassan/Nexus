@@ -178,6 +178,9 @@ object VoiceEngine {
 
     /** The user is speaking Twi right now. */
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
+    /** DEBUG: say [text] with the phone's OWN voice for [language] (Twi or English), to time it ("first audio" in the log). */
+    suspend fun speakOnDevice(text: String, language: String): Boolean =
+        (if (language == Lang.TWI) twiLocal?.let { RespellTts(it) } else ownVoice)?.speak(Verbalize.apply(text), language) ?: false
 
     @Volatile private var readyLocalAt = 0L
     private fun availMb(): Long = try {

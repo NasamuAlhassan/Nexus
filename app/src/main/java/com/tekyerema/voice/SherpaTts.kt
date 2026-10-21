@@ -437,10 +437,13 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
             val data = s.dataDir?.let { extract("$dir/$it", File(app.filesDir, "ondevice/tts/$it")) } ?: ""
             val vits = OfflineTtsVitsModelConfig(model = "$dir/${s.model}", tokens = "$dir/${s.tokens}", dataDir = data,
                 noiseScale = s.noiseScale, noiseScaleW = s.noiseScaleW, lengthScale = s.lengthScale)
-            val cfg = OfflineTtsConfig(model = OfflineTtsModelConfig(vits = vits, numThreads = s.threads, debug = false, provider = "cpu"))
+            // `speech.tts.onDevice.threads.<language>` (eng | twi …) overrides voice.json — the A20e has 2 big + 6 little cores, so the
+            // best count is measured, not assumed (judge, 21 Oct 2026).
+            val threads = AppConfig.int("speech.tts.onDevice.threads.${s.language ?: "eng"}", s.threads).coerceIn(1, 8)
+            val cfg = OfflineTtsConfig(model = OfflineTtsModelConfig(vits = vits, numThreads = threads, debug = false, provider = "cpu"))
             OfflineTts(app.assets, cfg).also {
                 engine = it
-                Log.i("Tekyerema", "[TTS] on-device voice loaded: ${s.label} ${it.sampleRate()} Hz, ${s.threads} threads (${android.os.SystemClock.uptimeMillis() - t0} ms)")
+                Log.i("Tekyerema", "[TTS] on-device voice loaded: ${s.label} ${it.sampleRate()} Hz, $threads threads (${android.os.SystemClock.uptimeMillis() - t0} ms)")
             }
         } catch (t: Throwable) {
             loadError = "the on-device voice could not be loaded (${t.javaClass.simpleName})"

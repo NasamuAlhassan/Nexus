@@ -285,6 +285,16 @@ class RunGoalReceiver : BroadcastReceiver() {
             com.tekyerema.voice.VoiceDebug.listTtsVoices(context.applicationContext)
             return
         }
+        // Time the phone's own voice:  --es tts_local "<line>" --es lang twi|gh_en   → "[TTS] on-device voice: … first audio N ms"
+        intent.getStringExtra("tts_local")?.let { text ->
+            val lang = if (intent.getStringExtra("lang") == com.tekyerema.voice.Lang.TWI) com.tekyerema.voice.Lang.TWI else com.tekyerema.voice.Lang.GH_EN
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+                val t0 = android.os.SystemClock.uptimeMillis()
+                val ok = try { com.tekyerema.voice.VoiceEngine.speakOnDevice(text, lang) } catch (_: Throwable) { false }
+                Log.i("Tekyerema", "[VOICE-DEBUG] tts_local spoke=$ok lang=$lang in ${android.os.SystemClock.uptimeMillis() - t0} ms")
+            }
+            return
+        }
         intent.getStringExtra("tts_test")?.let { text ->
             com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"),
                 save = intent.getStringExtra("tts_save") == "1")
