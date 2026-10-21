@@ -414,7 +414,9 @@
     },
     "asr": {
       "_offlineTwiNote": "ON again 20 Oct 2026 (owner: the full Space model on the phone, like English): w2vbert_ctc (tekyerema-asr-ctc-twi-v2 int8 ONNX) in files/ondevice/twi/asr, used when Twi online hearing is unreachable or fails. Earlier: Offline Twi hearing (the on-device omni CTC model) is OFF — owner, 3 October 2026: online Twi first, English-only offline for now. true = an on-device Twi model with its own model.json is used when the HCI Lab can't be reached. Findings and the plan: docs/agent/OFFLINE_TWI.md.",
-      "offlineTwi": true
+      "offlineTwi": true,
+      "_loadPeakNote": "21 Oct 2026: the 4-bit full Twi model (q4b64c8, 384 MB) measured 438 MB anonymous RSS after load with no arena and no prepacking (ORT 1.17.1, Kaggle) — 1.2x its file, not the 1.5x default.",
+      "loadPeakFactor": {"w2vbert_ctc": 1.2}
     }
   }
 }
