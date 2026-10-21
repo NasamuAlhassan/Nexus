@@ -44,6 +44,10 @@ class AuditEngineFixesTest {
         assertEquals("0.5", ReviseTurn.patch("ussd_navigate", nav, "no, 50 pesewas")!!.args.getString("amount"))
         assertEquals("10", ReviseTurn.patch("ussd_navigate", nav, "change it to 10")!!.args.getString("amount"))
         assertEquals("1 cedi", ReviseTurn.patch("ussd_navigate", nav, "make it one cedi")!!.what.substringAfter("to "))
+        // the same correction said again (take A2, 21 Oct 2026): unchanged, read back again — not a re-plan
+        val again = ReviseTurn.patch("ussd_navigate", nav, "no, 20 cedis")!!
+        assertTrue(again.unchanged); assertEquals("20", again.args.getString("amount"))
+        assertFalse(ReviseTurn.patch("ussd_navigate", nav, "no, 10 cedis")!!.unchanged)
     }
 
     @Test fun changed_words_and_a_changed_app() {

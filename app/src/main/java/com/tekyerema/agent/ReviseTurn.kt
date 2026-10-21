@@ -17,7 +17,8 @@ import org.json.JSONObject
  */
 object ReviseTurn {
 
-    data class Revised(val args: JSONObject, val what: String)
+    /** [unchanged]: the reply restates what is already planned ("no, 10 cedis" when it is 10) — read it back again, nothing to change. */
+    data class Revised(val args: JSONObject, val what: String, val unchanged: Boolean = false)
 
     /** tool → (name key, number key): tools that take a contact name or a number. */
     private val CONTACT_TOOLS = mapOf(
@@ -140,7 +141,10 @@ object ReviseTurn {
             } else if (changes.isEmpty()) return null
         }
 
-        if (changes.isEmpty() || out.toString() == args.toString()) return null
+        if (changes.isEmpty()) return null
+        // The user repeated the correction already made (take A2, A20e, 21 Oct 2026: a second "daabi, sidi du" on the corrected
+        // read-back went to the cloud planner, which re-ran the original request — and the amount went back to 5).
+        if (out.toString() == args.toString()) return Revised(out, changes.joinToString(" and "), unchanged = true)
         return Revised(out, changes.joinToString(" and "))
     }
 

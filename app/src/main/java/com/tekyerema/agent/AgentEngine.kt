@@ -1615,6 +1615,13 @@ object AgentEngine {
                                         }
                                         val revised = if (decision.rationale == com.tekyerema.money.MoMoRetry.RATIONALE) null
                                             else ReviseTurn.patch(decision.name, decision.args, reply.text)
+                                        if (revised != null && revised.unchanged) {
+                                            log(LogEntry.Kind.POLICY, "The correction is what is planned already (${revised.what}) — reading it back again.")
+                                            history.add("You proposed: \"$prompt\". The user restated ${revised.what}, which it already is; it is being " +
+                                                "proposed again unchanged and will be confirmed again.")
+                                            planned.addFirst(decision.copy(rationale = "the user restated ${revised.what}"))
+                                            setStatus(AgentStatus.THINKING); continue
+                                        }
                                         if (revised != null) {
                                             log(LogEntry.Kind.POLICY, "Correction applied (${revised.what}) — reading it back again.")
                                             history.add("You proposed: \"$prompt\". The user corrected ${revised.what}; it is being proposed " +
