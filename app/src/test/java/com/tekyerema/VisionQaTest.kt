@@ -37,7 +37,8 @@ class VisionQaTest {
     // ---- the fallback order: Gemini first, Groq as the retry, nothing without keys ----
 
     @Test fun ladder_plan_is_gemini_then_groq() {
-        assertEquals(listOf(VisionLadder.Rung.GEMINI, VisionLadder.Rung.GROQ), VisionLadder.plan("gk", listOf("k1", "k2")))
+        assertEquals(listOf(VisionLadder.Rung.GROQ, VisionLadder.Rung.GEMINI), VisionLadder.plan("gk", listOf("k1", "k2")))   // Groq first since 21 Oct 2026
+        assertEquals(listOf(VisionLadder.Rung.GEMINI, VisionLadder.Rung.GROQ), VisionLadder.plan("gk", listOf("k1"), order = "gemini,groq"))
         assertEquals(listOf(VisionLadder.Rung.GEMINI), VisionLadder.plan("gk", emptyList()))
         assertEquals(listOf(VisionLadder.Rung.GROQ), VisionLadder.plan("", listOf("k1")))   // keyless-Gemini days
         assertEquals(emptyList<VisionLadder.Rung>(), VisionLadder.plan("", listOf(" ")))

@@ -60,9 +60,16 @@ object VisionLadder {
     enum class Rung { GEMINI, GROQ }
 
     /** Which rungs are worth trying, in order. Pure, so the fallback order is unit-tested. */
-    fun plan(geminiKey: String, groqKeys: List<String>): List<Rung> = buildList {
-        if (geminiKey.isNotBlank()) add(Rung.GEMINI)
-        if (groqKeys.any { it.isNotBlank() }) add(Rung.GROQ)
+    fun plan(geminiKey: String, groqKeys: List<String>,
+             order: String = com.tekyerema.core.config.AppConfig.string("camera.vision.order", "groq,gemini")): List<Rung> {
+        // Groq first (A20e, 21 Oct 2026: Groq answered a camera question in 1.35 s; Gemini missed its 7 s deadline);
+        // `camera.vision.order` "gemini,groq" = the old order.
+        val have = buildList {
+            if (geminiKey.isNotBlank()) add(Rung.GEMINI)
+            if (groqKeys.any { it.isNotBlank() }) add(Rung.GROQ)
+        }
+        val wanted = order.lowercase().split(',').mapNotNull { n -> Rung.values().firstOrNull { it.name.lowercase() == n.trim() } }
+        return wanted.filter { it in have } + have.filter { it !in wanted }
     }
 
     /** Walk the plan until a rung answers. The caller has already checked the user's cloud consent (J-18).
