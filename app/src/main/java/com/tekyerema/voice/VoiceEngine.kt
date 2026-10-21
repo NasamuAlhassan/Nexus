@@ -343,6 +343,8 @@ object VoiceEngine {
         val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
         englishVoice = if (own != null) AccentTts(own, systemVoice) else systemVoice
         twiLocal = SherpaTts(app, OnDeviceVoice.dirFor(Lang.TWI)).takeIf { it.present }?.also { it.warm() }
+        // Short of memory for the offline recogniser: the phone voices let go first (they reload for the reply) — see SherpaTts.releaseNow.
+        AsrMemory.onRelease(this) { ownVoice?.releaseNow(); twiLocal?.releaseNow() }
         langVoices = ON_DEVICE_LANGS.mapNotNull { l -> SherpaTts(app, OnDeviceVoice.dirFor(l)).takeIf { it.present }?.let { l to it } }.toMap()
         stage("ownVoice")
         android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}" +

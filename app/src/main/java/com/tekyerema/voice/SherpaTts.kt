@@ -223,6 +223,17 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
         }
     }
 
+    /**
+     * The same, waited for (up to [waitMs]): the offline recogniser is about to load and needs this memory NOW — its guard
+     * measures again straight after (A20e, 21 Oct 2026: offline Twi and English were refused "memory too low" while the two
+     * phone voices held a few hundred MB, and the user heard "no internet"). The voice reloads on the next line.
+     */
+    fun releaseNow(waitMs: Long = 1500L) {
+        if (engine == null) return
+        try { worker.submit { release() }.get(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Throwable) {}
+        try { worker.submit {}.get(waitMs, java.util.concurrent.TimeUnit.MILLISECONDS) } catch (_: Throwable) {}
+    }
+
     /** Give the model's memory back when nothing is being said (the system is short of RAM); it reloads on the next
      *  line. Queued on the worker, so it can never free the model under a line that is being synthesised. */
     fun release() {
