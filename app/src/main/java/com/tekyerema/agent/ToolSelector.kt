@@ -16,7 +16,9 @@ object ToolSelector {
      *  keyword, it was missing on a follow-up ("I meant mimics…", A20e 2026-09-28) — the model said "there's no
      *  web_search tool" and spent a step on find_tool. Its schema is ~60 tokens. */
     val DEFAULT_CORE = listOf("read_state", "wait", "tap", "long_press", "swipe", "scroll", "type", "key_event",
-        "open_app", "cannot_do", "find_tool", "ask_user", "web_search", "tap_sequence")
+        "open_app", "cannot_do", "find_tool", "ask_user", "web_search", "tap_sequence",
+        // The brain decides when a request needs eyes (owner, 21 Oct 2026: "the brain should understand") — not a word list.
+        "look_with_camera")
 
     private data class Group(val tools: List<String>, val keywords: Regex)
 

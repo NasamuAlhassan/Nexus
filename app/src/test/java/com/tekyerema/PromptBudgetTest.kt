@@ -42,7 +42,9 @@ class PromptBudgetTest {
         // Owner's night round (2026-10-20): + look_with_camera (our camera answers a question about a physical thing; "vision"
         // group — loaded per step only with seeing/holding/money words) measured 30,508. Cap = measured + ~100.
         assertTrue("compiled tool schema grew to $tools chars", tools <= 30_610)
-        assertTrue("system prompt grew to $system chars", system <= 5_760)
+        // Owner, 21 Oct 2026 ("the brain should understand"): one line telling the brain it has eyes (look_with_camera, now a
+        // core tool) — measured 5,935. Cap = measured + ~60.
+        assertTrue("system prompt grew to $system chars", system <= 5_995)
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */

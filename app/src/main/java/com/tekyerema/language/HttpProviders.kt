@@ -220,7 +220,9 @@ class HttpTtsProvider(
                         if (spec.dialect == "gradio") {
                             // Our own Twi voice on the language Space (api tts: text + language → a WAV file to download).
                             val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
-                                org.json.JSONArray().put(p).put(code)), spec.connectMs, spec.callMs)
+                                // Our Space voice reads Twi letters only: English words respelled first (voice/TwiRespell). The
+                                // cache key stays the line itself.
+                                org.json.JSONArray().put(if (language == Lang.TWI) com.tekyerema.voice.TwiRespell.apply(p) else p).put(code)), spec.connectMs, spec.callMs)
                             HttpSpeech.failureOf(spec, call)?.let { throw it }
                             val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), HttpSpeech.gradioEventId(spec, call)),
                                 spec.connectMs, spec.callMs)

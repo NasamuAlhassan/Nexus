@@ -400,7 +400,7 @@ object VoiceEngine {
                         twiLocal?.let { local ->
                             val networkOnly = SpeechProviders.resolve(SpeechProviders.ttsIds("twi", listOf("system")), ttsRegistry)
                                 .filter { it !== systemVoice }.let { l -> when (l.size) { 0 -> null; 1 -> l[0]; else -> FallbackTts(l) } }
-                            OfflineFirstTts(chain, local, isOnline, networkOnly ?: chain)
+                            OfflineFirstTts(chain, RespellTts(local), isOnline, networkOnly ?: chain)   // English words respelled (voice/TwiRespell)
                         } ?: chain
                     },
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured

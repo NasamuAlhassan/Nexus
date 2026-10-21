@@ -1,8 +1,39 @@
 {
  "schema_version": 1,
  "speech": {
-  "twi": {"_note": "20 Oct 2026 (owner: everything said in Twi is Twi, the fallback too): an English reply in a Twi conversation is translated whole (messages, answers) and spoken by the Twi voice; if it cannot be translated, cannotTranslate is said in Twi and the words stay on screen. noEnglishFallback false = the English voice reads it. [native speaker to verify cannotTranslate]", "noEnglishFallback": true, "cannotTranslate": "Mintumi nkyerɛ eyi ase seesei. San bisa bio."},
-  "ghEnglish": {"enabled": true, "_enabledNote": "20 Oct 2026: the cached F5 Kafui lines play first; a line not cached waits only firstWaitMs, then the phone's own Kafui voice (models/ondevice/eng/tts, chain 'ghvoice') speaks it. false = on-device Kafui only.","_note": "19 Oct 2026: the Kafui Dey English voice from the language Space is the default English voice. A CPU line takes ~24 s when the Space GPU is busy, so a first sentence gets 12 s (then the phone voice speaks), and the app's fixed lines are kept on disk (HttpProviders.TtsDiskCache.keepsEnglish) so they play at once after one slow fetch.", "firstWaitMs": 150, "nextWaitMs": 150},
+  "twi": {
+   "_note": "20 Oct 2026 (owner: everything said in Twi is Twi, the fallback too): an English reply in a Twi conversation is translated whole (messages, answers) and spoken by the Twi voice; if it cannot be translated, cannotTranslate is said in Twi and the words stay on screen. noEnglishFallback false = the English voice reads it. [native speaker to verify cannotTranslate]",
+   "noEnglishFallback": true,
+   "cannotTranslate": "Mintumi nkyerɛ eyi ase seesei. San bisa bio.",
+   "respell": {
+    "_note": "21 Oct 2026: English words in Twi lines respelled for the Twi voices (voice/TwiRespell) — pick-by-ear candidates in build/listen/twi_respell; other not-Twi words go through the letter rules. [owner: choose by ear]",
+    "mobile money": "mobaal mɔni",
+    "momo": "momo",
+    "wife": "waif",
+    "phone": "fon",
+    "airtime": "ɛtaim",
+    "reference": "rɛfrɛns",
+    "network": "nɛtwɔk",
+    "mtn": "ɛm ti ɛn",
+    "m t n": "ɛm ti ɛn",
+    "data": "dɛta",
+    "money": "mɔni",
+    "mobile": "mobaal",
+    "time": "taim",
+    "transport": "transpɔt",
+    "whatsapp": "wɔtsap",
+    "pin": "pin",
+    "free": "fri",
+    "balance": "balans"
+   }
+  },
+  "ghEnglish": {
+   "enabled": true,
+   "_enabledNote": "20 Oct 2026: the cached F5 Kafui lines play first; a line not cached waits only firstWaitMs, then the phone's own Kafui voice (models/ondevice/eng/tts, chain 'ghvoice') speaks it. false = on-device Kafui only.",
+   "_note": "19 Oct 2026: the Kafui Dey English voice from the language Space is the default English voice. A CPU line takes ~24 s when the Space GPU is busy, so a first sentence gets 12 s (then the phone voice speaks), and the app's fixed lines are kept on disk (HttpProviders.TtsDiskCache.keepsEnglish) so they play at once after one slow fetch.",
+   "firstWaitMs": 150,
+   "nextWaitMs": 150
+  },
   "voiceLayer": {
    "profile": "gh_mixed",
    "_note": "gh_mixed (owner's choice 2026-09-29, the default) = English: Android SpeechRecognizer + system TTS; Twi: UG HCI Lab ASR (on-device Twi Whisper fallback) + HCI Lab TTS — one recognizer per listen, chosen by the language setting ('speak Twi' / 'speak English'). builtin_en = Android SpeechRecognizer + system TTS, English only (SherpaAsr and the HCI Lab language layer are not built). ghana = MicCapture + HybridAsr (sherpa Whisper-tiny + UG HCI Lab ASR) + RoutingTts (HCI Lab Twi TTS). Only VoiceEngine.init reads this (voice/io/VoiceLayer.kt). The secure step never starts the system recognizer: the user taps Done.",
