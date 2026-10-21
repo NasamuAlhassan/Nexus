@@ -180,6 +180,11 @@ object VoiceEngine {
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
 
     @Volatile private var readyLocalAt = 0L
+    private fun availMb(): Long = try {
+        val am = appCtx?.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        android.app.ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem / (1024 * 1024)
+    } catch (_: Throwable) { 0L }
+    @Volatile private var appCtx: android.content.Context? = null
     @Volatile private var readyNetAt = 0L
 
     /**
@@ -193,7 +198,11 @@ object VoiceEngine {
     fun getReady(reason: String) {
         if (!initialized || !com.tekyerema.core.config.AppConfig.bool("speech.warm.enabled", true)) return
         val now = System.currentTimeMillis()
-        if (now - readyLocalAt > com.tekyerema.core.config.AppConfig.long("speech.warm.localEveryMs", 120_000L)) {
+        // The phone voices are reloaded only with memory clearly to spare: a reload under pressure can get the whole app killed —
+        // and the accessibility service (the floating bubble, the wake word) with it (owner, 21 Oct 2026: "the floating icons,
+        // wake words didn't work"). Below `speech.warm.minAvailMb` they stay as they are and load with the next reply.
+        if (now - readyLocalAt > com.tekyerema.core.config.AppConfig.long("speech.warm.localEveryMs", 120_000L) &&
+            availMb() >= com.tekyerema.core.config.AppConfig.long("speech.warm.minAvailMb", 900L)) {
             readyLocalAt = now
             try { ownVoice?.warm() } catch (_: Throwable) {}
             try { twiLocal?.warm() } catch (_: Throwable) {}
@@ -325,6 +334,7 @@ object VoiceEngine {
     fun init(app: Application) {
         if (initialized) return
         initialized = true
+        appCtx = app
         settings = Settings(app)
         // P3-02 (13 October 2026): this initialiser took 16.6 s of a 24-s Application.onCreate on the emulator (the start-up
         // ANR that leaves the accessibility service "crashed"); each stage is timed so the heavy ones can be moved off here.
