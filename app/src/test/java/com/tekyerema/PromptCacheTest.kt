@@ -126,7 +126,9 @@ class PromptCacheTest {
         assertTrue("settings step grew to ${settings.length}", settings.length <= 1_900)
         // 2026-10-01 (audit C10): a messaging goal now carries BrainPrompts.COMMS_RULES (~450 chars: never open a bot, what
         // "sent" means, don't redo a refused send by hand) — only on message/call goals, so the other three are unchanged.
-        assertTrue("chat list step grew to ${chats.length}", chats.length <= 2_800)
+        // 2026-10-20: the goal-rules table (BrainPrompts.goalRules: COMMS + PLACE, only on matching goals) measured 2,881 for
+        // this messaging step. Cap = measured + ~70.
+        assertTrue("chat list step grew to ${chats.length}", chats.length <= 2_950)
         assertTrue("quick settings step grew to ${qs.length}", qs.length <= 1_950)
         assertTrue("article step grew to ${article.length}", article.length <= 5_000)
     }

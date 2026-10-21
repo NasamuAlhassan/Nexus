@@ -757,9 +757,10 @@ class LocalFastRouter(
                 // quota); the rest stays English for the English voice — "speak English" is what to say. The whole line used to
                 // be English sent to the translator at the very moment the warm-up was waking it, so it always missed the
                 // reply bound and the English voice read it (A20e, 4 October 2026).
-                "Yoo, mɛsesa. " + com.tekyerema.language.EntityTags.EN_OPEN +
-                    "My Twi hearing is still learning — if I get it wrong, say it again, or type it. Say 'speak English' to switch back." +
-                    com.tekyerema.language.EntityTags.EN_CLOSE
+                // All in Twi (owner, 20 Oct 2026: in Twi everything is Twi) — before, the second sentence was an English stretch.
+                // [owner: a native speaker to verify] `locales.tw.twiSwitched`.
+                com.tekyerema.voice.Phrases.get("twiSwitched", true,
+                    "Yoo, mɛsesa. Seesei mɛkasa Twi. Sɛ mante wo yie a, ka bio anaa twerɛ. Sɛ wopɛ Borɔfo a, ka sɛ speak English.")
             } else {
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_ENGLISH; s.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
                 "Okay, English."
