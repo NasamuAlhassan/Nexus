@@ -311,10 +311,13 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         mi.availMem to mi.lowMemory
     } catch (_: Throwable) { Long.MAX_VALUE to false }
 
-    private fun limits(fromAssets: Boolean): AsrMemory.Limits {
+    private fun limits(fromAssets: Boolean, type: String? = null): AsrMemory.Limits {
         val cfg = com.tekyerema.core.config.AppConfig
-        val peak = if (fromAssets) cfg.double("speech.asr.loadPeakFactor.assets", AsrMemory.PEAK_FROM_ASSETS)
+        val base = if (fromAssets) cfg.double("speech.asr.loadPeakFactor.assets", AsrMemory.PEAK_FROM_ASSETS)
             else cfg.double("speech.asr.loadPeakFactor.files", AsrMemory.PEAK_FROM_FILES)
+        // A runtime with its own load profile (ONNX Runtime for w2vbert_ctc, measured on Kaggle: peak RSS / file size) may
+        // set `speech.asr.loadPeakFactor.<type>` (21 Oct 2026).
+        val peak = type?.let { cfg.double("speech.asr.loadPeakFactor.$it", base) } ?: base
         return AsrMemory.Limits(
             peakFactor = peak.coerceIn(1.0, 4.0),
             reserveBytes = cfg.long("speech.asr.loadReserveMb", 100L).coerceAtLeast(0L) * AsrMemory.MB,
@@ -331,7 +334,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     private fun admit(lang: String, d: File?, spec: ModelSpec) {
         if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.memoryGuard", true)) return
         val bytes = modelBytes(lang, d, spec)
-        val limits = limits(fromAssets = d == null)
+        val limits = limits(fromAssets = d == null, type = spec.type)
         var (avail, low) = memoryNow()
         var decision = AsrMemory.decide(avail, low, bytes, alreadyReleased = false, limits = limits)
         if (decision.verdict == AsrMemory.Verdict.RELEASE_THEN_LOAD) {

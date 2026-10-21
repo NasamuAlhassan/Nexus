@@ -32,6 +32,9 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int) : AutoCloseable 
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.EXTENDED_OPT)
             setCPUArenaAllocator(false)
             setMemoryPatternOptimization(false)
+            // No second, prepacked copy of the weights (Kaggle 1.17.1 measurements, 21 Oct 2026: load RAM is mostly copied
+            // initializers). `speech.asr.ort.prepacking` true = ORT's default (a little faster, more RAM).
+            if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.ort.prepacking", false)) addConfigEntry("session.disable_prepacking", "1")
         }
         session = env.createSession(modelFile.absolutePath, opts)
         val (v, b) = readVocab(vocabFile.readText())
