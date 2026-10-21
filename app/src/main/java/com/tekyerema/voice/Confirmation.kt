@@ -96,6 +96,7 @@ object Confirmation {
     /** A bare decline ("no", "daabi") — on a money read-back it asks what to change before dropping the send. */
     fun isBareNo(text: String): Boolean = text.trim().lowercase().replace(Regex("[^\\p{L}\\s]"), " ").trim()
         .matches(Regex("(?:no|nope|nah|daabi|dabi|oh no|no no|daabi daabi)"))
+    private val MONEY_PROMPT = Regex("(?i)cedi|pesewa|mobile money|momo|airtime")
     private val STOPPING = Regex("\\b(?:cancel|stop|never mind|nevermind|forget it|leave it|gyae)\\b")
 
     // The owner's live test (A20e, 14 October 2026): "I said you should send it to Mom and then 2019" corrected the number,
@@ -165,7 +166,10 @@ object Confirmation {
         // A bare "no", "no thanks" or "no, cancel / don't" stays a decline.
         if (ans == Answer.NO && !STOPPING.containsMatchIn(norm) && !DECLINING.containsMatchIn(norm)) {
             val afterNo = norm.replace(Regex("^.*?\\b(?:no|nope|nah|daabi|dabi)\\b"), "").trim()
-            if (afterNo.split(" ").count { it.isNotBlank() } >= 2 && !Regex("^(?:thanks|thank you|please)$").matches(afterNo)) return true
+            // On a MONEY read-back even one word after the no is a change for the brain: the Twi recogniser runs "daabi, fa sidi
+            // du" together into "daabi fasiidiidum" (A20e, 21 Oct 2026, 06:45) and the send was dropped.
+            val minWords = if (prompt != null && MONEY_PROMPT.containsMatchIn(prompt)) 1 else 2
+            if (afterNo.split(" ").count { it.isNotBlank() } >= minWords && !Regex("^(?:thanks|thank you|please|o|oo)$").matches(afterNo)) return true
         }
         // A plain decline with no redirect stays a decline; a clean yes stays a yes.
         if (ans != Answer.UNCLEAR) return false

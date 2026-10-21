@@ -34,6 +34,7 @@ class OwnerNightBugsTest {
         assertTrue(Confirmation.looksLikeRevision("change the reference to call me", momo))
         assertTrue(Confirmation.looksLikeRevision("no you send 50 pesos rather and change the reference to food", momo))
         assertTrue(Confirmation.looksLikeRevision("daabi fa ma Kofi", momo))
+        assertTrue(Confirmation.looksLikeRevision("daabi fasiidiidum", momo))   // the Twi recogniser glued "fa sidi du"
         // a decline stays a decline
         assertFalse(Confirmation.looksLikeRevision("no", momo))
         assertFalse(Confirmation.looksLikeRevision("I said no", momo))
