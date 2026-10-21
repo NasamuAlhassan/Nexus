@@ -179,6 +179,8 @@ class HttpTtsProvider(
     override suspend fun speak(text: String, language: String): Boolean = fetch(text, language)?.let { play(it) } ?: false
 
     override suspend fun play(clips: List<ByteArray>): Boolean {
+        // The moment the first word is heard — what the user waits for (judge's per-turn latency, 21 Oct 2026).
+        Log.i("Tekyerema", "[TTS] $name audio starts (${clips.size} clip(s))")
         for (c in clips) if (!sink.play(c)) return false
         return true
     }
@@ -197,7 +199,7 @@ class HttpTtsProvider(
             val key = "$code|$p"
             cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)
         }
-        if (ready.isNotEmpty() && ready.all { it != null }) return ready.map { it!! }
+        if (ready.isNotEmpty() && ready.all { it != null }) { Log.i("Tekyerema", "[TTS] $name: from the phone's cache"); return ready.map { it!! } }
         if (!available()) return null
         // The gateway takes at most spec.maxChars a request (HCI Lab: 250) — split, and leave a long reply to the phone's
         // own voice rather than spend several of a small day's requests on one answer.
