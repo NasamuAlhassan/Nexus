@@ -91,8 +91,10 @@ class HttpAsrProvider(
             guard.run {
                 if (spec.dialect == "gradio") {
                     // Our own Twi hearing model on the language Space (asr_b64: base64 WAV + language → text).
+                    // Less to send: the words only, as μ-law (SpaceAudio) — `speech.asr.compactUpload` = false sends the WAV as recorded.
+                    val audio = if (com.tekyerema.core.config.AppConfig.bool("speech.asr.compactUpload", true)) SpaceAudio.compact(wav) else wav
                     val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
-                        org.json.JSONArray().put(java.util.Base64.getEncoder().encodeToString(wav)).put(code ?: "twi")),
+                        org.json.JSONArray().put(java.util.Base64.getEncoder().encodeToString(audio)).put(code ?: "twi")),
                         spec.connectMs, spec.callMs)
                     HttpSpeech.failureOf(spec, call)?.let { throw it }
                     val tSent = SystemClock.elapsedRealtime()
@@ -100,7 +102,7 @@ class HttpAsrProvider(
                         spec.connectMs, spec.callMs)
                     HttpSpeech.failureOf(spec, result)?.let { throw it }
                     // Where the time goes — sending the audio, or the Space's queue and model (judge's latency audit, 21 Oct 2026).
-                    Log.i("Tekyerema", "[ASR] $name: audio ${wav.size / 1024} KB sent in ${tSent - t0} ms, answer ${SystemClock.elapsedRealtime() - tSent} ms later")
+                    Log.i("Tekyerema", "[ASR] $name: audio ${audio.size / 1024} KB (recorded ${wav.size / 1024} KB) sent in ${tSent - t0} ms, answer ${SystemClock.elapsedRealtime() - tSent} ms later")
                     return@run (HttpSpeech.parseGradio(spec, result.text()) ?: "") to null
                 }
                 val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.asr", 14_000L)) {
