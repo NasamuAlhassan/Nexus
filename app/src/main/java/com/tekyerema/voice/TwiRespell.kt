@@ -19,13 +19,36 @@ object TwiRespell {
 
     /** [line] with the lexicon's phrases and the not-Twi words respelled. */
     fun apply(line: String, lexicon: Map<String, String> = configured()): String {
-        var s = line
+        var s = endings(line)
         // Longest phrases first, whole words only, case-insensitive ("Mobile Money" and "mobile money").
         for ((k, v) in lexicon.entries.sortedByDescending { it.key.length }) {
             if (k.isBlank() || k.startsWith("_")) continue
             s = Regex("(?i)(?<![\\p{L}])" + Regex.escape(k) + "(?![\\p{L}])").replace(s) { v }
         }
         return WORD.replace(s) { m -> if (NOT_TWI.containsMatchIn(m.value)) letters(m.value) else m.value }
+    }
+
+    /**
+     * "ending 3 6 9 0" (a number's last digits) inside a Twi line, as the Twi read-back says it: "nɔma a n'awieɛ yɛ mmiɛnsa nsia
+     * nkron zero" (owner, 21 Oct 2026: "the ending number like 3 6 9 0, the ending isn't translated"). The translator keeps the
+     * English word and the figures (or English digit words); this puts the Twi frame and Twi digits back, whatever came out.
+     */
+    fun endings(line: String): String = ENDING.replace(line) { m ->
+        val digits = DIGIT_TOKEN.findAll(m.groupValues[1]).mapNotNull { t -> digitOf(t.value) }.joinToString("")
+        if (digits.length < 3) m.value
+        else Phrases.get("twiNumberEnding", true, ", nɔma a n'awieɛ yɛ {digits}", "digits" to ConfirmTemplates.twiDigits(digits))
+            .trimStart(',', ' ') + m.value.takeLastWhile { it.isWhitespace() || it == ',' }
+    }
+
+    private const val DIGIT_WORDS = "zero|oh|one|two|three|four|five|six|seven|eight|nine|baako|mmienu|abien|mmiɛnsa|abiɛsa|anan|" +
+        "anum|nsia|nson|nwɔtwe|nkron"
+    private val DIGIT_TOKEN = Regex("(?i)\\d|\\b(?:$DIGIT_WORDS)\\b")
+    private val ENDING = Regex("(?i)\\bending(?:\\s+(?:in|with))?[\\s:,]+((?:(?:\\d|\\b(?:$DIGIT_WORDS)\\b)[\\s,]*){3,6})")
+    private fun digitOf(t: String): Char? = when (t.lowercase()) {
+        "zero", "oh" -> '0'; "one", "baako" -> '1'; "two", "mmienu", "abien" -> '2'; "three", "mmiɛnsa", "abiɛsa" -> '3'
+        "four", "anan" -> '4'; "five", "anum" -> '5'; "six", "nsia" -> '6'; "seven", "nson" -> '7'; "eight", "nwɔtwe" -> '8'
+        "nine", "nkron" -> '9'
+        else -> t.singleOrNull()?.takeIf { it.isDigit() }
     }
 
     /** The letter rules for one word (lower case out; the Twi voice lower-cases anyway). */

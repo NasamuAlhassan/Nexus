@@ -19,6 +19,16 @@ class TwiRespellTest {
         assertEquals("telesel", TwiRespell.letters("Telecel"))
     }
 
+    /** Owner, 21 Oct 2026: "the ending number like 3 6 9 0, the ending isn't translated". */
+    @Test fun aNumbersEndingIsSaidInTwi() {
+        val twiEnding = "nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron sero"   // "zero" then the letter rule (z → s)
+        assertEquals("Mefrɛ My yere, $twiEnding?", TwiRespell.apply("Mefrɛ My yere, ending 3 6 9 0?", emptyMap()))
+        assertEquals("Mefrɛ My yere, $twiEnding?", TwiRespell.apply("Mefrɛ My yere, ending mmiɛnsa nsia nkron zero?", emptyMap()))
+        assertEquals("Ama, $twiEnding na ɛyɛ MTN.", TwiRespell.apply("Ama, ending three six nine zero na ɛyɛ MTN.", emptyMap()))
+        // not a number's ending
+        assertEquals("Ending no yɛ fɛ.", TwiRespell.apply("Ending no yɛ fɛ.", emptyMap()))
+    }
+
     @Test fun twiWordsAreNeverTouched() {
         val twi = "Wopɛ sɛ mesoma sidi anum ma Ama? Ka aane anaa daabi."
         assertEquals(twi, TwiRespell.apply(twi, emptyMap()))
