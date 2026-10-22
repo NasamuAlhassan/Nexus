@@ -63,7 +63,12 @@ object SpaceAudio {
         // fmt: format 7 = μ-law, 1 channel, 8 bits; cbSize 0 is optional for non-PCM and soundfile reads it as written
         b.put("fmt ".toByteArray()).putInt(16).putShort(7).putShort(1).putInt(rate).putInt(rate).putShort(1).putShort(8)
         b.put("data".toByteArray()).putInt(n)
-        for (i in from until to) b.put(muLaw(s[i]))
+        // Brought up to ~70 % of full scale first (at most 8×): μ-law is coarse on quiet audio — a soft "aduane" at −12 dB was
+        // heard "eduane" without this, and right with it (judge's quiet-clip check, 22 Oct 2026).
+        var peak = 1
+        for (i in from until to) peak = maxOf(peak, kotlin.math.abs(s[i].toInt()))
+        val gain = minOf(8.0, 0.7 * 32767 / peak)
+        for (i in from until to) b.put(muLaw((s[i] * gain).toInt().coerceIn(-32768, 32767).toShort()))
         if (n and 1 == 1) b.put(0)
         return b.array()
     }
