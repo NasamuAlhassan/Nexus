@@ -199,16 +199,24 @@ class OfflineFirstTts(
     @Volatile var lastVoice: String? = null
         private set
     override fun whyUnavailable(): String? = null
+    /** Bumped by [stop]: a line cut short while a voice played it is over — never said again by the next voice (audit, 22 Oct 2026). */
+    private val stops = java.util.concurrent.atomic.AtomicInteger()
     override suspend fun speak(text: String, language: String): Boolean {
+        val gen = stops.get()
         if (!isOnline()) {
             if (local.speak(text, language)) { lastVoice = local.name; return true }
+            if (stops.get() != gen) return true
             return network.speak(text, language).also { if (it) lastVoice = network.name }
         }
         if (networkOnly.speak(text, language)) { lastVoice = (networkOnly as? FallbackTts)?.lastVoice ?: networkOnly.name; return true }
+        // A stopped clip comes back false (MediaAudioSink): a volume key at the PIN, hush, a new request. The phone's Twi voice used to
+        // read the whole line again from the start — stopped counts as said, as SherpaTts reports it (audit, 22 Oct 2026).
+        if (stops.get() != gen) return true
         if (local.speak(text, language)) { lastVoice = local.name; return true }
+        if (stops.get() != gen) return true
         if (networkOnly !== network && network.speak(text, language)) { lastVoice = network.name; return true }
         return false
     }
-    override fun stop() { network.stop(); local.stop(); if (networkOnly !== network) networkOnly.stop() }
+    override fun stop() { stops.incrementAndGet(); network.stop(); local.stop(); if (networkOnly !== network) networkOnly.stop() }
     override fun shutdown() { network.shutdown(); local.shutdown(); if (networkOnly !== network) networkOnly.shutdown() }
 }

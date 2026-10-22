@@ -201,7 +201,7 @@ class HttpTtsProvider(
         // A line already on the phone — a lab clip recorded in advance and shipped in the app (LabClips), or one cached
         // earlier — plays at once: no network, no daily quota, and none of the lab's ~14 s wait (3 October 2026).
         val ready = HttpSpeech.parts(say, spec.maxChars).map { p ->
-            val key = "$code|$p"
+            val key = clipKey(code, p, language)
             cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)
         }
         if (ready.isNotEmpty() && ready.all { it != null }) { Log.i("Tekyerema", "[TTS] $name: from the phone's cache"); return ready.map { it!! } }
@@ -215,7 +215,7 @@ class HttpTtsProvider(
         }
         val clips = ArrayList<ByteArray>(parts.size)
         for (p in parts) {
-            val key = "$code|$p"
+            val key = clipKey(code, p, language)
             clips += cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)?.also { if (spec.cacheEntries > 0) cache[key] = it } ?: run {
                 val units = QuotaLedger.Units(chars = p.length)
                 // DEBUG builds: the line that has no recorded clip yet, so a rehearsal can list what to pre-record when the
@@ -256,6 +256,15 @@ class HttpTtsProvider(
         }
         return clips
     }
+
+    /**
+     * The cache key of one part. Our Space's Twi voice is SENT the line with a kin name put into Twi ("My wife" → "wo yere",
+     * voice/TwiRespell.kinNames, 21 Oct 2026), so the key carries that too: keyed by the line alone, a clip cached on the phone's
+     * disk before that change (kept across installs) went on saying "My wife" (audit, 22 Oct 2026). A line with no kin name keeps
+     * its key, so every other cached clip still plays at once.
+     */
+    private fun clipKey(code: String, p: String, language: String): String =
+        if (spec.dialect == "gradio" && language == Lang.TWI) "$code|${com.tekyerema.voice.TwiRespell.kinNames(p)}" else "$code|$p"
 
     override fun stop() = sink.stop()
     override fun shutdown() = sink.stop()

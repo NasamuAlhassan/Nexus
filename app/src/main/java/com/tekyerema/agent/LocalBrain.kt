@@ -230,6 +230,9 @@ class LocalBrain : AgentBrain {
             // Airtime for SOMEONE ELSE is never decided by this older rule: it has no place for the other person, and
             // proposed the user's own phone (live A20e 2026-10-02). The money flow takes those; what it leaves, the planner.
             if (RE_AIRTIME_OTHER.containsMatchIn(g)) return defer("airtime for someone else — not for this rule")
+            // A meter, a bill or a TV subscription "topped up" is not airtime for this phone: since MoneyFlow.notYet stopped answering
+            // bills, "recharge my ECG prepaid with 50 cedis" reached here and was read back as airtime (audit, 22 Oct 2026).
+            if (!g.contains("airtime") && RE_BILL_TOPUP.containsMatchIn(g)) return defer("a bill or meter top-up, not airtime")
             buyAirtimeDecision(raw)?.let { return it }
         }
         if ((g.contains("send") || g.contains("transfer") || g.contains("fa")) &&
@@ -1016,6 +1019,8 @@ class LocalBrain : AgentBrain {
         private val RE_BARE_APP = Regex("^(?:the\\s+|my\\s+)?(camera|gallery|photos|settings|calculator|clock|calendar|" +
             "contacts|files|whatsapp|telegram|youtube|chrome|maps|instagram|facebook|tiktok|spotify|gmail|recorder|notes|" +
             "play store|playstore|messages)$", RegexOption.IGNORE_CASE)
+        /** A top-up that is not airtime: a prepaid meter, a bill, a TV subscription (audit, 22 Oct 2026). */
+        private val RE_BILL_TOPUP = Regex("(?<![a-z])(?:ecg|prepaid|postpaid|electricity|light|meter|water|dstv|gotv|startimes|bills?|fees?|subscription)(?![a-z])")
         /** Airtime asked ABOUT, not bought: check / balance / how much / left. */
         private val RE_AIRTIME_OTHER = Regex("\\b(?:to|for)\\s+(?:a|an|another|someone|somebody|him|her|them|\\+?\\d[\\d\\s-]{6,})")
         private val RE_BALANCE_ASK = Regex("\\bcheck\\b|\\bbalance\\b|how much|\\bleft\\b|\\bremaining\\b|do i have")

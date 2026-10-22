@@ -354,7 +354,12 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         // Right after a tight model was let go its memory is still coming back (A20e, 21 Oct 2026: a second offline Twi
         // command 0.7 s later was 32 MB short; ~20 s to recover fully). Wait a little for it instead of refusing at once.
         val sinceUnload = android.os.SystemClock.elapsedRealtime() - ResidentModels.lastTightUnloadAt
-        if (decision.verdict == AsrMemory.Verdict.REFUSE && sinceUnload in 0 until 30_000L) {
+        // Only a SMALL shortfall comes back by waiting (the memory of the model just let go — 32 MB that day). The big offline English
+        // model "needs" ~1.5 GB on the A20e and never fits: the 6 s wait before the small English model was tried delayed every offline
+        // English command made within 30 s of the last unload (audit, 22 Oct 2026). `speech.asr.recoverMaxShortMb`.
+        val shortMb = (decision.neededBytes - avail) / AsrMemory.MB
+        if (decision.verdict == AsrMemory.Verdict.REFUSE && sinceUnload in 0 until 30_000L &&
+            shortMb <= com.tekyerema.core.config.AppConfig.long("speech.asr.recoverMaxShortMb", 200L)) {
             val waitMs = com.tekyerema.core.config.AppConfig.long("speech.asr.recoverWaitMs", 6000L).coerceIn(0L, 15_000L)
             val until = android.os.SystemClock.elapsedRealtime() + waitMs
             while (decision.verdict == AsrMemory.Verdict.REFUSE && android.os.SystemClock.elapsedRealtime() < until) {

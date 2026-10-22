@@ -40,12 +40,19 @@ class ReaderVoice(
     private fun next() {
         val (line, then) = queue.removeFirstOrNull() ?: run { job = null; return }
         job = scope.launch {
+            val askedAt = VoiceEngine.lastRequestAt
             val ok = try { VoiceEngine.speakIn(line, VoiceEngine.language()) } catch (c: CancellationException) { throw c } catch (_: Throwable) { false }
+            val me = coroutineContext[Job]
             main.post {
+                // Stopped or flushed while this waited for the main thread: the old line's follow-up and fallback are void, and the newer
+                // line's job must not be forgotten (it could then be neither stopped nor waited for) — audit, 22 Oct 2026.
+                if (job !== me) return@post
                 job = null
                 val fb = fallback
                 // Twi never falls back to the phone's English engine (speech.twi.noEnglishFallback): its own lines say why.
-                if (!ok && fb != null && VoiceEngine.language() != com.tekyerema.voice.Lang.TWI) fb(line, then) else then?.invoke()
+                // A line cut short by a new request is over: "false" from the reply voice also means "stopped" (RoutingTts), and the
+                // phone's engine read it again from the start over the new request (audit, 22 Oct 2026).
+                if (!ok && fb != null && VoiceEngine.language() != com.tekyerema.voice.Lang.TWI && VoiceEngine.lastRequestAt == askedAt) fb(line, then) else then?.invoke()
                 if (job == null) next()
             }
         }

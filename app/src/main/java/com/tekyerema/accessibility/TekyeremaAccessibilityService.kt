@@ -281,8 +281,13 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // Back on the network's PIN dialog closes it — a cancel, like its Cancel button and the power button (owner's live test,
         // 22 Oct 2026: a Back-closed dialog was taken for "maybe the PIN went in" and the app kept waiting for MTN's text).
         // Not consumed: Back still closes the dialog.
+        // …but only a Back that really closed the network's dialog (audit, 22 Oct 2026). Back often only hides the keyboard over
+        // the PIN box and the dialog STAYS; after the PIN the secure step outlives the dialog (AfterPin waits ~22 s for MTN's
+        // text). Both said "Cancelled. Nothing was sent.", dropped the hand-off and disarmed the volume-key PIN pad. So: the
+        // dialog is on screen at the key-up (this filter sees the key before the dialog does) and gone 1.2 s later.
         if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK && e.action == android.view.KeyEvent.ACTION_UP &&
-            com.tekyerema.voice.SecureStep.active()) com.tekyerema.phone.PinCurtain.onUserCancelled()
+            com.tekyerema.voice.SecureStep.active() && phoneWindowPresent())
+            mainHandler.postDelayed({ if (!phoneWindowPresent()) com.tekyerema.phone.PinCurtain.onUserCancelled() }, 1_200L)
         if (com.tekyerema.money.ussd.AfterPinConfirm.onKey(e.keyCode, e.action)) return true
         if (com.tekyerema.money.PinPad.onKey(this, e.keyCode, e.action, e.eventTime)) return true
         // Demo step 1 (owner, 14 Oct 2026): the phone is ringing — Volume Up answers, on the loudspeaker (phone/IncomingCall).

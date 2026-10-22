@@ -271,7 +271,10 @@ class RoutingTts(
     private suspend fun speakStitched(line: String, language: String): Boolean? {
         val pieces = com.tekyerema.language.EntityTags.segments(line)
         var spokeTwi = false
+        val gen = stops.get()
         for ((i, piece) in pieces.withIndex()) {
+            // Stopped part-way (a volume key at the PIN, hush, a new request): the rest of the line is not said (audit, 22 Oct 2026).
+            if (stops.get() != gen) return true
             val (text, isEnglish) = piece
             // Owner, 20 Oct 2026: in Twi everything is Twi — an English piece (an amount, a name) is put into Twi words and said
             // by the Twi voice too (`speech.twi.noEnglishFallback` false = the old English pieces).
@@ -316,6 +319,8 @@ class RoutingTts(
         }
     }
 
-    override fun stop() { english.stop(); twi.stop(); ghEnglish?.stop(); others.values.forEach { it.stop() } }
+    /** Bumped by [stop], so a line spoken piece by piece ends where it was stopped (audit, 22 Oct 2026). */
+    private val stops = java.util.concurrent.atomic.AtomicInteger()
+    override fun stop() { stops.incrementAndGet(); english.stop(); twi.stop(); ghEnglish?.stop(); others.values.forEach { it.stop() } }
     override fun shutdown() { english.shutdown(); twi.shutdown(); ghEnglish?.shutdown(); others.values.forEach { it.shutdown() } }
 }

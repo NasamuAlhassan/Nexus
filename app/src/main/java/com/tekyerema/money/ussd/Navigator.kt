@@ -139,8 +139,10 @@ class Navigator(
                         val pick = online?.chooseForGoal(tx.goal.orEmpty(), m.rows, path, tx.amount)
                         val choice = when (pick) {
                             is OnlineFallback.GoalPick.Row -> pick.option.also { t("GOAL", "chose $it") }
-                            is OnlineFallback.GoalPick.Ask -> { t("GOAL", "asks the user"); return Outcome.NeedUser("${pick.question} The menu says: " +
-                                "“${UssdSpeech.forEar(m.text, intro = "")}”.") }
+                            // The menu first and the question LAST: a hand-over that doesn't end in "?" is the walk's END for
+                            // MoneyPlan.navigatorEnd — the task finished on the question and the user's answer reached nothing (audit, 22 Oct 2026).
+                            is OnlineFallback.GoalPick.Ask -> { t("GOAL", "asks the user"); return Outcome.NeedUser("The menu says: " +
+                                "“${UssdSpeech.forEar(m.text, intro = "")}”. " + pick.question.trim().trimEnd('.').let { if (it.endsWith("?")) it else "$it?" }) }
                             else -> morePressed.takeIf { it < 3 }?.let { com.tekyerema.money.TelcoUssd.moreOption(m.text) }?.also { morePressed++; t("PAGE", "More ($morePressed)") }
                                 ?: return Outcome.NeedUser("I couldn't find that on this menu. It says: “${UssdSpeech.forEar(m.text, intro = "")}”. " +
                                     "Which number should I enter?")

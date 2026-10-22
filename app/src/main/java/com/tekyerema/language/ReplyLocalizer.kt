@@ -43,7 +43,9 @@ class ReplyLocalizer(
      */
     suspend fun toTwi(text: String, wait: Long = waitMs(), everything: Boolean = false): String? {
         val src = text.trim()
-        fixedTwi(src)?.let { return it }
+        // The fixed lines are Twi: a Kusaal reply (target KUS) never gets them — "Cancelled. Nothing was sent." was said in Twi
+        // by the Kusaal voice (audit, 22 Oct 2026).
+        if (target == Lang.TWI) fixedTwi(src)?.let { return it }
         if (translator == null || !enabled() || src.isEmpty() || src.length > maxChars()) return null
         if (!everything && !looksEnglish(src)) return null
         // everything = the owner's rule (20 Oct 2026): whatever is said in Twi is Twi. The words of a message are translated
@@ -78,7 +80,7 @@ class ReplyLocalizer(
      * screen (the Twi voice says about three requests of text).
      */
     suspend fun toTwiAll(text: String, wait: Long = AppConfig.long("providers.speech.mt.allWaitMs", 7_000L)): String? {
-        fixedTwi(text.trim())?.let { return it }
+        if (target == Lang.TWI) fixedTwi(text.trim())?.let { return it }   // Twi lines only for Twi (audit, 22 Oct 2026)
         if (translator == null || !enabled()) return null
         val src = text.trim()
         // One request when it fits (the translator takes maxChars); longer text in pieces at sentence ends. ONE budget for the

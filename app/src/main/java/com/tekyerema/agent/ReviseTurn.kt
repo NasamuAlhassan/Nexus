@@ -96,7 +96,9 @@ object ReviseTurn {
         if (args.has("reference") || tool == "ussd_navigate" || tool == "momo_send") REFERENCE.find(rest)?.let { m ->
             val ref = m.groupValues[1].replace(TRAIL, "").trim().trim('"', '“', '”').trimEnd('.', '!')
             if (ref.isEmpty() || ref.length > 60) return null
-            out.put("reference", ref); changes.add("the reference to “$ref”")
+            // "…, the reference is fine / okay / correct" KEEPS the reference — it was changed to "fine" (audit, 22 Oct 2026)
+            if (!Regex("(?i)^(?:fine|ok(?:ay)?|good|correct|right|(?:the )?same|no change)$").matches(ref)) {
+                out.put("reference", ref); changes.add("the reference to “$ref”") }
             rest = rest.substring(0, m.range.first).trim().trimEnd(',').replace(Regex("(?i)\\s+(?:and also|and|also)$"), "").trim()
         }
 
@@ -157,6 +159,10 @@ object ReviseTurn {
                     contact != null -> { out.put(contact.first, who); out.remove(contact.second); changes.add("the person to $who") }
                     else -> return null       // a name for a number-only tool: the planner resolves it
                 }
+                // Airtime now for someone: the navigator's intent follows. BUY_AIRTIME skips the recipient, so "… for Loglo" was read
+                // back "for this phone" again and bought there — the live path is ussd_navigate, not mobile_money (audit, 22 Oct 2026).
+                if (tool == "ussd_navigate" && out.optString("intent") == "buy_airtime" &&
+                    !Regex("(?i)^(?:me|myself|my (?:own )?(?:phone|number|line)|this (?:phone|number|line))$").matches(who)) out.put("intent", "send_airtime")
             } else if (changes.isEmpty()) return null
         }
 

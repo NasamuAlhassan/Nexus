@@ -32,9 +32,10 @@ Never say a road is safe to cross. Keep Ghanaian names and Twi letters (ɛ, ɔ) 
 """.trim()
 
     /** For "how much money": the notes as JSON only; the phone adds them up ([spokenMoney]) — never the model's sum. */
+    // The only example shows ONE note: "count":2 there invited a single note to be counted twice (audit, 22 Oct 2026).
     const val MONEY = """
 Count the Ghana cedi money in this photo for a blind person. JSON only, no other text:
-{"items":[{"kind":"note","value_ghs":20,"count":2}],"unreadable":0,"other_currency":"","confidence":"high","fix":""}
+{"items":[{"kind":"note","value_ghs":20,"count":1}],"unreadable":0,"other_currency":"","confidence":"high","fix":""}
 Notes: GH₵1, 2, 5, 10, 20, 50, 100, 200. Coins: 1, 5, 10, 20, 50 pesewas (0.01 to 0.5) and GH₵1, GH₵2. value_ghs comes from
 the printed numeral. Count every physical note and coin, overlapping ones included. ONE note prints its value SEVERAL times (in
 the corners and the middle): count each piece of paper ONCE, by its edges — never by how many numerals you see. One note in the
