@@ -50,7 +50,10 @@ object ToolSelector {
             // "cash": the owner's "Send cash to 055…" (A20e 2026-09-29) loaded no money tool, so the planner hunted for
             // a "Mobile Money" app instead of walking *170#.
             Regex("(?i)(\\bmomo\\b|mobile money|\\bmoney\\b|\\bcash\\b|\\bcedis?\\b|\\bghs\\b|pesewa|transfer|\\bpay\\b|airtime|bundle|" +
-                "balance|ussd|\\*\\d|sika|\\bbank\\b|fees?\\b|\\bloans?\\b|\\bsav(?:e|ings)\\b|yello|approv|midnight)")
+                "balance|ussd|\\*\\d|sika|\\bbank\\b|fees?\\b|\\bloans?\\b|\\bsav(?:e|ings)\\b|yello|approv|midnight)|" +
+                // A Twi request reaches the planner with its amount as a TAG ("give [A1] to my wife"): no money word was left, no
+                // money tool loaded, and the planner asked for the wife's number (owner's live test, 22 Oct 2026, 07:18).
+                "\\[A\\d+\\]")
         ),
         // P1-05 token diet (13 October 2026): the old single "device" group carried 15 schemas and loaded WHOLE on any word
         // from "settings" to "song" — "open settings and go to about phone" sent 29 tools (~5,000 prompt tokens a step).
