@@ -643,6 +643,10 @@ class LocalBrain : AgentBrain {
 
     /** §A.2 — buy airtime: extract the cedi amount if present, open the network's MoMo menu, hand off. */
     private fun buyAirtimeDecision(raw: String): AgentDecision? {
+        // Airtime "to"/"for" someone is never airtime for this phone: the brain (or the money flow) finds the person in the contacts
+        // and reads it back. The owner's "send 2 cedis airtime to Loglo" lost the name in the recogniser and became airtime for
+        // the owner's own phone (live test, 22 Oct 2026).
+        if (RE_AIRTIME_FOR_OTHER.containsMatchIn(raw)) return defer("airtime for someone else — the person is resolved by the brain")
         val canon = Normalizer.normalize(raw, if (twi) Lang.TWI else Lang.GH_EN)
         val amount = com.tekyerema.tools.GhanaMobileMoney.parseAmount(canon)
         val args = JSONObject().put("_kind", "buy_airtime"); amount?.let { args.put("_amount", it) }
@@ -1169,6 +1173,8 @@ class LocalBrain : AgentBrain {
         // F-12: a number the user points at on the screen.
         private val RE_THIS_NUMBER = Regex("\\b(?:call|dial|ring|copy) (?:this|that|the) (?:phone )?number\\b|\\bnumber on (?:the |my )?screen\\b", RegexOption.IGNORE_CASE)
         // L-04: an urgent request for personal help (the public lines are "call an ambulance/police" on the fast path).
+        /** Airtime named for someone else: "… airtime to/for Loglo", "… for my wife" (not "for me", "for this phone"). */
+        private val RE_AIRTIME_FOR_OTHER = Regex("(?i)\\bairtime\\b.*\\b(?:to|for)\\b(?!\\s+(?:me|myself|my (?:own )?(?:phone|number|line)|this (?:phone|number|line))\\b)")
         private val RE_EMERGENCY = Regex("^(?:please )?(?:help me(?: please)?|i need help|i need urgent help|this is an emergency|emergency|" +
             "call (?:my )?emergency contact|i(?:'ve| have) fallen(?: down)?|mmoa(?: me)?|boa me)[.!]*$", RegexOption.IGNORE_CASE)
         private val RE_SETTING_OFF = Regex("\\b(turn|switch|put)\\s+(\\w+\\s+){0,3}?off\\b|\\bdisable\\b|\\bdeactivate\\b", RegexOption.IGNORE_CASE)

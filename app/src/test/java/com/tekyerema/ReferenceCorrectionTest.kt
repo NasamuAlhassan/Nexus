@@ -19,4 +19,13 @@ class ReferenceCorrectionTest {
         patch("I'm so change the amount to 3 Ghana cedis and also change the reference to charger").let {
             assertEquals("3", it.getString("amount")); assertEquals("charger", it.getString("reference")) }
     }
+
+    /** Owner's live test (22 Oct 2026): "I said buy 2 cities airtime for Loglo" was read back unchanged, for this phone. */
+    @Test fun airtimeForSomeoneNamesThem() {
+        val airtime = JSONObject().put("_kind", "buy_airtime").put("_amount", "2")
+        ReviseTurn.patch("mobile_money", airtime, "I said buy 2 cities airtime for Loglo")!!.let {
+            assertEquals("Loglo", it.args.getString("_recipient")); org.junit.Assert.assertFalse(it.unchanged) }
+        // a restated amount with a target we can't parse is the brain's — never "unchanged"
+        org.junit.Assert.assertNull(ReviseTurn.patch("ussd_navigate", JSONObject(nav.toString()).put("amount", "5"), "I said 5 cedis for Kofi"))
+    }
 }

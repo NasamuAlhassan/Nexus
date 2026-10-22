@@ -64,6 +64,8 @@ object ReviseTurn {
      *  the new reference, as said (owner's live test, 22 Oct 2026: the reference change was dropped, or the whole reply re-planned). */
     private val REFERENCE = Regex("(?i)(?:^|[,\\s]+)(?:and\\s+)?(?:(?:please\\s+)?(?:change|set|make|put|use)\\s+)?(?:the\\s+)?" +
         "(?:reference|narration|description)(?:\\s+(?:to|is|should be|as|be|of))?[:\\s]+(.+)$")
+    private val AIRTIME_FOR = Regex("(?i)\\bfor\\s+(?!me\\b|myself\\b|this phone\\b|my phone\\b|my number\\b)(.+)$")
+    private val UNPARSED_TARGET = Regex("(?i)\\b(?:for|to)\\s+\\S+")
     /** One to three capitalised words and nothing else: "Prince Melanin", "Kofi" — a name, not a sentence. */
     private val NAME_LIKE = Regex("^(?:\\p{Lu}[\\p{L}'.-]*)(?:\\s+\\p{Lu}[\\p{L}'.-]*){0,2}$")
     private val HAS_DIGITS = Regex("\\d(?:[\\s-]?\\d){8,12}")
@@ -132,8 +134,12 @@ object ReviseTurn {
         }
 
         // --- the person / the number ---
+        // Airtime "for Loglo" names who it is for (owner's live test, 22 Oct 2026: "I said buy 2 cedis airtime for Loglo" was read
+        // back unchanged, for this phone). Only for airtime: on a money send "for food" is the purpose, not a person.
+        val airtime = args.optString("_kind") == "buy_airtime" || args.optString("intent").contains("airtime")
         if (!messageSet && rest.isNotBlank()) {
-            val who = RECIPIENT.withIndex().firstNotNullOfOrNull { (i, rx) ->
+            val forWho = if (airtime) AIRTIME_FOR.find(rest)?.groupValues?.get(1)?.replace(TRAIL, "")?.trim()?.trim('"', '“', '”', ',') else null
+            val who = forWho ?: RECIPIENT.withIndex().firstNotNullOfOrNull { (i, rx) ->
                 val w = rx.find(rest)?.groupValues?.get(1)?.replace(TRAIL, "")?.trim()?.trim('"', '“', '”', ',') ?: return@firstNotNullOfOrNull null
                 // The loosest form ("no, Prince Melanin") only counts when what follows is plainly a name or a number —
                 // "no, that's wrong" is not a recipient.
@@ -155,6 +161,9 @@ object ReviseTurn {
         }
 
         if (changes.isEmpty()) return null
+        // Words left that name someone or something ("… for Loglo", "… to Kofi") were not understood here: the brain reads them —
+        // never a read-back "unchanged" that ignores them (owner's live test, 22 Oct 2026).
+        if (out.toString() == args.toString() && UNPARSED_TARGET.containsMatchIn(rest)) return null
         // The user repeated the correction already made (take A2, A20e, 21 Oct 2026: a second "daabi, sidi du" on the corrected
         // read-back went to the cloud planner, which re-ran the original request — and the amount went back to 5).
         if (out.toString() == args.toString()) return Revised(out, changes.joinToString(" and "), unchanged = true)
