@@ -18,6 +18,9 @@ object LookWithCameraTool : Tool {
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true
+    /** The camera opening IS the outcome — the engine must not judge our camera screen a "wrong page" and press Back on it
+     *  (owner's live test, 22 Oct 2026: "what's on my hand" said "Looking." and the camera was closed by the recovery, twice). */
+    override val verifiesOutcome = true
     override val params = listOf(
         ToolParam("question", "string", "The user's question, in English, e.g. 'how much money am I holding'.")
     )

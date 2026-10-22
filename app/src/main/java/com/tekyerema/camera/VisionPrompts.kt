@@ -36,7 +36,10 @@ Never say a road is safe to cross. Keep Ghanaian names and Twi letters (ɛ, ɔ) 
 Count the Ghana cedi money in this photo for a blind person. JSON only, no other text:
 {"items":[{"kind":"note","value_ghs":20,"count":2}],"unreadable":0,"other_currency":"","confidence":"high","fix":""}
 Notes: GH₵1, 2, 5, 10, 20, 50, 100, 200. Coins: 1, 5, 10, 20, 50 pesewas (0.01 to 0.5) and GH₵1, GH₵2. value_ghs comes from
-the printed numeral. Count every physical note and coin, overlapping ones included. A note or coin whose numeral you cannot
+the printed numeral. Count every physical note and coin, overlapping ones included. ONE note prints its value SEVERAL times (in
+the corners and the middle): count each piece of paper ONCE, by its edges — never by how many numerals you see. One note in the
+photo is count 1. If you cannot tell whether two numerals are on one note or two, count one and set confidence "low" (owner's
+test, 22 Oct 2026: a single 50 cedi note was counted as two). A note or coin whose numeral you cannot
 see goes in "unreadable", not in items. confidence is "low" if the photo is blurred or dark or the money overlaps.
 fix is one short instruction ("Spread the notes out", "Turn the note over"), else "". No money: items [] and fix
 "Hold the money about a hand away." Other currency: name it in other_currency.
