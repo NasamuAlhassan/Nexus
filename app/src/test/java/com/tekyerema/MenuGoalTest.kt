@@ -38,5 +38,8 @@ class MenuGoalTest {
         val tools = com.tekyerema.agent.ToolSelector.select("give [A1] to my wife", emptySet(), emptySet(),
             listOf("read_state", "tap", "ask_user", "mobile_money", "momo_send", "run_ussd"))
         assertTrue(tools.toString(), "momo_send" in tools && "mobile_money" in tools)
+        // …and a cedi glued to the word before it (07:28: "soma wacedi ma me yere")
+        assertTrue("momo_send" in com.tekyerema.agent.ToolSelector.select("soma wacedi ma me yere", emptySet(), emptySet(),
+            listOf("read_state", "tap", "ask_user", "mobile_money", "momo_send", "run_ussd")))
     }
 }
