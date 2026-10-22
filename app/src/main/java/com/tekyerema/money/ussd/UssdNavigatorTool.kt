@@ -56,6 +56,17 @@ object UssdNavigatorTool : Tool {
     const val CHECK_BALANCE = "check_balance"
     const val BUY_AIRTIME = "buy_airtime"
     const val SEND_AIRTIME = "send_airtime"
+    /** Anything else on the network's own menus, walked toward the user's words by the brain (TxIntent.GOAL). */
+    const val MENU_GOAL = "menu_goal"
+    /** GOAL: the user's request in plain words, and the official root code to start from ([goalRoots]). */
+    const val ARG_GOAL = "goal"
+    const val ARG_ROOT = "root"
+
+    /** The official root codes a goal walk may start from, by network — never a deep code a model composed
+     *  (`ussd.goal.roots.<network>`; owner, 22 Oct 2026: "official MTN roots only"). */
+    internal fun goalRoots(network: String?): List<String> = com.tekyerema.core.config.AppConfig.stringList(
+        "ussd.goal.roots.${network?.lowercase() ?: "none"}",
+        if (network?.lowercase() == "mtn") listOf("*170#", "*138#", "*124#") else emptyList())
     /** A person named instead of a number — resolved against the contacts in [preflight] (the same key the engine's
      *  "which one?" writes its pick to). */
     const val ARG_CONTACT = "contact"
@@ -90,6 +101,7 @@ object UssdNavigatorTool : Tool {
         CHECK_BALANCE -> TxIntent.CHECK_BALANCE
         BUY_AIRTIME -> TxIntent.BUY_AIRTIME
         SEND_AIRTIME -> TxIntent.SEND_AIRTIME
+        MENU_GOAL -> TxIntent.GOAL
         else -> TxIntent.SEND_MONEY
     }
 
@@ -145,6 +157,20 @@ object UssdNavigatorTool : Tool {
         if (ctx.controller == null)
             return ToolResult(false, "The accessibility service isn't running, so I can't read the menu. Turn on Tɛkyerɛma in Settings, under Accessibility.", recoverable = false)
         if (intent == TxIntent.CHECK_BALANCE) return null
+        if (intent == TxIntent.GOAL) {
+            if (args.str(ARG_GOAL).isNullOrBlank())
+                return ToolResult(false, "I didn't get what you want me to do on the menu. Say it again in your own words.", recoverable = false)
+            val roots = goalRoots(sim.provider)
+            val root = args.str(ARG_ROOT)?.replace(Regex("\\s"), "")
+            if (root == null || root !in roots) args.put(ARG_ROOT, roots.firstOrNull()
+                ?: return ToolResult(false, "I don't have the network's official menu code for this SIM, so I won't guess one.", recoverable = false))
+            args.put(MoMoSendTool.ARG_SIM, sim.provider)
+            args.str("amount")?.let { com.tekyerema.money.MoneyLimits.parseAmount(it)?.let { a -> args.put("amount", a.toPlainString()) } ?: args.remove("amount") }
+            if (args.str(ARG_CONTACT) != null || args.str("number") != null)
+                recipient(args, { com.tekyerema.tools.ContactChoice.resolve(ctx.appContext, it) },
+                    { said, matches -> com.tekyerema.tools.ContactChoice.result(ctx.appContext, said, matches) })?.let { return it }
+            return null
+        }
         amountProblem(args.str("amount"))?.let { return ToolResult(false, it, recoverable = false) }
         val amount = com.tekyerema.money.MoneyLimits.parseAmount(args.str("amount"))!!
         args.put("amount", amount.toPlainString())
@@ -167,13 +193,18 @@ object UssdNavigatorTool : Tool {
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
             return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open Mobile Money. Allow Phone for Tɛkyerɛma in Settings.")
         val ctrl = ctx.controller ?: return ToolResult(false, "The accessibility service isn't running, so I can't read the menu.")
-        val root = Provider.momoRoot(ctx.appContext)
+        val intent = intentOf(args)
+        val root = (if (intent == TxIntent.GOAL) args.str(ARG_ROOT)?.takeIf { it in goalRoots(Provider.current(ctx.appContext).provider) }
+            else Provider.momoRoot(ctx.appContext))
             ?: return ToolResult(false, "I couldn't tell which network this SIM is on, so I won't guess a code.", recoverable = true)
         val sim = Provider.current(ctx.appContext)
-        val intent = intentOf(args)
         val balance = intent == TxIntent.CHECK_BALANCE
         val contact = args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }
         val tx = if (balance) TxContext(intent = intent, provider = sim.provider, confirmedUpFront = true)
+        // The goal walk: nothing on the network's confirmation is taken as already approved — it is read and asked (Boundary).
+        else if (intent == TxIntent.GOAL) TxContext(intent = intent, provider = sim.provider, recipient = args.str("number")?.filter { it.isDigit() },
+            recipientName = contact, amount = args.str("amount"), reference = args.str("reference")?.trim()?.ifBlank { null },
+            confirmedUpFront = false, goal = args.str(ARG_GOAL))
         else TxContext(
             intent = intent,
             provider = sim.provider,
@@ -211,7 +242,7 @@ object UssdNavigatorTool : Tool {
             is Navigator.Outcome.Boundary -> {
                 // The walk reached the authorization: the ledger entry (the outcome is the network's to tell), today's
                 // total for a send, the follow-up look. (A balance check sends nothing: none of that.)
-                if (!balance) com.tekyerema.money.MoneyStatus.handedOff(ctx.appContext,
+                if (!balance && intent != TxIntent.GOAL) com.tekyerema.money.MoneyStatus.handedOff(ctx.appContext,
                     if (intent == TxIntent.SEND_MONEY) com.tekyerema.money.TxLedger.What.SEND else com.tekyerema.money.TxLedger.What.AIRTIME,
                     com.tekyerema.money.MoneyLimits.parseAmount(tx.amount), tx.recipient, contact ?: out.registeredName, sim.provider,
                     registered = out.registeredName)
@@ -262,6 +293,7 @@ object UssdNavigatorTool : Tool {
 
     private fun nothing(intent: TxIntent): String = when (intent) {
         TxIntent.SEND_MONEY -> "Nothing was sent."
+        TxIntent.GOAL -> "Nothing was paid or sent."
         TxIntent.CHECK_BALANCE -> "Nothing was changed."
         else -> "Nothing was bought."
     }
@@ -327,6 +359,12 @@ object UssdNavigatorTool : Tool {
     override fun confirmationPrompt(args: JSONObject): String {
         val intent = intentOf(args)
         if (intent == TxIntent.CHECK_BALANCE) return BALANCE_PROMPT
+        if (intent == TxIntent.GOAL) {
+            val root = args.str(ARG_ROOT)?.let { com.tekyerema.voice.Verbalize.apply(it) } ?: "the network's menu"
+            val amt = args.str("amount")?.let { " for ${GhanaMobileMoney.cedisPhrase(it)}" } ?: ""
+            return "I'll go through $root to ${args.str(ARG_GOAL)?.trim()?.trimEnd('.', '?')}$amt. " +
+                "I'll read what the network shows before anything is paid, and stop at your PIN. Shall I?"
+        }
         val amt = args.str("amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"
         val who = whoWords(args)
         val call = com.tekyerema.tools.MoneyPrivacy.callWarning(args.optBoolean(MoMoSendTool.ARG_ON_CALL))

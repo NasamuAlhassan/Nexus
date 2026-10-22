@@ -57,7 +57,7 @@ object PushedPin {
 
     /** Nothing came within the wait: honest, with the way to finish it by hand (MTN: *170# → My Wallet → My Approvals; R-A9). */
     fun lateLine(network: String): String =
-        "$network's PIN prompt hasn't come. If it comes, your volume keys will enter the PIN; if not, dial star 1 7 0 hash, choose My Wallet, then My Approvals."
+        "$network's PIN prompt hasn't come. If it comes, your volume keys will enter the PIN; if not, say “open my approvals” and I'll find it on the menu."
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var job: Job? = null

@@ -27,7 +27,8 @@ class PushedPinTest {
         assertTrue(waiting, waiting.startsWith("MTN will ask for your PIN in a moment"))
         assertTrue("short enough to be over before the prompt lands", waiting.length < 140)
         assertEquals("MTN is asking for your PIN. Enter it now.", PushedPin.arrivedLine())
-        assertTrue(PushedPin.lateLine("MTN").contains("star 1 7 0 hash"))
+        // the approvals are opened FOR the user — never "dial star 1 7 0 hash" (owner, 22 Oct 2026)
+        assertTrue(PushedPin.lateLine("MTN").contains("open my approvals") && !PushedPin.lateLine("MTN").contains("dial"))
         assertTrue(PushedPin.confirmFirstLine("MTN").contains("confirm"))
         // Nothing here ever says, keeps or types a PIN digit.
         for (l in listOf(waiting, PushedPin.arrivedLine(), PushedPin.lateLine("MTN"), PushedPin.confirmFirstLine("MTN")))

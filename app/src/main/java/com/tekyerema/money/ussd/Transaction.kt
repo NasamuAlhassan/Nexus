@@ -6,13 +6,17 @@ package com.tekyerema.money.ussd
  * one consolidated confirmation + the PIN boundary close it. Pure data — nothing here touches Android.
  */
 enum class TxIntent {
-    SEND_MONEY, BUY_AIRTIME, BUY_DATA, SEND_AIRTIME, SEND_DATA, CHECK_BALANCE, PAY_BILL;
+    SEND_MONEY, BUY_AIRTIME, BUY_DATA, SEND_AIRTIME, SEND_DATA, CHECK_BALANCE, PAY_BILL,
+    /** Anything else on the network's own menus, walked toward the user's words ([TxContext.goal]) by the brain: a midnight
+     *  bundle, Allow Cash Out, a bank or school-fees payment (owner, 22 Oct 2026: "the brain… understand all these options"). */
+    GOAL;
 
     /** Spoken name for the one confirmation and honest errors. */
     val spoken: String get() = when (this) {
         SEND_MONEY -> "send money"; BUY_AIRTIME -> "buy airtime"; BUY_DATA -> "buy data"
         SEND_AIRTIME -> "send airtime"; SEND_DATA -> "send a data bundle"; CHECK_BALANCE -> "check the balance"
         PAY_BILL -> "pay a bill"
+        GOAL -> "do that"
     }
 }
 
@@ -30,7 +34,8 @@ data class TxContext(
     val amount: String? = null,       // plain cedi figure, e.g. "50" or "0.50"
     val product: String? = null,      // a bundle/offer the user named ("the 1 cedi mashup")
     val reference: String? = null,
-    val confirmedUpFront: Boolean = false
+    val confirmedUpFront: Boolean = false,
+    val goal: String? = null          // GOAL: what the user asked for, in their words ("buy the 3 cedi midnight bundle")
 ) {
     /** The value for a slot the network asks for, or null (then the user is asked ONCE). */
     fun slot(kind: SlotKind): String? = when (kind) {

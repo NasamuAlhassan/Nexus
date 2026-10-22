@@ -77,6 +77,7 @@ class Navigator(
         var lastPressedMenu: String? = null
         var morePressed = 0
         var lastEntered: SlotKind? = null      // the slot just typed into — the same one asked again means it was refused
+        val path = ArrayList<String>()         // GOAL: the rows chosen so far, so the brain knows where it is
         repeat(maxSteps) {
             current = screen
             val m = MenuModel.read(screen.text, screen.hasInput, screen.masked)
@@ -105,7 +106,7 @@ class Navigator(
                         t("PROMISE", "the PIN prompt will be pushed")
                         return Outcome.Final(PushedPin.waitingLine(com.tekyerema.agent.NumberSpeech.networkName(tx.provider ?: "the network")), pushedPin = true)
                     }
-                    return if (tx.intent == TxIntent.CHECK_BALANCE || IN_PROGRESS.containsMatchIn(m.text)) Outcome.Final(UssdSpeech.forEar(m.text))
+                    return if (tx.intent == TxIntent.CHECK_BALANCE || tx.intent == TxIntent.GOAL || IN_PROGRESS.containsMatchIn(m.text)) Outcome.Final(UssdSpeech.forEar(m.text))
                         else Outcome.Failed(endedBeforePin(tx, m.text))
                 }
                 MenuModel.Kind.INPUT -> {
@@ -132,6 +133,25 @@ class Navigator(
                     // to pay): those are the user's to decide, before any meaning match could press a row.
                     val brain = MenuBrain.decide(goal(), m.text)
                     if (brain is MenuBrain.Move.Ask && brain.urgent) { t("ASK", brain.kind.name); return Outcome.NeedUser(brain.question, brain) }
+                    // The user's own goal (TxIntent.GOAL): the brain names the row that moves toward it, asks the user when the
+                    // menu is ambiguous for it, or says nothing here fits. Only a row on THIS screen can be pressed (§19).
+                    if (tx.intent == TxIntent.GOAL) {
+                        val pick = online?.chooseForGoal(tx.goal.orEmpty(), m.rows, path, tx.amount)
+                        val choice = when (pick) {
+                            is OnlineFallback.GoalPick.Row -> pick.option.also { t("GOAL", "chose $it") }
+                            is OnlineFallback.GoalPick.Ask -> { t("GOAL", "asks the user"); return Outcome.NeedUser("${pick.question} The menu says: " +
+                                "“${UssdSpeech.forEar(m.text, intro = "")}”.") }
+                            else -> morePressed.takeIf { it < 3 }?.let { com.tekyerema.money.TelcoUssd.moreOption(m.text) }?.also { morePressed++; t("PAGE", "More ($morePressed)") }
+                                ?: return Outcome.NeedUser("I couldn't find that on this menu. It says: “${UssdSpeech.forEar(m.text, intro = "")}”. " +
+                                    "Which number should I enter?")
+                        }
+                        m.rows.firstOrNull { it.first == choice }?.let { path += it.second }
+                        lastEntered = null
+                        lastPressedMenu = if (choice == com.tekyerema.money.TelcoUssd.moreOption(m.text)) null else m.text
+                        t("PRESS", "option $choice")
+                        screen = press(m.text, choice) ?: return timedOut()
+                        return@repeat
+                    }
                     val v = SemanticMatch.best(tx.intent, m.rows, embed, crossNetwork(),
                         com.tekyerema.agent.NumberSpeech.networkKey(tx.recipient))
                     t("MATCH", "best=${v?.option} conf=${"%.2f".format(v?.confidence ?: 0.0)} margin=${"%.2f".format(v?.margin ?: 0.0)}")
@@ -187,6 +207,7 @@ class Navigator(
     /** What did NOT happen, in the intent's own word: a balance check never sends or buys anything. */
     private fun nothing(): String = when (tx.intent) {
         TxIntent.SEND_MONEY -> "Nothing was sent."
+        TxIntent.GOAL -> "Nothing was paid or sent."
         TxIntent.CHECK_BALANCE -> "Nothing was changed."
         else -> "Nothing was bought."
     }

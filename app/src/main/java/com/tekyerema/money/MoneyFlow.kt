@@ -68,17 +68,21 @@ object MoneyFlow {
     internal fun notYet(goal: String): String? {
         val g = goal.lowercase().replace('’', '\'')
         if (NOT_A_REQUEST.containsMatchIn(g)) return null
+        // Owner, 22 Oct 2026: "a blind person to dial *170#? who does that?" — a bill, a school fee, Allow Cash Out are on the
+        // network's own menus, so the brain walks there (mobile_money menu_goal → the navigator); only a withdrawal, which an agent
+        // starts, is explained — and never with "dial it yourself".
         return when {
+            ALLOW_CASH_OUT.containsMatchIn(g) -> null
             CASH_OUT.containsMatchIn(g) -> CASH_OUT_LINE
-            BILL.containsMatchIn(g) -> BILL_LINE
             else -> null
         }
     }
 
-    const val CASH_OUT_LINE = "I can't do a cash-out for you yet. It's done with a Mobile Money agent: the agent starts it, and you " +
-        "approve it on your phone with your PIN. If the agent asks you to allow it first, that's Allow Cash Out in the star 1 7 0 hash menu on MTN."
+    const val CASH_OUT_LINE = "A cash-out is started by a Mobile Money agent. When the agent starts it, I'll read the network's prompt " +
+        "to you and you approve it with your PIN. If the agent asks you to allow it first, say “allow cash out” and I'll do it on the menu."
     const val BILL_LINE = "I can't pay bills for you yet, so nothing was paid. On MTN it's under MoMoPay and Pay Bill in the star 1 7 0 hash menu."
 
+    private val ALLOW_CASH_OUT = Regex("\\b(?:allow|approve|enable|authori[sz]e)\\b.{0,15}\\b(?:cash ?out|cashout|withdrawal)\\b")
     private val CASH_OUT = Regex("\\b(?:withdraw|withdrawal|cash ?out|cashout)\\b")
     private val BILL = Regex("\\bpay\\b.{0,30}\\b(?:bills?|ecg|light|electricity|water|dstv|gotv|startimes|tv subscription|school fees)\\b|" +
         "\\b(?:buy|top ?up|recharge)\\b.{0,20}\\b(?:prepaid|electricity|ecg|light)\\b")
@@ -123,6 +127,15 @@ object MoneyFlow {
             }
             "mobile_money" -> {
                 val kind = s("_kind")
+                // Anything else on the network's own menus: the navigator walks toward the user's words from an official root
+                // (UssdNavigatorTool.goalRoots checks it), reads the network's confirmation back and stops at the PIN.
+                if (kind == com.tekyerema.tools.MobileMoneyTool.KIND_GOAL) {
+                    nav.put(UssdNavigatorTool.ARG_INTENT, UssdNavigatorTool.MENU_GOAL).put(UssdNavigatorTool.ARG_GOAL, s("_goal") ?: goal)
+                    s("_root")?.let { nav.put(UssdNavigatorTool.ARG_ROOT, it) }
+                    s("_amount")?.let { nav.put("amount", it) }
+                    s("_number")?.let { nav.put("number", it) } ?: s("_recipient")?.let { nav.put(UssdNavigatorTool.ARG_CONTACT, it) }
+                    return AgentDecision.CallTool(NAV, nav, "the planner's menu goal — walked on the phone, by the navigator")
+                }
                 if (kind == com.tekyerema.tools.MobileMoneyTool.KIND_BALANCE) nav.put(UssdNavigatorTool.ARG_INTENT, UssdNavigatorTool.CHECK_BALANCE)
                 else {
                     if (kind != "buy_airtime" && kind != "send_money") return d

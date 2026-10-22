@@ -106,12 +106,16 @@ object GhanaMobileMoney {
  */
 object MobileMoneyTool : Tool {
     override val name = "mobile_money"
-    override val description = "Open the network's Mobile Money menu to send money, buy airtime or check the Mobile Money balance. Reads the recipient and amount back for ONE confirmation, then opens the menu so you can navigate it (choose send-money, enter the number, amount and reference; or My Wallet › Check Balance). The user always enters the PIN."
+    override val description = "Mobile Money and the network's menus: send money, buy airtime, check the balance; or _kind menu_goal for " +
+        "anything else on the menus (a bundle like midnight, Allow Cash Out, bills, school fees, bank services, savings): _goal in the " +
+        "user's words, _root *170# (MoMo) or *138# (bundles). Reads back; the user enters the PIN. Never tell the user to dial a code."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER3
     override val isAccelerator = true
     override val params = listOf(
-        ToolParam("_kind", "string", "send_money | buy_airtime | check_balance"),
+        ToolParam("_kind", "string", "send_money | buy_airtime | check_balance | menu_goal"),
+        ToolParam("_goal", "string", "menu_goal: what the user wants, in their words.", required = false),
+        ToolParam("_root", "string", "menu_goal: *170# or *138#.", required = false),
         ToolParam("_amount", "string", "Cedi amount.", required = false),
         ToolParam("_recipient", "string", "Recipient name (for send_money).", required = false),
         ToolParam("_number", "string", "Recipient number (for send_money).", required = false)
@@ -122,7 +126,9 @@ object MobileMoneyTool : Tool {
     const val BALANCE_PROMPT = "Check your Mobile Money balance? I'll go through the menu; you'll enter your PIN."
 
     /** A send (not airtime, not a balance check): the guided send-money menu. */
-    private fun isSend(args: JSONObject) = args.str("_kind").let { it != "buy_airtime" && it != KIND_BALANCE }
+    private fun isSend(args: JSONObject) = args.str("_kind").let { it != "buy_airtime" && it != KIND_BALANCE && it != KIND_GOAL }
+    /** Anything else on the network's own menus — walked by the navigator toward the user's words (MoneyFlow.fromPlanner). */
+    const val KIND_GOAL = "menu_goal"
 
     /**
      * Money safety round 2 (2026-09-29), the guided send the same as momo_send: the user's spending limit is checked before
@@ -158,7 +164,9 @@ object MobileMoneyTool : Tool {
         val tm = ctx.appContext.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager
         val operator = tm?.simOperatorName?.ifBlank { tm.simOperator } ?: tm?.simOperator
         val root = GhanaMobileMoney.rootUssd(operator)
-            ?: return ToolResult(false, "I couldn't tell which mobile network this SIM is on, so I won't guess a Mobile Money code. Open your Mobile Money app yourself.", recoverable = true)
+            ?: return ToolResult(false, "I couldn't tell which mobile network this SIM is on, so I won't guess a Mobile Money code.", recoverable = true)
+        // A menu goal is the navigator's walk (MoneyFlow.fromPlanner); here only when that route is switched off.
+        if (args.str("_kind") == KIND_GOAL) return ToolResult(false, "I can't walk the network's menu for that right now, so nothing was paid or sent.", recoverable = false)
 
         val kind = args.str("_kind")
         val amount = args.str("_amount")

@@ -174,10 +174,14 @@ class MoneyFlowTest {
     @Test fun a_job_with_no_checked_route_is_said_plainly_not_guessed_at() {
         // Then: "pay my light bill" → "Which phone number should I send the payment to? none?"; "withdraw 100 cedis" → a
         // question about a bank account nobody mentioned.
-        assertEquals(MoneyFlow.BILL_LINE, (MoneyFlow.decide("pay my light bill", emptyList()) as AgentDecision.Done).summary)
-        assertEquals(MoneyFlow.BILL_LINE, (MoneyFlow.decide("I want to pay my DSTV", emptyList()) as AgentDecision.Done).summary)
+        // Owner, 22 Oct 2026: bills and Allow Cash Out are on the network's own menus — the brain walks there (menu_goal), never
+        // a refusal that tells a blind user to dial a code. Only a withdrawal (an agent starts it) is explained.
+        assertNull(MoneyFlow.notYet("pay my light bill"))
+        assertNull(MoneyFlow.notYet("I want to pay my DSTV"))
+        assertNull(MoneyFlow.notYet("approve the cash out"))
+        assertNull(MoneyFlow.notYet("allow cash out for me"))
         assertEquals(MoneyFlow.CASH_OUT_LINE, (MoneyFlow.decide("withdraw 100 cedis", emptyList()) as AgentDecision.Done).summary)
-        assertEquals(MoneyFlow.CASH_OUT_LINE, (MoneyFlow.decide("approve the cash out", emptyList()) as AgentDecision.Done).summary)
+        assertTrue(!MoneyFlow.CASH_OUT_LINE.contains("star 1 7 0") && !MoneyFlow.CASH_OUT_LINE.contains("dial"))
         assertNull("only as the first word on it — never in the middle of a task", MoneyFlow.decide("pay my light bill", listOf("open_app({}) → success [intent]; verified=true (ok); Opened ECG")))
         assertNull(MoneyFlow.decide("text Ama that I will pay the light bill", emptyList()))
     }

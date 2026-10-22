@@ -101,6 +101,8 @@ object Boundary {
                 "You're about to buy ${tx.product ?: "the bundle"}${tx.recipientName?.let { " for $it" } ?: ""} — $go."
             TxIntent.CHECK_BALANCE -> if (pin) "Enter your PIN now, and I'll read your Mobile Money balance when the network answers."
                 else "To hear your balance — $go."
+            // The brain's walk toward the user's words: the network's own confirmation, read as it is, then the question.
+            TxIntent.GOAL -> "$net says “${com.tekyerema.money.UssdSpeech.forEar(m.text, intro = "")}” — $go."
             else -> "You're about to ${tx.intent.spoken} — $go."
         }
         // Owner, 4 October 2026: in a Twi conversation the PIN line is ONE Twi sentence in the lab's voice — the network, the
