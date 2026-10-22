@@ -38,7 +38,8 @@ object ReviseTurn {
     private val WORD_NUM = mapOf("one" to "1", "two" to "2", "three" to "3", "four" to "4", "five" to "5", "six" to "6",
         "seven" to "7", "eight" to "8", "nine" to "9", "ten" to "10", "twenty" to "20", "fifty" to "50", "hundred" to "100")
     private const val NUM = "(\\d+(?:\\.\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|twenty|fifty|hundred)"
-    private val AMOUNT_UNIT = Regex("(?i)\\b$NUM\\s*(cedis?|ghs|gh₵|ghc|pesewas?)\\b")
+    // "3 Ghana cedis" (owner's live test, 22 Oct 2026: not read as an amount, so the cloud asked "How much?")
+    private val AMOUNT_UNIT = Regex("(?i)\\b$NUM\\s*(?:ghana\\s+)?(cedis?|ghs|gh₵|ghc|pesewas?)\\b")
     /** Nothing but a new amount: "no, 20 cities", "make it 20 cities instead", "it's 2 cds 50 ps". */
     private const val FIGURE = "(?:\\d+(?:[.,]\\d+)?|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|" +
         "twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)"
@@ -59,6 +60,10 @@ object ReviseTurn {
         Regex("(?i)^$LEAD(?:the message|it) should (?:be|say|read)\\s+(.+)$"),
         Regex("(?i)^$LEAD(?:say|write|tell (?:him|her|them)(?: that)?)\\s+(.+)$")
     )
+    /** "change the reference to food", "the reference is school fees", "…and make the reference 50 cedis" — the words after it are
+     *  the new reference, as said (owner's live test, 22 Oct 2026: the reference change was dropped, or the whole reply re-planned). */
+    private val REFERENCE = Regex("(?i)(?:^|[,\\s]+)(?:and\\s+)?(?:(?:please\\s+)?(?:change|set|make|put|use)\\s+)?(?:the\\s+)?" +
+        "(?:reference|narration|description)(?:\\s+(?:to|is|should be|as|be|of))?[:\\s]+(.+)$")
     /** One to three capitalised words and nothing else: "Prince Melanin", "Kofi" — a name, not a sentence. */
     private val NAME_LIKE = Regex("^(?:\\p{Lu}[\\p{L}'.-]*)(?:\\s+\\p{Lu}[\\p{L}'.-]*){0,2}$")
     private val HAS_DIGITS = Regex("\\d(?:[\\s-]?\\d){8,12}")
@@ -83,6 +88,14 @@ object ReviseTurn {
                 else -> return null          // an app this tool can't send through → the planner
             }
             rest = (rest.substring(0, m.range.first) + rest.substring(m.range.last + 1)).trim().trimEnd(',')
+        }
+
+        // --- the reference (money tools): first, so its words ("50 cedis", "2 cds") are never read as an amount or a number ---
+        if (args.has("reference") || tool == "ussd_navigate" || tool == "momo_send") REFERENCE.find(rest)?.let { m ->
+            val ref = m.groupValues[1].replace(TRAIL, "").trim().trim('"', '“', '”').trimEnd('.', '!')
+            if (ref.isEmpty() || ref.length > 60) return null
+            out.put("reference", ref); changes.add("the reference to “$ref”")
+            rest = rest.substring(0, m.range.first).trim().trimEnd(',').replace(Regex("(?i)\\s+(?:and also|and|also)$"), "").trim()
         }
 
         // --- the amount (money tools) ---

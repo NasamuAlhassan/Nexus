@@ -981,14 +981,17 @@ class VoiceController(
                         // "make it shorter", "actually call Ama") is a CORRECTION, not a decline. Hand the
                         // words to the brain, which re-plans against the pending proposal; the run continues
                         // and the next proposal (if any) is confirmed again. Buttons/plain yes-no are unchanged.
-                        if (Confirmation.looksLikeRevision(heard, prompt)) {
+                        // "What's the number again?" asks to HEAR the read-back again — checked before the correction test, which it
+                        // also passes ("the number"): it was re-planned by the cloud and the task lost (owner's live test, 22 Oct 2026).
+                        val wantsRepeat = repeats < 2 && Confirmation.asksToRepeat(heard, tr?.raw)
+                        if (!wantsRepeat && Confirmation.looksLikeRevision(heard, prompt)) {
                             agent.revise(heard)
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE, speechDetected = false) }
                             try { tts.speak(if (lang == Lang.TWI) "Yoo, ma mensesa." else "Okay, let me change that.", lang) }
                             catch (c: CancellationException) { throw c } catch (_: Exception) {}
                             return
                         }
-                        if (repeats < 2 && Confirmation.asksToRepeat(heard, tr?.raw)) { repeatAsked = true; Confirmation.Answer.UNCLEAR }
+                        if (wantsRepeat) { repeatAsked = true; Confirmation.Answer.UNCLEAR }
                         else com.tekyerema.voice.io.YesNo.decide(heard, alternatives).let { a ->
                             // A Kusaal answer heard by the English recogniser could come back as a "yes"-like English word
                             // ("okay", "yeah"); in a Kusaal session only a plain English yes approves (KusaalYes).
