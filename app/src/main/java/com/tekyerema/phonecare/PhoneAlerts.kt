@@ -181,6 +181,11 @@ object PhoneAlerts {
         }
         val tx = com.tekyerema.money.TxLedger.waiting().firstOrNull { it.at == handOffAt && !it.told } ?: return
         com.tekyerema.money.TxLedger.markTold(tx)
+        // The user has asked for something else since: don't speak over it (owner's live test, 22 Oct 2026: "it's still reading
+        // that it hasn't seen any process transaction" during the next request). The ledger keeps it for "did my money go?".
+        if (com.tekyerema.voice.VoiceEngine.lastRequestAt > tx.at) {
+            Log.i(TAG, "[MONEY] no word from the network for the earlier hand-off — not said: the user has moved on"); return
+        }
         Log.i(TAG, "[MONEY] no word from the network ${(System.currentTimeMillis() - tx.at) / 1000}s after the hand-off")
         deliver(app, Alert(OUTCOME, com.tekyerema.money.TxLedger.silentLine(tx), "o|silent|${tx.at}", canBePrivate = false))
     }

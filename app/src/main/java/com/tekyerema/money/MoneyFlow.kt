@@ -111,7 +111,14 @@ object MoneyFlow {
         val nav = JSONObject()
         when (d.name) {
             "momo_send" -> {
-                nav.put("number", s("number") ?: return d).put("amount", s("amount") ?: return d)
+                val number = s("number")?.takeIf { n -> n.count { it.isDigit() } >= 7 }
+                val name = s("contact") ?: s("number")?.takeIf { n -> n.count { it.isDigit() } < 7 }
+                when {
+                    number != null -> nav.put("number", number)
+                    name != null -> nav.put(UssdNavigatorTool.ARG_CONTACT, name)
+                    else -> return d
+                }
+                nav.put("amount", s("amount") ?: return d)
                 s("reference")?.let { nav.put("reference", it) }
             }
             "mobile_money" -> {

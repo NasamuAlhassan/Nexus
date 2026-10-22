@@ -34,12 +34,15 @@ import org.json.JSONObject
 object MoMoSendTool : Tool {
     override val name = "momo_send"
     override val description =
-        "Send money via Mobile Money: after the recipient number + amount + reference are confirmed, deterministically walk the *170# send-money menu (reading each screen) and STOP at the PIN for the user. Never types the PIN. Use only when the number, amount and reference are all known and confirmed."
+        "Send Mobile Money: reads it back, stops at the PIN. A named person goes in `contact` (the phone finds the number); never open Contacts."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER3   // highest confirmation tier; PIN is never automated
     override val isAccelerator = true
     override val params = listOf(
-        ToolParam("number", "string", "Recipient phone number (digits)."),
+        ToolParam("number", "string", "Digits the user said.", required = false),
+        // A person named instead (owner's live test, 22 Oct 2026: the planner opened Contacts and proposed a stranger's number
+        // off the screen for "my wife") — MoneyFlow.fromPlanner hands it to the navigator, which resolves it in the contacts.
+        ToolParam("contact", "string", "Person as named, e.g. my wife.", required = false),
         ToolParam("amount", "string", "Cedi amount, e.g. 0.1 for 10 pesewas."),
         ToolParam("reference", "string", "Payment reference / narration.", required = false)
     )

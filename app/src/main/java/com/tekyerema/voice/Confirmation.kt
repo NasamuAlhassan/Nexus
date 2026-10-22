@@ -19,7 +19,11 @@ object Confirmation {
         s.isNotEmpty() && REPEAT_ASK.matches(s)
     }
     private val REPEAT_ASK = Regex("^(?:(?:please|sorry|eh|ei|hey)\\s+)*(?:repeat(?: (?:it|that))?|say (?:it|that) again|again|come again|pardon(?: me)?|" +
-        "what did you say|i didn'?t (?:hear|get|catch) (?:it|that|you)|(?:san )?ka (?:no )?bio|san ka|mante(?: no| ase)?|mente ase)(?:\\s+(?:please|mepa wo kyɛw|mepa wo kyew))?$")
+        "what did you say|i didn'?t (?:hear|get|catch) (?:it|that|you)|(?:san )?ka (?:no )?bio|san ka|mante(?: no| ase)?|mente ase|" +
+        // a question about the read-back itself is a request to hear it again (owner's live test, 22 Oct 2026: "what is the
+        // number again" was taken as a correction, re-planned by the cloud, and the task ended on a question)
+        "what(?:'s| is| was)? (?:the |that )?(?:number|amount|name|reference)(?: again)?|which number|read (?:it|that) again|" +
+        "repeat the (?:number|amount|name|reference))(?:\\s+(?:please|mepa wo kyɛw|mepa wo kyew))?$")
 
     /** HOLD (B-09): "wait" / "hold on" alone — the user needs a moment; the question stays pending. */
     enum class Answer { YES, NO, UNCLEAR, HOLD }

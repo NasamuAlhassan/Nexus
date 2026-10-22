@@ -182,6 +182,8 @@ object VoiceEngine {
     suspend fun speakOnDevice(text: String, language: String): Boolean =
         (if (language == Lang.TWI) twiLocal?.let { RespellTts(it) } else ownVoice)?.speak(Verbalize.apply(text), language) ?: false
 
+    /** When the user last asked for something (any input): a money follow-up isn't spoken over a newer request. */
+    @Volatile var lastRequestAt = 0L
     @Volatile private var readyLocalAt = 0L
     private fun availMb(): Long = try {
         val am = appCtx?.getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager

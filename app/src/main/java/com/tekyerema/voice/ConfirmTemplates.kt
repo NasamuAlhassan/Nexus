@@ -22,7 +22,8 @@ object ConfirmTemplates {
         val amount: String? = null,   // cedi amount — read digit by digit
         val message: String? = null,  // message body — passed through VERBATIM
         val firstTime: Boolean = false, // a send to a number this phone has never paid (money/KnownRecipients)
-        val reference: String? = null  // the payment reference the user said, kept as said (the Twi frame reads it back)
+        val reference: String? = null, // the payment reference the user said, kept as said (the Twi frame reads it back)
+        val repeat: Boolean = false     // the same amount went to this number as far as the PIN a few minutes ago (money/TxLedger)
     ) {
         enum class Kind { CALL, SEND_MONEY, BUY_AIRTIME, SEND_MESSAGE, GENERIC }
     }
@@ -136,6 +137,10 @@ object ConfirmTemplates {
             Spec.Kind.SEND_MONEY -> "Menbue Mobile Money sɛ wode ${amount ?: "sika"} kɔma ${who ?: return null}${endingTwi(name, spec.number)}?" +
                 // "This number is new." [owner: verify the Twi] — the first-time warning, which used to force the English line
                 (if (spec.firstTime) " Nɔma yi yɛ foforɔ." else "") +
+                // "You took the same amount to this number a moment ago; if it went through, this pays twice." — a fixed Twi line, so
+                // the warning no longer forces the whole read-back through the translator (owner's live test, 22 Oct 2026: a half-
+                // English read-back). [owner: verify the Twi]
+                (if (spec.repeat) " " + Phrases.get("twiRepeatPay", true, "Wode sika yi ara kɔɔ nɔma yi so seesei ara. Sɛ ɛkɔɔ so a, eyi bɛtua mprenu.") else "") +
                 // the reference is read back too [owner: verify "Nkyerɛkyerɛmu"]
                 (spec.reference?.trim()?.takeIf { it.isNotEmpty() }?.let { " Nkyerɛkyerɛmu: $it." } ?: "") + " Wo ankasa na wobɛhyɛ PIN."
             Spec.Kind.BUY_AIRTIME -> "Menbue Mobile Money sɛ wobɛtɔ airtime${amount?.let { " $it" } ?: ""}? Wo ankasa na wobɛhyɛ PIN."

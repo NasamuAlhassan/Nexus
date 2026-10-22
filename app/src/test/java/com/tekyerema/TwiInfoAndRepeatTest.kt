@@ -35,9 +35,10 @@ class TwiInfoAndRepeatTest {
 
     @Test fun repeatRequestsInEnglishAndTwi() {
         for (s in listOf("say that again", "Pardon?", "repeat", "please repeat that", "what did you say", "ka bio", "San ka bio",
-                "ka no bio", "mante", "Mante no.", "come again", "I didn't hear that"))
+                "ka no bio", "mante", "Mante no.", "come again", "I didn't hear that", "what is the number again", "What's the amount?",
+                "which number"))
             assertTrue(s, Confirmation.asksToRepeat(s))
-        for (s in listOf("yes", "aane", "daabi", "no", "send it again to Kofi", "ka sidi du", "", null))
+        for (s in listOf("yes", "aane", "daabi", "no", "send it again to Kofi", "ka sidi du", "change the number to 0244", "", null))
             assertFalse("$s", Confirmation.asksToRepeat(s))
     }
 }

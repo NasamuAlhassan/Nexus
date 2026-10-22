@@ -307,14 +307,13 @@ object UssdNavigatorTool : Tool {
         if (intent != TxIntent.SEND_MONEY) return null
         val number = args.str("number")?.takeIf { n -> n.any { it.isDigit() } } ?: return null
         if (com.tekyerema.agent.NumberSpeech.moneyReadBack(number, args.str(MoMoSendTool.ARG_SIM)).second != null) return null
-        if (args.optBoolean(ARG_UNSAID) || args.optBoolean(ARG_UNSAID_AMOUNT) || args.str(ARG_REPEAT) != null ||
-            args.optBoolean(MoMoSendTool.ARG_ON_CALL)) return null
+        if (args.optBoolean(ARG_UNSAID) || args.optBoolean(ARG_UNSAID_AMOUNT) || args.optBoolean(MoMoSendTool.ARG_ON_CALL)) return null
         val firstTime = MoMoSendTool.firstTimeWarning(args) != null
         val spec = com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY,
             name = args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }, number = number, amount = amount, firstTime = firstTime,
-            reference = args.str("reference")?.trim()?.takeIf { it.isNotEmpty() })
+            reference = args.str("reference")?.trim()?.takeIf { it.isNotEmpty() }, repeat = args.str(ARG_REPEAT) != null)
         // The first-time warning is only carried by the one-voice Twi line ("Nɔma yi yɛ foforɔ."); without it, English.
-        return spec.takeIf { !firstTime || com.tekyerema.voice.ConfirmTemplates.oneVoice(it) != null }
+        return spec.takeIf { (!firstTime && !spec.repeat) || com.tekyerema.voice.ConfirmTemplates.oneVoice(it) != null }
     }
 
     /** Said in the read-back of airtime for another network. */
