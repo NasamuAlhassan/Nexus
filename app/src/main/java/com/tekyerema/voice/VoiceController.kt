@@ -1376,7 +1376,7 @@ class VoiceController(
                     inputSource = source)
             }
             // SEC-P1-4: the spoken command ("send 50 to 024…") is sensitive — full text in debug only.
-            VoiceEngine.lastRequestAt = System.currentTimeMillis()
+            VoiceEngine.onNewRequest()
             if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i("Tekyerema", "[INPUT] source=$source text='${tr.canonical}' lang=${tr.language}")
             else Log.i("Tekyerema", "[INPUT] source=$source len=${tr.canonical.length} lang=${tr.language}")
 

@@ -714,9 +714,32 @@ object VoiceEngine {
 
     /** K-10: speak a line outside a voice turn (onboarding steps) — only when replies are read aloud and no screen
      *  reader is already reading the page (TalkBack users hear the screen itself). */
+    /** Background lines being said or waiting (money follow-ups, notices) — a new request stops them ([onNewRequest]). */
+    private val announcing = java.util.Collections.synchronizedSet(HashSet<kotlinx.coroutines.Job>())
+
+    /**
+     * The user has asked for something new: whatever the last task left talking or waiting stops now (owner's live test,
+     * 22 Oct 2026: "when I start another prompt, everything that was doing should stop… a task from the previous one is still
+     * speaking"). Background lines are cancelled and the voices stopped; the last payment's watchers (the dialog after the PIN,
+     * the wait for MTN's PIN prompt) end — never while a PIN is being entered. A real result that arrives later (MTN's text)
+     * is still read; it is news, not leftover speech.
+     */
+    fun onNewRequest() {
+        if (!initialized) return
+        lastRequestAt = System.currentTimeMillis()
+        synchronized(announcing) { announcing.toList() }.forEach { it.cancel() }
+        try { englishVoice.stop() } catch (_: Throwable) {}
+        try { replyVoice?.stop() } catch (_: Throwable) {}
+        if (!SecureStep.active()) {
+            try { com.tekyerema.money.ussd.AfterPin.cancel() } catch (_: Throwable) {}
+            try { com.tekyerema.money.ussd.PushedPin.cancel() } catch (_: Throwable) {}
+        }
+    }
+
     fun announce(text: String, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
         scope.launch {
+            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { j -> announcing += j; j.invokeOnCompletion { announcing -= j } }
             // Owner, 19 Oct 2026: in a Twi or Kusaal conversation every spoken line is in that language — the money outcome
             // and the other announcements went to the English voice. The reply voice puts the line into the language
             // (ReplyLocalizer) and speaks it; a line it cannot put into the language is still said in English there.
