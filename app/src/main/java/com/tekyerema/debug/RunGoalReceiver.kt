@@ -131,6 +131,11 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // Phase 5 ASR diagnostic: per-stage timings + proxy/raw/normalized/final. No goal submitted.
         //   adb ... --es asr_diag twi_C01.wav --es lang twi
+        // The online recogniser on a pushed WAV (the Space for Twi), no goal: --es online_asr C10.wav --es lang twi
+        intent.getStringExtra("online_asr")?.let { name ->
+            com.tekyerema.voice.VoiceDebug.onlineAsr(context.applicationContext, name, intent.getStringExtra("lang"))
+            return
+        }
         intent.getStringExtra("asr_diag")?.let { name ->
             com.tekyerema.voice.VoiceDebug.asrDiag(context.applicationContext, name, intent.getStringExtra("lang"))
             return

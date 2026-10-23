@@ -91,8 +91,12 @@ class HttpAsrProvider(
             guard.run {
                 if (spec.dialect == "gradio") {
                     // Our own Twi hearing model on the language Space (asr_b64: base64 WAV + language → text).
-                    // Less to send: the words only, as μ-law (SpaceAudio) — `speech.asr.compactUpload` = false sends the WAV as recorded.
-                    val audio = if (com.tekyerema.core.config.AppConfig.bool("speech.asr.compactUpload", true)) SpaceAudio.compact(wav) else wav
+                    // Less to send: the words only, as Ogg/Opus (SpaceOpus, `speech.asr.uploadCodec` "opus"), else μ-law (SpaceAudio)
+                    // — `speech.asr.compactUpload` = false sends the WAV as recorded.
+                    val audio = if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.compactUpload", true)) wav
+                        else (if (com.tekyerema.core.config.AppConfig.string("speech.asr.uploadCodec", "opus") == "opus")
+                            SpaceOpus.encode(wav, com.tekyerema.core.config.AppConfig.int("speech.asr.opusBitrate", 24_000)) else null)
+                            ?: SpaceAudio.compact(wav)
                     val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
                         org.json.JSONArray().put(java.util.Base64.getEncoder().encodeToString(audio)).put(code ?: "twi")),
                         spec.connectMs, spec.callMs)

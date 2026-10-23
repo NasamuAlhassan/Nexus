@@ -59,6 +59,29 @@ object VoiceDebug {
      * RAW (post-depua), NORMALIZED and FINAL transcripts, so a device run can be diffed against the clean
      * reference. Does NOT submit a goal to the agent (pure ASR — no side effects). DEBUG-only.
      */
+    /**
+     * `--es online_asr <name.wav> [--es lang twi]` — the WAV through the ONLINE recogniser the app would use for that language
+     * (the Space for Twi: the upload codec, sizes and timings are logged by HttpAsrProvider). No goal is submitted. DEBUG-only.
+     */
+    fun onlineAsr(ctx: Context, name: String, lang: String?) {
+        val file = File(ctx.getExternalFilesDir(null), name)
+        if (!file.exists()) { Log.w("Tekyerema", "[ONLINE-ASR] no such file: ${file.absolutePath}"); return }
+        scope.launch {
+            val l = lang ?: Lang.TWI
+            // Our Space only: a test must never spend the HCI Lab's ~10 requests a day (the fallback chain would).
+            val asr = com.tekyerema.language.LanguageLayer.build(ctx.applicationContext).asr[if (l == Lang.TWI) "space_asr" else "space_asr_$l"]
+            if (asr == null) { Log.w("Tekyerema", "[ONLINE-ASR] no Space recogniser for $l"); return@launch }
+            // The bytes the upload would carry, kept beside the WAV so they can be checked off the phone.
+            com.tekyerema.language.SpaceOpus.encode(file.readBytes())?.let { File(file.parentFile, "$name.ogg").writeBytes(it) }
+            try {
+                val tr = asr.transcribe(file.readBytes(), l, l)
+                Log.i("Tekyerema", "[ONLINE-ASR] file=$name via=${asr.name} raw='${tr.raw}' canonical='${tr.canonical}' ${tr.asrMs}ms")
+            } catch (e: Exception) {
+                Log.w("Tekyerema", "[ONLINE-ASR] failed: ${e.message}")
+            }
+        }
+    }
+
     fun asrDiag(ctx: Context, name: String, lang: String?) {
         val settings = Settings(ctx)
         val file = File(ctx.getExternalFilesDir(null), name)
