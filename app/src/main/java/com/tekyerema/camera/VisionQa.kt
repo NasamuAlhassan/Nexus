@@ -1,6 +1,7 @@
 package com.tekyerema.camera
 
 import android.util.Log
+import kotlinx.coroutines.async
 import com.tekyerema.core.NetworkMonitor
 import com.tekyerema.core.config.AppConfig
 import com.tekyerema.settings.Settings
@@ -72,19 +73,69 @@ object VisionLadder {
         return wanted.filter { it in have } + have.filter { it !in wanted }
     }
 
-    /** Walk the plan until a rung answers. The caller has already checked the user's cloud consent (J-18).
-     *  [structured] (P5-07): Gemini is asked for the JSON contract at low resolution; Groq gets the same prompt as text. */
-    suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false): VisionResult {
-        var last: VisionResult = VisionResult.Failed("no vision key")
+    /** The two rungs at once (`camera.vision.mode` "hedge", the default; "ladder" = one after the other, as before). The caller has
+     *  already checked the user's cloud consent (J-18). [structured] (P5-07): Gemini is asked for the JSON contract at low
+     *  resolution; Groq gets the same prompt as text. [smart]: a question, money or a follow-up — the answer the user is waiting
+     *  on, where the second rung (Gemini) is the better eye (counting and identification well ahead of Qwen's; research,
+     *  23 Oct 2026), so its answer is preferred when it comes in time. */
+    suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false, smart: Boolean = false): VisionResult {
         val rungs = plan(settings.geminiApiKey, settings.groqApiKeys)
-        for ((i, rung) in rungs.withIndex()) {
-            val call: suspend () -> VisionResult = {
+        val call: (Rung) -> suspend () -> VisionResult = { rung ->
+            {
                 when (rung) {
                     Rung.GEMINI -> GeminiVision.describe(jpeg, settings.geminiApiKey,
                         com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt, structured)   // N-06
                     Rung.GROQ -> GroqVision.describe(jpeg, settings.groqApiKeys, settings.groqBaseUrl, prompt)
                 }
             }
+        }
+        if (rungs.size == 2 && AppConfig.string("camera.vision.mode", "hedge").lowercase() == "hedge")
+            return race(call(rungs[0]), call(rungs[1]), smart,
+                hedgeMs = AppConfig.long("camera.vision.hedgeMs", 2_000L),
+                smartWaitMs = AppConfig.long("camera.vision.smartWaitMs", 4_500L),
+                onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") })
+        return ladder(rungs.map(call), rungs)
+    }
+
+    /**
+     * Two rungs, hedged. The fast one starts at once. The smart one starts at once too for a [smart] question; otherwise only when
+     * the fast one hasn't answered by [hedgeMs] (a plain description shouldn't spend the smart rung's small daily quota). A smart
+     * question waits up to [smartWaitMs] for the smart rung's answer; after that, and for everything else, the first answer wins.
+     * A failure never wins while the other rung may still answer. Pure over its two calls, so the timing is unit-tested.
+     */
+    suspend fun race(fast: suspend () -> VisionResult, smartCall: suspend () -> VisionResult, smart: Boolean,
+                     hedgeMs: Long, smartWaitMs: Long, onLoss: (VisionResult.Failed) -> Unit = {}): VisionResult =
+        kotlinx.coroutines.coroutineScope {
+            val a = async { fast() }
+            val b = async {
+                if (!smart && kotlinx.coroutines.withTimeoutOrNull(hedgeMs) { a.await() } is VisionResult.Described) null
+                else smartCall()
+            }
+            if (smart) {
+                val early = kotlinx.coroutines.withTimeoutOrNull(smartWaitMs) { b.await() }
+                if (early is VisionResult.Described) { a.cancel(); return@coroutineScope early }
+            }
+            var pending = listOf(a, b)
+            var last: VisionResult = VisionResult.Failed("no vision key")
+            while (pending.isNotEmpty()) {
+                val (done, r) = kotlinx.coroutines.selects.select<Pair<kotlinx.coroutines.Deferred<VisionResult?>, VisionResult?>> {
+                    pending.forEach { d -> d.onAwait { d to it } }
+                }
+                pending = pending - done
+                when (r) {
+                    is VisionResult.Described -> { pending.forEach { it.cancel() }; return@coroutineScope r }
+                    is VisionResult.Failed -> { onLoss(r); last = r }
+                    null -> {}
+                }
+            }
+            last
+        }
+
+    /** One rung after the other (`camera.vision.mode` "ladder", or a single rung). */
+    private suspend fun ladder(calls: List<suspend () -> VisionResult>, rungs: List<Rung>): VisionResult {
+        var last: VisionResult = VisionResult.Failed("no vision key")
+        for ((i, rung) in rungs.withIndex()) {
+            val call = calls[i]
             // A slow first rung hands over instead of holding the user (`camera.vision.firstRungMs`, 20 Oct 2026).
             last = if (i < rungs.lastIndex)
                 kotlinx.coroutines.withTimeoutOrNull(com.tekyerema.core.config.AppConfig.long("camera.vision.firstRungMs", 7_000L)) { call() }
@@ -137,7 +188,7 @@ object VisionQa {
         }
         if (!NetworkMonitor.isOnline())
             return AppConfig.string("camera.phrases.qaOffline", "I can't check the photo without the internet.")
-        return when (val r = VisionLadder.describe(jpeg, GeminiVision.qaPrompt(question), settings)) {
+        return when (val r = VisionLadder.describe(jpeg, GeminiVision.qaPrompt(question), settings, smart = true)) {
             is VisionResult.Described -> r.text
             is VisionResult.Failed -> {
                 Log.w(TAG, "[CAMERA] follow-up failed: ${r.reason}")

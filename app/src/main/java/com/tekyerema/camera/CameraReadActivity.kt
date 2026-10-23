@@ -13,13 +13,10 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import android.util.Size
-import android.util.TypedValue
-import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
@@ -112,7 +109,8 @@ class CameraReadActivity : ComponentActivity() {
 
     private lateinit var settings: Settings
     private lateinit var previewView: PreviewView
-    private lateinit var caption: TextView
+    /** The floating glass over the picture (CameraSurface): what it's doing, the question, the answer. */
+    private val ui = CameraUi()
 
     /** The user's question for this photo (VisionPrompts), or null for the general description. */
     private var question: String? = null
@@ -192,6 +190,8 @@ class CameraReadActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        // The picture runs under the status and navigation bars; the glass keeps clear of them (CameraSurface).
+        androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
         settings = Settings(this)
         mode = when (intent?.getStringExtra(EXTRA_MODE)) {
             MODE_COLOR -> MODE_COLOR
@@ -208,6 +208,8 @@ class CameraReadActivity : ComponentActivity() {
             mode = MODE_DESCRIBE; moneyAsk = true
         }
         intervalMs = AppConfig.long("camera.analysis.intervalMs", 500L).coerceAtLeast(100L)
+        ui.question = question
+        ui.label = modeLabel()
         setContentView(buildLayout())
         tts = TextToSpeech(applicationContext) { status -> runOnUiThread { onTtsInit(status) } }
 
@@ -258,6 +260,7 @@ class CameraReadActivity : ComponentActivity() {
                     else -> null
                 }
                 if (why == null) {
+                    showCaption(phrase("describing", "Got it, one moment."), CameraPhase.WORKING)
                     speak(phrase("describing", "Got it, one moment."), flush = false)
                     val jpeg = withContext(Dispatchers.Default) { ImportedImage.jpeg(bmp, AppConfig.int("camera.describe.maxSide", 1024)) }
                     LastCapture.hold(jpeg)   // a follow-up question goes back to the cloud with THIS picture (VisionQa)
@@ -697,6 +700,8 @@ class CameraReadActivity : ComponentActivity() {
     private fun sendForDescription(nv21: ByteArray, width: Int, height: Int, rotation: Int) {
         if (closing) return
         // The request takes a few seconds: say we have the picture so the user can stop aiming.
+        ui.shutter++
+        showCaption(phrase("describing", "Got it, one moment."), CameraPhase.WORKING)
         speak(phrase("describing", "Got it, one moment."), flush = false)
         lifecycleScope.launch {
             val jpeg = withContext(Dispatchers.Default) {
@@ -715,9 +720,9 @@ class CameraReadActivity : ComponentActivity() {
                 LastCapture.hold(jpeg)
                 val q = question
                 when {
-                    moneyAsk -> VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false)
-                    q != null -> VisionLadder.describe(jpeg, VisionPrompts.forQuestion(q), settings, structured = false)
-                    else -> VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Gemini first, Groq when it fails
+                    moneyAsk -> VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true)
+                    q != null -> VisionLadder.describe(jpeg, VisionPrompts.forQuestion(q), settings, structured = false, smart = true)
+                    else -> VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Groq and Gemini hedged (VisionLadder.race)
                 }
             }
             if (closing) return@launch
@@ -739,7 +744,8 @@ class CameraReadActivity : ComponentActivity() {
     private fun fallBackToText(line: String) {
         mode = MODE_TEXT
         stabilizer.reset()
-        showCaption(line)
+        ui.label = modeLabel()
+        showCaption(line, CameraPhase.FAILED)
         speak(line)
         resetIdleTimer()
         scheduleNoTextHint()
@@ -752,13 +758,14 @@ class CameraReadActivity : ComponentActivity() {
         if (closing) return
         spokeResult = true
         main.removeCallbacks(noTextHint)
-        showCaption(text)
+        showCaption(text, CameraPhase.ANSWER)
         speak(text)
         resetIdleTimer()
     }
 
     /** The mode line. Queued (never cuts anything off), and after TalkBack's own window announcement. */
     private fun announce(line: String) {
+        ui.label = modeLabel()   // begin() may have settled on text (offline, no key)
         showCaption(line)
         if (ScreenReader.active(this)) {
             main.postDelayed({ if (!closing) speak(line, flush = false) }, SCREEN_READER_DELAY_MS)
@@ -772,13 +779,24 @@ class CameraReadActivity : ComponentActivity() {
         closing = true
         main.removeCallbacks(idleTimeout)
         main.removeCallbacks(noTextHint)
-        showCaption(line)
+        showCaption(line, CameraPhase.FAILED)
         speak(line) { finish() }
         main.postDelayed({ finish() }, FINISH_FALLBACK_MS)
     }
 
-    private fun showCaption(text: String) {
-        if (::caption.isInitialized) caption.text = text
+    private fun showCaption(text: String, phase: CameraPhase = CameraPhase.LOOKING) {
+        ui.text = text
+        ui.phase = phase
+    }
+
+    /** The capsule's small line: what the camera is doing (the question, when there is one, goes under it). */
+    private fun modeLabel(): String = when {
+        moneyAsk -> phrase("labelMoneyAsk", "Counting money")
+        mode == MODE_DESCRIBE && question != null -> phrase("labelAsk", "Looking for you")
+        mode == MODE_DESCRIBE -> phrase("labelDescribe", "Describing")
+        mode == MODE_CURRENCY -> phrase("labelCurrency", "Checking money")
+        mode == MODE_COLOR -> phrase("labelColor", "Colour and light")
+        else -> phrase("labelText", "Reading text")
     }
 
     private fun phrase(key: String, def: String): String = AppConfig.string("camera.phrases.$key", def)
@@ -894,7 +912,6 @@ class CameraReadActivity : ComponentActivity() {
     // ------------------------------------------------------------------------------------------------ layout
 
     private fun buildLayout(): View {
-        val dp = resources.displayMetrics.density
         val root = FrameLayout(this).apply {
             setBackgroundColor(Color.BLACK)   // the theme is translucent; the camera screen should not show the app below
             contentDescription = phrase("contentDescription", "Camera — point it at what you want me to read")
@@ -913,20 +930,12 @@ class CameraReadActivity : ComponentActivity() {
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         root.addView(previewView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        caption = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 24f)
-            setBackgroundColor(0xCC000000.toInt())
-            gravity = Gravity.CENTER
-            val pad = (16 * dp).toInt()
-            setPadding(pad, pad, pad, pad)
-            // Already spoken by us; TalkBack reading it again would double every result.
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+        // The liquid-glass layer (CameraSurface). Its words are already spoken by us — TalkBack reading them again would double
+        // every result — so only its Close pill is exposed.
+        val surface = androidx.compose.ui.platform.ComposeView(this).apply {
+            setContent { CameraSurface(ui, closeLabel = phrase("closeAction", "Close").replaceFirstChar { it.uppercase() }, onClose = { close() }) }
         }
-        root.addView(
-            caption,
-            FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
-        )
+        root.addView(surface, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         return root
     }
 }

@@ -13,10 +13,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * The Groq rung under GeminiVision (vision_features.md §4): the same OpenAI-style chat endpoint the planner brains
- * speak (OpenAiCompatBrain's request shape), with the photo as a base64 data-URL content part. Groq counts every
- * image as ~2k input tokens against the same daily budget the agent's brain runs on, so this rung is tried only
- * AFTER Gemini failed (no key, quota out, network error) — never first.
+ * The camera's fast rung (vision_features.md §4): the same OpenAI-style chat endpoint the planner brains speak
+ * (OpenAiCompatBrain's request shape), with the photo as a base64 data-URL content part. It answers first and is hedged
+ * with GeminiVision, the better eye for questions (VisionLadder.race, 23 Oct 2026). Groq counts every image as ~2k input
+ * tokens against the same daily budget the agent's brain runs on.
  *
  * Key rotation is the brains' idea at its simplest: limits are per key per organization, so a limited or refused
  * key just means the next one. One photo is one request — no pacing loop here.

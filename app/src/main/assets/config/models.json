@@ -4,7 +4,7 @@
   "groq": {
    "baseUrl": "https://api.groq.com/openai/v1",
    "visionModel": "qwen/qwen3.8-27b",
-   "_visionNote": "P-01 fallback rung (camera/GroqVision): Groq's current vision-capable model. Each image counts ~2k input tokens from the same daily budget the planner runs on, so it is tried only when Gemini fails."
+   "_visionNote": "The camera's fast rung (camera/GroqVision, ~1.4 s on the A20e), hedged with the Gemini vision model (VisionLadder.race, 23 Oct 2026): a question, money or a follow-up starts both and prefers Gemini's answer within camera.vision.smartWaitMs; a plain description asks Gemini only when Groq is slow or fails. Each image counts ~2k input tokens from the planner's daily budget."
   },
   "gemini": {
    "baseUrl": "https://generativelanguage.googleapis.com/v1beta"

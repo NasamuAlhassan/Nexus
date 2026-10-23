@@ -63,14 +63,15 @@ object GeminiVision {
     suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT, structured: Boolean = false): VisionResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext VisionResult.Failed("no Gemini key")
         val first = describeOnce(jpeg, apiKey, model, prompt, structured)
-        if (structured && first is VisionResult.Failed && first.reason == "HTTP 400") {
-            Log.w(TAG, "[CAMERA] structured describe refused by the model (HTTP 400) → plain request once")
-            return@withContext describeOnce(jpeg, apiKey, model, prompt, structured = false)
+        if (first is VisionResult.Failed && first.reason == "HTTP 400") {
+            Log.w(TAG, "[CAMERA] describe refused by the model (HTTP 400) → a bare request once")
+            return@withContext describeOnce(jpeg, apiKey, model, prompt, structured = false, bare = true)
         }
         first
     }
 
-    private suspend fun describeOnce(jpeg: ByteArray, apiKey: String, model: String, prompt: String, structured: Boolean): VisionResult = withContext(Dispatchers.IO) {
+    private suspend fun describeOnce(jpeg: ByteArray, apiKey: String, model: String, prompt: String, structured: Boolean,
+                                     bare: Boolean = false): VisionResult = withContext(Dispatchers.IO) {
         val timeoutSec = AppConfig.long("camera.describe.timeoutSec", 30L).coerceAtLeast(5L)
         val client = shared.newBuilder()
             .connectTimeout(minOf(timeoutSec, 15L), TimeUnit.SECONDS)
@@ -85,8 +86,13 @@ object GeminiVision {
             Base64.encodeToString(jpeg, Base64.NO_WRAP),
             AppConfig.double("camera.describe.temperature", 0.2),
             json = structured,
-            mediaResolution = if (structured) AppConfig.string("camera.describe.mediaResolution", "low") else "",
-            thinking = if (structured) AppConfig.string("camera.describe.thinking", "minimal") else ""
+            // A question, money or a follow-up (plain text back) gets the same minimal thinking as the structured describe: without
+            // it gemini-3.6-flash thinks at its default (medium) and missed the camera's 7-s deadline on the A20e (research,
+            // 23 Oct 2026). Medium resolution there: small print and banknote numerals need the detail.
+            mediaResolution = when { bare -> ""; structured -> AppConfig.string("camera.describe.mediaResolution", "low")
+                else -> AppConfig.string("camera.vision.mediaResolution", "medium") },
+            thinking = when { bare -> ""; structured -> AppConfig.string("camera.describe.thinking", "minimal")
+                else -> AppConfig.string("camera.vision.thinking", "minimal") }
         )
         val t0 = System.nanoTime()
         val request = Request.Builder()
