@@ -738,8 +738,9 @@ object VoiceEngine {
 
     fun announce(text: String, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
-        scope.launch {
-            kotlinx.coroutines.currentCoroutineContext()[kotlinx.coroutines.Job]?.let { j -> announcing += j; j.invokeOnCompletion { announcing -= j } }
+        // Registered before it is dispatched (audit, 22 Oct 2026): a line asked for from a background thread (PushedPin, AfterPin,
+        // PhoneAlerts) joined [announcing] only once it ran on the main thread — a new request in between missed it.
+        val announced = scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) {
             // Owner, 19 Oct 2026: in a Twi or Kusaal conversation every spoken line is in that language — the money outcome
             // and the other announcements went to the English voice. The reply voice puts the line into the language
             // (ReplyLocalizer) and speaks it; a line it cannot put into the language is still said in English there.
@@ -753,6 +754,8 @@ object VoiceEngine {
             // The line ended with a question (agent/NextStep's offer): the microphone opens once for the answer.
             if (ok && listenAfter) try { controller.followUp() } catch (_: Throwable) {}
         }
+        announcing += announced; announced.invokeOnCompletion { announcing -= announced }
+        announced.start()
     }
 
     /**

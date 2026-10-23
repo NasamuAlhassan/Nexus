@@ -1415,21 +1415,33 @@ class VoiceController(
                 set(VoiceState.SPEAKING, shown)
                 com.tekyerema.ui.ReplyCard.show(shown, speakAloud())
                 // Twi / Kusaal: the screen shows what the voice says, not the English it came from.
-                if ((!fast.systemVoice || tr.language == Lang.TWI) && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken)?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown); com.tekyerema.ui.ReplyCard.show(shown, speakAloud()) }
+                // "speak English" said in a Twi conversation is answered in English (LocalFastRouter.preference, council review 19 Oct
+                // 2026): the Twi rule below sent "Okay, English." to the translator and the Twi voice (audit, 22 Oct 2026).
+                val leavingTwi = fast.intent == "PREFERENCE" && fast.spoken == "Okay, English."
+                val localSaid = if ((!fast.systemVoice || (tr.language == Lang.TWI && !leavingTwi)) && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken) else null
+                localSaid?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown); com.tekyerema.ui.ReplyCard.show(shown, speakAloud()) }
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
                 // by a slow online Twi voice); information QUERIES (time/battery) stay on the normal voice/lang.
                 // Never in a Twi conversation: the line is said in the language the user set, by the Twi voice (owner, 21 Oct 2026:
                 // "everything that will come of Tɛkyerɛma be the voice the user set").
-                val useSystem = fast.systemVoice && systemVoice != null && tr.language != Lang.TWI
+                val useSystem = fast.systemVoice && systemVoice != null && (tr.language != Lang.TWI || leavingTwi)
                 val engine = if (useSystem) systemVoice!! else tts
                 // "speak Twi" said in English is answered in Twi ("Yoo, mɛsesa…"): through the English path it waited 12 s for the network
                 // English voice first (A20e, 20 Oct 2026).
-                val lang = if (useSystem) Lang.GH_EN
+                val lang = if (useSystem || leavingTwi) Lang.GH_EN
                     else if (fast.intent == "PREFERENCE" && fast.spoken.startsWith("Yoo, mɛsesa")) Lang.TWI
                     else tr.language
                 tel.mark("reply_start")
+                // Offline in Twi an action's English line has no Twi (the translator is online only, no fixed line): the Twi voice then said
+                // "Mintumi nkyerɛ eyi ase seesei. San bisa bio." AFTER the action had worked, and the user asked again — a short Twi
+                // done / not-done line instead; never "done" for a guide-only refusal (audit, 22 Oct 2026). [owner: verify the Twi]
+                val sayLine = if (tr.language == Lang.TWI && fast.systemVoice && localSaid == null && fast.intent != "PREFERENCE" &&
+                    !fast.spoken.startsWith(com.tekyerema.operator.Capabilities.GUIDE_PREFIX) &&
+                    !com.tekyerema.core.NetworkMonitor.isOnline() && com.tekyerema.language.ReplyLocalizer.englishForVoice(SpokenText.plain(fast.spoken)))
+                    Phrases.get(if (fast.ok) "twiActionDone" else "twiActionFailed", true, if (fast.ok) "Yoo, mayɛ." else "Mantumi anyɛ.")
+                    else fast.spoken
                 val spoke = if (!speakAloud() || fast.spoken.isBlank()) false
-                    else try { engine.speak(Verbalize.apply(fast.spoken), lang) }
+                    else try { engine.speak(Verbalize.apply(sayLine), lang) }
                     catch (c: CancellationException) { throw c } catch (e: Exception) { false }
                 if (!fast.listenAfter) com.tekyerema.ui.ReplyCard.hideAfter(3_500L + shown.length * 45L)
                 tel.endTurn(if (fast.ok) "full" else "failed", byVoice = true)

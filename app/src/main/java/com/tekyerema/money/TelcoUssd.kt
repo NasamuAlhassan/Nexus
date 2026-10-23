@@ -148,7 +148,10 @@ object TelcoUssd {
             code?.let { Request.Open(Flow(key, it, auto, what, net.name, number = number, amount = amount, name = person,
                 pay = if (buys) pay else null, words = words, prefer = prefer)) } ?: Request.Unsupported(
                 "I don't have a checked code for $missing on ${net.name}, and I never guess codes. " +
-                    "Ask me again in your own words and I'll find it on ${net.name}'s main menu.")
+                    // Only a network the brain's walk has an official root for can keep "I'll find it" — Telecel and AT have none,
+                    // so asking again gave this same line, or "I won't guess one" (audit, 22 Oct 2026).
+                    (if (com.tekyerema.money.ussd.UssdNavigatorTool.goalRoots(net.key).isNotEmpty())
+                        "Ask me again in your own words and I'll find it on ${net.name}'s main menu." else "Nothing was dialled."))
         // "Dial *138#", "open star 5 6 7 hash and buy a midnight bundle": a network menu the user named by its code is walked
         // with them — the brain chooses by their words, and asks where they said nothing (2 October 2026: "Dial star 138
         // hash" placed a phone call to 138, and "run the USSD code *138#" failed as a one-shot request).

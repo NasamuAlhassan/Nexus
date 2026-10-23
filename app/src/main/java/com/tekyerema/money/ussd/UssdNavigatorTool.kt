@@ -166,6 +166,8 @@ object UssdNavigatorTool : Tool {
                 ?: return ToolResult(false, "I don't have the network's official menu code for this SIM, so I won't guess one.", recoverable = false))
             args.put(MoMoSendTool.ARG_SIM, sim.provider)
             args.str("amount")?.let { com.tekyerema.money.MoneyLimits.parseAmount(it)?.let { a -> args.put("amount", a.toPlainString()) } ?: args.remove("amount") }
+            // A goal walk can pay (a bill, a merchant, school fees): the on-call scam warning is read back as on a send or airtime (audit, 22 Oct 2026).
+            if (com.tekyerema.tools.MoneyPrivacy.onCall(ctx.appContext)) args.put(MoMoSendTool.ARG_ON_CALL, true) else args.remove(MoMoSendTool.ARG_ON_CALL)
             if (args.str(ARG_CONTACT) != null || args.str("number") != null)
                 recipient(args, { com.tekyerema.tools.ContactChoice.resolve(ctx.appContext, it) },
                     { said, matches -> com.tekyerema.tools.ContactChoice.result(ctx.appContext, said, matches) })?.let { return it }
@@ -343,7 +345,10 @@ object UssdNavigatorTool : Tool {
         val firstTime = MoMoSendTool.firstTimeWarning(args) != null
         val spec = com.tekyerema.voice.ConfirmTemplates.Spec(com.tekyerema.voice.ConfirmTemplates.Spec.Kind.SEND_MONEY,
             name = args.str(ARG_CONTACT)?.trim()?.takeIf { it.isNotEmpty() }, number = number, amount = amount, firstTime = firstTime,
-            reference = args.str("reference")?.trim()?.takeIf { it.isNotEmpty() }, repeat = args.str(ARG_REPEAT) != null)
+            reference = args.str("reference")?.trim()?.takeIf { it.isNotEmpty() }, repeat = args.str(ARG_REPEAT) != null,
+            // the network already confirmed the first one: the Twi line says so, as the English does (audit, 22 Oct 2026)
+            repeatConfirmed = args.str(ARG_REPEAT) != null && com.tekyerema.money.TxLedger.repeatOf(number,
+                com.tekyerema.money.MoneyLimits.parseAmount(amount))?.state == com.tekyerema.money.TxLedger.State.DONE)
         // The first-time warning is only carried by the one-voice Twi line ("Nɔma yi yɛ foforɔ."); without it, English.
         return spec.takeIf { (!firstTime && !spec.repeat) || com.tekyerema.voice.ConfirmTemplates.oneVoice(it) != null }
     }
@@ -362,7 +367,9 @@ object UssdNavigatorTool : Tool {
         if (intent == TxIntent.GOAL) {
             val root = args.str(ARG_ROOT)?.let { com.tekyerema.voice.Verbalize.apply(it) } ?: "the network's menu"
             val amt = args.str("amount")?.let { " for ${GhanaMobileMoney.cedisPhrase(it)}" } ?: ""
-            return "I'll go through $root to ${args.str(ARG_GOAL)?.trim()?.trimEnd('.', '?')}$amt. " +
+            // the on-call scam warning, as on a send or airtime (audit, 22 Oct 2026)
+            val callWarn = com.tekyerema.tools.MoneyPrivacy.callWarning(args.optBoolean(MoMoSendTool.ARG_ON_CALL))?.let { "$it " } ?: ""
+            return "I'll go through $root to ${args.str(ARG_GOAL)?.trim()?.trimEnd('.', '?')}$amt. " + callWarn +
                 "I'll read what the network shows before anything is paid, and stop at your PIN. Shall I?"
         }
         val amt = args.str("amount")?.let { GhanaMobileMoney.cedisPhrase(it) } ?: "money"

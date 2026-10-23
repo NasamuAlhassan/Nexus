@@ -81,7 +81,10 @@ class OnlineFallback(private val keys: List<String>) {
         val body = JSONObject()
             .put("model", AppConfig.string("ussd.goal.model", "openai/gpt-oss-120b"))
             .put("temperature", 0)
-            .put("max_tokens", 300)
+            // gpt-oss reasons before it answers, and its reasoning counts against this cap (the app's own logs: 88–249 reasoning tokens
+            // a step). At its default ("medium") effort 300 can run out before any JSON — the walk then can't choose (audit, 22 Oct 2026).
+            .put("max_tokens", AppConfig.int("ussd.goal.maxTokens", 1024))
+            .apply { AppConfig.string("ussd.goal.reasoning", "low").takeIf { it.isNotBlank() }?.let { put("reasoning_effort", it) } }
             .put("response_format", JSONObject().put("type", "json_object"))
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content",

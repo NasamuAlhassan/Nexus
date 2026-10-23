@@ -45,10 +45,17 @@ object TwiRespell {
      * wife). The name is kept as saved everywhere else (the screen, the read-back's English); the translator half-translated it
      * ("Ɛfiri My yere hɔ") — judge's review of take A1, 21 Oct 2026.
      */
-    fun kinNames(line: String): String = KIN_NAME.replace(line) { m ->
-        val twi = KIN_TWI[m.groupValues[1].lowercase()] ?: return@replace m.value
-        if (m.value.first().isUpperCase() && m.range.first == 0) "Wo $twi" else "wo $twi"
+    fun kinNames(line: String): String {
+        // Never inside quotation marks: a message's own words in a read-back ("Nkra no se: “My mother is sick”") are said as
+        // they will be sent — "my" there is the writer, and "wo maame" read back a different message (audit, 22 Oct 2026).
+        val quoted = QUOTED.findAll(line).map { it.range }.toList()
+        return KIN_NAME.replace(line) { m ->
+            if (quoted.any { m.range.first in it }) return@replace m.value
+            val twi = KIN_TWI[m.groupValues[1].lowercase()] ?: return@replace m.value
+            if (m.value.first().isUpperCase() && m.range.first == 0) "Wo $twi" else "wo $twi"
+        }
     }
+    private val QUOTED = Regex("[“\"][^“”\"]*[”\"]")
     private val KIN_TWI = mapOf("wife" to "yere", "yere" to "yere", "husband" to "kunu", "kunu" to "kunu",
         "mum" to "maame", "mom" to "maame", "mother" to "maame", "maame" to "maame", "dad" to "papa", "father" to "papa",
         "papa" to "papa", "brother" to "nuabarima", "sister" to "nuabaa")
