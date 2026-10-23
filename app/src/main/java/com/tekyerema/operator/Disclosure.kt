@@ -42,6 +42,9 @@ object Disclosure {
             "Say “offline mode” to keep everything on the phone."
         val order = providers.joinToString(", then ") { name(it) }
         return "I use $order. " + providers.mapNotNull { of(it)?.text }.joinToString(" ") +
+            // R-01: a camera photo goes to every provider in the list (a question to both at once, the better answer kept).
+            (if (providers.size > 1) " A photo you ask me about goes to ${providers.joinToString(" and ") { name(it) }}." else
+                " A photo you ask me about goes to ${name(providers[0])}.") +
             " You can change this in Settings, Control."
     }
 }

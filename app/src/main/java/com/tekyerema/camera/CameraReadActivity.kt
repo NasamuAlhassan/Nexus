@@ -255,6 +255,7 @@ class CameraReadActivity : ComponentActivity() {
             if (mode == MODE_DESCRIBE) {
                 val why = when {
                     VisionLadder.allowedRungs(settings).isEmpty() -> phrase("describeDisabled", "Describing photos needs an online AI, and none is allowed in Settings.")
+                    !VisionLadder.canDescribe(settings) -> phrase("describeNoKey", "Describing needs a key that isn't set up on this phone. I can read any text I see instead.")
                     settings.geminiApiKey.isBlank() && settings.groqApiKeys.isEmpty() -> phrase("describeNoKey", "Describing needs a key that isn't set up on this phone. I can read any text I see instead.")
                     !NetworkMonitor.isOnline() -> phrase("describeOffline", "I can't describe it offline, but I can read any text I see.")
                     else -> null
@@ -367,7 +368,7 @@ class CameraReadActivity : ComponentActivity() {
                     return
                 }
                 // The Groq vision rung (VisionLadder) means describe works on keyless-Gemini days too.
-                settings.geminiApiKey.isBlank() && settings.groqApiKeys.isEmpty() -> {
+                !VisionLadder.canDescribe(settings) -> {
                     mode = MODE_TEXT
                     announce(phrase("describeNoKey", "Describing needs a key that isn't set up on this phone. I can read any text I see instead."))
                 }

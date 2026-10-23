@@ -31,6 +31,7 @@ class AirtimePurposeTest {
         assertEquals(air("5"), MoneyAsk.parse("buy airtime to call, five cedis"))
         assertEquals(air(), MoneyAsk.parse("buy airtime to talk to my mother in Kumasi"))
         assertEquals(air(), MoneyAsk.parse("buy airtime to call my mother-in-law"))
+        assertEquals(air(), MoneyAsk.parse("buy airtime to call Mr Ghartey"))   // a name, not a currency (review 4 N-A)
         val question = MoneyAsk.parse("buy airtime to call abroad, how much does it cost")
         assertTrue("a question is not an airtime read-back: $question", question?.kind != Kind.AIRTIME)
     }

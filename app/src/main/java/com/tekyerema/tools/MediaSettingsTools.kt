@@ -342,7 +342,11 @@ object PlayMusicTool : Tool {
                 kotlinx.coroutines.delay(300L)
             }
         }
-        return ToolResult(true, transportWords(action, now, before != null), JSONObject().put("action", action), channel = "native")
+        // `checked`: a player was seen and, for a skip or a start, reported playing afterwards. Without notification access (before
+        // == null) the key went out blind — said honestly, never counted as done (review 4 N-B).
+        val checked = before != null && (now != null || action in setOf("pause", "stop"))
+        return ToolResult(true, transportWords(action, now, before != null), JSONObject().put("action", action).put("checked", checked),
+            channel = "native")
     }
 
     override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {

@@ -114,10 +114,13 @@ object VisionLadder {
 
     /** J-18: a photo goes only to a provider the user allowed (Settings › Control › AI provider and model) — Gemini only when
      *  it is in their list, Groq only when Groq is (R-01, 23 Oct 2026: "Groq only" had switched the camera off altogether). */
-    fun allowedRungs(settings: Settings): Set<Rung> = allowedRungs(settings.allowGeminiBackup, com.tekyerema.operator.OperatorPolicy.providers)
+    fun allowedRungs(settings: Settings): Set<Rung> = allowedRungs(settings.allowGeminiBackup,
+        com.tekyerema.operator.OperatorPolicy.cloudUsable(), com.tekyerema.operator.OperatorPolicy.providers)
 
-    /** Pure, unit-tested. */
-    fun allowedRungs(geminiBackup: Boolean, providers: List<String>): Set<Rung> = buildSet {
+    /** Pure, unit-tested. Nothing at all while the cloud is off or today's cloud budget is spent ([cloudUsable]): "the cloud is
+     *  off, so nothing you say leaves your phone" holds for photos too (fifth review, 23 Oct 2026). */
+    fun allowedRungs(geminiBackup: Boolean, cloudUsable: Boolean, providers: List<String>): Set<Rung> = buildSet {
+        if (!cloudUsable) return@buildSet
         if (geminiBackup && "gemini" in providers) add(Rung.GEMINI)
         if ("groq" in providers) add(Rung.GROQ)
     }

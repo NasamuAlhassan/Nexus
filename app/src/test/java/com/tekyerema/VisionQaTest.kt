@@ -116,9 +116,15 @@ class VisionQaTest {
 
     /** R-01 (J-18): a photo goes only to the providers the user allowed; "Groq only" keeps the camera working. */
     @Test fun photosGoOnlyToAllowedProviders() {
-        assertEquals(setOf(VisionLadder.Rung.GROQ), VisionLadder.allowedRungs(geminiBackup = false, providers = listOf("groq")))
-        assertEquals(setOf(VisionLadder.Rung.GROQ, VisionLadder.Rung.GEMINI), VisionLadder.allowedRungs(true, listOf("groq", "gemini")))
-        assertEquals(setOf(VisionLadder.Rung.GEMINI), VisionLadder.allowedRungs(true, listOf("gemini")))
-        assertEquals(emptySet<VisionLadder.Rung>(), VisionLadder.allowedRungs(false, listOf("gemini")))
+        assertEquals(setOf(VisionLadder.Rung.GROQ), VisionLadder.allowedRungs(geminiBackup = false, cloudUsable = true, providers = listOf("groq")))
+        assertEquals(setOf(VisionLadder.Rung.GROQ, VisionLadder.Rung.GEMINI), VisionLadder.allowedRungs(true, true, listOf("groq", "gemini")))
+        assertEquals(setOf(VisionLadder.Rung.GEMINI), VisionLadder.allowedRungs(true, true, listOf("gemini")))
+        assertEquals(emptySet<VisionLadder.Rung>(), VisionLadder.allowedRungs(false, true, listOf("gemini")))
+    }
+
+    /** Fifth review: the cloud off, or today's budget spent, means no photo leaves the phone — whatever the provider list says. */
+    @Test fun noPhotoLeavesThePhoneWithTheCloudOff() {
+        assertEquals(emptySet<VisionLadder.Rung>(), VisionLadder.allowedRungs(true, cloudUsable = false, providers = listOf("groq", "gemini")))
+        assertEquals(emptySet<VisionLadder.Rung>(), VisionLadder.allowedRungs(false, cloudUsable = false, providers = listOf("groq")))
     }
 }

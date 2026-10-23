@@ -270,7 +270,8 @@ object MoneyAsk {
             .joinToString("|")
         Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|phone|talk|chat|text|browse)\\b" +
             "(?:\\s+(?!(?:for|number|a\\s+(?:hundred|thousand)|an?\\s+half|$num)\\b)[\\p{L}'’.\\-]+){0,8}?" +
-            "(?=\\s+(?:for\\b|an?\\s+(?:hundred|thousand|half)\\b|(?:$num)\\b|\\d|gh|₵)|\\s*[,?]|\\s*$)")
+            // A currency shape only ("GHS5", "GH₵ 5", "₵5", "¢5") — never a bare "gh": "call Mr Ghartey" is a name (review 4 N-A).
+            "(?=\\s+(?:for\\b|an?\\s+(?:hundred|thousand|half)\\b|(?:$num)\\b|\\d|gh[sc₵¢]?\\s?\\d|gh[sc₵¢]\\b|[₵¢])|\\s*[,?]|\\s*$)")
     }
     private val GIVES_AIR = Regex("(?i)\\b(?:send|give|transfer|gift|share)\\b")
 
