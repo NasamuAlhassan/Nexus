@@ -78,10 +78,12 @@ object VisionLadder {
      *  resolution; Groq gets the same prompt as text. [smart]: a question, money or a follow-up — the answer the user is waiting
      *  on, where the second rung (Gemini) is the better eye (counting and identification well ahead of Qwen's; research,
      *  23 Oct 2026), so its answer is preferred when it comes in time. */
-    suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false, smart: Boolean = false): VisionResult {
+    suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false, smart: Boolean = false,
+                         agree: ((String, String) -> String?)? = null): VisionResult {
         // Gemini resting after a 429 (its free key is shared with the brain's backup, web search and screen reading): the photo
         // goes to Groq alone until the rest is over (models session's review, 23 Oct 2026).
-        val rungs = plan(settings.geminiApiKey, settings.groqApiKeys).filter { it != Rung.GEMINI || !geminiResting() }
+        val allowed = allowedRungs(settings)
+        val rungs = plan(settings.geminiApiKey, settings.groqApiKeys).filter { it in allowed && (it != Rung.GEMINI || !geminiResting()) }
         val call: (Rung) -> suspend () -> VisionResult = { rung ->
             {
                 // A rung that throws must not take the other one (and the camera screen's scope) down with it.
@@ -103,12 +105,25 @@ object VisionLadder {
                 race(call(Rung.GROQ), call(Rung.GEMINI), smart,
                     hedgeMs = AppConfig.long("camera.vision.hedgeMs", 2_000L),
                     smartWaitMs = AppConfig.long("camera.vision.smartWaitMs", 4_500L),
-                    onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") })
+                    onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") }, agree = agree)
             } ?: VisionResult.Failed("no answer within the camera's deadline")
         // One rung (Gemini resting, one key, ladder mode) keeps the same deadline: never 30 s of silence after "one moment".
         return kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.vision.totalMs", 15_000L)) { ladder(rungs.map(call), rungs) }
             ?: VisionResult.Failed("no answer within the camera's deadline")
     }
+
+    /** J-18: a photo goes only to a provider the user allowed (Settings › Control › AI provider and model) — Gemini only when
+     *  it is in their list, Groq only when Groq is (R-01, 23 Oct 2026: "Groq only" had switched the camera off altogether). */
+    fun allowedRungs(settings: Settings): Set<Rung> = allowedRungs(settings.allowGeminiBackup, com.tekyerema.operator.OperatorPolicy.providers)
+
+    /** Pure, unit-tested. */
+    fun allowedRungs(geminiBackup: Boolean, providers: List<String>): Set<Rung> = buildSet {
+        if (geminiBackup && "gemini" in providers) add(Rung.GEMINI)
+        if ("groq" in providers) add(Rung.GROQ)
+    }
+
+    /** Can a photo be described at all with what the user allowed and the keys on this phone? */
+    fun canDescribe(settings: Settings): Boolean = plan(settings.geminiApiKey, settings.groqApiKeys).any { it in allowedRungs(settings) }
 
     @Volatile private var geminiRestUntil = 0L
     private fun geminiResting(): Boolean = android.os.SystemClock.elapsedRealtime() < geminiRestUntil
@@ -123,8 +138,11 @@ object VisionLadder {
      * question waits up to [smartWaitMs] for the smart rung's answer; after that, and for everything else, the first answer wins.
      * A failure never wins while the other rung may still answer. Pure over its two calls, so the timing is unit-tested.
      */
+    /** [agree] (money): when BOTH rungs have answered a smart question, the two answers are compared — a non-null result
+     *  replaces the smart answer (two different totals for the same photo → "I can't be sure"; third review, 23 Oct 2026). */
     suspend fun race(fast: suspend () -> VisionResult, smartCall: suspend () -> VisionResult, smart: Boolean,
-                     hedgeMs: Long, smartWaitMs: Long, onLoss: (VisionResult.Failed) -> Unit = {}): VisionResult =
+                     hedgeMs: Long, smartWaitMs: Long, onLoss: (VisionResult.Failed) -> Unit = {},
+                     agree: ((String, String) -> String?)? = null): VisionResult =
         kotlinx.coroutines.coroutineScope {
             val a = async { fast() }
             val b = async {
@@ -133,7 +151,12 @@ object VisionLadder {
             }
             if (smart) {
                 val early = kotlinx.coroutines.withTimeoutOrNull(smartWaitMs) { b.await() }
-                if (early is VisionResult.Described) { a.cancel(); return@coroutineScope early }
+                if (early is VisionResult.Described) {
+                    val heldFast = if (a.isCompleted) a.await() else null   // already in hand: no extra wait, no extra request
+                    a.cancel()
+                    val verdict = if (agree != null && heldFast is VisionResult.Described) agree(heldFast.text, early.text) else null
+                    return@coroutineScope verdict?.let { VisionResult.Described(it) } ?: early
+                }
             }
             var pending = listOf(a, b)
             var last: VisionResult = VisionResult.Failed("no vision key")
@@ -202,7 +225,7 @@ object VisionQa {
     suspend fun ask(question: String, settings: Settings): String? {
         val jpeg = LastCapture.get() ?: return null
         // J-18 binds the follow-up exactly as it bound the describe: no consent, no pixels off the phone.
-        if (!settings.allowGeminiBackup) {
+        if (!VisionLadder.canDescribe(settings)) {
             LastCapture.clear()
             return null
         }

@@ -113,4 +113,12 @@ class VisionQaTest {
         assertNull(GroqVision.parse("""{"choices":[]}"""))
         assertNull(GroqVision.parse("not json"))
     }
+
+    /** R-01 (J-18): a photo goes only to the providers the user allowed; "Groq only" keeps the camera working. */
+    @Test fun photosGoOnlyToAllowedProviders() {
+        assertEquals(setOf(VisionLadder.Rung.GROQ), VisionLadder.allowedRungs(geminiBackup = false, providers = listOf("groq")))
+        assertEquals(setOf(VisionLadder.Rung.GROQ, VisionLadder.Rung.GEMINI), VisionLadder.allowedRungs(true, listOf("groq", "gemini")))
+        assertEquals(setOf(VisionLadder.Rung.GEMINI), VisionLadder.allowedRungs(true, listOf("gemini")))
+        assertEquals(emptySet<VisionLadder.Rung>(), VisionLadder.allowedRungs(false, listOf("gemini")))
+    }
 }

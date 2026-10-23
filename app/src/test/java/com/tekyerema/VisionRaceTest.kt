@@ -52,6 +52,17 @@ class VisionRaceTest {
         assertEquals(1_200, currentTime)
     }
 
+    /** R-02: two different totals for one photo are never settled silently. */
+    @Test fun twoDifferentMoneyTotalsAreNotSettledSilently() = runTest {
+        val thirty = """{"items":[{"kind":"note","value_ghs":20,"count":1},{"kind":"note","value_ghs":10,"count":1}]}"""
+        val forty = """{"items":[{"kind":"note","value_ghs":20,"count":2}]}"""
+        val agree: (String, String) -> String? = { a, b -> com.tekyerema.camera.VisionPrompts.moneyDisagreement(a, b, "not sure") }
+        assertEquals(VisionResult.Described("not sure"),
+            VisionLadder.race(answer(thirty, 1_000), answer(forty, 3_000), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500, agree = agree))
+        assertEquals(VisionResult.Described(forty),
+            VisionLadder.race(answer(forty, 1_000), answer(forty, 3_000), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500, agree = agree))
+    }
+
     @Test fun bothFailingIsAFailure() = runTest {
         val r = VisionLadder.race(failure("HTTP 429", 100), failure("HTTP 503", 200), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500)
         assertTrue(r is VisionResult.Failed)

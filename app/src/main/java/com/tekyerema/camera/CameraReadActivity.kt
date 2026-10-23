@@ -204,7 +204,7 @@ class CameraReadActivity : ComponentActivity() {
         // `camera.currency.vision` off) the on-phone classifier names one note at a time.
         if ((mode == MODE_CURRENCY || (mode == MODE_DESCRIBE && VisionPrompts.isMoneyQuestion(question))) &&
             AppConfig.bool("camera.currency.vision", true) && NetworkMonitor.isOnline() &&
-            settings.allowGeminiBackup && (settings.geminiApiKey.isNotBlank() || settings.groqApiKeys.isNotEmpty())) {
+            VisionLadder.canDescribe(settings)) {
             mode = MODE_DESCRIBE; moneyAsk = true
         }
         intervalMs = AppConfig.long("camera.analysis.intervalMs", 500L).coerceAtLeast(100L)
@@ -254,7 +254,7 @@ class CameraReadActivity : ComponentActivity() {
             showImage(bmp)
             if (mode == MODE_DESCRIBE) {
                 val why = when {
-                    !settings.allowGeminiBackup -> phrase("describeDisabled", "Describing photos needs the Gemini backup, which is switched off in Settings.")
+                    VisionLadder.allowedRungs(settings).isEmpty() -> phrase("describeDisabled", "Describing photos needs an online AI, and none is allowed in Settings.")
                     settings.geminiApiKey.isBlank() && settings.groqApiKeys.isEmpty() -> phrase("describeNoKey", "Describing needs a key that isn't set up on this phone. I can read any text I see instead.")
                     !NetworkMonitor.isOnline() -> phrase("describeOffline", "I can't describe it offline, but I can read any text I see.")
                     else -> null
@@ -361,9 +361,9 @@ class CameraReadActivity : ComponentActivity() {
         if (mode == MODE_DESCRIBE) {
             when {
                 // J-18: the user switched the Gemini backup off — a photo must not leave the phone behind their back.
-                !settings.allowGeminiBackup -> {
+                VisionLadder.allowedRungs(settings).isEmpty() -> {
                     speakThenFinish(phrase("describeDisabled",
-                        "Describing photos needs the Gemini backup, which is switched off in Settings."))
+                        "Describing photos needs an online AI, and none is allowed in Settings."))
                     return
                 }
                 // The Groq vision rung (VisionLadder) means describe works on keyless-Gemini days too.
@@ -720,7 +720,9 @@ class CameraReadActivity : ComponentActivity() {
                 LastCapture.hold(jpeg)
                 val q = question
                 when {
-                    moneyAsk -> VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true)
+                    moneyAsk -> VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true,
+                        agree = { a, b -> VisionPrompts.moneyDisagreement(a, b, phrase("moneyDisagree", "I can't be sure of the total — I " +
+                            "counted it two ways. Hold the money flat, one note at a time, and ask me again.")) })
                     q != null -> VisionLadder.describe(jpeg, VisionPrompts.forQuestion(q), settings, structured = false, smart = true)
                     else -> VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Groq and Gemini hedged (VisionLadder.race)
                 }

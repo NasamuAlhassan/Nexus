@@ -101,6 +101,25 @@ fix is one short instruction ("Spread the notes out", "Turn the note over"), els
     }
 
     /** A plain answer cleaned for speech (no markdown, no stray quotes). */
+    /** The total of a money answer (every item's value × count), or null when it isn't one. Pure. */
+    fun moneyTotal(json: String): Double? {
+        val o = try { JSONObject(json.substring(json.indexOf('{').coerceAtLeast(0), json.lastIndexOf('}') + 1)) } catch (_: Throwable) { return null }
+        val items = o.optJSONArray("items") ?: return null
+        return (0 until items.length()).sumOf { i ->
+            val it = items.optJSONObject(i) ?: return@sumOf 0.0
+            val v = it.optDouble("value_ghs", 0.0)
+            if (v.isNaN() || v <= 0) 0.0 else v * it.optInt("count", 1).coerceIn(1, 200)
+        }
+    }
+
+    /** Two models' money answers for the same photo: null when they agree (or either isn't a count), else the honest line. */
+    fun moneyDisagreement(a: String, b: String, line: String = "I can't be sure of the total — I counted it two ways. Hold the " +
+        "money flat, one note at a time, and ask me again."): String? {
+        val ta = moneyTotal(a) ?: return null
+        val tb = moneyTotal(b) ?: return null
+        return if (kotlin.math.abs(ta - tb) > 0.001) line else null
+    }
+
     fun spoken(text: String): String = text.replace(Regex("[*_`#>]+"), "").replace(Regex("\\s+"), " ").trim().trim('"')
 
     /** "two 20 cedi notes", not "2 20 cedi notes". */

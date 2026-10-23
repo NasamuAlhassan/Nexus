@@ -207,8 +207,10 @@ internal fun ProvidersPage(settings: Settings, onBack: () -> Unit) {
             "When a task needs the online AI, Tɛkyerɛma sends what you asked and what's on the screen — never a PIN or password.")
         GlassGroup("Which AI, in what order") {
             Column(Modifier.selectableGroup()) {
-                ChoiceRow("Groq, then Gemini", "Gemini is used only when Groq can't answer.", order == listOf("groq", "gemini")) { choose(listOf("groq", "gemini")) }
-                ChoiceRow("Groq only", "Nothing goes to Google — no Gemini for tasks, pictures or searches.", order == listOf("groq")) { choose(listOf("groq")) }
+                ChoiceRow("Groq, then Gemini", "Gemini is used when Groq can't answer — and a question about a photo goes to both, " +
+                    "the better answer kept.", order == listOf("groq", "gemini")) { choose(listOf("groq", "gemini")) }
+                ChoiceRow("Groq only", "Nothing goes to Google — no Gemini for tasks, pictures or searches. Photos go to Groq.",
+                    order == listOf("groq")) { choose(listOf("groq")) }
                 ChoiceRow("Gemini, then Groq", "Google's Gemini plans first.", order == listOf("gemini", "groq")) { choose(listOf("gemini", "groq")) }
                 ChoiceRow("Gemini only", "Only Google's Gemini plans your tasks.", order == listOf("gemini"), divider = false) { choose(listOf("gemini")) }
             }
