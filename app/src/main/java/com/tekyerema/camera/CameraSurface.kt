@@ -105,7 +105,9 @@ fun CameraSurface(ui: CameraUi, closeLabel: String, onClose: () -> Unit) {
     // Looking and thinking breathe; an answer or a failure glows once and settles (calm motion: steady, no breathing).
     val breathing = rememberInfiniteTransition(label = "camera light")
     val breath by breathing.animateFloat(0.55f, 1f, infiniteRepeatable(tween(1_400, easing = LinearEasing), RepeatMode.Reverse), label = "breath")
-    val sweep by breathing.animateFloat(0f, 360f, infiniteRepeatable(tween(2_800, easing = LinearEasing)), label = "sweep")
+    val sweepState = breathing.animateFloat(0f, 360f, infiniteRepeatable(tween(2_800, easing = LinearEasing)), label = "sweep")
+    // Read in the draw phase only (glassBody calls it per frame): the surface never recomposes for the moving light.
+    val sweep: () -> Float = { sweepState.value }
     val settle = remember { Animatable(1f) }
     LaunchedEffect(ui.phase, ui.text) {
         if (ui.phase == CameraPhase.ANSWER || ui.phase == CameraPhase.FAILED) {
@@ -137,7 +139,6 @@ fun CameraSurface(ui: CameraUi, closeLabel: String, onClose: () -> Unit) {
                         0.62f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f)))
                     if (flash.value > 0f) drawRect(Color.White.copy(alpha = flash.value))
                 }
-                .clearAndSetSemantics { }
         ) {
             StatusCapsule(ui, mood, light, sweep, tier, calm, Modifier.align(Alignment.TopCenter))
             Column(
@@ -154,14 +155,15 @@ fun CameraSurface(ui: CameraUi, closeLabel: String, onClose: () -> Unit) {
 }
 
 @Composable
-private fun StatusCapsule(ui: CameraUi, mood: LightMood, light: () -> Float, sweep: Float, tier: GlassTier, calm: Boolean, modifier: Modifier) {
+private fun StatusCapsule(ui: CameraUi, mood: LightMood, light: () -> Float, sweep: () -> Float, tier: GlassTier, calm: Boolean, modifier: Modifier) {
     val g = LocalGlass.current
     Row(
         modifier
+            .clearAndSetSemantics { }   // already spoken by the activity; only Close is a control
             .statusBarsPadding()
             .padding(top = 8.dp, start = 24.dp, end = 24.dp)
             .widthIn(max = 520.dp)
-            .glassBody(23.dp, g, mood = { mood }, light = light, sweep = { sweep }, glowShift = { 0f }, tier = tier,
+            .glassBody(23.dp, g, mood = { mood }, light = light, sweep = sweep, glowShift = { 0f }, tier = tier,
                 tilt = { DEFAULT_LIGHT_DEGREES })
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -188,15 +190,16 @@ private fun StatusCapsule(ui: CameraUi, mood: LightMood, light: () -> Float, swe
 }
 
 @Composable
-private fun AnswerCard(ui: CameraUi, mood: LightMood, light: () -> Float, sweep: Float, tier: GlassTier, calm: Boolean) {
+private fun AnswerCard(ui: CameraUi, mood: LightMood, light: () -> Float, sweep: () -> Float, tier: GlassTier, calm: Boolean) {
     val g = LocalGlass.current
     val maxH = (LocalConfiguration.current.screenHeightDp * 0.46f).dp
     val radius = 34.dp
     Box(
         Modifier
+            .clearAndSetSemantics { }   // already spoken by the activity (TalkBack reading it again would double every result)
             .fillMaxWidth()
             .heightIn(max = maxH)
-            .glassBody(radius, g, mood = { mood }, light = light, sweep = { sweep }, glowShift = { 0f }, tier = tier)
+            .glassBody(radius, g, mood = { mood }, light = light, sweep = sweep, glowShift = { 0f }, tier = tier)
             .clip(RoundedCornerShape(radius))
     ) {
         AnimatedContent(

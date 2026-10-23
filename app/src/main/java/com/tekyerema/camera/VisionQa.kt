@@ -79,22 +79,40 @@ object VisionLadder {
      *  on, where the second rung (Gemini) is the better eye (counting and identification well ahead of Qwen's; research,
      *  23 Oct 2026), so its answer is preferred when it comes in time. */
     suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false, smart: Boolean = false): VisionResult {
-        val rungs = plan(settings.geminiApiKey, settings.groqApiKeys)
+        // Gemini resting after a 429 (its free key is shared with the brain's backup, web search and screen reading): the photo
+        // goes to Groq alone until the rest is over (models session's review, 23 Oct 2026).
+        val rungs = plan(settings.geminiApiKey, settings.groqApiKeys).filter { it != Rung.GEMINI || !geminiResting() }
         val call: (Rung) -> suspend () -> VisionResult = { rung ->
             {
-                when (rung) {
-                    Rung.GEMINI -> GeminiVision.describe(jpeg, settings.geminiApiKey,
-                        com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt, structured)   // N-06
-                    Rung.GROQ -> GroqVision.describe(jpeg, settings.groqApiKeys, settings.groqBaseUrl, prompt)
-                }
+                // A rung that throws must not take the other one (and the camera screen's scope) down with it.
+                val r = try {
+                    when (rung) {
+                        Rung.GEMINI -> GeminiVision.describe(jpeg, settings.geminiApiKey,
+                            com.tekyerema.agent.ModelRoles.model("vision", settings.model), prompt, structured)   // N-06
+                        Rung.GROQ -> GroqVision.describe(jpeg, settings.groqApiKeys, settings.groqBaseUrl, prompt)
+                    }
+                } catch (c: kotlinx.coroutines.CancellationException) { throw c }
+                catch (t: Throwable) { VisionResult.Failed("${rung.name.lowercase()}: ${t.javaClass.simpleName}") }
+                if (rung == Rung.GEMINI && r is VisionResult.Failed && r.reason == "HTTP 429") restGemini()
+                r
             }
         }
-        if (rungs.size == 2 && AppConfig.string("camera.vision.mode", "hedge").lowercase() == "hedge")
-            return race(call(rungs[0]), call(rungs[1]), smart,
-                hedgeMs = AppConfig.long("camera.vision.hedgeMs", 2_000L),
-                smartWaitMs = AppConfig.long("camera.vision.smartWaitMs", 4_500L),
-                onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") })
+        // The hedge is by identity, not by order: Groq is the fast rung and Gemini the better eye whatever `camera.vision.order` says.
+        if (Rung.GROQ in rungs && Rung.GEMINI in rungs && AppConfig.string("camera.vision.mode", "hedge").lowercase() == "hedge")
+            return kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.vision.totalMs", 15_000L)) {
+                race(call(Rung.GROQ), call(Rung.GEMINI), smart,
+                    hedgeMs = AppConfig.long("camera.vision.hedgeMs", 2_000L),
+                    smartWaitMs = AppConfig.long("camera.vision.smartWaitMs", 4_500L),
+                    onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") })
+            } ?: VisionResult.Failed("no answer within the camera's deadline")
         return ladder(rungs.map(call), rungs)
+    }
+
+    @Volatile private var geminiRestUntil = 0L
+    private fun geminiResting(): Boolean = android.os.SystemClock.elapsedRealtime() < geminiRestUntil
+    private fun restGemini() {
+        geminiRestUntil = android.os.SystemClock.elapsedRealtime() + AppConfig.long("camera.vision.geminiRestMs", 600_000L)
+        Log.w(TAG, "[CAMERA] Gemini vision is out of quota (429) — Groq alone for a while")
     }
 
     /**

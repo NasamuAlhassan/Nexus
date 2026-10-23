@@ -3,6 +3,7 @@ package com.tekyerema
 import com.tekyerema.money.MoneyAsk
 import com.tekyerema.money.MoneyAsk.Kind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** Audit, 22 Oct 2026: "… airtime to call my wife" is what the airtime is for, not who it is for. */
@@ -13,6 +14,15 @@ class AirtimePurposeTest {
     @Test fun airtimeToCallSomeoneIsAirtimeForThisPhone() {
         assertEquals(air("5"), MoneyAsk.parse("buy 5 cedis airtime to call my wife"))
         assertEquals(air(), MoneyAsk.parse("buy airtime to call my wife"))
+    }
+
+    /** Models session's review, 23 Oct 2026: only the purpose clause goes — never the amount, the person or a question after it. */
+    @Test fun whatComesAfterThePurposeIsKept() {
+        assertEquals(air("5"), MoneyAsk.parse("buy airtime to call my wife, five cedis"))
+        assertEquals(air(name = "Kofi", self = false), MoneyAsk.parse("buy airtime to talk to my mother, for Kofi"))
+        assertEquals(air("5"), MoneyAsk.parse("buy airtime to call my wife for 5 cedis"))
+        val question = MoneyAsk.parse("buy airtime to call abroad, how much does it cost")
+        assertTrue("a question is not an airtime read-back: $question", question?.kind != Kind.AIRTIME)
     }
 
     @Test fun aPersonOrANumberTheAirtimeIsForIsKept() {

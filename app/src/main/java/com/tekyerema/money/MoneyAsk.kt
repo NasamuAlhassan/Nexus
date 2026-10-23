@@ -260,14 +260,17 @@ object MoneyAsk {
     // ------------------------------------------------------------------ airtime
 
     /** "Buy airtime to call my wife": what the airtime is FOR, not who it is for, so it is this phone's (audit, 22 Oct 2026: "call
-     *  my wife" became the contact to send airtime to). Never after send / give / transfer, and never a tail with digits in it:
-     *  "airtime to phone number 024…" keeps its number. */
-    private val PURPOSE_TAIL = Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|talk|chat|browse)\\b\\D*$")
+     *  my wife" became the contact to send airtime to). Only that clause is cut — up to a comma, a question mark, "for …" or the
+     *  end — so "…, five cedis" keeps its amount and "…, for Kofi" its person (models session's review, 23 Oct 2026). Never after
+     *  send / give / transfer, and never across a digit: "airtime to phone number 024…" keeps its number. */
+    private val PURPOSE_CLAUSE = Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|phone|talk|chat|text|message|whatsapp|browse)\\b[^,?\\d]*?(?=\\s+for\\b|\\s*[,?]|\\s*$)")
     private val GIVES_AIR = Regex("(?i)\\b(?:send|give|transfer|gift|share)\\b")
 
     private fun airtime(clean: String): Ask? {
-        val s0 = VIA.replace(clean, " ").let { s -> if (GIVES_AIR.containsMatchIn(s)) s else PURPOSE_TAIL.replace(s, "") }
-        val g = s0.lowercase()
+        val said = VIA.replace(clean, " ")
+        val s0 = if (GIVES_AIR.containsMatchIn(said)) said else PURPOSE_CLAUSE.replace(said, "")
+        // The guards read what was SAID: a question after the clause ("…, how much does it cost") is still a question.
+        val g = said.lowercase()
         if (DATA_WORD.containsMatchIn(g) || QUESTION_HEAD.containsMatchIn(g) || ABOUT.containsMatchIn(g) || PRICE.containsMatchIn(g) ||
             BILL.containsMatchIn(g) || CARD.containsMatchIn(g) || BACK.containsMatchIn(g) || AIR_MEDIA.containsMatchIn(g)) return null
         // "for me", "my phone", "this number": the user's own line — said or not, that is the default.

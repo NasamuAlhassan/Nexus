@@ -1435,11 +1435,15 @@ class VoiceController(
                 // Offline in Twi an action's English line has no Twi (the translator is online only, no fixed line): the Twi voice then said
                 // "Mintumi nkyerɛ eyi ase seesei. San bisa bio." AFTER the action had worked, and the user asked again — a short Twi
                 // done / not-done line instead; never "done" for a guide-only refusal (audit, 22 Oct 2026). [owner: verify the Twi]
-                val sayLine = if (tr.language == Lang.TWI && fast.systemVoice && localSaid == null && fast.intent != "PREFERENCE" &&
-                    !fast.spoken.startsWith(com.tekyerema.operator.Capabilities.GUIDE_PREFIX) &&
-                    !com.tekyerema.core.NetworkMonitor.isOnline() && com.tekyerema.language.ReplyLocalizer.englishForVoice(SpokenText.plain(fast.spoken)))
-                    Phrases.get(if (fast.ok) "twiActionDone" else "twiActionFailed", true, if (fast.ok) "Yoo, mayɛ." else "Mantumi anyɛ.")
-                    else fast.spoken
+                val sayLine = when (TwiOfflineLine.pick(twi = tr.language == Lang.TWI, systemVoice = fast.systemVoice,
+                    hasTwiLine = localSaid != null, online = com.tekyerema.core.NetworkMonitor.isOnline(),
+                    englishOnly = com.tekyerema.language.ReplyLocalizer.englishForVoice(SpokenText.plain(fast.spoken)),
+                    acted = fast.acted, ok = fast.ok, listenAfter = fast.listenAfter, spoken = SpokenText.plain(fast.spoken),
+                    guide = fast.spoken.startsWith(com.tekyerema.operator.Capabilities.GUIDE_PREFIX))) {
+                    TwiOfflineLine.Pick.DONE -> Phrases.get("twiActionDone", true, "Yoo, mayɛ.")
+                    TwiOfflineLine.Pick.FAILED -> Phrases.get("twiActionFailed", true, "Mantumi anyɛ.")
+                    null -> fast.spoken
+                }
                 val spoke = if (!speakAloud() || fast.spoken.isBlank()) false
                     else try { engine.speak(Verbalize.apply(sayLine), lang) }
                     catch (c: CancellationException) { throw c } catch (e: Exception) { false }

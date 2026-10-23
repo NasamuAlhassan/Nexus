@@ -570,7 +570,7 @@ class LocalFastRouter(
         com.tekyerema.audit.AuditLog.clear()
         com.tekyerema.core.telemetry.Telemetry.clear()
         AgentEngine.clearTraces()
-        return action(FastIntent.ClearHistory.name, "Okay, I've cleared your history.")
+        return action(FastIntent.ClearHistory.name, "Okay, I've cleared your history.", acted = true)
     }
 
     // ---------------------------------------------------------------- W7
@@ -687,7 +687,7 @@ class LocalFastRouter(
     private fun magnify(action: String): FastOutcome? {
         val c = controller() ?: return null
         val scale = c.magnify(action) ?: return action("MAGNIFY", "I can't magnify the screen on this phone.")
-        return action("MAGNIFY", if (scale <= 1f) "Magnification is off." else "Magnified ${"%.1f".format(java.util.Locale.US, scale)} times.")
+        return action("MAGNIFY", if (scale <= 1f) "Magnification is off." else "Magnified ${"%.1f".format(java.util.Locale.US, scale)} times.", acted = true)
     }
 
     /** L-04: "set my emergency contact to Ama" — one clear contact match, or an honest question. */
@@ -1241,7 +1241,7 @@ class LocalFastRouter(
                 now == want && mode == "normal" -> "Your phone will ring."
                 now == want -> "Your phone is on $mode."
                 else -> "I couldn't change the ringer mode."
-            })
+            }, acted = now == want)
         } catch (se: SecurityException) {
             try { am.ringerMode = AudioManager.RINGER_MODE_VIBRATE } catch (_: Throwable) {}
             action("RINGER_VIBRATE", "I put it on vibrate — full silent needs Do Not Disturb access for Tɛkyerɛma.")
@@ -1334,7 +1334,7 @@ class LocalFastRouter(
         val am = audio() ?: return null
         val dir = if (raise) AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
         am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
-        return action("VOLUME_${if (raise) "UP" else "DOWN"}", if (raise) "Volume up." else "Volume down.")
+        return action("VOLUME_${if (raise) "UP" else "DOWN"}", if (raise) "Volume up." else "Volume down.", acted = true)
     }
 
     private fun muteVolume(mute: Boolean): FastOutcome? {
@@ -1362,7 +1362,7 @@ class LocalFastRouter(
             val cur = Settings.System.getInt(cr, Settings.System.SCREEN_BRIGHTNESS, 128)
             val next = (cur + if (up) 45 else -45).coerceIn(10, 255)
             Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, next)
-            action("BRIGHTNESS_${if (up) "UP" else "DOWN"}", if (up) "Brightness up." else "Brightness down.")
+            action("BRIGHTNESS_${if (up) "UP" else "DOWN"}", if (up) "Brightness up." else "Brightness down.", acted = true)
         } catch (t: Throwable) { null }
     }
 
@@ -1373,7 +1373,7 @@ class LocalFastRouter(
             val cr = appContext.contentResolver
             Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS_MODE, Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL)
             Settings.System.putInt(cr, Settings.System.SCREEN_BRIGHTNESS, Math.round(fraction * 254 + 1))
-            return action("BRIGHTNESS_SET", brightnessSaid(fraction))
+            return action("BRIGHTNESS_SET", brightnessSaid(fraction), acted = true)
         } catch (_: Throwable) { /* fall back to the slider */ }
         return brightnessViaSlider(fraction, null)
     }
@@ -1418,7 +1418,8 @@ class LocalFastRouter(
         c.closeShade()
         val frac = (target - r.min) / span
         return action("BRIGHTNESS", if (fraction != null) brightnessSaid(fraction)
-            else if ((delta ?: 0f) > 0) "Brightness up, now ${Math.round(frac * 100)} percent." else "Brightness down, now ${Math.round(frac * 100)} percent.")
+            else if ((delta ?: 0f) > 0) "Brightness up, now ${Math.round(frac * 100)} percent." else "Brightness down, now ${Math.round(frac * 100)} percent.",
+            acted = true)
     }
 
     /** Pull down Quick Settings and wait until it is the active window and has stopped animating. Returns the package
@@ -1470,7 +1471,7 @@ class LocalFastRouter(
         return try {
             cm.setTorchMode(id, on)
             if (was != on) extraInverses.add(com.tekyerema.audit.Inverse.Torch(was))
-            action(if (on) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF", if (on) "Flashlight on." else "Flashlight off.")
+            action(if (on) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF", if (on) "Flashlight on." else "Flashlight off.", acted = true)
         } catch (t: Throwable) {
             action("FLASHLIGHT", "Sorry, I couldn't switch the flashlight ${if (on) "on" else "off"}.")
         }
@@ -1699,7 +1700,7 @@ class LocalFastRouter(
             Log.i(TAG, "[LOCAL_FAST_PATH] OPEN_APP ${app.packageName} still starting (fg=$fg) → said so, no agent")
             return action("OPEN_APP", "Opening ${app.label}.")
         }
-        return action("OPEN_APP", "${app.label} is open.")
+        return action("OPEN_APP", "${app.label} is open.", acted = true)
     }
 
     /** An information QUERY answer — spoken on the normal (Twi-capable) voice. */
@@ -1751,12 +1752,12 @@ class LocalFastRouter(
         if (TimerNotice.showsRunning(c.buildSnapshot().elements.map { it.label })) {
             Log.i(TAG, "[LOCAL_FAST_PATH] STOP_TIMER pressed, but the timer still shows Pause → agent"); return null
         }
-        return action("STOP_TIMER", "Okay, the timer is stopped.")
+        return action("STOP_TIMER", "Okay, the timer is stopped.", acted = true)
     }
 
     /** A deterministic ACTION confirmation — spoken on the OFFLINE system engine so it's instant, never
      *  blocked by the online Twi voice on a slow network. */
-    private fun action(name: String, text: String) = FastOutcome(name, text, systemVoice = true)
+    private fun action(name: String, text: String, acted: Boolean = false) = FastOutcome(name, text, systemVoice = true, acted = acted)
 
     companion object {
         private const val TAG = "Tekyerema"
@@ -1835,7 +1836,11 @@ data class FastOutcome(
     /** K-03: false when the line reports a failure ("Sorry, I couldn't…") — the error cue plays, not "done". */
     val ok: Boolean = !FAILURE_LINE.containsMatchIn(spoken),
     /** The line asks something ("Did you mean …?"): after a spoken turn the mic opens again for the answer. */
-    val listenAfter: Boolean = false
+    val listenAfter: Boolean = false,
+    /** The phone really did what was asked (volume, light, an app opened…), set only where that is known. A line that merely
+     *  reads as fine ("No contact named Kofi.") is [ok] without being this: only this may be said as "done" (models session's
+     *  review, 23 Oct 2026). */
+    val acted: Boolean = false
 )
 
 private val FAILURE_LINE = Regex("(?i)^(sorry\\b|i couldn't|i can't|i could not|i cannot|this phone (doesn't|does not|has no))")
