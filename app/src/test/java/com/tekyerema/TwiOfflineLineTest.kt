@@ -22,6 +22,14 @@ class TwiOfflineLineTest {
         assertEquals(null, pick(acted = true, spoken = "Which one?"))
     }
 
+    /** Re-review N6: each rule on its own. */
+    @Test fun eachRuleHoldsOnItsOwn() {
+        assertEquals(null, pick(acted = true, listenAfter = true, spoken = "Volume up."))              // the mic opens: not "done"
+        assertEquals(null, pick(ok = false, listenAfter = true, spoken = "I couldn't. Try another way."))  // nor "not done"
+        assertEquals(null, TwiOfflineLine.pick(twi = true, systemVoice = true, hasTwiLine = false, online = false, englishOnly = true,
+            acted = true, ok = true, listenAfter = false, spoken = "Volume up.", guide = true))          // a guide line is kept
+    }
+
     @Test fun aLineThatOnlyReadsFineIsNotDone() = assertEquals(null, pick(acted = false, spoken = "No contact named Kofi."))
 
     @Test fun onlineOrEnglishOrATwiLineKeepsTheLine() {

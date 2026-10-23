@@ -104,7 +104,7 @@ class LocalFastRouter(
                 com.tekyerema.live.TimerSpeech.Match.LEFT -> com.tekyerema.live.LiveTimer.leftWords() ?: "No timer is running."
                 com.tekyerema.live.TimerSpeech.Match.ADD_MINUTE -> { com.tekyerema.live.LiveTimer.addMinute(appContext); "Added a minute." }
             }
-            return FastOutcome("TIMER", said, systemVoice = true)
+            return FastOutcome("TIMER", said, systemVoice = true, acted = m != com.tekyerema.live.TimerSpeech.Match.LEFT)
         }
         // The answer to "Did you mean …?" (the meaning matcher, below): yes runs it and remembers the wording, no drops it.
         // Anything else drops it too and is handled as said — so a stale suggestion never catches a later "yes".
@@ -355,7 +355,7 @@ class LocalFastRouter(
         is FastIntent.CloseApp -> closeApp(intent)
         FastIntent.ReadMore -> readMore()
         FastIntent.CalendarToday -> runTool("calendar", org.json.JSONObject().put("action", "today"))
-        FastIntent.ShowAlarms -> runTool("show_alarms", org.json.JSONObject(), action = true)
+        FastIntent.ShowAlarms -> runTool("show_alarms", org.json.JSONObject(), action = true, acted = false)   // its answer is a list
         FastIntent.StopTimer -> stopTimer(intent)
         FastIntent.Connectivity -> connectivity()
         FastIntent.NowPlaying -> nowPlaying()
@@ -480,7 +480,7 @@ class LocalFastRouter(
         val failed = ArrayList<com.tekyerema.audit.Inverse>()
         for (inv in g.inverses) if (com.tekyerema.audit.DeviceState.apply(appContext, inv)) done.add(inv) else failed.add(inv)
         com.tekyerema.audit.AuditLog.record("fast", com.tekyerema.audit.AuditLog.DONE, "undid the last change", com.tekyerema.audit.AuditLog.newTask())
-        return action(FastIntent.Undo.name, com.tekyerema.audit.DeviceState.spoken(done, failed))
+        return action(FastIntent.Undo.name, com.tekyerema.audit.DeviceState.spoken(done, failed), acted = failed.isEmpty() && done.isNotEmpty())
     }
 
     /** J-12: the action audit, read aloud. */
@@ -586,7 +586,8 @@ class LocalFastRouter(
                 extraInverses.add(com.tekyerema.audit.Inverse.RemoveSchedule(stored.id))   // J-13
                 val runsAlone = com.tekyerema.agent.triggers.TriggerSafety.reminderLine(stored.goal) != null ||
                     com.tekyerema.agent.triggers.TriggerSafety.isReadOnlyGoal(stored.goal)
-                return action(intent.name, "Okay. " + rel.parsed.spoken + if (runsAlone) "" else " At that time I'll remind you — I won't do it by myself.")
+                return action(intent.name, "Okay. " + rel.parsed.spoken + if (runsAlone) "" else " At that time I'll remind you — I won't do it by myself.",
+                    acted = true)
             }
             null -> {}
         }
@@ -599,7 +600,7 @@ class LocalFastRouter(
         val runsAlone = com.tekyerema.agent.triggers.TriggerSafety.reminderLine(stored.goal) != null ||
             com.tekyerema.agent.triggers.TriggerSafety.isReadOnlyGoal(stored.goal)
         val tail = if (runsAlone) "" else " At that time I'll remind you — I won't do it by myself."
-        return action(intent.name, "Okay. " + com.tekyerema.agent.triggers.ScheduledTasks.describe(stored) + tail)
+        return action(intent.name, "Okay. " + com.tekyerema.agent.triggers.ScheduledTasks.describe(stored) + tail, acted = true)
     }
 
     private fun listSchedules(): FastOutcome {
@@ -1162,7 +1163,7 @@ class LocalFastRouter(
      * confirmation — anything that would need one falls through to the agent, which asks. A tool that isn't built,
      * is flagged off, or fails its preflight speaks that honest reason instead.
      */
-    private suspend fun runTool(name: String, args: org.json.JSONObject, action: Boolean = false,
+    private suspend fun runTool(name: String, args: org.json.JSONObject, action: Boolean = false, acted: Boolean = action,
                                 lead: (com.tekyerema.tools.ToolResult) -> String? = { null }): FastOutcome? {
         val tool = com.tekyerema.tools.defaultTools().firstOrNull { it.name == name } ?: return null
         if (!com.tekyerema.tools.ToolManifest.isAvailable(tool)) return null
@@ -1180,7 +1181,7 @@ class LocalFastRouter(
                 ?.let { References.noteRead(it.trim(), if (name == "read_sms") "SMS" else null) }
         val said = speakable(r.message)
         val spoken = lead(r)?.let { it + com.tekyerema.voice.SpokenText.BREAK + said } ?: said
-        return FastOutcome(name.uppercase(), spoken, systemVoice = action, ok = r.success)
+        return FastOutcome(name.uppercase(), spoken, systemVoice = action, ok = r.success, acted = acted && r.success)
     }
 
     /** Tool output → a spoken line: drop planner-only headers and list bullets; each listed item its own sentence with a
@@ -1341,7 +1342,7 @@ class LocalFastRouter(
         val am = audio() ?: return null
         val dir = if (mute) AudioManager.ADJUST_MUTE else AudioManager.ADJUST_UNMUTE
         am.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
-        return action(if (mute) "VOLUME_MUTE" else "VOLUME_UNMUTE", if (mute) "Muted." else "Unmuted.")
+        return action(if (mute) "VOLUME_MUTE" else "VOLUME_UNMUTE", if (mute) "Muted." else "Unmuted.", acted = true)
     }
 
     private fun volumeText(): String {
@@ -1565,7 +1566,7 @@ class LocalFastRouter(
             return null
         }
         c.closeShade()
-        return action(t.name, "${tile.spoken} is $state.")
+        return action(t.name, "${tile.spoken} is $state.", acted = true)
     }
 
     // ---------------------------------------------------------------- media transport keys
@@ -1574,14 +1575,14 @@ class LocalFastRouter(
         return try {
             am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
             am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
-            action(intent.name, say)
+            action(intent.name, say, acted = true)
         } catch (t: Throwable) { null }
     }
 
     // ---------------------------------------------------------------- navigation (accessibility global actions)
     private fun global(globalName: String, intent: FastIntent, say: String): FastOutcome? {
         val c = controller() ?: return null
-        return if (c.globalAction(globalName)) action(intent.name, say) else null
+        return if (c.globalAction(globalName)) action(intent.name, say, acted = true) else null
     }
 
     // ---------------------------------------------------------------- close the shade / leave the app / read on (audit 2026-10-01)
@@ -1591,7 +1592,7 @@ class LocalFastRouter(
         val c = controller() ?: return null
         if (c.activeWindowPackage() != AccessibilityController.SYSTEM_UI)
             return handled(intent, "The notification panel isn't open.")
-        return if (c.closeShade()) action(intent.name, "Closed.") else null   // still open → the agent looks at what is there
+        return if (c.closeShade()) action(intent.name, "Closed.", acted = true) else null   // still open → the agent looks at what is there
     }
 
     /**

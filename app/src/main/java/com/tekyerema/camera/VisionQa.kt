@@ -105,7 +105,9 @@ object VisionLadder {
                     smartWaitMs = AppConfig.long("camera.vision.smartWaitMs", 4_500L),
                     onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") })
             } ?: VisionResult.Failed("no answer within the camera's deadline")
-        return ladder(rungs.map(call), rungs)
+        // One rung (Gemini resting, one key, ladder mode) keeps the same deadline: never 30 s of silence after "one moment".
+        return kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.vision.totalMs", 15_000L)) { ladder(rungs.map(call), rungs) }
+            ?: VisionResult.Failed("no answer within the camera's deadline")
     }
 
     @Volatile private var geminiRestUntil = 0L

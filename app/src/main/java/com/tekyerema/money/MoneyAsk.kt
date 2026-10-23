@@ -263,7 +263,12 @@ object MoneyAsk {
      *  my wife" became the contact to send airtime to). Only that clause is cut — up to a comma, a question mark, "for …" or the
      *  end — so "…, five cedis" keeps its amount and "…, for Kofi" its person (models session's review, 23 Oct 2026). Never after
      *  send / give / transfer, and never across a digit: "airtime to phone number 024…" keeps its number. */
-    private val PURPOSE_CLAUSE = Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|phone|talk|chat|text|message|whatsapp|browse)\\b[^,?\\d]*?(?=\\s+for\\b|\\s*[,?]|\\s*$)")
+    // At most four words after the verb, never "number" or an amount; it ends where an amount, "for", a comma, a question mark or
+    // the end comes — the recogniser writes no commas, so "… my wife five cedis" must end the clause at "five" (re-review, 23 Oct).
+    private val PURPOSE_CLAUSE = Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|phone|talk|chat|text|browse)\\b" +
+        "(?:\\s+(?!(?:for|number|$NUM_WORD)\\b)[\\p{L}'’]+){1,4}?(?=\\s+(?:for\\b|(?:$NUM_WORD)\\b|\\d)|\\s*[,?]|\\s*$)")
+    private const val NUM_WORD = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|" +
+        "fifty|sixty|seventy|eighty|ninety|hundred|thousand|half|cedi|cedis|ghana|pesewa|pesewas"
     private val GIVES_AIR = Regex("(?i)\\b(?:send|give|transfer|gift|share)\\b")
 
     private fun airtime(clean: String): Ask? {
