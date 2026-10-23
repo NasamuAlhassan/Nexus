@@ -260,15 +260,18 @@ object MoneyAsk {
     // ------------------------------------------------------------------ airtime
 
     /** "Buy airtime to call my wife": what the airtime is FOR, not who it is for, so it is this phone's (audit, 22 Oct 2026: "call
-     *  my wife" became the contact to send airtime to). Only that clause is cut — up to a comma, a question mark, "for …" or the
-     *  end — so "…, five cedis" keeps its amount and "…, for Kofi" its person (models session's review, 23 Oct 2026). Never after
-     *  send / give / transfer, and never across a digit: "airtime to phone number 024…" keeps its number. */
-    // At most four words after the verb, never "number" or an amount; it ends where an amount, "for", a comma, a question mark or
-    // the end comes — the recogniser writes no commas, so "… my wife five cedis" must end the clause at "five" (re-review, 23 Oct).
-    private val PURPOSE_CLAUSE = Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|phone|talk|chat|text|browse)\\b" +
-        "(?:\\s+(?!(?:for|number|$NUM_WORD)\\b)[\\p{L}'’]+){1,4}?(?=\\s+(?:for\\b|(?:$NUM_WORD)\\b|\\d)|\\s*[,?]|\\s*$)")
-    private const val NUM_WORD = "zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|fifteen|twenty|thirty|forty|" +
-        "fifty|sixty|seventy|eighty|ninety|hundred|thousand|half|cedi|cedis|ghana|pesewa|pesewas"
+     *  my wife" became the contact to send airtime to). Only that clause is cut: the verb and up to eight words after it, never
+     *  "number" or an amount, ending where an amount ("five", "a hundred", "5", "GH₵5"), "for", a comma, a question mark or the end
+     *  comes — the recogniser writes no commas, so "… my wife five cedis" ends at "five" and "…, for Kofi" keeps its person (the
+     *  models session's three reviews, 23 Oct 2026). Never after send / give / transfer: "airtime to phone number 024…" keeps its
+     *  number. Lazy: the number words come from the same tables the amounts are read with, defined further down. */
+    private val PURPOSE_CLAUSE by lazy {
+        val num = (UNITS.keys + TEENS.keys + TENS.keys + listOf("hundred", "thousand", "half", "cedi", "cedis", "ghana", "pesewa", "pesewas"))
+            .joinToString("|")
+        Regex("(?i)\\s+(?:in order\\s+|so as\\s+)?to\\s+(?:call|ring|phone|talk|chat|text|browse)\\b" +
+            "(?:\\s+(?!(?:for|number|a\\s+(?:hundred|thousand)|an?\\s+half|$num)\\b)[\\p{L}'’.\\-]+){0,8}?" +
+            "(?=\\s+(?:for\\b|an?\\s+(?:hundred|thousand|half)\\b|(?:$num)\\b|\\d|gh|₵)|\\s*[,?]|\\s*$)")
+    }
     private val GIVES_AIR = Regex("(?i)\\b(?:send|give|transfer|gift|share)\\b")
 
     private fun airtime(clean: String): Ask? {

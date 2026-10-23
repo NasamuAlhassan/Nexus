@@ -24,6 +24,13 @@ class AirtimePurposeTest {
         // The recogniser writes no commas (re-review, 23 Oct 2026).
         assertEquals(air("5"), MoneyAsk.parse("buy airtime to call my wife five cedis"))
         assertEquals(air("5"), MoneyAsk.parse("buy airtime to call my wife 5 cedis"))
+        // Third review: "a hundred", a bare verb, a long or hyphenated purpose.
+        assertEquals(air("100"), MoneyAsk.parse("buy airtime to call my wife a hundred cedis"))
+        assertEquals(air(), MoneyAsk.parse("buy airtime to browse"))
+        assertEquals(air("5"), MoneyAsk.parse("buy 5 cedis airtime to call"))
+        assertEquals(air("5"), MoneyAsk.parse("buy airtime to call, five cedis"))
+        assertEquals(air(), MoneyAsk.parse("buy airtime to talk to my mother in Kumasi"))
+        assertEquals(air(), MoneyAsk.parse("buy airtime to call my mother-in-law"))
         val question = MoneyAsk.parse("buy airtime to call abroad, how much does it cost")
         assertTrue("a question is not an airtime read-back: $question", question?.kind != Kind.AIRTIME)
     }
@@ -31,7 +38,7 @@ class AirtimePurposeTest {
     /** "to phone number …" is a number, never a purpose: it is not cut (re-review N5). */
     @Test fun aPhoneNumberClauseIsNotAPurpose() {
         val r = MoneyAsk.parse("buy 5 cedis airtime to phone number zero five five")
-        assertTrue("not read as this phone: $r", r == null || r.forSelf != true || r.number != null || r.lostNumber != null)
+        assertTrue("not read as this phone: $r", r != null && (!r.forSelf || r.number != null || r.lostNumber != null))
     }
 
     @Test fun aPersonOrANumberTheAirtimeIsForIsKept() {

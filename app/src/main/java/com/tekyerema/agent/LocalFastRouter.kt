@@ -1181,7 +1181,10 @@ class LocalFastRouter(
                 ?.let { References.noteRead(it.trim(), if (name == "read_sms") "SMS" else null) }
         val said = speakable(r.message)
         val spoken = lead(r)?.let { it + com.tekyerema.voice.SpokenText.BREAK + said } ?: said
-        return FastOutcome(name.uppercase(), spoken, systemVoice = action, ok = r.success, acted = acted && r.success)
+        // "Done" only where the tool itself confirmed it: open_setting "still coming up" and play_music "asked X to play" succeed
+        // without confirming (data confirmed / checked false) — third review, 23 Oct 2026.
+        val confirmed = r.data?.optBoolean("confirmed", true) != false && r.data?.optBoolean("checked", true) != false
+        return FastOutcome(name.uppercase(), spoken, systemVoice = action, ok = r.success, acted = acted && r.success && confirmed)
     }
 
     /** Tool output → a spoken line: drop planner-only headers and list bullets; each listed item its own sentence with a
@@ -1575,7 +1578,8 @@ class LocalFastRouter(
         return try {
             am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, keyCode))
             am.dispatchMediaKeyEvent(KeyEvent(KeyEvent.ACTION_UP, keyCode))
-            action(intent.name, say, acted = true)
+            // A key nobody receives does nothing: "done" only while some player has a media session.
+            action(intent.name, say, acted = com.tekyerema.tools.MediaSessions.current(appContext)?.isNotEmpty() == true)
         } catch (t: Throwable) { null }
     }
 
@@ -1629,7 +1633,7 @@ class LocalFastRouter(
         // it hands over to Google Maps only when OpenStreetMap can't be reached).
         if (com.tekyerema.core.config.AppConfig.bool("live.walk.own", true))
             return handled(i, com.tekyerema.live.nav.WalkGuide.start(appContext, i.place))
-        return runTool("open_intent", org.json.JSONObject().put("template", "maps_search").put("query", i.place), action = true)
+        return runTool("open_intent", org.json.JSONObject().put("template", "maps_search").put("query", i.place), action = true, acted = false)
     }
 
     private fun recentScreenRead(): Boolean =
