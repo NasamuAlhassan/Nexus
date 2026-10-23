@@ -764,13 +764,14 @@ class LocalFastRouter(
                     "Yoo, mɛsesa. Seesei mɛkasa Twi. Sɛ mante wo yie a, ka bio anaa twerɛ. Sɛ wopɛ Borɔfo a, ka sɛ speak English.")
             } else {
                 s.languageMode = com.tekyerema.settings.Settings.LANG_MODE_ENGLISH; s.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
-                "Okay, English."
+                OKAY_ENGLISH
             }
             else -> "Okay."
         }
         // "speak English" is answered in English by the phone's own voice — it used to go to the Twi translator and the Twi voice
         // (council review, 19 Oct 2026: 3.5 s of dead air, the answer in the language being left).
-        return if (line == "Okay, English.") FastOutcome(p.name, line, systemVoice = true) else handled(p, line)
+        return if (line === OKAY_ENGLISH) FastOutcome(p.name, line, systemVoice = true, switchedTo = com.tekyerema.voice.Lang.GH_EN)
+            else handled(p, line)
     }
 
     // ---------------------------------------------------------------- Overnight [S]
@@ -1766,6 +1767,8 @@ class LocalFastRouter(
 
     companion object {
         private const val TAG = "Tekyerema"
+        /** The switch to English, said in English (the one line the router compares by identity, never by its words). */
+        private const val OKAY_ENGLISH = "Okay, English."
         /** When "read this" / "read the screen" was last asked (elapsedRealtime; 0 = never). The reading itself is the
          *  agent's; this only tells a later bare "continue" that a screen was being read. In memory only. */
         @Volatile private var screenReadAt = 0L
@@ -1845,7 +1848,10 @@ data class FastOutcome(
     /** The phone really did what was asked (volume, light, an app opened…), set only where that is known. A line that merely
      *  reads as fine ("No contact named Kofi.") is [ok] without being this: only this may be said as "done" (models session's
      *  review, 23 Oct 2026). */
-    val acted: Boolean = false
+    val acted: Boolean = false,
+    /** The language this turn switched the conversation TO ("speak English" → GH_EN), so its answer is said in that language
+     *  whatever the words are (R-06: it was keyed on the literal "Okay, English."). */
+    val switchedTo: String? = null
 )
 
 private val FAILURE_LINE = Regex("(?i)^(sorry\\b|i couldn't|i can't|i could not|i cannot|this phone (doesn't|does not|has no))")

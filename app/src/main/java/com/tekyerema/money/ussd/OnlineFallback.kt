@@ -78,13 +78,15 @@ class OnlineFallback(private val keys: List<String>) {
         if (goal.isBlank() || rows.isEmpty() || keys.isEmpty()) return null
         if (!com.tekyerema.core.NetworkMonitor.isOnline()) return null
         val menu = rows.joinToString("\n") { (n, w) -> "$n. $w" }
+        val model = AppConfig.string("ussd.goal.model", "openai/gpt-oss-120b")
         val body = JSONObject()
-            .put("model", AppConfig.string("ussd.goal.model", "openai/gpt-oss-120b"))
+            .put("model", model)
             .put("temperature", 0)
             // gpt-oss reasons before it answers, and its reasoning counts against this cap (the app's own logs: 88–249 reasoning tokens
             // a step). At its default ("medium") effort 300 can run out before any JSON — the walk then can't choose (audit, 22 Oct 2026).
             .put("max_tokens", AppConfig.int("ussd.goal.maxTokens", 1024))
-            .apply { AppConfig.string("ussd.goal.reasoning", "low").takeIf { it.isNotBlank() }?.let { put("reasoning_effort", it) } }
+            // Only the gpt-oss models take low/medium/high; another model set in config would refuse the request (R-04).
+            .apply { AppConfig.string("ussd.goal.reasoning", "low").takeIf { it.isNotBlank() && model.contains("gpt-oss") }?.let { put("reasoning_effort", it) } }
             .put("response_format", JSONObject().put("type", "json_object"))
             .put("messages", JSONArray()
                 .put(JSONObject().put("role", "system").put("content",

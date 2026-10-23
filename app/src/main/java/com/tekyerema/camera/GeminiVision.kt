@@ -63,7 +63,9 @@ object GeminiVision {
     suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT, structured: Boolean = false): VisionResult = withContext(Dispatchers.IO) {
         if (apiKey.isBlank()) return@withContext VisionResult.Failed("no Gemini key")
         val first = describeOnce(jpeg, apiKey, model, prompt, structured)
-        if (first is VisionResult.Failed && first.reason == "HTTP 400") {
+        // Only a 400 that names the extra fields (thinking, media resolution, the JSON type) is retried bare; any other 400 — a bad
+        // image, a too-large request — would fail the same way again and spend a second request (R-05).
+        if (first is VisionResult.Failed && first.reason == "HTTP 400 fields") {
             Log.w(TAG, "[CAMERA] describe refused by the model (HTTP 400) → a bare request once")
             return@withContext describeOnce(jpeg, apiKey, model, prompt, structured = false, bare = true)
         }
@@ -112,7 +114,8 @@ object GeminiVision {
         if (code !in 200..299) {
             Log.w(TAG, "[CAMERA] describe HTTP $code")
             if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] describe error body: ${text.take(300)}")
-            return@withContext VisionResult.Failed("HTTP $code")
+            val fields = code == 400 && !bare && FIELD_REFUSAL.containsMatchIn(text)
+            return@withContext VisionResult.Failed(if (fields) "HTTP 400 fields" else "HTTP $code")
         }
         val description = parse(text) ?: run {
             Log.w(TAG, "[CAMERA] describe: no text in response")
@@ -126,6 +129,9 @@ object GeminiVision {
         if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] description: $description")
         VisionResult.Described(description)
     }
+
+    /** A 400 that is about the optional fields this client adds, not about the picture or the prompt. */
+    private val FIELD_REFUSAL = Regex("(?i)thinking|media_?resolution|mediaResolution|response_?mime_?type|responseMimeType|Unknown name|not supported")
 
     /** The generateContent body: one user turn holding the prompt and the inline JPEG. [json] asks for a JSON answer;
      *  [mediaResolution] ("low" | "medium" | "high" | "") and [thinking] ("minimal" | "low" | … | "") add the P5-07 fields. */

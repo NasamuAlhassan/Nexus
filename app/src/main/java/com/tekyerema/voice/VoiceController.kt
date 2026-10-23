@@ -1417,7 +1417,7 @@ class VoiceController(
                 // Twi / Kusaal: the screen shows what the voice says, not the English it came from.
                 // "speak English" said in a Twi conversation is answered in English (LocalFastRouter.preference, council review 19 Oct
                 // 2026): the Twi rule below sent "Okay, English." to the translator and the Twi voice (audit, 22 Oct 2026).
-                val leavingTwi = fast.intent == "PREFERENCE" && fast.spoken == "Okay, English."
+                val leavingTwi = fast.switchedTo == Lang.GH_EN
                 val localSaid = if ((!fast.systemVoice || (tr.language == Lang.TWI && !leavingTwi)) && !fast.spoken.isBlank()) VoiceEngine.localLine(fast.spoken) else null
                 localSaid?.let { shown = it + "\n" + shown; set(VoiceState.SPEAKING, shown); com.tekyerema.ui.ReplyCard.show(shown, speakAloud()) }
                 // ACTION confirmations ("volume up") speak on the OFFLINE system engine (instant, never blocked
