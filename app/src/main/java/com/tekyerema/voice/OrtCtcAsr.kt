@@ -22,6 +22,8 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
     private val session: OrtSession
     private val vocab: Array<String>
     private val blank: Int
+    /** The beam search with the word language model, when the model folder has one and it is switched on; else greedy. */
+    private val beam: CtcLmDecoder?
 
     init {
         val t0 = SystemClock.uptimeMillis()
@@ -40,6 +42,7 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
         session = env.createSession(modelFile.absolutePath, opts)
         val (v, b) = readVocab(vocabFile.readText())
         vocab = v; blank = b
+        beam = lmDecoder(modelFile.parentFile, v, b)
         Log.i("Tekyerema", "[ASR] onnx ${modelFile.name} ready (${threads} threads, inputs ${session.inputNames}) in ${SystemClock.uptimeMillis() - t0} ms")
     }
 
@@ -63,6 +66,12 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
             session.run(inputs).use { out ->
                 @Suppress("UNCHECKED_CAST")
                 val logits = (out[0].value as Array<Array<FloatArray>>)[0]
+                beam?.let { d ->
+                    try {
+                        val t0 = SystemClock.uptimeMillis()
+                        return d.decode(logits).also { Log.i("Tekyerema", "[ASR] onnx LM beam in ${SystemClock.uptimeMillis() - t0} ms") }
+                    } catch (e: Exception) { Log.w("Tekyerema", "[ASR] onnx LM beam failed, greedy instead: ${e.message}") }
+                }
                 return greedy(logits, vocab, blank)
             }
         } finally { inputs.values.forEach { it.close() } }
@@ -72,6 +81,21 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
 
     companion object {
         const val MAX_SECONDS = 15
+        /** The word language model beside the model ([dir]/lm.arpa), for the beam search. OFF until it matches pyctcdecode
+         *  on the models session's parity clips: `speech.asr.ort.lm` true, with `.alpha`, `.beta`, `.beam` (C-03 settings). */
+        private fun lmDecoder(dir: File?, vocab: Array<String>, blank: Int): CtcLmDecoder? {
+            if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.ort.lm", false)) return null
+            val f = dir?.let { File(it, "lm.arpa") }?.takeIf { it.isFile } ?: return null
+            return try {
+                val t0 = SystemClock.uptimeMillis()
+                val lm = f.bufferedReader().useLines { NgramLm.parseArpa(it) }
+                Log.i("Tekyerema", "[ASR] onnx LM ${f.length() / 1024} KB, order ${lm.order}, loaded in ${SystemClock.uptimeMillis() - t0} ms")
+                CtcLmDecoder(vocab, blank, lm,
+                    alpha = com.tekyerema.core.config.AppConfig.float("speech.asr.ort.lm.alpha", 0.3f),
+                    beta = com.tekyerema.core.config.AppConfig.float("speech.asr.ort.lm.beta", 0.5f),
+                    beamWidth = com.tekyerema.core.config.AppConfig.int("speech.asr.ort.lm.beam", 25).coerceIn(1, 100))
+            } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx LM not loaded: ${t.message}"); null }
+        }
         /** id → token, and the blank's id ("[PAD]", else "<pad>", else 0). Pure. */
         fun readVocab(json: String): Pair<Array<String>, Int> {
             val o = JSONObject(json)
