@@ -31,19 +31,21 @@ People: how many, where, what they are doing; never identify anyone or guess age
 Never say a road is safe to cross. Keep Ghanaian names and Twi letters (ɛ, ɔ) exactly as printed.
 """.trim()
 
-    /** For "how much money": the notes as JSON only; the phone adds them up ([spokenMoney]) — never the model's sum. */
-    // The only example shows ONE note: "count":2 there invited a single note to be counted twice (audit, 22 Oct 2026).
+    /** For "how much money": one JSON entry per physical note or coin, with the box around its edges; the phone decides
+     *  the count ([MoneyTally]) and does the sum ([spokenMoney]) — never the model's count or arithmetic. */
+    // History: the 22 Oct prompt asked for {value, count} and an example with count 2 made one note two; with count 1 and
+    // "count each paper once" a single 10 was still counted as two on 24 Oct. A count the phone cannot check is gone.
     const val MONEY = """
 Count the Ghana cedi money in this photo for a blind person. JSON only, no other text:
-{"items":[{"kind":"note","value_ghs":20,"count":1}],"unreadable":0,"other_currency":"","confidence":"high","fix":""}
-Notes: GH₵1, 2, 5, 10, 20, 50, 100, 200. Coins: 1, 5, 10, 20, 50 pesewas (0.01 to 0.5) and GH₵1, GH₵2. value_ghs comes from
-the printed numeral. Count every physical note and coin, overlapping ones included. ONE note prints its value SEVERAL times (in
-the corners and the middle): count each piece of paper ONCE, by its edges — never by how many numerals you see. One note in the
-photo is count 1. If you cannot tell whether two numerals are on one note or two, count one and set confidence "low" (owner's
-test, 22 Oct 2026: a single 50 cedi note was counted as two). A note or coin whose numeral you cannot
-see goes in "unreadable", not in items. confidence is "low" if the photo is blurred or dark or the money overlaps.
-fix is one short instruction ("Spread the notes out", "Turn the note over"), else "". No money: items [] and fix
-"Hold the money about a hand away." Other currency: name it in other_currency.
+{"notes":[{"kind":"note","value_ghs":20,"box":[310,120,690,880],"sure":true}],"unreadable":0,"other_currency":"","confidence":"high","fix":""}
+"notes" has ONE entry per PHYSICAL piece of paper or coin: three 10 cedi notes are three entries, one note is one entry.
+box is that piece's WHOLE outline — its edges, not a numeral — as [ymin, xmin, ymax, xmax] on a 0 to 1000 scale.
+A note prints its value SEVERAL times (in the corners, the middle and on the back): that is still one note, one entry, one
+box around the whole paper. Notes: GH₵1, 2, 5, 10, 20, 50, 100, 200. Coins: 1, 5, 10, 20, 50 pesewas (0.01 to 0.5) and
+GH₵1, GH₵2. value_ghs comes from the printed numeral. sure is false when you cannot clearly read that piece's value.
+A note or coin whose numeral you cannot see goes in "unreadable", not in notes. confidence is "low" if the photo is blurred
+or dark or the money overlaps. fix is one short instruction ("Spread the notes out", "Turn the note over"), else "".
+No money: notes [] and fix "Hold the money about a hand away." Other currency: name it in other_currency.
 """
 
     private val MONEY_Q = Regex("(?i)\\b(how much (?:money|cash|cedis?)|how much (?:am i|i'm|i am) holding|how many cedis?|" +
@@ -64,62 +66,52 @@ fix is one short instruction ("Spread the notes out", "Turn the note over"), els
     /** The question is about money in hand (counted by [MONEY]). */
     fun isMoneyQuestion(question: String?): Boolean = question != null && MONEY_Q.containsMatchIn(question)
 
-    /** One line for a blind listener: what the model saw, the sum done here, doubt said plainly. Null when [json] is unusable. */
+    /** One line for a blind listener: what the phone counted ([MoneyTally]), the sum done here, doubt said plainly. Null
+     *  when [json] is unusable. */
     fun spokenMoney(json: String): String? {
-        val o = try { JSONObject(json.substring(json.indexOf('{').coerceAtLeast(0), json.lastIndexOf('}') + 1)) } catch (_: Throwable) { return null }
-        val items = o.optJSONArray("items") ?: return null
+        val o = MoneyTally.obj(json) ?: return null
+        val tally = MoneyTally.of(json) ?: return null
         val unreadable = o.optInt("unreadable", 0).coerceIn(0, 200)
         val low = o.optString("confidence").equals("low", ignoreCase = true)
-        val fix = o.optString("fix").trim().ifEmpty { o.optString("note").trim() }
-        data class Item(val value: Double, val count: Int, val note: Boolean, val sure: Boolean)
-        val list = (0 until items.length()).mapNotNull { i ->
-            val it = items.optJSONObject(i) ?: return@mapNotNull null
-            val v = it.optDouble("value_ghs", Double.NaN)
-            val n = it.optInt("count", 1).coerceIn(1, 200)
-            if (v.isNaN() || v <= 0) null else Item(v, n, it.optString("kind", "note") != "coin", it.optBoolean("sure", true))
-        }
+        val advice = o.optString("fix").trim().ifEmpty { o.optString("note").trim() }
         val other = o.optString("other_currency").trim()
-        val advice = fix
-        if (list.isEmpty()) {
+        if (tally.isEmpty) {
             if (other.isNotEmpty()) return "That doesn't look like cedis. I think it's $other."
             return "I don't see any money. " + (advice.ifEmpty { "Hold the notes flat in front of the camera, about a hand away." })
         }
-        val parts = list.sortedByDescending { it.value }.map { item ->
-            val what = if (item.value < 1) "${(item.value * 100).toInt()} pesewa ${if (item.note) "note" else "coin"}"
-                else "${fmt(item.value)} cedi ${if (item.note) "note" else "coin"}"
-            "${COUNT.getOrElse(item.count) { item.count.toString() }} ${if (item.count == 1) what else "${what}s"}" + if (!item.sure) " (not sure)" else ""
+        // Notes lying on each other can't be counted honestly: no total, one instruction (owner's demo, 24 Oct 2026).
+        if (tally.unstable) return "Some of the notes overlap, so I can't count them for sure. Spread the notes out flat so I " +
+            "can see each one, then ask me again."
+        val parts = tally.counts.entries.sortedByDescending { it.key.first }.map { (k, n) ->
+            val (value, note) = k
+            val what = if (value < 1) "${(value * 100).toInt()} pesewa ${if (note) "note" else "coin"}"
+                else "${fmt(value)} cedi ${if (note) "note" else "coin"}"
+            "${COUNT.getOrElse(n) { n.toString() }} ${if (n == 1) what else "${what}s"}" + if (k in tally.doubtful) " (not sure)" else ""
         }
-        val total = list.sumOf { it.value * it.count }
-        val doubt = list.any { !it.sure } || low
+        val doubt = tally.doubtful.isNotEmpty() || low
         // A total only when every note was read (research: never a confident sum over a note it couldn't see).
         val sentence = "I see " + join(parts) + ". " + when {
             unreadable > 0 -> "There ${if (unreadable == 1) "is one more I can't read" else "are $unreadable more I can't read"}, so I can't give the total yet."
-            doubt -> "That's about ${spokenTotal(total)} in all."
-            else -> "That's ${spokenTotal(total)} in all."
+            doubt -> "That's about ${spokenTotal(tally.total)} in all."
+            else -> "That's ${spokenTotal(tally.total)} in all."
         }
         return if ((doubt || unreadable > 0) && advice.isNotEmpty()) "$sentence $advice" else sentence
     }
 
-    /** A plain answer cleaned for speech (no markdown, no stray quotes). */
-    /** The total of a money answer (every item's value × count), or null when it isn't one. Pure. */
-    fun moneyTotal(json: String): Double? {
-        val o = try { JSONObject(json.substring(json.indexOf('{').coerceAtLeast(0), json.lastIndexOf('}') + 1)) } catch (_: Throwable) { return null }
-        val items = o.optJSONArray("items") ?: return null
-        return (0 until items.length()).sumOf { i ->
-            val it = items.optJSONObject(i) ?: return@sumOf 0.0
-            val v = it.optDouble("value_ghs", 0.0)
-            if (v.isNaN() || v <= 0) 0.0 else v * it.optInt("count", 1).coerceIn(1, 200)
-        }
-    }
+    /** The phone's total of a money answer, or null when it isn't one or its notes overlap (no honest total). Pure. */
+    fun moneyTotal(json: String): Double? = MoneyTally.of(json)?.takeIf { !it.unstable }?.total
 
-    /** Two models' money answers for the same photo: null when they agree (or either isn't a count), else the honest line. */
+    /** Two models' money answers for the same photo: null when they count the same notes (or either isn't a count), else the
+     *  honest line. Compared note by note, not by total: two 10s and one 20 are not four 5s. */
     fun moneyDisagreement(a: String, b: String, line: String = "I can't be sure of the total — I counted it two ways. Hold the " +
         "money flat, one note at a time, and ask me again."): String? {
-        val ta = moneyTotal(a) ?: return null
-        val tb = moneyTotal(b) ?: return null
-        return if (kotlin.math.abs(ta - tb) > 0.001) line else null
+        val ta = MoneyTally.of(a) ?: return null
+        val tb = MoneyTally.of(b) ?: return null
+        if (ta.unstable || tb.unstable) return null          // spokenMoney already says to spread the notes out
+        return if (ta.counts != tb.counts) line else null
     }
 
+    /** A plain answer cleaned for speech (no markdown, no stray quotes). */
     fun spoken(text: String): String = text.replace(Regex("[*_`#>]+"), "").replace(Regex("\\s+"), " ").trim().trim('"')
 
     /** "two 20 cedi notes", not "2 20 cedi notes". */

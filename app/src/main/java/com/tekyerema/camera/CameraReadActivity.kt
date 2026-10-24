@@ -731,7 +731,13 @@ class CameraReadActivity : ComponentActivity() {
             if (closing) return@launch
             when (result) {
                 is VisionResult.Described -> deliver(when {
-                    moneyAsk -> VisionPrompts.spokenMoney(result.text) ?: VisionPrompts.spoken(result.text)
+                    moneyAsk -> {
+                        // How the phone counted (no amounts in a release log): pieces the model listed, merged duplicates, overlap.
+                        MoneyTally.parse(result.text)?.let { p -> val t = MoneyTally.reconcile(p)
+                            Log.i(TAG, "[CAMERA] money: ${p.size} listed, ${p.count { it.box != null }} with a box, ${t.merged} merged as one note, " +
+                                "unstable=${t.unstable}" + if (com.tekyerema.BuildConfig.DEV_HOOKS) " model='${result.text.take(600)}'" else "") }
+                        VisionPrompts.spokenMoney(result.text) ?: VisionPrompts.spoken(result.text)
+                    }
                     question != null -> VisionPrompts.spoken(result.text)
                     else -> StructuredDescribe.spokenFor(result.text, ocr.await(), TAG)
                 })
