@@ -61,7 +61,7 @@ import com.tekyerema.ui.theme.TkMotion
 internal enum class Page {
     ROOT, LANGUAGE, VOICE, KEYBOARD, PERMISSIONS, ACCESSIBILITY, HELP,
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
-    PHONE_CARE, MONEY_LIMITS, APP_RULES;
+    PHONE_CARE, MONEY_LIMITS, APP_RULES, PIN_PRACTICE;
 
     val parent: Page get() = when (this) {
         ROOT -> ROOT
@@ -116,7 +116,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.VOICE -> VoicePage(settings) { page = Page.ROOT }
         Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
         Page.PERMISSIONS -> PermissionsPage { page = Page.ROOT }
-        Page.ACCESSIBILITY -> AccessibilityPage(settings) { page = Page.ROOT }
+        Page.ACCESSIBILITY -> AccessibilityPage(settings, onPinPractice = { page = Page.PIN_PRACTICE }) { page = Page.ROOT }
         Page.HELP -> HelpPage(settings) { page = Page.ROOT }
         Page.CONTROL -> ControlPage(settings, onBack = { page = Page.ROOT }) { page = it }
         Page.PROVIDERS -> ProvidersPage(settings) { page = Page.CONTROL }
@@ -127,6 +127,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
         Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
         Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }
+        Page.PIN_PRACTICE -> PinPracticePage { page = Page.ACCESSIBILITY }
     } }
 }
 
@@ -304,7 +305,7 @@ private fun PermissionsPage(onBack: () -> Unit) {
 }
 
 @Composable
-private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
+private fun AccessibilityPage(settings: Settings, onPinPractice: () -> Unit, onBack: () -> Unit) {
     val version by settings.changes.collectAsState()
     val haptics = remember(version) { settings.haptics }
     val sounds = remember(version) { settings.sounds }
@@ -324,7 +325,11 @@ private fun AccessibilityPage(settings: Settings, onBack: () -> Unit) {
         // J-18: the Gemini backup switch moved to Settings › Control › AI provider and model (WS-C), with each provider's
         // data statement next to it.
         // N-11: Samsung puts unused apps to sleep, which silently stops the wake word and background tasks.
-        SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off", divider = false) { Perms.requestBatteryUnrestricted(context) }
+        SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off") { Perms.requestBatteryUnrestricted(context) }
+        // PinPracticePage (built 30 Sep 2026, never linked until the 24 Oct cleanup): learn TalkBack keypad typing on a
+        // made-up number before a real Mobile Money PIN screen.
+        SettingRow("Practise typing a PIN", description = "A made-up number on a keypad like the phone's. Never your real PIN.",
+            divider = false) { onPinPractice() }
         }
         Note("Text size and TalkBack follow your phone's accessibility settings.")
         val appearance = remember(version) { settings.appearance }
