@@ -84,7 +84,7 @@ object TelcoTerms {
         if (w == "mtn") return if (body.removeSuffix(poss) == "MTN") null else lead + "MTN" + poss + trail
         if (w.length !in 2..5 || !(w.startsWith("m") || w.startsWith("em"))) return null
         if (w in NOT_MTN) return null
-        val d = levenshtein(w, "mtn")
+        val d = com.tekyerema.core.TextDistance.levenshtein(w, "mtn")
         val plural = w == "mtns"
         // one letter added ("mttn", "mtnn") or the last one heard as the other nasal ("mtm") — never another consonant:
         // "MTV", "mts", "mtb" are other things (safety audit 2026-10-05: "play MTV on my data" became MTN)
@@ -99,18 +99,6 @@ object TelcoTerms {
     private val GH_AMOUNT = Regex("(?i)\\bg\\.?\\s?h\\.?\\s+(?=\\d)")
     private val AIRTELTIGO = Regex("(?i)\\b(?:air\\s?tel+\\s*[- ]?\\s*tigo|airtell?\\s?tigo|airtel-tigo|air tell tigo)\\b")
 
-    internal fun levenshtein(a: String, b: String): Int {
-        val dp = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            var prev = dp[0]; dp[0] = i
-            for (j in 1..b.length) {
-                val tmp = dp[j]
-                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
-                prev = tmp
-            }
-        }
-        return dp[b.length]
-    }
 }
 
 /**

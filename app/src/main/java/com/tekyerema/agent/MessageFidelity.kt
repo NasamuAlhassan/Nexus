@@ -107,15 +107,7 @@ object MessageFidelity {
     private fun same(a: String, b: String): Boolean {
         if (a == b) return true
         if (a.length >= 4 && b.length >= 4 && a.take(4) == b.take(4)) return true
-        return a.length >= 5 && b.length >= 5 && editDistance(a, b) <= 2
-    }
-    private fun editDistance(a: String, b: String): Int {
-        val d = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            var prev = d[0]; d[0] = i
-            for (j in 1..b.length) { val tmp = d[j]; d[j] = minOf(d[j] + 1, d[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1); prev = tmp }
-        }
-        return d[b.length]
+        return a.length >= 5 && b.length >= 5 && com.tekyerema.core.TextDistance.levenshtein(a, b) <= 2
     }
     /** Words a polish may add or drop without changing what is said. */
     private val LIGHT = setOf("i", "i'm", "im", "am", "is", "are", "was", "were", "be", "been", "being", "the", "a", "an", "and", "but",

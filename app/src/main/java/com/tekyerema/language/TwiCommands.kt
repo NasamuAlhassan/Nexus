@@ -149,21 +149,12 @@ object TwiCommands {
     /** Letters only, ɛ→e / ɔ→o, doubled letters as one — how close two spellings SOUND, roughly. */
     private fun key(s: String) = TwiText.fold(s).filter { it.isLetter() }.replace(Regex("(.)\\1+"), "$1")
 
-    private fun lev(a: String, b: String): Int {
-        val d = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            var prev = d[0]; d[0] = i
-            for (j in 1..b.length) { val t = d[j]; d[j] = minOf(d[j] + 1, d[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1); prev = t }
-        }
-        return d[b.length]
-    }
-
     /** The [NEAR] request [low] is closest to — within a quarter of its letters, and clearly closer than any OTHER
      *  request (by 0.15) — or null. Pure. */
     internal fun near(low: String): String? {
         val k = key(low)
         if (k.length < 7) return null                                   // "kya" for "gyae": too short to judge
-        val scored = NEAR.map { (twi, en) -> val t = key(twi); en to lev(k, t).toDouble() / maxOf(k.length, t.length) }
+        val scored = NEAR.map { (twi, en) -> val t = key(twi); en to com.tekyerema.core.TextDistance.levenshtein(k, t).toDouble() / maxOf(k.length, t.length) }
         val best = scored.minByOrNull { it.second } ?: return null
         val other = scored.filter { it.first != best.first }.minOfOrNull { it.second } ?: 1.0
         return best.first.takeIf { best.second <= 0.25 && other - best.second >= 0.15 }

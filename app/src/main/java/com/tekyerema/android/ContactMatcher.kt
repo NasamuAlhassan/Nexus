@@ -48,7 +48,7 @@ object ContactMatcher {
         return sb.toString()
     }
 
-    private fun lev(a: String, b: String): Int = com.tekyerema.voice.understand.TelcoTerms.levenshtein(a, b)
+    private fun lev(a: String, b: String): Int = com.tekyerema.core.TextDistance.levenshtein(a, b)
 
     /** How well [heard] fits the saved [name], 0 when it doesn't. Pure. */
     fun score(heard: String, name: String): Double {

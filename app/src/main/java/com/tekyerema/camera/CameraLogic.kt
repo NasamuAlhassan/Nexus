@@ -87,7 +87,7 @@ class TextStabilizer(
             if (a == b) return 1.0
             val longest = max(a.length, b.length)
             if (longest == 0) return 1.0
-            return 1.0 - levenshtein(a, b).toDouble() / longest
+            return 1.0 - com.tekyerema.core.TextDistance.levenshtein(a, b).toDouble() / longest
         }
 
         /** Jaccard overlap of the space-separated tokens. */
@@ -100,20 +100,6 @@ class TextStabilizer(
         }
 
         private fun digits(s: String): String = s.filter { it.isDigit() }
-
-        private fun levenshtein(a: String, b: String): Int {
-            var prev = IntArray(b.length + 1) { it }
-            var cur = IntArray(b.length + 1)
-            for (i in 1..a.length) {
-                cur[0] = i
-                for (j in 1..b.length) {
-                    val cost = if (a[i - 1] == b[j - 1]) 0 else 1
-                    cur[j] = min(min(cur[j - 1] + 1, prev[j] + 1), prev[j - 1] + cost)
-                }
-                val t = prev; prev = cur; cur = t
-            }
-            return prev[b.length]
-        }
     }
 }
 

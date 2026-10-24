@@ -71,19 +71,7 @@ object PhoneticKey {
         java.text.Normalizer.normalize(TwiText.fold(s), java.text.Normalizer.Form.NFD).filter { it in 'a'..'z' || it in '0'..'9' }
 
     /** 1 − normalised Levenshtein, in [0, 1]. */
-    fun similarity(a: String, b: String): Double {
-        if (a.isEmpty() || b.isEmpty()) return 0.0
-        val dp = IntArray(b.length + 1) { it }
-        for (i in 1..a.length) {
-            var prev = dp[0]; dp[0] = i
-            for (j in 1..b.length) {
-                val tmp = dp[j]
-                dp[j] = minOf(dp[j] + 1, dp[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
-                prev = tmp
-            }
-        }
-        return 1.0 - dp[b.length].toDouble() / maxOf(a.length, b.length)
-    }
+    fun similarity(a: String, b: String): Double = com.tekyerema.core.TextDistance.similarity(a, b)
 }
 
 object EntityCorrector {
