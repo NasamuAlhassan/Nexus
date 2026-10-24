@@ -232,8 +232,12 @@ class HttpTtsProvider(
                             // Our own Twi voice on the language Space (api tts: text + language → a WAV file to download).
                             val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
                                 // Our Space voice reads Twi letters only: English words respelled first (voice/TwiRespell). The
-                                // cache key stays the line itself.
-                                org.json.JSONArray().put(if (language == Lang.TWI) com.tekyerema.voice.TwiRespell.apply(p) else p).put(code)), spec.connectMs, spec.callMs)
+                                // Kafui English voice gets the owner's spellings of our own words (voice/KafuiSay).
+                                org.json.JSONArray().put(when (language) {
+                                    Lang.TWI -> com.tekyerema.voice.TwiRespell.apply(p)
+                                    Lang.GH_EN -> com.tekyerema.voice.KafuiSay.apply(p)
+                                    else -> p
+                                }).put(code)), spec.connectMs, spec.callMs)
                             HttpSpeech.failureOf(spec, call)?.let { throw it }
                             val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), HttpSpeech.gradioEventId(spec, call)),
                                 spec.connectMs, spec.callMs)
@@ -265,10 +269,14 @@ class HttpTtsProvider(
      * The cache key of one part. Our Space's Twi voice is SENT the line with a kin name put into Twi ("My wife" → "wo yere",
      * voice/TwiRespell.kinNames, 21 Oct 2026), so the key carries that too: keyed by the line alone, a clip cached on the phone's
      * disk before that change (kept across installs) went on saying "My wife" (audit, 22 Oct 2026). A line with no kin name keeps
-     * its key, so every other cached clip still plays at once.
+     * its key, so every other cached clip still plays at once. The Kafui English voice's key carries its respelling the same
+     * way (24 Oct 2026): a fixed line cached on disk with the old "Tɛkyerɛma" or "cedis" is fetched again, once.
      */
-    private fun clipKey(code: String, p: String, language: String): String =
-        if (spec.dialect == "gradio" && language == Lang.TWI) "$code|${com.tekyerema.voice.TwiRespell.kinNames(p)}" else "$code|$p"
+    private fun clipKey(code: String, p: String, language: String): String = when {
+        spec.dialect == "gradio" && language == Lang.TWI -> "$code|${com.tekyerema.voice.TwiRespell.kinNames(p)}"
+        spec.dialect == "gradio" && language == Lang.GH_EN -> "$code|${com.tekyerema.voice.KafuiSay.apply(p)}"
+        else -> "$code|$p"
+    }
 
     override fun stop() = sink.stop()
     override fun shutdown() = sink.stop()

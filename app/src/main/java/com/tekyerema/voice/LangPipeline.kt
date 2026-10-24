@@ -38,7 +38,9 @@ private val TWI_CURRENCY_VARIANTS = mapOf(
     // the HCI Lab recogniser's pesewa (audit/lab-asr-2026-10-02: "pasea aduonum", "pɛ soa aduonum")
     "pasea" to "pesewa", "pɛsoa" to "pesewa", "pesoa" to "pesewa", "pɛsewa" to "pesewa",
     // the on-device omni CTC model's cedi (3 October 2026, GOLD K06: "mano scedi me no")
-    "scedi" to "cedi"
+    "scedi" to "cedi",
+    // our Space's Twi recogniser on our Twi voice's amounts (24 Oct 2026, Temp/num_rt: "cidi baako", "cidi aduonum", "sidie")
+    "cidi" to "cedi", "cidis" to "cedis", "sidie" to "cedi"
 )
 
 /** Speaker-verified Twi numerals + observed ASR-output variants (w2v-bert + Khaya). */
@@ -62,7 +64,10 @@ private val TWI_NUMBERS: Map<String, Int> = mapOf(
     "nnan" to 4,
     // 21 Oct 2026 (owner: "when someone mentions a number… it'll recognise it and use the number"): 15 and 14 as many
     // speakers say them, and the "-num" of compounds ("aduanan num" = 45, said after a ten). "nan" (also "leg") is NOT added.
-    "dunum" to 15, "dunan" to 14, "num" to 5, "ɛnum" to 5
+    "dunum" to 15, "dunan" to 14, "num" to 5, "ɛnum" to 5,
+    // 24 Oct 2026: the hundreds the app's own Twi voice SAYS (voice/understand/TwiSpeechText.HUNDREDS) — it could say
+    // "sidi ahanum" (500) but not hear it back. [owner: verify with a native speaker]
+    "ahasa" to 300, "ahanan" to 400, "ahanum" to 500, "ahansia" to 600, "ahanson" to 700, "ahanwɔtwe" to 800, "ahankron" to 900
 )
 
 /** The same tables keyed by [com.tekyerema.language.TwiText.fold], so plain-Latin and tone-marked spellings
@@ -79,7 +84,9 @@ private val TWI_CURRENCY_FOLDED: Map<String, String> =
  */
 private val GLUE_WORDS: Set<String> = setOf(
     "soma", "ma", "kɔ", "kɔma", "frɛ", "tɔ", "bue", "me", "wo", "no", "na", "ne", "sika", "kredit", "data", "nkra",
-    "mepɛ", "sɛ", "momo", "mu", "aka", "sɛn", "bɛn", "fa", "de", "kɔ", "nnɔn", "dɔn"
+    "mepɛ", "sɛ", "momo", "mu", "aka", "sɛn", "bɛn", "fa", "de", "kɔ", "nnɔn", "dɔn",
+    // "yɛ" (is) run into the amount after it: "sika a aka yɛsidi aduasa" (24 Oct 2026, Temp/num_rt)
+    "yɛ"
 ) +TWI_NUMBERS.keys + TWI_CURRENCY_VARIANTS.keys + setOf("cedi", "cedis", "pesewa", "pesewas") +
     EN_UNITS.keys + EN_TENS.keys + setOf("hundred", "thousand")
 
@@ -133,10 +140,21 @@ object Normalizer {
                 if (piece in GLUE_WORDS && (best[j] == null || best[j]!!.size > prefix.size + 1)) best[j] = prefix + piece
             }
         }
-        val pieces = best[w.length] ?: return word
+        val pieces = best[w.length] ?: return sharedVowel(w) ?: word
         val numeric = pieces.any { it in TWI_NUMBERS || it in TWI_CURRENCY_VARIANTS || it in EN_UNITS || it in EN_TENS ||
             it in setOf("cedi", "cedis", "pesewa", "pesewas") }
         return if (pieces.size >= 2 && numeric) pieces.joinToString(" ") else word
+    }
+
+    /** A currency word and the numeral after it written with ONE shared vowel: "pesewaduonum" = "pesewa aduonum" (24 Oct
+     *  2026, Temp/num_rt). Only after a currency word, and only when the rest is exactly one numeral. */
+    private fun sharedVowel(w: String): String? {
+        for (cur in listOf("pesewas", "pesewa", "cedis", "cedi", "sidis", "sidi", "sedi")) {
+            if (!w.startsWith(cur) || w.length <= cur.length) continue
+            val rest = w.substring(cur.length - 1)
+            if (cur.last() in "aeiouɛɔ" && TWI_NUMBERS.containsKey(rest)) return "$cur $rest"
+        }
+        return null
     }
 
     /**
