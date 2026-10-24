@@ -1,6 +1,7 @@
 package com.tekyerema
 
 import com.tekyerema.agent.AgentStatus
+import com.tekyerema.agent.AgentStep
 import com.tekyerema.agent.AgentUiState
 import com.tekyerema.live.LiveActivities
 import com.tekyerema.live.LiveActivity
@@ -40,5 +41,14 @@ class TaskLiveTest {
         LiveActivities.upsert(LiveActivity("timer-1", LiveKind.TIMER, "Timer", "Done", urgent = true))
         assertEquals("a timer that is done comes first", "timer-1", LiveActivities.lead()!!.id)
         LiveActivities.clear()
+    }
+
+    @Test fun betweenStepsItSaysTheLastStepDone() {
+        val running = AgentStep(1, 1, "open_app", "Settings", AgentStep.State.RUNNING)
+        val now = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "open settings", runSeq = 1, steps = listOf(running)), twi = false)!!
+        val between = TaskLive.of(AgentUiState(status = AgentStatus.THINKING, goal = "open settings", runSeq = 1,
+            steps = listOf(running.copy(state = AgentStep.State.DONE))), twi = false)!!
+        assertTrue("a step label while it runs: ${now.compact}", now.compact != "Working on it")
+        assertTrue("the step done, not 'Working on it', while the planner thinks: ${between.compact}", between.compact != "Working on it")
     }
 }

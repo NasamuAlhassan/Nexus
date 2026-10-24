@@ -21,7 +21,11 @@ object TaskLive {
     /** The capsule for [st], or null when no task is working (waiting on the user has its own panel; done is the reply). */
     fun of(st: AgentUiState, twi: Boolean): LiveActivity? {
         if (st.status !in WORKING) return null
-        val label = SurfaceModel.reduce(VoiceUiState(), st, twi = twi).title.ifBlank { if (twi) "Mereyɛ ho adwuma" else "Working on it" }
+        // The step running now; between steps (most of a task: the planner is thinking) the last one done — "Opened Settings"
+        // says more than "Working on it" (emulator, 24 Oct 2026: the pill read "Working on it" the whole task).
+        val steps = SurfaceModel.stepsOf(st)
+        val label = (steps.lastOrNull { it.active }?.label ?: steps.lastOrNull()?.past?.takeIf { it.isNotBlank() })
+            ?: SurfaceModel.reduce(VoiceUiState(), st, twi = twi).title.ifBlank { if (twi) "Mereyɛ ho adwuma" else "Working on it" }
         val title = if (twi) "Tɛkyerɛma reyɛ adwuma" else "Tɛkyerɛma is working"
         val request = (st.request ?: st.goal).orEmpty().trim().take(80)
         return LiveActivity(
