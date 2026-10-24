@@ -3,7 +3,7 @@ package com.tekyerema.voice
 /**
  * Phase 2 voice layer — shared types + provider abstractions.
  *
- * Design (see PHASE2_VOICE_DEVICE_REPORT.md): Android owns the real-time native path
+ * Design (see docs/archive/reports/PHASE2_VOICE_DEVICE_REPORT.md): Android owns the real-time native path
  * (mic capture → VAD → state machine → TTS playback + UI). The heavy ASR + LID + entity-first
  * normalization run in the online voice provider (the same proxy that serves the LLM), reusing the
  * VERIFIED phase2/asr.py + lid.py — the 2.8 GB test phone cannot host whisper-large-v3 / w2v-bert.

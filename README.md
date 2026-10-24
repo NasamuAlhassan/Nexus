@@ -42,7 +42,7 @@ MIC → ASR → LanguagePipeline(LID+normalize+entities) → BRAIN(router) → T
 - **Asante Twi** — validated model `PrinceAlhassanNasamu/tekyerema-twi-whisper-base-waxal-financial-v1`
   (whisper-base + WAXAL + Financial-Inclusion, CC-BY-4.0). Entity 0.550 / WER 1.20 on the locked Twi GOLD set
   (an *entity-preservation* score, not "55% transcription"). Ship as **ONNX FP32** (bit-exact); naive dynamic
-  INT8 is rejected (WER blow-up). See `TWI_ASR_COMBINED_REPORT.md`.
+  INT8 is rejected (WER blow-up). See `docs/archive/reports/TWI_ASR_COMBINED_REPORT.md`.
 
 ## ASR / brain / TTS
 

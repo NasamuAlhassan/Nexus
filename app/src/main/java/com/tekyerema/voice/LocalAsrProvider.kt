@@ -191,7 +191,7 @@ object NotIntegratedSpeechToRaw : SpeechToRaw {
     override val name = "none(DEVICE_TEST_PENDING)"
     override val ready = false
     override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? {
-        Log.i("Tekyerema", "[ASR] local model not integrated — see LOCAL_VOICE_ARCHITECTURE.md")
+        Log.i("Tekyerema", "[ASR] local model not integrated — see docs/archive/reports/LOCAL_VOICE_ARCHITECTURE.md")
         return null
     }
 }
@@ -212,7 +212,7 @@ object NotIntegratedSpeechToRaw : SpeechToRaw {
  *   // }
  *
  * Language is chosen by which bundled model runs (English vs a Twi model); the raw text then flows
- * through [LanguagePipeline]. Twi model availability follows ASR_MODEL_SHORTLIST.md (train/distil).
+ * through [LanguagePipeline]. Twi model availability follows docs/archive/reports/ASR_MODEL_SHORTLIST.md (train/distil).
  */
 object SherpaSpeechToRaw : SpeechToRaw {
     override val name = "sherpa-onnx(NOT_INTEGRATED)"

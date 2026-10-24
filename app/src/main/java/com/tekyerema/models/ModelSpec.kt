@@ -90,7 +90,7 @@ class ModelStore(private val root: File) {
 object ModelRegistry {
     val TWI_ASR = ModelSpec(
         id = "twi-asr",
-        // §Speed+quality decision (2026-09-27, PRODUCTION_ASR_PLAN.md): on-device Twi = a small streaming
+        // §Speed+quality decision (2026-09-27, docs/archive/reports/PRODUCTION_ASR_PLAN.md): on-device Twi = a small streaming
         // zipformer-CTC (sherpa-native), distilled from the w2v-bert teacher (tekyerema-asr-ctc-twi-v2,
         // unseen WER 0.144). Measured rationale: w2v-bert has the quality but RTF 2.3-4x (too slow on a
         // phone); whisper-base is fast (RTF 0.41x) but under-emits ɛ/ɔ (unseen WER 0.56-0.62). A char-vocab
@@ -107,7 +107,7 @@ object ModelRegistry {
     )
     val EN_ASR = ModelSpec(
         id = "en-asr",
-        // §Speed+quality decision (2026-09-27, PRODUCTION_ASR_PLAN.md): same choice as Twi — a small
+        // §Speed+quality decision (2026-09-27, docs/archive/reports/PRODUCTION_ASR_PLAN.md): same choice as Twi — a small
         // streaming zipformer-CTC (sherpa-native), distilled from the whisper-large-v3-turbo-tekyerema-eng
         // teacher. Rationale: whisper-tiny is fast (RTF 0.38x) but misses code-switch/entities (MoMo->"mu mu",
         // 1k->"wrong case"); whisper-small would fix quality but is ~1.3x RTF (too slow); zipformer-CTC is both
