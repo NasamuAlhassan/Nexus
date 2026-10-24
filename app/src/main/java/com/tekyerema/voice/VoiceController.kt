@@ -308,16 +308,30 @@ class VoiceController(
      * Returns false (it is the answer) otherwise.
      */
     private fun newRequestInsteadOfAnswer(reply: String, heard: Transcript?, source: InputSource): Boolean {
-        if (!com.tekyerema.voice.understand.AnswerOrNew.isNewRequest(reply, agent.state.value.goal)) return false
-        Log.i("Tekyerema", "[ANSWER] a new request, not the answer — the waiting question is dropped")
+        val goal = agent.state.value.goal
+        if (!com.tekyerema.voice.understand.AnswerOrNew.isNewRequest(reply, goal)) return false
+        Log.i("Tekyerema", "[ANSWER] a new request, not the answer — the waiting task is replaced")
         val language = forceLanguage() ?: sessionLanguage()
         val tr = heard ?: LanguagePipeline.process(reply, language, forceLanguage(), backend = "answer-new")
+        // Owner, 24 Oct 2026: starting something new must not be answered with the OLD task's ending ("Stopped.", a Twi
+        // "Ɛyɛ."): the replaced task ends quietly. Only the one task waiting on the user stops — timers, alarms, music and
+        // walking guidance run outside the agent and are untouched. A money read-back dropped this way says once, in the
+        // language now in force, that nothing was sent: a blind user must never wonder whether the money went.
+        val wasMoney = com.tekyerema.voice.understand.AnswerOrNew.kindOf(goal.orEmpty()) == com.tekyerema.voice.understand.AnswerOrNew.Kind.MONEY
+        stopAlreadySaid = true
         agent.stop()
         scope.launch {
             var waited = 0L
             while (agent.busy && waited < 3_000L) { kotlinx.coroutines.delay(100); waited += 100 }
             followUpChain = 0
-            launchTurn { runTurn(tr, source) }
+            launchTurn {
+                if (wasMoney && speakAloud()) {
+                    val twi = (forceLanguage() ?: tr.language) == Lang.TWI
+                    val line = Phrases.get("moneyLeftForNew", twi, if (twi) "Mannyɛ sika no soma no; biribiara nkɔeɛ." else "I left the transfer. Nothing was sent.")
+                    try { tts.speak(line, if (twi) Lang.TWI else Lang.GH_EN) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                }
+                runTurn(tr, source)
+            }
         }
         return true
     }
@@ -781,6 +795,11 @@ class VoiceController(
                 TypedResult(route, accepted = true)
             }
             AgentStatus.WAITING_CONFIRMATION -> when {
+                // A new request of another kind typed at a read-back replaces the waiting task (owner, 24 Oct 2026).
+                Confirmation.interpret(englishReply(t)) == Confirmation.Answer.UNCLEAR &&
+                    newRequestInsteadOfAnswer(englishReply(t), Transcript(raw = t, canonical = t,
+                        language = forceLanguage() ?: sessionLanguage(), reason = "typed"), InputSource.TYPED) -> {
+                    confirmJob?.cancel(); cues.captured(); TypedResult(route, accepted = true) }
                 Confirmation.looksLikeRevision(englishReply(t), agent.state.value.pendingConfirmation.orEmpty()) -> {
                     confirmJob?.cancel(); cues.captured(); agent.revise(englishReply(t)); TypedResult(route, accepted = true) }
                 else -> when (Confirmation.interpret(englishReply(t))) {
@@ -984,6 +1003,14 @@ class VoiceController(
                         // "What's the number again?" asks to HEAR the read-back again — checked before the correction test, which it
                         // also passes ("the number"): it was re-planned by the cloud and the task lost (owner's live test, 22 Oct 2026).
                         val wantsRepeat = repeats < 2 && Confirmation.asksToRepeat(heard, tr?.raw)
+                        // Owner, 24 Oct 2026: a new request said at a read-back ("open WhatsApp" while a transfer waits) was
+                        // taken as a correction of the transfer, or as an unclear answer and then declined — the new request
+                        // lost either way. Plainly another kind of request → it replaces the waiting task (I-26's rule).
+                        if (!wantsRepeat && Confirmation.interpret(heard) == Confirmation.Answer.UNCLEAR &&
+                            newRequestInsteadOfAnswer(heard, tr?.takeIf { it.canonical.isNotBlank() }, InputSource.ASR)) {
+                            _state.update { it.copy(confirmPhase = ConfirmPhase.NONE, speechDetected = false) }
+                            return
+                        }
                         if (!wantsRepeat && Confirmation.looksLikeRevision(heard, prompt)) {
                             agent.revise(heard)
                             _state.update { it.copy(confirmPhase = ConfirmPhase.NONE, speechDetected = false) }
@@ -1790,7 +1817,8 @@ class VoiceController(
         // ("detailed" no longer adds "That took N steps." — no spoken step numbers, owner 2026-09-28.)
         // [exact]: a reading the user asked for is never cut — "brief" used to keep only "You're in Messages." of a screen.
         val text = resultText?.let { if (verbosity() == "brief" && !exact) SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
-        val twi = sessionLanguage() == Lang.TWI
+        // The language in force (a forced English in a Twi conversation said "Ɛyɛ." — owner, 24 Oct 2026).
+        val twi = twiNow()
         return when (status) {
             AgentStatus.COMPLETED -> text ?: Closers.done(twi)   // varied, never the same "Done." twice in a row
             // (Honest results 2026-09-29: a send's evidence line that already says "I can't confirm it went" isn't doubted twice.)
