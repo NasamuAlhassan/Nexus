@@ -474,6 +474,9 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     /** elapsedRealtime of the last on-device decode ([TrimPolicy]). */
     val lastUsedAt: Long get() = ResidentModels.lastUsedAt
 
+    /** DEBUG: close ORT's profile of the loaded [lang] recogniser and return its file (`speech.asr.ort.profile`). */
+    fun endOrtProfile(lang: String): String? = synchronized(ResidentModels.monitor) { ResidentModels.ort[lang]?.endProfile() }
+
     suspend fun releaseAll() = withContext(Dispatchers.Default) {
         lock.withLock {
             val n = synchronized(ResidentModels.monitor) { releaseLocked { true } }

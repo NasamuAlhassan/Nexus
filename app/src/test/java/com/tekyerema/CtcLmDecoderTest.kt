@@ -50,6 +50,19 @@ class CtcLmDecoderTest {
         assertTrue(lm.hasPrefix("si")); assertFalse(lm.hasPrefix("x"))
     }
 
+    /** The phone read a 4.5 MB ARPA in 20 s with a regex per line; tab-separated lines now take the fast path. */
+    @Test fun aTabbedAndASpacedArpaReadTheSame() {
+        val tabbed = listOf("\\data\\", "ngram 1=3", "", "\\1-grams:", "-1.0\t<s>\t-0.3", "-0.5\tdu\t-0.2", "-2.0\tda", "", "\\end\\")
+        val spaced = tabbed.map { it.replace('\t', ' ') }
+        for (lines in listOf(tabbed, spaced)) {
+            val m = NgramLm.parseArpa(lines.asSequence())
+            assertEquals(-0.5f, m.log10p(emptyList(), "du"), 1e-6f)
+            assertEquals(-2.0f, m.log10p(emptyList(), "da"), 1e-6f)
+            assertEquals(-2.0f, m.log10p(listOf("du"), "da"), 1e-6f)   // a unigram-only model ignores the context
+            assertTrue(m.isWord("du")); assertFalse(m.isWord("<s>"))
+        }
+    }
+
     @Test fun clearSpeechIsWhatGreedyHears() {
         val logits = (spell("sidi") + listOf(frame("|" to 0.99)) + spell("du")).toTypedArray()
         assertEquals(OrtCtcAsr.greedy(logits, vocab, 0), CtcLmDecoder(vocab, 0, lm).decode(logits))

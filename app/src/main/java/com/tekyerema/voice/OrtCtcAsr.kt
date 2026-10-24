@@ -27,6 +27,9 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
 
     init {
         val t0 = SystemClock.uptimeMillis()
+        // The word LM (when on) is read on a thread of its own while the session loads: the two used to run one after the other
+        // (A20e, 24 Oct 2026: 20 s for the LM file, after 5 s for the model).
+        val lmRead = startLmRead(modelFile.parentFile)
         // Lean on a 3 GB phone (reliability audit, 20 Oct 2026): EXTENDED fusions (attention, GELU) but not ALL (x86 layout
         // transforms), no CPU arena and no memory pattern, so the peak stays near the model's own size.
         val opts = OrtSession.SessionOptions().apply {
@@ -39,10 +42,13 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
             // initializers). `speech.asr.ort.prepacking` true = ORT's default (a little faster, more RAM).
             if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.ort.prepacking", false)) addConfigEntry("session.disable_prepacking", "1")
         }
+        // DEBUG builds: `speech.asr.ort.profile` writes ORT's per-operator timings (the first decode), for the models session.
+        if (com.tekyerema.BuildConfig.DEV_HOOKS && com.tekyerema.core.config.AppConfig.bool("speech.asr.ort.profile", false))
+            opts.enableProfiling(File(modelFile.parentFile, "ort_profile").absolutePath)
         session = env.createSession(modelFile.absolutePath, opts)
         val (v, b) = readVocab(vocabFile.readText())
         vocab = v; blank = b
-        beam = lmDecoder(modelFile.parentFile, v, b)
+        beam = lmRead?.let { f -> try { f.get()?.let { decoderFor(it, v, b) } } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx LM not loaded: ${t.message}"); null } }
         Log.i("Tekyerema", "[ASR] onnx ${modelFile.name} ready (${threads} threads, inputs ${session.inputNames}) in ${SystemClock.uptimeMillis() - t0} ms")
     }
 
@@ -77,25 +83,31 @@ class OrtCtcAsr(modelFile: File, vocabFile: File, threads: Int, preoptimized: Bo
         } finally { inputs.values.forEach { it.close() } }
     }
 
+    /** DEBUG: the profile file ORT wrote for the decodes so far (`speech.asr.ort.profile`), logged; null when off. */
+    fun endProfile(): String? = try { session.endProfiling().also { Log.i("Tekyerema", "[ASR] ORT profile written: $it") } } catch (_: Throwable) { null }
+
     override fun close() { try { session.close() } catch (_: Throwable) {} }
 
     companion object {
         const val MAX_SECONDS = 15
         /** The word language model beside the model ([dir]/lm.arpa), for the beam search. OFF until it matches pyctcdecode
          *  on the models session's parity clips: `speech.asr.ort.lm` true, with `.alpha`, `.beta`, `.beam` (C-03 settings). */
-        private fun lmDecoder(dir: File?, vocab: Array<String>, blank: Int): CtcLmDecoder? {
+        private fun startLmRead(dir: File?): java.util.concurrent.FutureTask<NgramLm?>? {
             if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.ort.lm", false)) return null
             val f = dir?.let { File(it, "lm.arpa") }?.takeIf { it.isFile } ?: return null
-            return try {
+            val task = java.util.concurrent.FutureTask<NgramLm?> {
                 val t0 = SystemClock.uptimeMillis()
-                val lm = f.bufferedReader().useLines { NgramLm.parseArpa(it) }
-                Log.i("Tekyerema", "[ASR] onnx LM ${f.length() / 1024} KB, order ${lm.order}, loaded in ${SystemClock.uptimeMillis() - t0} ms")
-                CtcLmDecoder(vocab, blank, lm,
-                    alpha = com.tekyerema.core.config.AppConfig.float("speech.asr.ort.lm.alpha", 0.3f),
-                    beta = com.tekyerema.core.config.AppConfig.float("speech.asr.ort.lm.beta", 0.5f),
-                    beamWidth = com.tekyerema.core.config.AppConfig.int("speech.asr.ort.lm.beam", 25).coerceIn(1, 100))
-            } catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx LM not loaded: ${t.message}"); null }
+                val lm = f.bufferedReader(Charsets.UTF_8, 1 shl 16).useLines { NgramLm.parseArpa(it) }
+                Log.i("Tekyerema", "[ASR] onnx LM ${f.length() / 1024} KB, order ${lm.order}, read in ${SystemClock.uptimeMillis() - t0} ms")
+                lm
+            }
+            Thread(task, "ort-lm-read").start()
+            return task
         }
+        private fun decoderFor(lm: NgramLm, vocab: Array<String>, blank: Int) = CtcLmDecoder(vocab, blank, lm,
+            alpha = com.tekyerema.core.config.AppConfig.float("speech.asr.ort.lm.alpha", 0.3f),
+            beta = com.tekyerema.core.config.AppConfig.float("speech.asr.ort.lm.beta", 0.5f),
+            beamWidth = com.tekyerema.core.config.AppConfig.int("speech.asr.ort.lm.beam", 25).coerceIn(1, 100))
         /** id → token, and the blank's id ("[PAD]", else "<pad>", else 0). Pure. */
         fun readVocab(json: String): Pair<Array<String>, Int> {
             val o = JSONObject(json)

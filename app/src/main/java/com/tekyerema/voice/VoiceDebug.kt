@@ -132,6 +132,7 @@ object VoiceDebug {
                 Log.i("Tekyerema", "[ASR-BATCH] ${f.name} ms=$ms raw='$raw' final='${tr.canonical}'")
             }
             Log.i("Tekyerema", "[ASR-BATCH] done ${files.size} files in ${total} ms, model=${sherpa.name}")
+            sherpa.endOrtProfile(if (force == Lang.TWI) "twi" else "eng")
         }
     }
 

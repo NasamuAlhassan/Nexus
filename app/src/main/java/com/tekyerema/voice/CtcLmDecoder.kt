@@ -45,14 +45,24 @@ class NgramLm private constructor(
             val prob = HashMap<String, Float>(); val backoff = HashMap<String, Float>()
             var n = 0; var order = 0
             for (raw in lines) {
-                val line = raw.trim()
+                val line = raw.trimEnd()
                 if (line.isEmpty()) continue
                 if (line.startsWith("\\")) {
                     n = Regex("\\\\(\\d+)-grams:").matchEntire(line)?.groupValues?.get(1)?.toInt() ?: 0
                     order = max(order, n); continue
                 }
                 if (n == 0) continue                       // the \data\ counts
-                val parts = line.split(WS)
+                // KenLM's lines are `prob<TAB>ngram<TAB>backoff`: the n-gram is already space-joined, so take it between the tabs
+                // (the phone parsed a 4.5 MB file in 20 s with a regex split and a rejoin per line, A20e, 24 Oct 2026).
+                val t1 = line.indexOf('	')
+                if (t1 > 0) {
+                    val t2 = line.indexOf('	', t1 + 1)
+                    val key = if (t2 < 0) line.substring(t1 + 1) else line.substring(t1 + 1, t2)
+                    prob[key] = line.substring(0, t1).toFloatOrNull() ?: continue
+                    if (t2 >= 0) line.substring(t2 + 1).trim().toFloatOrNull()?.let { backoff[key] = it }
+                    continue
+                }
+                val parts = line.split(WS)               // a hand-written file with spaces instead of tabs
                 if (parts.size < n + 1) continue
                 val key = parts.subList(1, n + 1).joinToString(" ")
                 prob[key] = parts[0].toFloatOrNull() ?: continue
