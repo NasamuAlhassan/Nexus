@@ -75,7 +75,7 @@ object Addressedness {
         if (all.isEmpty()) return Verdict(false, "empty")
         val t = all.joinToString(" ")
         // Said to Tɛkyerɛma by name, or a cry for help: always heard.
-        if (all.any { it in NAMES_OF_US }) return Verdict(true, "named")
+        if (all.any { it in NAMES_OF_US } || all.zipWithNext().any { (a, b) -> "$a $b" in NAME_PAIRS }) return Verdict(true, "named")
         if (EMERGENCY.containsMatchIn(t)) return Verdict(true, "emergency")
         // A phrase said over and over ("share my ask the share my ask the share my…") is the recognizer looping on
         // background talk, whatever words it contains.
@@ -197,7 +197,12 @@ object Addressedness {
 
     // ------------------------------------------------------------------ word lists
 
-    private val NAMES_OF_US = setOf("tekyerema", "tɛkyerɛma", "tekyerɛma", "tɛkyerema", "chekyerema", "tekyirema")
+    private val NAMES_OF_US = setOf("tekyerema", "tɛkyerɛma", "tekyerɛma", "tɛkyerema", "chekyerema", "tekyirema",
+        // what both English recognisers wrote for the owner saying the name (models session, 24 Oct 2026, asr_eng_owner
+        // W01–W04: 0 of 4 right in every system) — none is an English word
+        "grema", "dechema", "techma", "hatechema", "tertrumah", "tequirema")
+    /** …and the two-word forms from the same clips ("tetch ramah", "the germa"). */
+    private val NAME_PAIRS = setOf("tetch ramah", "the germa")
 
     private val EMERGENCY = Regex("\\b(?:help me|i need help|emergency|ambulance|police|i(?:'ve| have) fallen|mmoa|boa me)\\b")
 

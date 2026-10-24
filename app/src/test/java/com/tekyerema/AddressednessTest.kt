@@ -239,4 +239,11 @@ class AddressednessTest {
         assertEquals(listOf("share", "my location"), agent2.submitted)
         vc2.shutdown()
     }
+
+    /** How both English recognisers wrote the owner saying the name (models session, 24 Oct 2026). */
+    @Test fun the_name_as_the_recognisers_hear_it_is_still_the_name() {
+        for (s in listOf("techma what is the time", "hatechema I am going", "the germa I will eat today", "tetch ramah I will eat today"))
+            assertEquals("named: $s", "named", Addressedness.judge(s, follow).reason)
+        assertFalse(Addressedness.judge("the german I will eat today", follow).reason == "named")
+    }
 }
