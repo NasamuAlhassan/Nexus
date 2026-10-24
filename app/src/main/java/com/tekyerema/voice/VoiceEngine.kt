@@ -209,8 +209,10 @@ object VoiceEngine {
         if (now - readyLocalAt > com.tekyerema.core.config.AppConfig.long("speech.warm.localEveryMs", 120_000L) &&
             availMb() >= com.tekyerema.core.config.AppConfig.long("speech.warm.minAvailMb", 900L)) {
             readyLocalAt = now
-            try { ownVoice?.warm() } catch (_: Throwable) {}
-            try { twiLocal?.warm() } catch (_: Throwable) {}
+            when (VoiceWarm.voiceToWarm(settings.forcedLanguage, settings.sessionLanguage, Long.MAX_VALUE, 0L)) {
+                Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
+                Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
+            }
         }
         if (!com.tekyerema.core.NetworkMonitor.isOnline()) { com.tekyerema.language.SpaceWarm.log("$reason: phone voices warm; offline, so nothing online"); return }
         if (now - readyNetAt < com.tekyerema.core.config.AppConfig.long("speech.warm.netEveryMs", 8 * 60_000L)) return
@@ -355,9 +357,15 @@ object VoiceEngine {
         // The app's own Ghanaian-English voice, on the phone (owner, 2026-10-02: the Nigerian system voice mangles our
         // words). Present only when the build bundles one (assets/models/ondevice/eng/tts/voice.json); it speaks first
         // and the phone's engine stays behind it, so a missing or failed model is never silence.
-        val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; v.warm(); com.tekyerema.language.PlainLatinVoice(v) }
+        val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; com.tekyerema.language.PlainLatinVoice(v) }
         englishVoice = if (own != null) AccentTts(own, systemVoice) else systemVoice
-        twiLocal = SherpaTts(app, OnDeviceVoice.dirFor(Lang.TWI)).takeIf { it.present }?.also { it.warm() }
+        twiLocal = SherpaTts(app, OnDeviceVoice.dirFor(Lang.TWI)).takeIf { it.present }
+        // Only the voice of the language in force, and only with memory to spare ([VoiceWarm]); the other loads with its first line.
+        when (VoiceWarm.voiceToWarm(settings.forcedLanguage, settings.sessionLanguage, availMb(),
+                com.tekyerema.core.config.AppConfig.long("speech.warm.minAvailMb", 900L))) {
+            Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
+            Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
+        }
         // Short of memory for the offline recogniser: the phone voices let go first (they reload for the reply) — see SherpaTts.releaseNow.
         AsrMemory.onRelease(this) { ownVoice?.releaseNow(); twiLocal?.releaseNow() }
         langVoices = ON_DEVICE_LANGS.mapNotNull { l -> SherpaTts(app, OnDeviceVoice.dirFor(l)).takeIf { it.present }?.let { l to it } }.toMap()
