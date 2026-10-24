@@ -95,3 +95,10 @@ local.properties.*
 # real-phone demo takes (scripts/phone_demo.sh): the owner's real contact and number are on screen and in the logs
 demo-package/phone-run/*_take*/
 demo-package/phone-run/clips/
+
+# ---- cleanup 24 Oct 2026 ----
+# Build and adb logs at the repo root (evidence logs live under audit/ and are kept).
+/*.log
+.kotlin/
+# whisper.cpp ggml conversions (730 MB, regenerable with phase2/train/sherpa/convert-pt-to-ggml.py; kept on disk).
+phase2/train/sherpa/ggml*/*.bin
