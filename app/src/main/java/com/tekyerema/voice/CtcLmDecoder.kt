@@ -14,8 +14,11 @@ class NgramLm private constructor(
     val order: Int,
     private val unigrams: Array<String>,
 ) {
-    /** A word the model knows. */
-    fun isWord(w: String): Boolean = w.isNotEmpty() && ' ' !in w && prob.containsKey(w)
+    private val known = unigrams.toHashSet()
+
+    /** A word the decoder counts as known: pyctcdecode's unigram list, the 1-gram lines that carry a backoff column
+     *  (`load_unigram_set_from_arpa` keeps lines of exactly three tab-separated fields), so `</s>` and `<unk>` are not. */
+    fun isWord(w: String): Boolean = w in known
 
     /** Some known word begins with [p] — a half-heard word can still become a real one. */
     fun hasPrefix(p: String): Boolean {
@@ -40,6 +43,7 @@ class NgramLm private constructor(
     companion object {
         fun parseArpa(lines: Sequence<String>): NgramLm {
             val prob = HashMap<String, Float>(); val backoff = HashMap<String, Float>()
+            val withBackoff = ArrayList<String>()
             var n = 0; var order = 0
             for (raw in lines) {
                 val line = raw.trim()
@@ -54,8 +58,11 @@ class NgramLm private constructor(
                 val key = parts.subList(1, n + 1).joinToString(" ")
                 prob[key] = parts[0].toFloatOrNull() ?: continue
                 parts.getOrNull(n + 1)?.toFloatOrNull()?.let { backoff[key] = it }
+                if (n == 1 && line.split('\t').size == 3) withBackoff += key
             }
-            val uni = prob.keys.filter { ' ' !in it && !it.startsWith("<") }.sorted().toTypedArray()
+            // No tab-separated unigram with a backoff (a hand-written file): every unigram counts.
+            val uni = withBackoff.ifEmpty { prob.keys.filter { ' ' !in it } }
+                .filter { !it.startsWith("<") }.sorted().toTypedArray()
             return NgramLm(prob, backoff, max(order, 1), uni)
         }
         private val WS = Regex("\\s+")
@@ -63,11 +70,14 @@ class NgramLm private constructor(
 }
 
 /**
- * CTC prefix beam search with a word language model, the shape pyctcdecode uses (models session, 24 Oct 2026, C-03: KenLM on
- * the deployed Twi recogniser, alpha 0.3, beta 0.5, beam 25, cut WER ~4 points on unseen speakers and money lines). For the
- * phone's own copy of that recogniser ([OrtCtcAsr]), which decoded greedily. Each frame keeps the [beamWidth] best
- * (text, word in progress) pairs, scored by the acoustic log-probability plus alpha·ln P(words) + beta per word; a word in
- * progress that no known word begins with costs [unkOffset]. Pure → CtcLmDecoderTest.
+ * CTC prefix beam search with a word language model: pyctcdecode 0.5.0's `decode()` ported step for step (models session,
+ * 24 Oct 2026, C-03: KenLM on the deployed Twi recogniser, alpha 0.3, beta 0.5, beam 25, cut WER ~4 points on unseen
+ * speakers and money lines). For the phone's own copy of that recogniser ([OrtCtcAsr]), which decoded greedily. Each frame
+ * keeps the [beamWidth] best (text, word in progress, last token) beams, scored by the acoustic log-probability plus, per
+ * finished word, alpha·ln10·(log10 P(word | history) + [unkOffset] if unknown) + beta; a word in progress that no known word
+ * begins with costs [unkOffset] (more when longer than 6 letters). As `decode()` does, beams that agree on the last order−1
+ * words are pruned to the best, and at the end the word in progress is scored with `</s>` — an empty one too, which
+ * pyctcdecode scores as an unknown "" word. Pure → CtcLmDecoderTest.
  */
 class CtcLmDecoder(
     private val vocab: Array<String>,
@@ -81,12 +91,16 @@ class CtcLmDecoder(
     private val unkOffset: Float = -10f,
 ) {
     private val space = vocab.indexOf("|")
+    private val history = max(1, (lm?.order ?: 1) - 1)
 
-    private class Beam(val words: List<String>, val partial: String, val last: Int, var logit: Float, val lmScore: Float)
+    private class Beam(val words: List<String>, val partial: String, val last: Int, var logit: Float, val lmScore: Float) {
+        var score = 0f
+    }
 
     fun decode(logits: Array<FloatArray>): String {
         var beams = listOf(Beam(emptyList(), "", -1, 0f, 0f))
         val lmCache = HashMap<String, Float>()
+        val partialCache = HashMap<String, Float>()
         for (row in logits) {
             val logp = logSoftmax(row)
             var best = 0
@@ -108,54 +122,63 @@ class CtcLmDecoder(
                         c == b.last -> add(b.words, b.partial, c, b.logit + p, b.lmScore)
                         c == space ->
                             if (b.partial.isEmpty()) add(b.words, "", c, b.logit + p, b.lmScore)
-                            else add(b.words + b.partial, "", c, b.logit + p, b.lmScore + wordScore(b.words, b.partial, lmCache))
+                            else add(b.words + b.partial, "", c, b.logit + p, b.lmScore + wordScore(b.words, b.partial, false, lmCache))
                         tok.startsWith("[") || tok.startsWith("<") -> add(b.words, b.partial, c, b.logit + p, b.lmScore)
                         else -> add(b.words, b.partial + tok, c, b.logit + p, b.lmScore)
                     }
                 }
             }
-            val ranked = merged.values.sortedByDescending { it.logit + it.lmScore + partialScore(it.partial) }
-            val top = ranked.firstOrNull() ?: break
-            val floor = top.logit + top.lmScore + partialScore(top.partial) + beamPruneLogp
-            beams = ranked.take(beamWidth).filter { it.logit + it.lmScore + partialScore(it.partial) >= floor }
+            for (b in merged.values) b.score = b.logit + b.lmScore + partialScore(b.partial, partialCache)
+            val top = merged.values.maxOfOrNull { it.score } ?: break
+            val kept = merged.values.filter { it.score >= top + beamPruneLogp }.sortedByDescending { it.score }.take(beamWidth)
+            // decode() runs with prune_history: of beams that agree on all the n-gram can still see, the best one stays.
+            val seen = HashSet<String>()
+            beams = kept.filter { seen.add(it.words.takeLast(history).joinToString(" ") + "\u0000" + it.partial + "\u0000" + it.last) }
         }
-        // The last word in progress is a word; the sentence ends.
-        val done = beams.map { b ->
-            val words = if (b.partial.isEmpty()) b.words else b.words + b.partial
-            val lmScore = if (b.partial.isEmpty()) b.lmScore else b.lmScore + wordScore(b.words, b.partial, lmCache)
-            words to b.logit + lmScore + endScore(words)
+        // The end: the word in progress is the last word (an empty one too), scored with </s>; the same texts merge.
+        val done = LinkedHashMap<String, Pair<Float, Float>>()
+        for (b in beams) {
+            val text = (if (b.partial.isEmpty()) b.words else b.words + b.partial).joinToString(" ")
+            val lmScore = b.lmScore + wordScore(b.words, b.partial, true, lmCache)
+            val had = done[text]
+            done[text] = if (had == null) b.logit to lmScore else logAddExp(had.first, b.logit) to had.second
         }
-        return done.maxByOrNull { it.second }?.first?.joinToString(" ")?.trim() ?: ""
+        return done.maxByOrNull { it.value.first + it.value.second }?.key?.trim() ?: ""
     }
 
-    private fun wordScore(context: List<String>, word: String, cache: HashMap<String, Float>): Float {
+    /** pyctcdecode's `LanguageModel.score`: the unknown-word offset and `</s>` sit inside the alpha scaling. */
+    private fun wordScore(context: List<String>, word: String, last: Boolean, cache: HashMap<String, Float>): Float {
         val m = lm ?: return 0f
-        val key = context.takeLast(m.order - 1).joinToString(" ") + "\u0000" + word
+        val key = context.takeLast(m.order - 1).joinToString(" ") + "\u0000" + word + "\u0000" + last
         return cache.getOrPut(key) {
-            var s = alpha * m.log10p(listOf("<s>") + context, word) * LN10 + beta
-            if (!m.isWord(word)) s += unkOffset
-            s
+            val ctx = listOf("<s>") + context
+            var raw = m.log10p(ctx, word)
+            if (!m.isWord(word)) raw += unkOffset
+            if (last) raw += m.log10p(ctx + word, "</s>")
+            alpha * raw * LN10 + beta
         }
     }
 
-    private fun partialScore(partial: String): Float {
+    /** pyctcdecode's `score_partial_token`: not scaled by alpha. */
+    private fun partialScore(partial: String, cache: HashMap<String, Float>): Float {
         val m = lm ?: return 0f
-        if (partial.isEmpty() || m.hasPrefix(partial)) return 0f
-        return alpha * unkOffset * (if (partial.length > 6) partial.length / 6f else 1f)
-    }
-
-    private fun endScore(words: List<String>): Float {
-        val m = lm ?: return 0f
-        return alpha * m.log10p(listOf("<s>") + words, "</s>") * LN10
+        if (partial.isEmpty()) return 0f
+        return cache.getOrPut(partial) {
+            val unk = if (m.hasPrefix(partial)) 0f else unkOffset
+            if (partial.length > AVG_TOKEN_LEN) unk * partial.length / AVG_TOKEN_LEN else unk
+        }
     }
 
     companion object {
         private val LN10 = ln(10f)
+        private const val AVG_TOKEN_LEN = 6
+        /** pyctcdecode clips log-probabilities at ln(1e-15). */
+        private val MIN_LOGP = ln(1e-15).toFloat()
         fun logSoftmax(row: FloatArray): FloatArray {
             var mx = row[0]; for (v in row) if (v > mx) mx = v
             var sum = 0.0; for (v in row) sum += exp((v - mx).toDouble())
             val lse = mx + ln(sum).toFloat()
-            return FloatArray(row.size) { row[it] - lse }
+            return FloatArray(row.size) { max(row[it] - lse, MIN_LOGP) }
         }
         fun logAddExp(a: Float, b: Float): Float {
             val m = max(a, b)
