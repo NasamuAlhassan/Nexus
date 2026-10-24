@@ -33,6 +33,10 @@ class TwiNumbersRoundTripTest {
         assertEquals("cedi 300", twi("sidi ahasa"))
     }
 
+    @Test fun theRecognisersTwelve() {
+        assertEquals("soma cedi 12 ma Ama", twi("soma sidi dummienu ma Ama"))
+    }
+
     /** "aduomu" could be 20 (aduonu) or 50 (aduonum): never guessed — the read-back asks. */
     @Test fun anAmbiguousNumeralIsNotGuessed() {
         assertEquals("wo sika aka yɛ cedi aduomu", twi("wo sika aka yɛ sidi aduomu"))

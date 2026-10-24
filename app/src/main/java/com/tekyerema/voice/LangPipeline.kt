@@ -67,7 +67,10 @@ private val TWI_NUMBERS: Map<String, Int> = mapOf(
     "dunum" to 15, "dunan" to 14, "num" to 5, "ɛnum" to 5,
     // 24 Oct 2026: the hundreds the app's own Twi voice SAYS (voice/understand/TwiSpeechText.HUNDREDS) — it could say
     // "sidi ahanum" (500) but not hear it back. [owner: verify with a native speaker]
-    "ahasa" to 300, "ahanan" to 400, "ahanum" to 500, "ahansia" to 600, "ahanson" to 700, "ahanwɔtwe" to 800, "ahankron" to 900
+    "ahasa" to 300, "ahanan" to 400, "ahanum" to 500, "ahansia" to 600, "ahanson" to 700, "ahanwɔtwe" to 800, "ahankron" to 900,
+    // the deployed Twi recogniser's 12 — its training spelling, 2 of 3 times greedy and 3 of 3 with the LM (models session,
+    // frozen sets v3, 24 Oct 2026)
+    "dummienu" to 12
 )
 
 /** The same tables keyed by [com.tekyerema.language.TwiText.fold], so plain-Latin and tone-marked spellings
