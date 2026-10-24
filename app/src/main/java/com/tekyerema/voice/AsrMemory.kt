@@ -22,6 +22,17 @@ package com.tekyerema.voice
  * Pure (no Android) → unit-tested.
  */
 object AsrMemory {
+    /**
+     * Skip trying the big English model ([SherpaAsr]): it was [refused] (at, MB needed) less than [retryMs] ago and the
+     * phone has not come within 15 % of what it needed ([availMb] now). A retry is still made once the window has passed or
+     * memory has grown — another app closed, the phone settled. Pure → AsrMemoryTest.
+     */
+    fun skipBig(refused: Pair<Long, Long>?, nowMs: Long, availMb: Long, retryMs: Long): Boolean {
+        val (at, neededMb) = refused ?: return false
+        if (nowMs - at !in 0 until retryMs) return false
+        return availMb < neededMb * 85 / 100
+    }
+
     const val MB = 1024L * 1024L
 
     /** What the user hears instead of the app dying. */

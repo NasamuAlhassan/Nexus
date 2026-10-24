@@ -81,6 +81,8 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     override val name: String
         get() = "sherpa-" + (loaded.entries.joinToString("+") { "${it.value}(${it.key})" }.ifEmpty { "on-device" })
     private val loaded get() = ResidentModels.loaded
+    /** When the big English model was last refused for memory, and how many MB it needed ([recWithFallback]). */
+    @Volatile private var bigRefused: Pair<Long, Long>? = null
     private val cache get() = ResidentModels.cache
 
     // §2.2 — one place decides where a language's model lives. Bundled-in-APK assets (extracted once to the
@@ -507,8 +509,18 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
      * free, the 630 MB model needs ~1.5 GB to load). Still no room → the big model's [AsrLowMemoryException].
      */
     private fun recWithFallback(lang: String): Pair<String, OfflineRecognizer>? {
+        // The big model was refused moments ago and memory hasn't come anywhere near what it needed: go straight to the small
+        // one, which stays loaded. Trying the big one first released the small one ("other recognisers"), was refused again
+        // and loaded the small one back — twice per request, ~9 s on the A20e (phone log, 24 Oct 2026: 577–756 MB free,
+        // 1,487 MB needed; 15–17 s from the end of speech to the words). `speech.asr.bigRetryMs`.
+        if (lang == "eng" && loaded["eng"] == null && assetSpec(LITE) != null && AsrMemory.skipBig(bigRefused,
+                android.os.SystemClock.elapsedRealtime(), memoryNow().first / AsrMemory.MB,
+                com.tekyerema.core.config.AppConfig.long("speech.asr.bigRetryMs", 120_000L))) {
+            rec(LITE)?.let { return LITE to it }
+        }
         val big = try { rec(lang) } catch (e: AsrLowMemoryException) {
             if (lang != "eng" || assetSpec(LITE) == null) throw e
+            bigRefused = android.os.SystemClock.elapsedRealtime() to e.neededMb
             val lite = try { rec(LITE) } catch (_: AsrLowMemoryException) { throw e } ?: throw e
             Log.i("Tekyerema", "[ASR] no room for the big English model — the small one (${loaded[LITE]}) is listening")
             return LITE to lite
