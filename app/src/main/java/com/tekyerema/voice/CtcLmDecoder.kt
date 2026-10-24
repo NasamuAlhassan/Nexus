@@ -87,29 +87,33 @@ class CtcLmDecoder(
     private val unkOffset: Float = -10f,
 ) {
     private val space = vocab.indexOf("|")
+    // The settings as written (0.3f is 0.30000001…; through its text it is 0.3, as pyctcdecode reads it).
+    private val alphaD = alpha.toString().toDouble()
+    private val betaD = beta.toString().toDouble()
     private val history = max(1, (lm?.order ?: 1) - 1)
 
-    private class Beam(val words: List<String>, val partial: String, val last: Int, var logit: Float, val lmScore: Float) {
-        var score = 0f
+    // Double throughout, as pyctcdecode scores in Python floats: near ties flipped in Float (parity 21/30, 24 Oct 2026).
+    private class Beam(val words: List<String>, val partial: String, val last: Int, var logit: Double, val lmScore: Double) {
+        var score = 0.0
     }
 
     fun decode(logits: Array<FloatArray>): String {
-        var beams = listOf(Beam(emptyList(), "", -1, 0f, 0f))
-        val lmCache = HashMap<String, Float>()
-        val partialCache = HashMap<String, Float>()
+        var beams = listOf(Beam(emptyList(), "", -1, 0.0, 0.0))
+        val lmCache = HashMap<String, Double>()
+        val partialCache = HashMap<String, Double>()
         for (row in logits) {
             val logp = logSoftmax(row)
             var best = 0
             for (i in 1 until logp.size) if (logp[i] > logp[best]) best = i
             val merged = LinkedHashMap<String, Beam>()
-            fun add(words: List<String>, partial: String, last: Int, logit: Float, lmScore: Float) {
+            fun add(words: List<String>, partial: String, last: Int, logit: Double, lmScore: Double) {
                 val key = words.joinToString(" ") + "\u0000" + partial + "\u0000" + last
                 val had = merged[key]
                 if (had == null) merged[key] = Beam(words, partial, last, logit, lmScore)
                 else had.logit = logAddExp(had.logit, logit)
             }
             for (c in logp.indices) {
-                if (c != best && logp[c] < tokenMinLogp) continue
+                if (c != best && logp[c] < tokenMinLogp.toDouble()) continue
                 val p = logp[c]
                 for (b in beams) {
                     val tok = vocab.getOrElse(c) { "" }
@@ -128,13 +132,13 @@ class CtcLmDecoder(
             }
             for (b in merged.values) b.score = b.logit + b.lmScore + partialScore(b.partial, partialCache)
             val top = merged.values.maxOfOrNull { it.score } ?: break
-            val kept = merged.values.filter { it.score >= top + beamPruneLogp }.sortedByDescending { it.score }.take(beamWidth)
+            val kept = merged.values.filter { it.score >= top + beamPruneLogp.toDouble() }.sortedByDescending { it.score }.take(beamWidth)
             // decode() runs with prune_history: of beams that agree on all the n-gram can still see, the best one stays.
             val seen = HashSet<String>()
             beams = kept.filter { seen.add(it.words.takeLast(history).joinToString(" ") + "\u0000" + it.partial + "\u0000" + it.last) }
         }
         // The end: the word in progress is the last word (an empty one too), scored with </s>; the same texts merge.
-        val done = LinkedHashMap<String, Pair<Float, Float>>()
+        val done = LinkedHashMap<String, Pair<Double, Double>>()
         for (b in beams) {
             val text = (if (b.partial.isEmpty()) b.words else b.words + b.partial).joinToString(" ")
             val lmScore = b.lmScore + wordScore(b.words, b.partial, true, lmCache)
@@ -146,43 +150,43 @@ class CtcLmDecoder(
     }
 
     /** pyctcdecode's `LanguageModel.score`: the unknown-word offset and `</s>` sit inside the alpha scaling. */
-    private fun wordScore(context: List<String>, word: String, last: Boolean, cache: HashMap<String, Float>): Float {
-        val m = lm ?: return 0f
+    private fun wordScore(context: List<String>, word: String, last: Boolean, cache: HashMap<String, Double>): Double {
+        val m = lm ?: return 0.0
         val key = context.takeLast(m.order - 1).joinToString(" ") + "\u0000" + word + "\u0000" + last
         return cache.getOrPut(key) {
             val ctx = listOf("<s>") + context
-            var raw = m.log10p(ctx, word)
+            var raw = m.log10p(ctx, word).toDouble()
             if (!m.isWord(word)) raw += unkOffset
             if (last) raw += m.log10p(ctx + word, "</s>")
-            alpha * raw * LN10 + beta
+            alphaD * raw * LN10 + betaD
         }
     }
 
     /** pyctcdecode's `score_partial_token`: not scaled by alpha. */
-    private fun partialScore(partial: String, cache: HashMap<String, Float>): Float {
-        val m = lm ?: return 0f
-        if (partial.isEmpty()) return 0f
+    private fun partialScore(partial: String, cache: HashMap<String, Double>): Double {
+        val m = lm ?: return 0.0
+        if (partial.isEmpty()) return 0.0
         return cache.getOrPut(partial) {
-            val unk = if (m.hasPrefix(partial)) 0f else unkOffset
+            val unk = if (m.hasPrefix(partial)) 0.0 else unkOffset.toDouble()
             if (partial.length > AVG_TOKEN_LEN) unk * partial.length / AVG_TOKEN_LEN else unk
         }
     }
 
     companion object {
-        private val LN10 = ln(10f)
+        private val LN10 = ln(10.0)
         private const val AVG_TOKEN_LEN = 6
         private const val UNK_MARK = "⁇"
         /** pyctcdecode clips log-probabilities at ln(1e-15). */
-        private val MIN_LOGP = ln(1e-15).toFloat()
-        fun logSoftmax(row: FloatArray): FloatArray {
-            var mx = row[0]; for (v in row) if (v > mx) mx = v
-            var sum = 0.0; for (v in row) sum += exp((v - mx).toDouble())
-            val lse = mx + ln(sum).toFloat()
-            return FloatArray(row.size) { max(row[it] - lse, MIN_LOGP) }
+        private val MIN_LOGP = ln(1e-15)
+        fun logSoftmax(row: FloatArray): DoubleArray {
+            var mx = row[0].toDouble(); for (v in row) if (v > mx) mx = v.toDouble()
+            var sum = 0.0; for (v in row) sum += exp(v - mx)
+            val lse = mx + ln(sum)
+            return DoubleArray(row.size) { max(row[it] - lse, MIN_LOGP) }
         }
-        fun logAddExp(a: Float, b: Float): Float {
+        fun logAddExp(a: Double, b: Double): Double {
             val m = max(a, b)
-            return if (m == Float.NEGATIVE_INFINITY) m else m + ln(exp(a - m) + exp(b - m))
+            return if (m == Double.NEGATIVE_INFINITY) m else m + ln(exp(a - m) + exp(b - m))
         }
     }
 }
