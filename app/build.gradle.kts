@@ -74,6 +74,9 @@ android {
         versionCode = 1
         versionName = "0.1.0-phase1"
         vectorDrawables { useSupportLibrary = true }
+        // Phones (arm64, and 32-bit ARM for low-end Android Go handsets) and the x86_64 emulator (Pixel_4_2). 32-bit x86 was
+        // 44 MB of native libraries that only a 32-bit x86 emulator could load (cleanup, 24 Oct 2026).
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
         buildConfigField("String", "DEFAULT_GROQ_BASE_URL", "\"$defaultGroqBaseUrl\"")
         buildConfigField("String", "DEFAULT_GROQ_MODEL", "\"$defaultGroqModel\"")
         buildConfigField("String", "DEFAULT_GROQ_REASONING_EFFORT", "\"$defaultGroqReasoningEffort\"")
@@ -142,14 +145,15 @@ val slimApk = project.hasProperty("slimApk")
 tasks.withType<com.android.build.gradle.tasks.MergeSourceSetFolders>().configureEach {
     if (name.endsWith("Assets")) {
         inputs.property("slimApk", slimApk)
-        if (slimApk) doLast { outputDir.get().asFile.resolve("models/ondevice/eng").deleteRecursively() }
+        // Only the recogniser: models/ondevice/eng/tts is the offline Kafui voice (63 MB), which the slim build used to drop
+        // along with it although nothing pushes that voice to the phone (cleanup, 24 Oct 2026).
+        if (slimApk) doLast { outputDir.get().asFile.resolve("models/ondevice/eng/asr").deleteRecursively() }
     }
 }
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.09.02"))
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     // Redesign 2026-09-29: icon tiles in Settings / History (globe, mic, keyboard, shield…); unused icons are
     // stripped by R8 in release builds.
@@ -157,9 +161,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.6")
-    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     // On-device OCR for the vision perception route (plan §6). Bundled model: works offline,
     // nothing leaves the device. Used only when the accessibility tree is insufficient.
@@ -175,6 +177,8 @@ dependencies {
     // Wake word ("Hey Tɛkyerɛma"): openWakeWord mel + embedding features and our trained heads, run with
     // ONNX Runtime. Same pairing with the sherpa AAR as the V2 app (the x86 pickFirst above covers the dup).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+    // Debug only: Android Studio's Compose Layout Inspector. (Cleanup 24 Oct 2026 removed datastore-preferences,
+    // lifecycle-viewmodel-compose and ui-tooling-preview: nothing imported them.)
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Pure-logic unit tests (grounding, sanitization, provenance, policy, verification predicates).
