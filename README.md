@@ -9,6 +9,10 @@ online reasoning when connectivity exists.
 
 ## Architecture
 
+The authoritative description is **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (24 Oct 2026; every component with its
+source file); runtime model files are listed in [docs/MODELS.md](docs/MODELS.md); current status in
+[docs/agent/PROJECT_STATE.md](docs/agent/PROJECT_STATE.md). In short:
+
 ```
 MIC → ASR → LanguagePipeline(LID+normalize+entities) → BRAIN(router) → TOOL → OBSERVE → VERIFY → RECOVER → TTS
 ```
@@ -38,26 +42,26 @@ MIC → ASR → LanguagePipeline(LID+normalize+entities) → BRAIN(router) → T
 
 ## Supported languages
 
-- **Ghanaian English** — online ASR = Whisper-large-v3 (MIT) via the proxy; on-device English STT seam ready.
-- **Asante Twi** — validated model `PrinceAlhassanNasamu/tekyerema-twi-whisper-base-waxal-financial-v1`
-  (whisper-base + WAXAL + Financial-Inclusion, CC-BY-4.0). Entity 0.550 / WER 1.20 on the locked Twi GOLD set
-  (an *entity-preservation* score, not "55% transcription"). Ship as **ONNX FP32** (bit-exact); naive dynamic
-  INT8 is rejected (WER blow-up). See `docs/archive/reports/TWI_ASR_COMBINED_REPORT.md`.
+- **Ghanaian English** — on the phone: our fine-tuned Parakeet 0.6B (bundled), whisper-base.en when memory is short, and
+  the `GhanaWords` repairs for money and telco words; online: the phone's recogniser.
+- **Asante Twi** — online: our own Space recogniser (w2v-BERT CTC, `tekyerema-asr-ctc-twi-v2`), then the UG HCI Lab;
+  on the phone: the same recogniser as int8 ONNX (`OrtCtcAsr`, pushed to `files/ondevice/twi/asr`).
+  The September whisper-base Twi results are history: `docs/archive/reports/TWI_ASR_COMBINED_REPORT.md`.
 
 ## ASR / brain / TTS
 
 | layer | offline | online |
 |---|---|---|
-| ASR | Ghanaian-English Parakeet 0.6B fine-tune, **bundled in the APK** (`SherpaAsr`; `-PslimApk` leaves it out for a phone that already holds it); offline Twi hearing is switched off for now (`speech.asr.offlineTwi`) | Twi: UG HCI Lab Speech Gateway (`hcilab_asr`); English stays on-device |
+| ASR | Ghanaian-English Parakeet 0.6B fine-tune, **bundled in the APK** (`SherpaAsr`; `-PslimApk` leaves it out for a phone that already holds it); Twi CTC int8 on the phone (`speech.asr.offlineTwi` = true) | Twi: our Space (`space_asr`) → UG HCI Lab (`hcilab_asr`) |
 | Brain | `LocalBrain` rules + the fast path + `MoneyPlan` / USSD navigator (deterministic, on-device; the Twi command matcher answers Twi here too) | Groq `openai/gpt-oss-120b` (OpenAI-compatible) → Gemini fallback; Twi that the matcher doesn't take goes translator → English brain with names/amounts as tags |
-| TTS | Android system engine (English) + recorded lab clips for the fixed Twi frames | UG HCI Lab TTS (Twi, 15 requests/day); falls back to the system engine so it's never silent (§28) |
+| TTS | our Piper Ghanaian-English voice (Kafui) and our Twi MMS-VITS voice, on the phone; the system engine last | Twi: our Space (`space_tts`) → UG HCI Lab TTS; Ghanaian English: Kafui on the Space |
 
 ## Device support (any Android phone, not one model)
 
 Tɛkyerɛma is built to run on **any Android 8.0+ (minSdk 26) phone**, not a specific device:
 
-- **No device/ABI lock-in** — no `Build.MODEL` checks, no RAM gates, no `abiFilters`; the APK bundles native
-  libs for `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`.
+- **No device lock-in** — no `Build.MODEL` checks; the APK bundles native libs for `arm64-v8a`, `armeabi-v7a` (32-bit
+  Android Go phones) and `x86_64` (emulators). 32-bit x86 was dropped on 24 Oct 2026 (44 MB no phone could use).
 - **Resolution/DPI independent** — screen control reads the live window metrics and acts on each element's own
   on-screen bounds (never fixed coordinates); Compose UI is density-independent.
 - **Graceful degradation** — the universal path (local brain + tool layer + accessibility control + online ASR +
@@ -75,7 +79,7 @@ reply), system-alert-window (floating trigger), network-state. Requested with ra
 
 ```
 ./gradlew :app:assembleDebug        # → app/build/outputs/apk/debug/app-debug.apk
-./gradlew :app:testDebugUnitTest    # 1,716 unit tests (3 October 2026)
+./gradlew :app:testDebugUnitTest    # ~2,160 JVM unit tests (24 October 2026)
 ```
 Requires the Android SDK (`local.properties` `sdk.dir`). Cloud-brain keys are injected from gitignored
 `local.properties` (`GEMINI_API_KEY`, `GROQ_API_KEY`); the app runs offline without them.
@@ -92,12 +96,12 @@ Test identity: **Prince / 0552093690 / 0508797323**.
 
 ## Known limitations (honest status)
 
-- **Twi speech is online.** Twi ASR and the Twi voice go through the UG HCI Lab speech API (the hackathon's required
-  path; ~10 ASR + 15 TTS requests a day on the test token). Offline, Twi speech input returns an honest "you're offline"
-  line; typed Twi still works through the local router.
+- **Twi offline is partial.** The Twi recogniser and voice run on the phone, but English→Twi translation exists only
+  online, so offline replies are English except the fixed Twi lines and the local router's answers. The phone's Twi voice
+  is slow on the A20e (~11 s to first audio, 21 Oct measurement). Ghanaian-language speech must be the UG HCI Lab's or the
+  team's own models (~10 ASR + 15 TTS lab requests a day).
 - **English speech:** the full APK bundles a fine-tuned Parakeet 0.6B for offline English ASR (≈631 MB; the `-PslimApk`
-  build leaves it out and uses the phone's recogniser); English replies use the phone's own voice. No Ghanaian-English
-  voice exists anywhere yet (our own Piper voice is a Kaggle work in progress).
+  build leaves it out); English replies use our own Ghanaian-English Piper voice (Kafui) with the system voice as backup.
 - **Wake word:** "Hey Tɛkyerɛma" (openWakeWord heads on ONNX Runtime) is on by default; the orb, the floating bubble, the
   accessibility button and the assistant gesture also open the mic.
 - **Device status (13 Oct 2026):** verified on the Pixel 4 emulator (API 35) for every flow that needs no SIM — the Mobile
