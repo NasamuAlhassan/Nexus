@@ -25,7 +25,7 @@ interface SpeechToRaw {
  * Local (offline) ASR provider: `wav → SpeechToRaw (model) → LanguagePipeline → Transcript`. The
  * default model is [NotIntegratedSpeechToRaw] so the app compiles and behaves honestly before a
  * sherpa-onnx model is bundled — it reports unavailability rather than pretending or calling a
- * network. Swap in [SherpaSpeechToRaw] once a model is packaged + device-validated.
+ * network. The app passes [SherpaAsr] (the bundled sherpa-onnx models) where one is loaded.
  */
 class LocalAsrProvider(
     private val model: SpeechToRaw = NotIntegratedSpeechToRaw,
@@ -196,26 +196,3 @@ object NotIntegratedSpeechToRaw : SpeechToRaw {
     }
 }
 
-/**
- * Scaffold for the sherpa-onnx on-device model (§34) — NOT wired into the UI, NOT counted as working.
- * Integration steps (kept as guidance, not compiled, until the AAR + a bundled model land):
- *
- *   // build.gradle: implementation("com.k2fsa.sherpa.onnx:sherpa-onnx:<ver>")  // arm64-v8a
- *   // assets: encoder.int8.onnx / decoder.int8.onnx / tokens.txt   (Whisper/Conformer, from phase2/train/export_onnx.py)
- *   //
- *   // private val recognizer = OfflineRecognizer(assetManager, OfflineRecognizerConfig(
- *   //   modelConfig = OfflineModelConfig(whisper = OfflineWhisperModelConfig(encoder, decoder),
- *   //                                     tokens = "tokens.txt", numThreads = 2)))
- *   // override suspend fun rawTranscript(wav, force): String {
- *   //   val s = recognizer.createStream(); s.acceptWaveform(pcmFloat(wav), 16000); recognizer.decode(s)
- *   //   return recognizer.getResult(s).text
- *   // }
- *
- * Language is chosen by which bundled model runs (English vs a Twi model); the raw text then flows
- * through [LanguagePipeline]. Twi model availability follows docs/archive/reports/ASR_MODEL_SHORTLIST.md (train/distil).
- */
-object SherpaSpeechToRaw : SpeechToRaw {
-    override val name = "sherpa-onnx(NOT_INTEGRATED)"
-    override val ready = false   // flip to true only after the AAR + model assets exist and load
-    override suspend fun rawTranscript(wav: ByteArray, forceLanguage: String?): String? = null
-}

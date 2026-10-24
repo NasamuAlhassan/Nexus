@@ -97,9 +97,6 @@ interface VoiceInput {
     fun release() {}
 }
 
-/** Output stays the existing [TtsProvider] (speak / stop / shutdown); aliased so both sides read alike. */
-typealias VoiceOutput = TtsProvider
-
 /** B-07 barge-in, split out: noticing that the user started talking is separate from recognising what they said. */
 interface BargeInDetector {
     /**

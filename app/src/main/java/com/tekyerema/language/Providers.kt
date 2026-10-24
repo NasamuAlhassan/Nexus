@@ -22,23 +22,6 @@ interface TranslationProvider {
     suspend fun translate(text: String, from: String, to: String): String?
 }
 
-/** Text language ID. The hot path uses the on-device [Lid]; an API that reports the spoken language alongside its
- *  transcript feeds that report through the ASR response instead (see `response.languagePath`). */
-interface LanguageIdentifier {
-    val name: String
-    /** The language and a 0..1 confidence, or null when there is nothing to go on. */
-    fun identify(text: String): Pair<String, Double>?
-}
-
-/** The on-device lexicon LID, offline and instant. */
-object OnDeviceLid : LanguageIdentifier {
-    override val name = "on-device-lid"
-    override fun identify(text: String): Pair<String, Double>? {
-        val d = Lid.detect(text)
-        return if (d.twi == 0.0 && d.eng == 0.0) null else d.lang to d.confidence
-    }
-}
-
 /** Tries translators in order; the first non-blank answer wins. */
 class FallbackTranslator(private val chain: List<TranslationProvider>) : TranslationProvider {
     override val name = "fallback(" + chain.joinToString(",") { it.name } + ")"

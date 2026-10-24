@@ -169,16 +169,6 @@ internal suspend fun awaitScreen(
     }
 }
 
-/** Wait for one of [pkgs] to be the app in front. */
-internal suspend fun awaitForeground(ctrl: AccessibilityController, pkgs: Set<String>, timeoutMs: Long): Boolean {
-    val end = System.currentTimeMillis() + timeoutMs
-    while (true) {
-        if (ctrl.foregroundPackage() in pkgs) return true
-        if (System.currentTimeMillis() >= end) return false
-        delay(250L)
-    }
-}
-
 /**
  * Press [e]: its node's click first; if the screen doesn't react, ONE gesture tap on its bounds (Compose and WhatsApp
  * controls sometimes accept ACTION_CLICK and do nothing). The re-tap only happens while the SAME control is still

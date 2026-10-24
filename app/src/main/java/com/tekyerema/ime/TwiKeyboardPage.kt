@@ -124,10 +124,6 @@ fun TwiKeyboardSetupCard(status: KeyboardStatus = rememberKeyboardStatus()) {
     }
 }
 
-/** The value for a "Twi keyboard" row on the Settings root (Not added / Added, not in use / In use). */
-@Composable
-fun rememberTwiKeyboardStatusLabel(): String = KeyboardSetupText.statusLabel(rememberKeyboardStatus())
-
 /**
  * The keyboard's setup state, re-read when the user comes back from the system keyboard list (ON_RESUME) and when the
  * keyboard chooser — a dialog over our window, which does not pause the activity — closes (window focus returns).

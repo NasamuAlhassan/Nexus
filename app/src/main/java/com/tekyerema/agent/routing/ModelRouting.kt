@@ -182,6 +182,3 @@ object ModelRouting {
         return configured.filter { it in ok }
     }
 }
-
-/** Convenience for tests / wiring: a brain is quota-aware if it implements [QuotaAware]. */
-fun AgentBrain.quotaAware(): QuotaAware? = this as? QuotaAware

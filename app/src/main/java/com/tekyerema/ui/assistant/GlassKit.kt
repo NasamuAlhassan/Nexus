@@ -235,19 +235,6 @@ fun Modifier.glassBody(
 
 private fun Color.toArgbInt(): Int = this.toArgb()
 
-/** A soft fade at the bottom edge of scrollable content, so text melts into the glass instead of being cut. Offscreen
- *  compositing only while [enabled] (a long, scrolling answer); short content draws straight to the glass. */
-fun Modifier.fadeBottom(fadeDp: Dp = 24.dp, enabled: Boolean = true): Modifier = if (!enabled) this else this
-    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
-    .drawWithCache {
-        val f = fadeDp.toPx()
-        val mask = Brush.verticalGradient(0f to Color.Black, 1f to Color.Transparent, startY = size.height - f, endY = size.height)
-        onDrawWithContent {
-            drawContent()
-            drawRect(mask, topLeft = Offset(0f, size.height - f), size = Size(size.width, f), blendMode = BlendMode.DstIn)
-        }
-    }
-
 /** The small handle at the bottom of a finished result: "pull me". Drawn, not a node (the gestures have semantic actions). */
 fun Modifier.handle(color: Color, visible: () -> Boolean): Modifier = this.drawWithCache {
     val w = 36.dp.toPx(); val h = 4.dp.toPx()
@@ -258,4 +245,3 @@ fun Modifier.handle(color: Color, visible: () -> Boolean): Modifier = this.drawW
     }
 }
 
-internal fun Rect.inflate(d: Float) = Rect(left - d, top - d, right + d, bottom + d)

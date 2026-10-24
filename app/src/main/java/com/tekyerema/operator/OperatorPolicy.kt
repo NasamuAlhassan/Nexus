@@ -56,13 +56,6 @@ interface OperatorStore {
     fun put(key: String, value: String?)
 }
 
-/** In-memory store (unit tests; also the fallback before [OperatorPolicy.init]). */
-class MemoryOperatorStore : OperatorStore {
-    val values = HashMap<String, String>()
-    @Synchronized override fun get(key: String): String? = values[key]
-    @Synchronized override fun put(key: String, value: String?) { if (value == null) values.remove(key) else values[key] = value }
-}
-
 object OperatorPolicy {
     /** Provider ids the router knows (models.json `models.planner.chain`). */
     val KNOWN_PROVIDERS = listOf("groq", "gemini")

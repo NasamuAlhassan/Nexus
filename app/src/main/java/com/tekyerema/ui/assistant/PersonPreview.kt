@@ -129,5 +129,3 @@ fun PersonPreview(f: ConfirmFacts.Facts, modifier: Modifier = Modifier) {
     }
 }
 
-/** Space between rows of the preview's parts. */
-internal val PreviewGap = Arrangement.spacedBy(8.dp)

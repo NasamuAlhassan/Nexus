@@ -613,5 +613,3 @@ val CANNOT_DO_CLASSES = listOf(
     "device_restriction", "network_unavailable", "resource_unavailable", "repeated_failure", "unsafe_or_uncertain"
 )
 
-/** Convenience for the engine: is this element from the tree with a live node? */
-internal val UiSnapshot.hasTree: Boolean get() = elements.any { it.source == ElementSource.TREE }
