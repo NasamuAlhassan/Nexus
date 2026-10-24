@@ -16,8 +16,8 @@ class NgramLm private constructor(
 ) {
     private val known = unigrams.toHashSet()
 
-    /** A word the decoder counts as known: pyctcdecode's unigram list, the 1-gram lines that carry a backoff column
-     *  (`load_unigram_set_from_arpa` keeps lines of exactly three tab-separated fields), so `</s>` and `<unk>` are not. */
+    /** A word the decoder counts as known: the unigram list pyctcdecode is given, every word of the 1-gram section but
+     *  `<s>`, `</s>`, `<unk>` (the models session's `arpa_unigrams`, asr-offline-lm-twi). */
     fun isWord(w: String): Boolean = w in known
 
     /** Some known word begins with [p] — a half-heard word can still become a real one. */
@@ -43,7 +43,6 @@ class NgramLm private constructor(
     companion object {
         fun parseArpa(lines: Sequence<String>): NgramLm {
             val prob = HashMap<String, Float>(); val backoff = HashMap<String, Float>()
-            val withBackoff = ArrayList<String>()
             var n = 0; var order = 0
             for (raw in lines) {
                 val line = raw.trim()
@@ -58,11 +57,8 @@ class NgramLm private constructor(
                 val key = parts.subList(1, n + 1).joinToString(" ")
                 prob[key] = parts[0].toFloatOrNull() ?: continue
                 parts.getOrNull(n + 1)?.toFloatOrNull()?.let { backoff[key] = it }
-                if (n == 1 && line.split('\t').size == 3) withBackoff += key
             }
-            // No tab-separated unigram with a backoff (a hand-written file): every unigram counts.
-            val uni = withBackoff.ifEmpty { prob.keys.filter { ' ' !in it } }
-                .filter { !it.startsWith("<") }.sorted().toTypedArray()
+            val uni = prob.keys.filter { ' ' !in it && it != "<s>" && it != "</s>" && it != "<unk>" }.sorted().toTypedArray()
             return NgramLm(prob, backoff, max(order, 1), uni)
         }
         private val WS = Regex("\\s+")
@@ -123,6 +119,8 @@ class CtcLmDecoder(
                         c == space ->
                             if (b.partial.isEmpty()) add(b.words, "", c, b.logit + p, b.lmScore)
                             else add(b.words + b.partial, "", c, b.logit + p, b.lmScore + wordScore(b.words, b.partial, false, lmCache))
+                        // pyctcdecode spells [UNK] as "⁇" inside the word (an unknown word to the LM); stripped at the end.
+                        tok == "[UNK]" -> add(b.words, b.partial + UNK_MARK, c, b.logit + p, b.lmScore)
                         tok.startsWith("[") || tok.startsWith("<") -> add(b.words, b.partial, c, b.logit + p, b.lmScore)
                         else -> add(b.words, b.partial + tok, c, b.logit + p, b.lmScore)
                     }
@@ -143,7 +141,8 @@ class CtcLmDecoder(
             val had = done[text]
             done[text] = if (had == null) b.logit to lmScore else logAddExp(had.first, b.logit) to had.second
         }
-        return done.maxByOrNull { it.value.first + it.value.second }?.key?.trim() ?: ""
+        val best = done.maxByOrNull { it.value.first + it.value.second }?.key ?: return ""
+        return best.replace(UNK_MARK, "").split(' ').filter { it.isNotEmpty() }.joinToString(" ")
     }
 
     /** pyctcdecode's `LanguageModel.score`: the unknown-word offset and `</s>` sit inside the alpha scaling. */
@@ -172,6 +171,7 @@ class CtcLmDecoder(
     companion object {
         private val LN10 = ln(10f)
         private const val AVG_TOKEN_LEN = 6
+        private const val UNK_MARK = "⁇"
         /** pyctcdecode clips log-probabilities at ln(1e-15). */
         private val MIN_LOGP = ln(1e-15).toFloat()
         fun logSoftmax(row: FloatArray): FloatArray {
