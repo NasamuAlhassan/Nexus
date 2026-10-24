@@ -48,6 +48,8 @@ private object ResidentModels {
     val unloadAfterUse = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
     /** elapsedRealtime of the last [unloadAfterUse] release: the phone takes a few seconds to hand that memory back. */
     @Volatile var lastTightUnloadAt = 0L
+    /** elapsedRealtime of the last decode by any on-device recogniser ([TrimPolicy]). */
+    @Volatile var lastUsedAt = 0L
     /** model location → its files' total size (never changes while the app runs). */
     val sizes = java.util.concurrent.ConcurrentHashMap<String, Long>()
     /** Models run by ONNX Runtime ([ModelSpec.W2VBERT_CTC]) by language — released with the sherpa ones (low memory, LRU). */
@@ -469,6 +471,9 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
         }
 
     /** Drop every loaded recognizer (N-08 low-memory: onTrimMemory). They reload on the next request. */
+    /** elapsedRealtime of the last on-device decode ([TrimPolicy]). */
+    val lastUsedAt: Long get() = ResidentModels.lastUsedAt
+
     suspend fun releaseAll() = withContext(Dispatchers.Default) {
         lock.withLock {
             val n = synchronized(ResidentModels.monitor) { releaseLocked { true } }
@@ -531,6 +536,7 @@ class SherpaAsr(private val appContext: Context) : SpeechToRaw {
     }
 
     private fun decodeSamples(lang: String, raw: FloatArray, sr: Int): String? {
+        ResidentModels.lastUsedAt = SystemClock.elapsedRealtime()
         ortFor(lang)?.let { m ->
             return try { guardRepetition(trimRestart(m.decode(raw, sr))) }
             catch (t: Throwable) { Log.w("Tekyerema", "[ASR] onnx decode failed: ${t.message}"); null }

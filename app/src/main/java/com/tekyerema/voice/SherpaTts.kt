@@ -245,9 +245,13 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
         }
     }
 
+    /** elapsedRealtime of the last line this voice was asked to say ([TrimPolicy]). */
+    @Volatile var lastUsedAt = 0L; private set
+
     override suspend fun speak(text: String, language: String): Boolean {
         if (text.isBlank()) return false
         val s = spec ?: return false
+        lastUsedAt = android.os.SystemClock.elapsedRealtime()
         if (!OnDeviceVoice.speaks(s, language)) return false
         if (!enabled() || loadError != null) return false
         NowSpeaking.begin()

@@ -701,11 +701,14 @@ object VoiceEngine {
      *  the next request, from the files dir). Called from TekyeremaApp.onTrimMemory. */
     fun onTrimMemory(level: Int) {
         if (!initialized) return
-        val pressing = level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW &&
-            level != android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
-        if (pressing && !controller.isRunning) sherpa?.let { s -> scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
-        if (pressing && !controller.isRunning) ownVoice?.let { v -> scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
-        if (pressing && !controller.isRunning) langVoices.values.forEach { v -> scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
+        if (controller.isRunning) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        val grace = com.tekyerema.core.config.AppConfig.long("speech.trim.graceMs", 90_000L)
+        fun drop(lastUsedAt: Long) = TrimPolicy.shouldRelease(level, now - lastUsedAt, grace)
+        sherpa?.let { s -> if (drop(s.lastUsedAt)) scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
+        ownVoice?.let { v -> if (drop(v.lastUsedAt)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
+        twiLocal?.let { v -> if (drop(v.lastUsedAt)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
+        langVoices.values.forEach { v -> scope.launch(Dispatchers.Default) { try { if (TrimPolicy.shouldRelease(level, Long.MAX_VALUE, grace)) v.release() } catch (_: Throwable) {} } }
     }
 
     private fun applyVoiceSettings() {
