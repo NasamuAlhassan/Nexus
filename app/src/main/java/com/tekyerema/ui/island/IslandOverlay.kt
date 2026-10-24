@@ -68,13 +68,17 @@ object IslandOverlay {
     private var owner: IslandOwner? = null
     private var visible: MutableTransitionState<Boolean>? = null
     private val removeLater = Runnable { removeNow() }
+    /** The accessibility service whose window holds the island (null = an app overlay window). */
+    private var hostSvc: Any? = null
 
     /** Tɛkyerɛma's own screen is in front (it shows the island in its own layout). */
     val appFront = MutableStateFlow(false)
 
     fun start(ctx: Context) {
-        if (job?.isActive == true) return
         val app = ctx.applicationContext
+        // Called again when the accessibility service (re)connects: the shown/hidden flow does not change then, so look now —
+        // an island that failed to attach, or whose window died with the old service, comes back (owner, 24 Oct 2026).
+        if (job?.isActive == true) { main.post { if (wanted()) attach(app) }; return }
         job = scope.launch {
             combine(LiveActivities.state, OverlayConfirm.onScreen, appFront) { acts, panel, front -> acts.isNotEmpty() && !panel && !front }
                 .distinctUntilChanged()
@@ -82,11 +86,17 @@ object IslandOverlay {
         }
     }
 
+    private fun wanted() = LiveActivities.state.value.isNotEmpty() && !OverlayConfirm.onScreen.value && !appFront.value
+
     private fun attach(ctx: Context) {
         main.removeCallbacks(removeLater)
+        // The window belonged to an accessibility service that has since restarted: it is gone from the screen.
+        if (view != null && hostSvc != null && hostSvc !== TekyeremaAccessibilityService.live) {
+            android.util.Log.i("Tekyerema", "[ISLAND] the service restarted — attaching the island again"); removeNow()
+        }
         visible?.let { it.targetState = true; if (view != null) return }
         val svc = TekyeremaAccessibilityService.live
-        if (svc == null && !Settings.canDrawOverlays(ctx)) return
+        if (svc == null && !Settings.canDrawOverlays(ctx)) { android.util.Log.i("Tekyerema", "[ISLAND] not shown: no screen control and no overlay permission"); return }
         val host: Context = svc ?: ctx
         val manager = host.getSystemService(Context.WINDOW_SERVICE) as? WindowManager ?: return
         val type = when {
@@ -133,8 +143,8 @@ object IslandOverlay {
         try {
             life.start()
             manager.addView(panel, lp)
-            view = panel; wm = manager; owner = life
-        } catch (t: Throwable) { life.destroy(); visible = null }
+            view = panel; wm = manager; owner = life; hostSvc = svc
+        } catch (t: Throwable) { life.destroy(); visible = null; android.util.Log.w("Tekyerema", "[ISLAND] not shown: ${t.javaClass.simpleName}") }
     }
 
     private fun detach() {
@@ -148,7 +158,7 @@ object IslandOverlay {
         val v = view ?: return
         try { wm?.removeView(v) } catch (_: Throwable) {}
         owner?.destroy()
-        view = null; wm = null; owner = null; visible = null
+        view = null; wm = null; owner = null; visible = null; hostSvc = null
     }
 
     private fun topInset(ctx: Context): Int {

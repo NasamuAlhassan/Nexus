@@ -244,6 +244,10 @@ object OverlayConfirm {
 
     fun hide(ctx: Context) { main.post { hideNow() } }
 
+    /** A voice turn's own question card is done: take it down — never the task's panel. A late call from the previous turn
+     *  removed the NEW task's panel, and nothing showed it again (owner, 24 Oct 2026: "sometimes no pop-up"). */
+    fun hideAsking(ctx: Context) { main.post { if (byEngine) android.util.Log.i("Tekyerema", "[PANEL] kept the task's panel (a turn's hide)") else hideNow() } }
+
     /** Remove the panel and wait until it is gone — before an approved action runs, so its tap lands on the app. */
     suspend fun hideAndWait(ctx: Context) {
         val gone = CompletableDeferred<Unit>()

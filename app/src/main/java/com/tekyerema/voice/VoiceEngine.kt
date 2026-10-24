@@ -553,7 +553,7 @@ object VoiceEngine {
             input = built.input,
             // A visible "Tɛkyerɛma is asking…" card over any app while a follow-up question waits for an answer.
             showAsking = { q -> com.tekyerema.ui.OverlayConfirm.showQuestion(app, q) },
-            hideAsking = { com.tekyerema.ui.OverlayConfirm.hide(app) },
+            hideAsking = { com.tekyerema.ui.OverlayConfirm.hideAsking(app) },
             // "Thinking" fillers while the brain works — the reply voice (own TTS instance), or the progress tone in Twi.
             fillers = FillerPlayer(app, scope, cue = { cues.progress() }, voice = {
                 (when (settings.speechRate) { 0 -> 0.8f; 2 -> 1.25f; else -> 1.0f }) to
@@ -596,6 +596,16 @@ object VoiceEngine {
             AgentEngine.state.map { PromptSurface.of(it.status, PromptSurface.confirmationText(it.pendingConfirmation, it.pendingConfirmationTwi), PromptSurface.confirmationText(it.pendingQuestion, it.pendingQuestionTwi), it.confirmationSeq, twi = speaksTwi()) }
                 .distinctUntilChanged()
                 .collect { p -> if (p == null) com.tekyerema.ui.OverlayConfirm.hidePrompt(app) else com.tekyerema.ui.OverlayConfirm.showPrompt(app, p) }
+        }
+        // …and while it WORKS in another app, the island says what it is doing (live/TaskLive; owner, 24 Oct 2026: no pop-up
+        // showed while it acted in WhatsApp or the MoMo menus). Timers, music and directions keep their own activities.
+        scope.launch(Dispatchers.Main) {
+            AgentEngine.state.map { com.tekyerema.live.TaskLive.of(it, twi = speaksTwi()) }
+                .distinctUntilChanged { a, b -> a?.copy(updatedAt = 0L) == b?.copy(updatedAt = 0L) }
+                .collect { a ->
+                    if (a == null) com.tekyerema.live.LiveActivities.end(com.tekyerema.live.TaskLive.ID)
+                    else com.tekyerema.live.LiveActivities.upsert(a) { action -> if (action == com.tekyerema.live.TaskLive.STOP) AgentEngine.stop() }
+                }
         }
         // N-16: why the process last ended, current issues — two binder calls into ActivityManager, off the start-up path (P3-02).
         scope.launch(Dispatchers.IO) { try { com.tekyerema.core.Health.logStartup(app) } catch (_: Throwable) {} }
