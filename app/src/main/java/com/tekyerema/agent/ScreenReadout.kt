@@ -19,6 +19,20 @@ object ScreenReadout {
     const val MORE = " There's more — say continue."
     const val NOTHING = "I don't see any text on this screen."
 
+    /** "Profile picture, double tap to open Google Account" → "Profile picture": a spoken hint is how to operate it, not what it says. */
+    private val HINT = Regex("(?i)[,.;:]\\s*(?:double[- ]?tap|tap twice|tap|long[- ]?press|press and hold|touch and hold)\\s+(?:to|and hold)\\b.{0,50}$")
+    /** A picture described as a picture, and controls that are chrome rather than content, are not part of "what it says". */
+    private val DECORATIVE = Regex("(?i)^illustration(?: of\\b.*)?$|^(?:icon|image|graphic|photo|picture)$|^(?:navigate up|more options|back|close|"
+        + "profile picture|menu|overflow menu|show navigation drawer|open navigation drawer)$")
+
+    fun clean(raw: String?): String {
+        val one = raw?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
+        val noHint = HINT.replace(one, "").trim().trimEnd(',', ';', ':').trim()
+        return noHint
+    }
+
+    fun isChrome(label: String) = DECORATIVE.matches(label)
+
     /** What is read, one item per entry, in reading order. */
     fun items(snap: UiSnapshot): List<String> {
         val tree = snap.elements.filter { it.source != ElementSource.VISION }
@@ -27,8 +41,8 @@ object ScreenReadout {
         val out = ArrayList<String>()
         for (e in tree + vision) {
             if (e.password) continue
-            val label = e.label?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
-            if (label.isEmpty()) continue
+            val label = clean(e.label)
+            if (label.isEmpty() || isChrome(label)) continue
             val prev = out.lastOrNull()
             if (out.any { it.equals(label, ignoreCase = true) }) continue
             if (prev != null && prev.contains(label, ignoreCase = true)) continue   // a row's own title, already read
