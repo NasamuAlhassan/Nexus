@@ -64,7 +64,16 @@ class TextStabilizer(
             for (line in raw.split('\n', '\r')) {
                 val l = line.replace(SPACES, " ").trim()
                 if (l.isEmpty()) continue
-                if (sb.isNotEmpty()) sb.append(if (sb.last() in SENTENCE_END) " " else ". ")
+                if (sb.isNotEmpty()) {
+                    val last = sb.last()
+                    when {
+                        // A line wrapped by the page, not ended by the writer: "…at 10 am" / "in the library" is one sentence, and
+                        // "regis-" / "tration" is one word (P6, 25 October 2026 — the voice stopped mid-sentence at every wrap).
+                        last == '-' && sb.length > 1 && sb[sb.length - 2].isLetter() && l[0].isLowerCase() -> sb.setLength(sb.length - 1)
+                        last !in SENTENCE_END && l[0].isLowerCase() -> sb.append(' ')
+                        else -> sb.append(if (last in SENTENCE_END) " " else ". ")
+                    }
+                }
                 sb.append(l)
             }
             if (sb.length <= maxChars) return sb.toString()

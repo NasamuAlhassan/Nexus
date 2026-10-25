@@ -115,7 +115,7 @@ class DocumentReadActivity : Activity() {
             caption.text = if (text.isBlank()) DocumentLines.empty(index, pages) else text.take(if (bmp == null) 2000 else 400)
             prefetchNext(index + 1)
             val lines = if (text.isBlank()) listOf(DocumentLines.empty(index, pages))
-                else listOf(DocumentLines.pageStart(index)) + SpeechChunks.split(text, AppConfig.int("document.chunkChars", 180))
+                else listOf(DocumentLines.pageStart(index)) + SpeechChunks.split(TextStabilizer.spokenForm(text, Int.MAX_VALUE), AppConfig.int("document.chunkChars", 180))
             lines.forEachIndexed { i, line -> speak(line, flush = i == 0 && index > 0, then = null) }
             speak(DocumentLines.pageEnd(index, pages), flush = false) { busy = false; resetIdleTimer() }
             busy = false
