@@ -59,7 +59,7 @@ class VisionRaceTest {
         val agree: (String, String) -> String? = { a, b -> com.tekyerema.camera.VisionPrompts.moneyDisagreement(a, b, "not sure") }
         assertEquals(VisionResult.Described("not sure"),
             VisionLadder.race(answer(thirty, 1_000), answer(forty, 3_000), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500, agree = agree))
-        assertEquals(VisionResult.Described(forty),
+        assertEquals("two models agreeing is marked cross-checked (P5-a: no second frame needed)", VisionResult.Described(forty, crossChecked = true),
             VisionLadder.race(answer(forty, 1_000), answer(forty, 3_000), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500, agree = agree))
     }
 

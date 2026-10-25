@@ -409,4 +409,39 @@ class FinanceLedgerTest {
         assertEquals("you bought 2 cedis of airtime", MoneyStatus.Lines.says(msg(MoMoOutcome.Kind.AIRTIME, "2.00")))
         assertEquals("I don't see a Mobile Money transaction message on this phone.", MoneyStatus.Lines.lastMessage(emptyList(), false, now))
     }
+
+    // ---------------------------------------------------------------- P5-b: "try again" after MTN already confirmed it
+
+    @Test fun try_again_after_the_network_confirmed_the_same_send_asks_the_status_instead() {
+        handOff("5")
+        TxLedger.settle(msg(MoMoOutcome.Kind.SENT, "5.00", "KOFI MENSAH"), t0 + min, now = t0 + min)!!
+        MoMoRetry.remember("0553238011", "5", null, t0 + 2 * min)
+        val goal = MoMoRetry.rewrite("try again", t0 + 3 * min)
+        assertEquals(MoMoRetry.STATUS_GOAL, goal)
+        assertEquals("a status goal is not a send", com.tekyerema.money.MoneyAsk.Kind.STATUS, com.tekyerema.money.MoneyAsk.parse(goal!!)?.kind)
+        assertTrue("the pending send is not consumed", MoMoRetry.pending(t0 + 3 * min) != null)
+        assertTrue(TxLedger.statusLine(t0 + 3 * min).startsWith("Yes"))
+    }
+
+    @Test fun try_again_for_a_send_the_network_never_confirmed_still_proposes_the_send() {
+        handOff("5")                                    // at the PIN, no word from the network
+        MoMoRetry.remember("0553238011", "5", null, t0 + 2 * min)
+        assertEquals("try again: send 5 cedis to 0553238011 with Mobile Money", MoMoRetry.rewrite("try again", t0 + 3 * min))
+    }
+
+    @Test fun try_again_after_a_failed_send_still_proposes_the_send() {
+        handOff("5")
+        TxLedger.settle(msg(MoMoOutcome.Kind.FAILED, "5.00", "KOFI MENSAH"), t0 + min, now = t0 + min)!!
+        MoMoRetry.remember("0553238011", "5", null, t0 + 2 * min)
+        assertEquals("try again: send 5 cedis to 0553238011 with Mobile Money", MoMoRetry.rewrite("try again", t0 + 3 * min))
+    }
+
+    @Test fun try_again_with_nothing_in_the_ledger_or_a_different_amount_is_unchanged() {
+        MoMoRetry.remember("0553238011", "5", null, t0)
+        assertEquals("try again: send 5 cedis to 0553238011 with Mobile Money", MoMoRetry.rewrite("try again", t0 + min))
+        handOff("5", at = t0 + 2 * min)
+        TxLedger.settle(msg(MoMoOutcome.Kind.SENT, "5.00", "KOFI MENSAH"), t0 + 3 * min, now = t0 + 3 * min)!!
+        MoMoRetry.remember("0553238011", "10", null, t0 + 4 * min)
+        assertEquals("try again: send 10 cedis to 0553238011 with Mobile Money", MoMoRetry.rewrite("try again", t0 + 5 * min))
+    }
 }

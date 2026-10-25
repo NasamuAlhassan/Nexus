@@ -24,7 +24,8 @@ import kotlin.coroutines.resumeWithException
 
 /** Outcome of one describe request. [Failed.reason] is for logs only, never spoken. */
 sealed class VisionResult {
-    data class Described(val text: String) : VisionResult()
+    /** [crossChecked]: two different models both answered the same photo and [VisionLadder.race]'s `agree` compared them. */
+    data class Described(val text: String, val crossChecked: Boolean = false) : VisionResult()
     data class Failed(val reason: String) : VisionResult()
 }
 

@@ -80,8 +80,7 @@ No money: notes [] and fix "Hold the money about a hand away." Other currency: n
             return "I don't see any money. " + (advice.ifEmpty { "Hold the notes flat in front of the camera, about a hand away." })
         }
         // Notes lying on each other can't be counted honestly: no total, one instruction (owner's demo, 24 Oct 2026).
-        if (tally.unstable) return "Some of the notes overlap, so I can't count them for sure. Spread the notes out flat so I " +
-            "can see each one, then ask me again."
+        if (tally.unstable) return SPREAD_OUT
         val parts = tally.counts.entries.sortedByDescending { it.key.first }.map { (k, n) ->
             val (value, note) = k
             val what = if (value < 1) "${(value * 100).toInt()} pesewa ${if (note) "note" else "coin"}"
@@ -97,6 +96,10 @@ No money: notes [] and fix "Hold the money about a hand away." Other currency: n
         }
         return if ((doubt || unreadable > 0) && advice.isNotEmpty()) "$sentence $advice" else sentence
     }
+
+    /** Said when the count cannot be trusted: notes overlap, or two frames of the same notes counted differently. */
+    const val SPREAD_OUT = "Some of the notes overlap, so I can't count them for sure. Spread the notes out flat so I " +
+        "can see each one, then ask me again."
 
     /** The phone's total of a money answer, or null when it isn't one or its notes overlap (no honest total). Pure. */
     fun moneyTotal(json: String): Double? = MoneyTally.of(json)?.takeIf { !it.unstable }?.total

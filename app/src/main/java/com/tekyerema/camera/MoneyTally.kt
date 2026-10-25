@@ -72,6 +72,12 @@ object MoneyTally {
         return Tally(counts, doubt, merged, unstable)
     }
 
+    /** Two answers for two frames of the same notes count exactly the same pieces per denomination. False when either is not
+     *  a money answer, or its notes overlap (no stable count) — the caller then asks the user to spread the notes out. */
+    fun sameCounts(a: Tally?, b: Tally?): Boolean =
+        a != null && b != null && !a.unstable && !b.unstable && a.counts == b.counts
+    fun sameCounts(a: String, b: String): Boolean = sameCounts(of(a), of(b))
+
     /** The tally of a model's answer, or null when it is not a money answer. */
     fun of(json: String): Tally? = parse(json)?.let { reconcile(it) }
 

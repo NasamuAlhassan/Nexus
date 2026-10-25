@@ -158,7 +158,8 @@ object VisionLadder {
                     val heldFast = if (a.isCompleted) a.await() else null   // already in hand: no extra wait, no extra request
                     a.cancel()
                     val verdict = if (agree != null && heldFast is VisionResult.Described) agree(heldFast.text, early.text) else null
-                    return@coroutineScope verdict?.let { VisionResult.Described(it) } ?: early
+                    return@coroutineScope verdict?.let { VisionResult.Described(it) }   // a disagreement line, not a count: nothing left to check
+                        ?: if (agree != null && heldFast is VisionResult.Described) early.copy(crossChecked = true) else early
                 }
             }
             var pending = listOf(a, b)

@@ -38,6 +38,7 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlin.coroutines.resume
 import com.google.mlkit.vision.text.TextRecognizer
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -600,8 +601,27 @@ class CameraReadActivity : ComponentActivity() {
     private var burstBestScore = -1.0
     private var burstW = 0; private var burstH = 0; private var burstRot = 0
 
+    // P5-a: the second sharp frame of a money count, taken ~0.5 s after the first, used only when one model answers.
+    @Volatile private var firstSentAt = 0L
+    @Volatile private var second: Triple<ByteArray, IntArray, Boolean>? = null   // nv21, [w, h, rotation]
+
+    /** Analyser thread, after the first frame went out: keep ONE sharp, well-lit frame at least 0.5 s later (money only). */
+    private fun grabSecond(image: ImageProxy) {
+        if (second != null || firstSentAt == 0L) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - firstSentAt < AppConfig.long("camera.money.secondFrameGapMs", 500L)) return
+        val yP = image.planes[0]
+        val luma = FrameConvert.planeBytes(yP, yBuf).also { yBuf = it }
+        val q = QualityGate.assess(luma, image.width, image.height, yP.rowStride,
+            darkBelow = AppConfig.double("camera.quality.darkBelow", QualityGate.DARK_BELOW),
+            brightAbove = AppConfig.double("camera.quality.brightAbove", QualityGate.BRIGHT_ABOVE),
+            blurMin = AppConfig.double("camera.quality.blurMin", QualityGate.BLUR_MIN))
+        if (q.verdict == Verdict.TOO_DARK || q.verdict == Verdict.TOO_BRIGHT || q.verdict == Verdict.BLURRY) return
+        second = Triple(FrameConvert.toNv21(image), intArrayOf(image.width, image.height, image.imageInfo.rotationDegrees), true)
+    }
+
     private fun gateForDescribe(image: ImageProxy) {
-        if (describeClaimed.get()) return
+        if (describeClaimed.get()) { if (moneyAsk) grabSecond(image); return }
         if (instantCapture) { captureMoment(image); return }
         val yP = image.planes[0]
         val luma = FrameConvert.planeBytes(yP, yBuf).also { yBuf = it }
@@ -658,6 +678,7 @@ class CameraReadActivity : ComponentActivity() {
         } ?: return
         if (!describeClaimed.compareAndSet(false, true)) return
         val w = burstW; val h = burstH; val rot = burstRot
+        firstSentAt = SystemClock.elapsedRealtime()
         if (BuildConfig.DEV_HOOKS) Log.d(TAG, "[CAMERA] moment captured after ${waited} ms (best blur=${burstBestScore.toInt()})")
         main.post { sendForDescription(pick, w, h, rot) }
     }
@@ -732,11 +753,14 @@ class CameraReadActivity : ComponentActivity() {
             when (result) {
                 is VisionResult.Described -> deliver(when {
                     moneyAsk -> {
+                        // P5-a: one model alone is not trusted with a count — a second frame must give the same tally.
+                        val twoFramesAgree = secondFrameAgrees(result)
                         // How the phone counted (no amounts in a release log): pieces the model listed, merged duplicates, overlap.
                         MoneyTally.parse(result.text)?.let { p -> val t = MoneyTally.reconcile(p)
                             Log.i(TAG, "[CAMERA] money: ${p.size} listed, ${p.count { it.box != null }} with a box, ${t.merged} merged as one note, " +
                                 "unstable=${t.unstable}" + if (com.tekyerema.BuildConfig.DEV_HOOKS) " model='${result.text.take(600)}'" else "") }
-                        VisionPrompts.spokenMoney(result.text) ?: VisionPrompts.spoken(result.text)
+                        if (!twoFramesAgree) VisionPrompts.SPREAD_OUT
+                        else VisionPrompts.spokenMoney(result.text) ?: VisionPrompts.spoken(result.text)
                     }
                     question != null -> VisionPrompts.spoken(result.text)
                     else -> StructuredDescribe.spokenFor(result.text, ocr.await(), TAG)
@@ -747,6 +771,29 @@ class CameraReadActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * P5-a. False only when a money count came from ONE model (not cross-checked by the other) and the same notes in a second
+     * frame, ~0.5 s later, were counted differently. True = nothing to doubt, or nothing to check against (no second sharp
+     * frame, or the second question failed — logged, the first answer stands).
+     */
+    private suspend fun secondFrameAgrees(first: VisionResult.Described): Boolean {
+        if (first.crossChecked || !AppConfig.bool("camera.money.twoFrames", true)) return true
+        val firstTally = MoneyTally.of(first.text) ?: return true
+        if (firstTally.isEmpty || firstTally.unstable) return true          // already the "no money" / "spread out" line
+        var f = second
+        var waited = 0
+        while (f == null && waited < 1_500 && !closing) { delay(100); waited += 100; f = second }
+        f ?: run { Log.i(TAG, "[CAMERA] money: single model, no second sharp frame — first count kept"); return true }
+        val jpeg2 = withContext(Dispatchers.Default) {
+            FrameConvert.nv21ToJpeg(f.first, f.second[0], f.second[1], f.second[2], VisionPrompts.maxSide(question, true), 80)
+        } ?: return true
+        val r2 = VisionLadder.describe(jpeg2, VisionPrompts.MONEY, settings, structured = false, smart = true)
+        if (r2 !is VisionResult.Described) { Log.i(TAG, "[CAMERA] money: second frame unanswered — first count kept"); return true }
+        val same = MoneyTally.sameCounts(firstTally, MoneyTally.of(r2.text))
+        Log.i(TAG, "[CAMERA] money: single model, second frame agrees=$same")
+        return same
     }
 
     /** Describe isn't possible this session: keep the camera useful by reading text, and say so. */

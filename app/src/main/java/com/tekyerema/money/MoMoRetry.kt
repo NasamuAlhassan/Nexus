@@ -54,9 +54,21 @@ object MoMoRetry {
     fun rewrite(goal: String, now: Long = System.currentTimeMillis()): String? {
         if (!isTryAgain(goal)) return null
         val s = pending(now) ?: return null
+        // The network already confirmed this very send (a late message settled it): a retry would pay twice. Say what the
+        // ledger knows instead; the pending spec is NOT consumed. FAILED / UNKNOWN / AT_PIN / no entry keep today's retry.
+        if (alreadyDone(s, now)) return STATUS_GOAL
         failed = null
         retrying = s
         return goalFor(s)
+    }
+
+    /** The status question a retry turns into when MTN already confirmed the same send (answered from the ledger). */
+    const val STATUS_GOAL = "did my last send go through"
+
+    /** True when the ledger holds a DONE send of the same amount to the same number inside the repeat window. */
+    internal fun alreadyDone(s: Spec, now: Long): Boolean {
+        val amount = MoneyLimits.parseAmount(s.amount)
+        return TxLedger.repeatOf(s.number, amount, now)?.state == TxLedger.State.DONE
     }
 
     /**

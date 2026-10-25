@@ -60,4 +60,26 @@ class MoneyTallyTest {
         val said = VisionPrompts.spokenMoney("""{"items":[{"kind":"note","value_ghs":20,"count":2,"sure":true},{"kind":"note","value_ghs":5,"count":1,"sure":true}]}""")
         assertEquals("I see two 20 cedi notes and one 5 cedi note. That's 45 cedis in all.", said)
     }
+
+    // P5-a: two frames of the same notes, one model — accept only an identical per-denomination tally.
+    @Test fun twoFramesWithTheSameNotesAgreeEvenWhenTheBoxesMove() {
+        val a = ans(note(10, "[0,0,300,600]"), note(5, "[400,0,700,600]"))
+        val b = ans(note(5, "[420,10,720,610]"), note(10, "[10,5,310,605]"))
+        assertTrue(MoneyTally.sameCounts(a, b))
+    }
+
+    @Test fun twoFramesThatCountDifferentlyDoNotAgree() {
+        val one = ans(note(10, "[0,0,300,600]"))
+        val two = ans(note(10, "[0,0,300,600]"), note(10, "[400,0,700,600]"))
+        assertFalse(MoneyTally.sameCounts(one, two))
+        assertFalse("same total, different notes", MoneyTally.sameCounts(ans(note(10, "[0,0,300,600]"), note(10, "[400,0,700,600]")),
+            ans(note(20, "[0,0,300,600]"))))
+    }
+
+    @Test fun anUnstableOrUnreadableFrameNeverAgrees() {
+        val ok = ans(note(10, "[0,0,300,600]"))
+        val overlap = ans(note(10, "[0,0,300,600]"), note(20, "[10,10,310,610]"))
+        assertFalse(MoneyTally.sameCounts(overlap, overlap))
+        assertFalse(MoneyTally.sameCounts(ok, "not json"))
+    }
 }
