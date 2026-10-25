@@ -70,6 +70,9 @@ class VoiceActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
+        // Every way in (wake word, floating icon, tile, assistant button) ends here: on the lock screen it does not open at
+        // all, so nothing listens (owner, 25 Oct 2026: it wakes only when the phone is unlocked).
+        if (com.tekyerema.core.DeviceLock.blocks(this)) { finish(); return }
         val settings = Settings(this)
         setContent { TekyeremaTheme { Arrival(settings, onClose = { finish() }) } }
     }

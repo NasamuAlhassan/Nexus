@@ -54,18 +54,46 @@ object TriggerBubble {
         val v = TriggerView(service) { launch(service) }
         v.attachDrag(wm, params, prefs)
         try { wm.addView(v, params); view = v; lp = params } catch (_: Throwable) { view = null }
+        watchLock(service)
+        applyVisibility()
     }
 
     fun hide(service: AccessibilityService) = main.post {
+        lockWatch?.let { try { service.unregisterReceiver(it) } catch (_: Throwable) {} }
+        lockWatch = null; appCtx = null
         val v = view ?: return@post
         try { (service.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v) } catch (_: Throwable) {}
         view = null; lp = null
     }
 
-    fun setVisible(visible: Boolean) = main.post { view?.visibility = if (visible) View.VISIBLE else View.GONE }
+    // The icon is on the home screen and in apps, never on the lock screen (owner, 25 Oct 2026: the assistant is reachable
+    // only on an unlocked phone). `wanted` is the app-in-front rule; the lock rule is applied on top of it.
+    private var wanted = true
+    private var appCtx: Context? = null
+    private var lockWatch: android.content.BroadcastReceiver? = null
+
+    fun setVisible(visible: Boolean) = main.post { wanted = visible; applyVisibility() }
+
+    private fun applyVisibility() {
+        val locked = appCtx?.let { com.tekyerema.core.DeviceLock.blocks(it) } ?: false
+        view?.visibility = if (wanted && !locked) View.VISIBLE else View.GONE
+    }
+
+    private fun watchLock(service: AccessibilityService) {
+        appCtx = service
+        if (lockWatch != null) return
+        val r = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { main.post { applyVisibility() } }
+        }
+        val f = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
+        }
+        try { service.registerReceiver(r, f); lockWatch = r } catch (_: Throwable) {}
+    }
 
     /** Start the arrive-on-top voice screen. Our overlay is a visible window, so this is allowed from the background. */
     fun launch(ctx: Context) {
+        if (com.tekyerema.core.DeviceLock.blocks(ctx)) return   // nothing opens on the lock screen
         try { TekyeremaAccessibilityService.live?.collapseShade() } catch (_: Throwable) {}   // never buried under the shade
         try {
             ctx.startActivity(Intent(ctx, VoiceActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))

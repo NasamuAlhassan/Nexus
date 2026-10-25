@@ -15,6 +15,11 @@ object DeviceLock {
     /** Pure decision, so it is unit-tested: refuse when the lock screen is up and the setting is on. */
     fun refuses(locked: Boolean, requireUnlocked: Boolean): Boolean = requireUnlocked && locked
 
+    /** The one question every door asks (wake word, floating icon, voice screen, tile, assistant button): is the
+     *  assistant shut because the phone is locked? Nothing wakes, shows or listens while it is. */
+    fun blocks(ctx: Context): Boolean =
+        refuses(isLocked(ctx), com.tekyerema.core.config.AppConfig.bool("security.requireUnlocked", true))
+
     fun isLocked(ctx: Context): Boolean = try {
         (ctx.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager)?.isKeyguardLocked == true
     } catch (_: Throwable) { false }   // a phone that will not say is treated as unlocked, so a failed check never silences the app

@@ -628,8 +628,9 @@ object AgentEngine {
         var stats = RunStats()
         // The assistant works only on an unlocked phone (owner, 25 Oct 2026). Every door lands here: voice, typed, triggers, a
         // paired computer. Nothing runs, nothing is read off the lock screen; one plain line says why.
-        if (forcedBrain == null && com.tekyerema.core.DeviceLock.refuses(com.tekyerema.core.DeviceLock.isLocked(ctxApp),
-                com.tekyerema.core.config.AppConfig.bool("security.requireUnlocked", true))) {
+        // (Looked at twice, 0.6 s apart: a phone being unlocked is not refused for a lock screen that is just going away.)
+        if (forcedBrain == null && com.tekyerema.core.DeviceLock.blocks(ctxApp) &&
+                run { kotlinx.coroutines.delay(600); com.tekyerema.core.DeviceLock.blocks(ctxApp) }) {
             log(LogEntry.Kind.INFO, "The phone is locked — nothing was run.")
             log(LogEntry.Kind.RESULT, com.tekyerema.core.DeviceLock.LOCKED_LINE)
             pushConvo("Tɛkyerɛma: ${com.tekyerema.core.DeviceLock.LOCKED_LINE}")

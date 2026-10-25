@@ -240,6 +240,8 @@ class WakeWordService : Service() {
 
     /** A wake match: hand the mic to a voice turn, then resume wake listening only once it's fully done. */
     private fun onWake() {
+        // The wake word does nothing on the lock screen (owner, 25 Oct 2026): no cue, no mic turn, no screen.
+        if (com.tekyerema.core.DeviceLock.blocks(this)) { Log.i(TAG, "[WAKE] heard on the lock screen — ignored"); return }
         if (VoiceEngine.isRunning || VoiceEngine.canRespond) {
             // C-12: a task is working — this wake is an interjection, heard on the answer mic while the task runs on;
             // or the task waits on the user — this wake is the reply (VoiceEngine.start routes it to respond()).
