@@ -318,12 +318,17 @@ private val VOLUME_STREAMS = mapOf(
     "alarm" to AudioManager.STREAM_ALARM,
     "notification" to AudioManager.STREAM_NOTIFICATION,
     "call" to AudioManager.STREAM_VOICE_CALL,
-    "system" to AudioManager.STREAM_SYSTEM
+    "system" to AudioManager.STREAM_SYSTEM,
+    // The phone's "Assistant" slider (AudioSystem.STREAM_ASSISTANT = 11, API 29+) is what the assistant's own voice plays on
+    // when it is not muted; the accessibility stream (10) is what it falls back to. Owner, A20e, 25 Oct 2026: "the normal
+    // volume is at max, but it can't set the assistant volume".
+    "assistant" to 11,
+    "accessibility" to AudioManager.STREAM_ACCESSIBILITY
 )
 private val STREAM_PARAM = ToolParam(
     "stream", "string",
     "Which audio stream (default media/music).", required = false,
-    enumValues = listOf("music", "ring", "alarm", "notification", "call", "system")
+    enumValues = listOf("music", "ring", "alarm", "notification", "call", "system", "assistant")
 )
 private fun audioManager(ctx: ToolContext): AudioManager? =
     ctx.appContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
@@ -362,6 +367,11 @@ object SetVolumeTool : Tool {
             val max = am.getStreamMaxVolume(stream)
             val targetIdx = VolumeMath.pctToIndex(pct, max)
             am.setStreamVolume(stream, targetIdx, AudioManager.FLAG_SHOW_UI)
+            // the assistant's voice also falls back to the accessibility stream: keep the two together
+            if (streamName(args) == "assistant") try {
+                val acc = AudioManager.STREAM_ACCESSIBILITY
+                am.setStreamVolume(acc, VolumeMath.pctToIndex(pct, am.getStreamMaxVolume(acc)), 0)
+            } catch (_: Throwable) {}
             val actual = am.getStreamVolume(stream)
             val ok = actual == targetIdx
             val data = JSONObject()

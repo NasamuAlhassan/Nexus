@@ -589,14 +589,18 @@ class LocalBrain : AgentBrain {
                 doneLine = "Volume down."; return call("volume_down", JSONObject(), "volume down (twi)")
             }
         }
-        if (RE_MUTE.containsMatchIn(g)) { doneLine = "Muted."; return call("set_volume", JSONObject().put("level", 0), "mute") }
+        // "the assistant volume" / "your volume" is the phone's Assistant slider, not the media one (25 Oct 2026)
+        val assistant = RE_VOL_ASSISTANT.containsMatchIn(g)
+        val who = if (assistant) "Assistant volume" else "Volume"
+        fun args(level: Int? = null) = JSONObject().apply { if (level != null) put("level", level); if (assistant) put("stream", "assistant") }
+        if (RE_MUTE.containsMatchIn(g)) { doneLine = "Muted."; return call("set_volume", args(0), "mute") }
         RE_VOL_SET.find(g)?.let { m ->
             val n = m.groupValues[1].toIntOrNull() ?: return@let
-            if (n in 0..100) { doneLine = "Volume set to $n percent."; return call("set_volume", JSONObject().put("level", n), "set volume") }
+            if (n in 0..100) { doneLine = "$who set to $n percent."; return call("set_volume", args(n), "set volume") }
         }
-        if (RE_VOL_MAX.containsMatchIn(g)) { doneLine = "Volume at max."; return call("set_volume", JSONObject().put("level", 100), "max volume") }
-        if (RE_VOL_UP.containsMatchIn(g)) { doneLine = "Volume up."; return call("volume_up", JSONObject(), "volume up") }
-        if (RE_VOL_DOWN.containsMatchIn(g)) { doneLine = "Volume down."; return call("volume_down", JSONObject(), "volume down") }
+        if (RE_VOL_MAX.containsMatchIn(g)) { doneLine = "$who at max."; return call("set_volume", args(100), "max volume") }
+        if (RE_VOL_UP.containsMatchIn(g)) { doneLine = "$who up."; return call("volume_up", args(), "volume up") }
+        if (RE_VOL_DOWN.containsMatchIn(g)) { doneLine = "$who down."; return call("volume_down", args(), "volume down") }
         return null
     }
 
@@ -1277,7 +1281,8 @@ class LocalBrain : AgentBrain {
         private val RE_VOL_UP = Regex("\\b(volume up|louder|turn (it|the volume) up|increase (the )?volume|raise (the )?volume)\\b", RegexOption.IGNORE_CASE)
         private val RE_VOL_DOWN = Regex("\\b(volume down|quieter|softer|turn (it|the volume) down|lower (the )?volume|decrease (the )?volume)\\b", RegexOption.IGNORE_CASE)
         private val RE_VOL_SET = Regex("\\bvolume\\b(?:.*?(?:to|at))?\\s*(\\d{1,3})\\s*(?:%|percent)?", RegexOption.IGNORE_CASE)
-        private val RE_VOL_MAX = Regex("\\b(max|maximum|full)\\s+volume|volume\\s+(to\\s+)?(max|maximum|full)\\b", RegexOption.IGNORE_CASE)
+        internal val RE_VOL_ASSISTANT = Regex("\\b(assistant|your|tekyerema'?s?)\\s+(voice\\s+)?volume\\b|\\bassistant\\b.*\\bvolume\\b|\\bvolume\\b.*\\bassistant\\b", RegexOption.IGNORE_CASE)
+        private val RE_VOL_MAX =Regex("\\b(max|maximum|full)\\s+volume|volume\\s+(to\\s+)?(max|maximum|full)\\b", RegexOption.IGNORE_CASE)
         private val RE_MUTE = Regex("\\b(mute|silence|silent)\\b", RegexOption.IGNORE_CASE)
         private val RE_TIME = Regex("\\b(\\d{1,2})(?::(\\d{2}))?\\s*(a\\.?m\\.?|p\\.?m\\.?)?", RegexOption.IGNORE_CASE)
         // §6.7 — English + common Twi duration units (simma/sima = minutes, dɔnhwere = hours).
