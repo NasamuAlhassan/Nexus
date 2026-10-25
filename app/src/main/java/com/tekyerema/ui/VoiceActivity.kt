@@ -63,9 +63,8 @@ import kotlinx.coroutines.launch
  */
 class VoiceActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // "Hey Tɛkyerɛma" at the lock screen must SHOW something (owner 2026-09-30) — the panel appears over the
-        // keyguard and wakes the display; the phone stays locked (no keyguard dismiss is requested).
-        if (android.os.Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true) }
+        // The assistant works only on an unlocked phone (owner, 25 Oct 2026, reversing 30 Sep): no panel over the lock screen.
+        // A request made while locked is still answered, in one spoken line, by AgentEngine (core/DeviceLock).
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)

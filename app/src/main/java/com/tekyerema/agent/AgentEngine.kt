@@ -626,6 +626,16 @@ object AgentEngine {
         val discoveredTools = LinkedHashSet<String>()
         val history = ArrayList<String>()
         var stats = RunStats()
+        // The assistant works only on an unlocked phone (owner, 25 Oct 2026). Every door lands here: voice, typed, triggers, a
+        // paired computer. Nothing runs, nothing is read off the lock screen; one plain line says why.
+        if (forcedBrain == null && com.tekyerema.core.DeviceLock.refuses(com.tekyerema.core.DeviceLock.isLocked(ctxApp),
+                com.tekyerema.core.config.AppConfig.bool("security.requireUnlocked", true))) {
+            log(LogEntry.Kind.INFO, "The phone is locked — nothing was run.")
+            log(LogEntry.Kind.RESULT, com.tekyerema.core.DeviceLock.LOCKED_LINE)
+            pushConvo("Tɛkyerɛma: ${com.tekyerema.core.DeviceLock.LOCKED_LINE}")
+            finish(AgentStatus.CANNOT_DO, stats, run = runCtx)
+            return
+        }
         // Completion gating (plan §11 hardening): a Done is only COMPLETED if the goal's
         // SUBSTANTIVE outcome was actually verified. We track device-MUTATING actions (anything
         // that isn't pure observation) separately from reads, so a trailing verified read can
