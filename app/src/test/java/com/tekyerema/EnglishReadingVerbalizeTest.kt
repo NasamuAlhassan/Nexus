@@ -39,6 +39,23 @@ class EnglishReadingVerbalizeTest {
         assertEquals("four point five", say("4.5"))
     }
 
+    @Test fun markdownLinksAndEmailsAreNotSpokenRaw() {
+        assertEquals("Read link text now", say("Read [link text](https://x.com/a?b=1) now"))
+        assertEquals("a picture", say("![a picture](img/a.png)"))
+        assertEquals("bold and italic", say("**bold** and _italic_"))
+        assertEquals("Write to kofi dot mensah at gmail dot com today", say("Write to kofi.mensah@gmail.com today"))
+        assertEquals("see a link", say("see https://www.mtn.com.gh/momo?ref=abc123"))
+    }
+
+    @Test fun datesAreSaidAsDates() {
+        assertEquals("on twenty five October two thousand twenty six", say("on 2026-10-25"))
+        assertEquals("Saturday, twenty five October", say("Sat, 25 Oct"))
+        assertEquals("due October five", say("due Oct 5"))
+        assertEquals("twenty fifth March", say("25th Mar."))
+        // a bare month word or a name that looks like a day is left alone
+        assertEquals("Sun cream", say("Sun cream"))
+    }
+
     @Test fun groupedNumbersLeaveListsAndMoneyAlone() {
         assertEquals("one, two, three", say("1, 2, 3"))
         assertEquals("one thousand two hundred fifty cedis fifty pesewas", say("GH₵1,250.50"))

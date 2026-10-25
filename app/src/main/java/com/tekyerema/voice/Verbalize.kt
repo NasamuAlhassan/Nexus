@@ -21,7 +21,17 @@ object Verbalize {
     private val MONTHS = arrayOf("January", "February", "March", "April", "May", "June", "July", "August",
         "September", "October", "November", "December")
 
-    private val URL = Regex("(?i)\\bhttps?://\\S+|\\bwww\\.\\S+")
+    private val MD_LINK = Regex("!?\\[([^\\]\\n]*)]\\([^)\\s]*\\)")
+    private val MD_ITALIC = Regex("(?<![\\p{L}\\p{N}_])_([^_\\n]+)_(?![\\p{L}\\p{N}_])")
+    private val EMAIL = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+")
+    private val ISO_DATE = Regex("\\b(\\d{4})-(\\d{2})-(\\d{2})\\b")
+    private const val MON = "Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec"
+    private val MON_AFTER_DAY = Regex("\\b(\\d{1,2}(?:st|nd|rd|th)?)\\s(" + MON + ")\\b\\.?")
+    private val MON_BEFORE_DAY = Regex("\\b(" + MON + ")\\.?\\s(\\d{1,2})\\b")
+    private val DAY_ABBR = Regex("\\b(Mon|Tues?|Wed|Thu(?:rs?)?|Fri|Sat|Sun)\\b\\.?,?\\s+(?=\\d{1,2}\\b|(?:" + MON + "|January|February|March|April|May|June|July|August|September|October|November|December)\\b)")
+    private val DAY_WORDS = mapOf("mon" to "Monday", "tue" to "Tuesday", "tues" to "Tuesday", "wed" to "Wednesday", "thu" to "Thursday",
+        "thur" to "Thursday", "thurs" to "Thursday", "fri" to "Friday", "sat" to "Saturday", "sun" to "Sunday")
+    private val URL =Regex("(?i)\\bhttps?://\\S+|\\bwww\\.\\S+")
     private val EMOJI = Regex("[\\x{1F000}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\x{1F1E6}-\\x{1F1FF}\\x{FE0F}\\x{200D}]")
     private val MARKDOWN = Regex("\\*\\*|__|`+|^\\s*#{1,6}\\s+|^\\s*[-*•]\\s+", RegexOption.MULTILINE)
     private val USSD = Regex("\\*[0-9*]+#")
@@ -88,7 +98,10 @@ object Verbalize {
     )
 
     fun apply(text: String): String {
-        var t = text.replace(URL, "a link").replace(EMOJI, "").replace(MARKDOWN, "")
+        // [text](url) is just "text"; an e-mail address is said "kofi dot mensah at gmail dot com", never as a raw string.
+        var t = text.replace(MD_LINK, "$1").replace(URL, "a link")
+            .replace(EMAIL) { m -> m.value.replace(".", " dot ").replace("@", " at ").replace("_", " underscore ").replace("-", " dash ") }
+            .replace(EMOJI, "").replace(MARKDOWN, "").replace(MD_ITALIC, "$1")
         t = lexicon(t)
         t = USSD.replace(t) { m -> m.value.map { c -> when (c) { '*' -> "star"; '#' -> "hash"; else -> ONES[c - '0'] } }.joinToString(" ") }
         // Phone numbers digit by digit in their groups ("055 209 3690" was "fifty-five, two hundred nine, three thousand six
@@ -122,6 +135,13 @@ object Verbalize {
         t = CUR_ALONE.replace(t, "cedis")
         // A figure glued to its unit or suffix ("5pm" was "fivepm", "1st" "onest", "31°C" "thirty one°C", "v1.2" "vone.two"):
         // ordinals as words, units as the words they stand for, versions as "version one point two" (P6, 25 October 2026).
+        t = ISO_DATE.replace(t) { m ->
+            val mo = m.groupValues[2].toInt(); val d = m.groupValues[3].toInt()
+            if (mo in 1..12 && d in 1..31) "$d ${MONTHS[mo - 1]} ${m.groupValues[1]}" else m.value
+        }
+        t = MON_AFTER_DAY.replace(t) { m -> m.groupValues[1] + " " + fullMonth(m.groupValues[2]) }
+        t = MON_BEFORE_DAY.replace(t) { m -> fullMonth(m.groupValues[1]) + " " + m.groupValues[2] }
+        t = DAY_ABBR.replace(t) { m -> DAY_WORDS[m.groupValues[1].lowercase()]!! + ", " }
         t = ORDINAL.replace(t) { m ->
             val n = m.groupValues[1].toLongOrNull()
             if (n == null || n > 999_999) m.value else ordinal(n)
@@ -196,6 +216,8 @@ object Verbalize {
         for ((word, spoken) in entries) t = Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word) + "(?![\\p{L}\\p{N}])").replace(t, Regex.escapeReplacement(spoken))
         return t
     }
+
+    private fun fullMonth(abbr: String) = MONTHS.first { it.startsWith(abbr.take(3), ignoreCase = true) }
 
     /** 1 → "first", 22 → "twenty second", 100 → "one hundredth". */
     fun ordinal(n: Long): String {
