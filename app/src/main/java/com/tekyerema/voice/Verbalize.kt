@@ -30,7 +30,8 @@ object Verbalize {
     private val DATE = Regex("\\b(\\d{1,2})/(\\d{1,2})/(\\d{4})\\b")
     private val TIME = Regex("\\b([01]?\\d|2[0-3]):([0-5]\\d)\\b")
     private val PERCENT = Regex("(\\d+(?:\\.\\d+)?)\\s?%")
-    private val DECIMAL = Regex("\\b(\\d+)\\.(\\d+)\\b")
+    private val GROUPED = Regex("(?<![\\d,.])(\\d{1,3}(?:,\\d{3})+)(?:\\.(\\d+))?(?![\\d,])")
+    private val DECIMAL =Regex("\\b(\\d+)\\.(\\d+)\\b")
     /** A Ghana phone number: 0 and nine digits, or +233 / 233 and nine, together or in groups (spaces or dashes). */
     private val PHONE = Regex("(?<![\\d.,])(?:\\+233|233|0)(?:[ -]?\\d){9}(?![\\d.,]?\\d)")
     private val ENDING = Regex("(?i)\\b(ending(?: in)?)\\s+(\\d{2,4})\\b")
@@ -111,6 +112,13 @@ object Verbalize {
         t = MONEY_AFTER.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
         // the currency on its own ("Balance in GHS") is a word, not letters
         t = CUR_ALONE.replace(t, "cedis")
+        // Comma-grouped figures are one number ("1,234" was "one,two hundred thirty four"; "2,500,000" ran into digit
+        // groups), P6 reading round, 25 October 2026.
+        t = GROUPED.replace(t) { m ->
+            val whole = m.groupValues[1].replace(",", "").toLongOrNull() ?: return@replace m.value
+            val frac = m.groupValues[2]
+            intToWords(whole) + if (frac.isEmpty()) "" else " point " + frac.map { ONES[it - '0'] }.joinToString(" ")
+        }
         t = DATE.replace(t) { m ->
             val d = m.groupValues[1].toInt(); val mo = m.groupValues[2].toInt()
             if (mo in 1..12 && d in 1..31) "$d ${MONTHS[mo - 1]} ${m.groupValues[3]}" else m.value
@@ -172,6 +180,7 @@ object Verbalize {
         if (n < 1000) return ONES[(n / 100).toInt()] + " hundred" + (if (n % 100 != 0L) " " + intToWords(n % 100) else "")
         if (n < 1_000_000) return intToWords(n / 1000) + " thousand" + (if (n % 1000 != 0L) " " + intToWords(n % 1000) else "")
         if (n < 1_000_000_000) return intToWords(n / 1_000_000) + " million" + (if (n % 1_000_000 != 0L) " " + intToWords(n % 1_000_000) else "")
-        return n.toString()   // beyond a billion: leave as-is
+        if (n < 1_000_000_000_000L) return intToWords(n / 1_000_000_000) + " billion" + (if (n % 1_000_000_000 != 0L) " " + intToWords(n % 1_000_000_000) else "")
+        return n.toString()   // beyond a trillion: leave as-is
     }
 }
