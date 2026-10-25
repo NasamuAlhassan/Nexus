@@ -100,9 +100,61 @@ class HybridOfflineTest {
         assertFalse(t.failure(now = 12_000, elapsedMs = 12_000))
         assertFalse(t.stalled(12_001))
         assertTrue(t.failure(now = 20_000, elapsedMs = 8_000))
-        assertTrue(t.stalled(79_999))
-        assertFalse("after openMs the next request is tried again", t.stalled(80_001))
+        assertTrue(t.stalled(34_999))
+        assertFalse("after the short window (one slow failure) the next request is tried again", t.stalled(35_001))
+        assertFalse(t.stalled(80_001))
         assertTrue("a failed probe re-opens at once", t.failure(now = 81_000, elapsedMs = 100, kind = LinkHealthTracker.Kind.PROBE))
+    }
+
+    private fun tracker15() = LinkHealthTracker(openMs = { 60_000L }, slowFailMs = { 6_000L }, shortOpenMs = { 15_000L })
+
+    @Test fun link_one_slow_failure_opens_only_briefly() {
+        val t = tracker15()
+        assertTrue(t.failure(now = 10_000, elapsedMs = 7_000))
+        assertTrue(t.stalled(10_001))
+        assertEquals(LinkHealthTracker.OpenKind.SHORT, t.openKind(10_001))
+        assertFalse(t.stalled(25_001))
+        assertEquals(LinkHealthTracker.OpenKind.NONE, t.openKind(25_001))
+    }
+
+    @Test fun link_two_failures_open_the_full_window() {
+        val t = tracker15()
+        t.failure(now = 10_000, elapsedMs = 150)
+        assertTrue(t.failure(now = 11_000, elapsedMs = 150))
+        assertTrue(t.stalled(11_000 + 59_000))
+        assertEquals(LinkHealthTracker.OpenKind.LONG, t.openKind(11_001))
+    }
+
+    @Test fun link_a_slow_failure_then_another_widens_to_the_full_window() {
+        val t = tracker15()
+        t.failure(now = 10_000, elapsedMs = 7_000)
+        t.failure(now = 12_000, elapsedMs = 7_000)
+        assertTrue(t.stalled(12_000 + 59_000))
+        assertEquals(LinkHealthTracker.OpenKind.LONG, t.openKind(12_001))
+    }
+
+    @Test fun link_a_failed_probe_opens_the_full_window() {
+        val t = tracker15()
+        assertTrue(t.failure(now = 5_000, elapsedMs = 100, kind = LinkHealthTracker.Kind.PROBE))
+        assertTrue(t.stalled(5_000 + 59_000))
+        assertEquals(LinkHealthTracker.OpenKind.LONG, t.openKind(5_001))
+    }
+
+    @Test fun link_a_success_closes_either_window_at_once() {
+        val t = tracker15()
+        t.failure(now = 10_000, elapsedMs = 7_000)
+        assertEquals(LinkHealthTracker.OpenKind.SHORT, t.openKind(10_500))
+        t.success(now = 11_000, elapsedMs = 300)
+        assertEquals(LinkHealthTracker.OpenKind.NONE, t.openKind(11_001))
+        assertEquals(LinkHealthTracker.Verdict.GOOD, t.verdict(11_001))
+    }
+
+    @Test fun router_says_the_internet_is_slow_after_one_slow_failure() = runBlocking {
+        val cloud = FakeBrain(AgentDecision.Done("should not be asked"))
+        val d = router(cloud, true, reason = OfflineReason.SLOW, linkCheck = { false }).decide(ctx("reconcile my quarterly ledgers"))
+        assertEquals(0, cloud.calls)
+        d as AgentDecision.CannotDo
+        assertTrue(d.detail, d.detail.startsWith("The internet is slow right now"))
     }
 
     @Test fun link_a_hanging_prewarm_makes_the_first_request_probe_first() {

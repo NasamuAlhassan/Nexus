@@ -16,7 +16,9 @@ enum class OfflineReason {
     /** No network at all (airplane mode, no Wi-Fi, data off). */
     NO_NETWORK,
     /** Connected, but traffic isn't getting through (a stalled Wi-Fi, a captive portal) — see [LinkHealth]. */
-    STALLED
+    STALLED,
+    /** One slow request failed (a short window): the link is shaky, not known to be dead. */
+    SLOW
 }
 
 /**
@@ -103,7 +105,9 @@ object NetworkMonitor {
     /** Why [isOnline] is false (or [OfflineReason.NONE] when it isn't). */
     fun offlineReason(): OfflineReason = when {
         state() == Connectivity.OFFLINE -> OfflineReason.NO_NETWORK
-        LinkHealth.stalled() -> OfflineReason.STALLED
+        LinkHealth.stalled() ->
+            if (LinkHealth.tracker.openKind(System.currentTimeMillis()) == LinkHealthTracker.OpenKind.SHORT) OfflineReason.SLOW
+            else OfflineReason.STALLED
         else -> OfflineReason.NONE
     }
 

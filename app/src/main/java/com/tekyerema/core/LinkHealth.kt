@@ -19,6 +19,10 @@ import com.tekyerema.core.config.AppConfig
  *  - after [openMs] the circuit half-opens: the next request is tried, and one more failure re-opens it at once.
  * A failure whose request STARTED before the latest success is old news and doesn't count.
  *
+ * 24 Oct 2026 (phone): one request failed after 12 s ("DNS lookup timed out") and the circuit stayed open for 60 s, so the
+ * next English request went to the slow offline model. Now ONE slow request failure opens only a short window
+ * ([shortOpenMs], 15 s); two failures in a row, or a failed probe, open the full [openMs].
+ *
  * Pure (clock injected) → unit-tested; [LinkHealth] is the process-wide instance.
  */
 class LinkHealthTracker(
@@ -26,15 +30,19 @@ class LinkHealthTracker(
     private val slowFailMs: () -> Long = { AppConfig.long("router.network.stall.slowFailMs", 6_000L) },
     private val weakProbeMs: () -> Long = { AppConfig.long("router.network.weakProbeMs", 3_000L) },
     private val recentMs: () -> Long = { AppConfig.long("router.network.stall.recentOkMs", 120_000L) },
-    private val warmSuspectMs: () -> Long = { AppConfig.long("router.network.stall.warmSuspectMs", 2_500L) }
+    private val warmSuspectMs: () -> Long = { AppConfig.long("router.network.stall.warmSuspectMs", 2_500L) },
+    private val shortOpenMs: () -> Long = { AppConfig.long("router.network.stall.shortOpenMs", 15_000L) }
 ) {
     enum class Kind { REQUEST, PROBE }
     enum class Verdict { UNKNOWN, GOOD, SUSPECT, STALLED }
+    /** Which offline window is open: SHORT after one slow request failure, LONG after two in a row or a failed probe. */
+    enum class OpenKind { NONE, SHORT, LONG }
 
     private var lastOkAt = 0L
     private var lastFailAt = 0L
     private var consecutiveFails = 0
     private var openUntil = 0L
+    private var openKind = OpenKind.NONE
     /** Total time of the last successful probe (DNS + TCP + TLS + one HTTP exchange) — a coarse link-speed sample. */
     private var lastProbeMs = 0L
     /** When the connection pre-warm (opened as the mic opens) started, while it hasn't answered yet; 0 = none pending. */
@@ -53,6 +61,7 @@ class LinkHealthTracker(
         lastOkAt = now
         consecutiveFails = 0
         openUntil = 0L
+        openKind = OpenKind.NONE
         warmSince = 0L   // the link answered: a pre-warm still pending is no longer evidence against it
         if (kind == Kind.PROBE) lastProbeMs = elapsedMs.coerceAtLeast(1L)
         return wasOpen
@@ -66,14 +75,20 @@ class LinkHealthTracker(
         val wasOpen = openUntil > now
         lastFailAt = now
         consecutiveFails++
-        val stall = kind == Kind.PROBE || elapsedMs >= slowFailMs() || consecutiveFails >= 2
-        if (stall) openUntil = now + openMs()
-        return stall && !wasOpen
+        val long = kind == Kind.PROBE || consecutiveFails >= 2
+        val short = !long && elapsedMs >= slowFailMs()
+        if (long) { openUntil = now + openMs(); openKind = OpenKind.LONG }
+        else if (short) { openUntil = now + shortOpenMs(); openKind = OpenKind.SHORT }
+        return (long || short) && !wasOpen
     }
+
+    /** Which window is open at [now] (NONE when the circuit is closed). */
+    @Synchronized
+    fun openKind(now: Long): OpenKind = if (openUntil > now) openKind else OpenKind.NONE
 
     /** A new network (or the old one lost): forget what the previous link did. */
     @Synchronized
-    fun reset() { lastOkAt = 0L; lastFailAt = 0L; consecutiveFails = 0; openUntil = 0L; lastProbeMs = 0L; warmSince = 0L }
+    fun reset() { lastOkAt = 0L; lastFailAt = 0L; consecutiveFails = 0; openUntil = 0L; openKind = OpenKind.NONE; lastProbeMs = 0L; warmSince = 0L }
 
     @Synchronized fun stalled(now: Long): Boolean = openUntil > now
 
@@ -120,8 +135,11 @@ object LinkHealth {
 
     fun failure(elapsedMs: Long, why: String?, kind: LinkHealthTracker.Kind = LinkHealthTracker.Kind.REQUEST) {
         if (tracker.failure(now(), elapsedMs, kind)) {
+            val window = if (tracker.openKind(now()) == LinkHealthTracker.OpenKind.SHORT)
+                "${AppConfig.long("router.network.stall.shortOpenMs", 15_000L) / 1000}s (one slow request)"
+            else "${AppConfig.long("router.network.stall.openMs", 60_000L) / 1000}s"
             android.util.Log.w("Tekyerema", "[NET] link stalled (${kind.name.lowercase()} failed after ${elapsedMs}ms: ${why?.take(80)}) " +
-                "— keeping work on the phone for ${AppConfig.long("router.network.stall.openMs", 60_000L) / 1000}s")
+                "— keeping work on the phone for $window")
             for (l in stalledListeners) try { l() } catch (_: Throwable) {}
         }
     }

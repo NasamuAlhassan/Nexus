@@ -391,6 +391,7 @@ class RoutingBrain(
         val lead = when {
             noCloud -> "No online assistant is set up"
             reason == OfflineReason.STALLED -> "The internet isn't working right now"
+            reason == OfflineReason.SLOW -> "The internet is slow right now"
             else -> "I'm offline"
         }
         val reasonClass = if (needsNet) LocalBrain.NETWORK else OFFLINE_UNKNOWN
@@ -417,6 +418,8 @@ class RoutingBrain(
             noCloud && needsNet -> "That needs the internet and an online assistant, which isn't set up. On the phone I can " + LocalBrain.offlineCapabilities() + "."
             noCloud -> "I don't know that command yet, and no online assistant is set up. On the phone I can " + LocalBrain.offlineCapabilities() + "."
             needsNet && reason == OfflineReason.STALLED -> "The internet isn't working right now, so I can't do that one. Offline I can still " +
+                LocalBrain.offlineCapabilities() + "."
+            needsNet && reason == OfflineReason.SLOW -> "The internet is slow right now, so I can't do that one yet. Offline I can still " +
                 LocalBrain.offlineCapabilities() + "."
             needsNet -> "I don't have internet, so I can't do that one right now. Offline I can still " + LocalBrain.offlineCapabilities() + "."
             else -> "$lead and I don't know that command yet. Offline I can " + LocalBrain.offlineCapabilities() + "."

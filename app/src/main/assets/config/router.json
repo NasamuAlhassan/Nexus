@@ -20,7 +20,7 @@
       "watchdogMs": 8000,
       "providerCoolMs": 90000,
       "weakProbeMs": 3000,
-      "stall": { "openMs": 60000, "slowFailMs": 6000, "recentOkMs": 120000 },
+      "stall": { "openMs": 60000, "shortOpenMs": 15000, "slowFailMs": 6000, "recentOkMs": 120000 },
       "probe": {
         "enabled": true,
         "url": "https://connectivitycheck.gstatic.com/generate_204",
