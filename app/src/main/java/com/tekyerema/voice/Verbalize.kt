@@ -31,7 +31,15 @@ object Verbalize {
     private val TIME = Regex("\\b([01]?\\d|2[0-3]):([0-5]\\d)\\b")
     private val PERCENT = Regex("(\\d+(?:\\.\\d+)?)\\s?%")
     private val GROUPED = Regex("(?<![\\d,.])(\\d{1,3}(?:,\\d{3})+)(?:\\.(\\d+))?(?![\\d,])")
-    private val DECIMAL =Regex("\\b(\\d+)\\.(\\d+)\\b")
+    private val ORDINAL = Regex("(?i)(?<![\\d,.])(\\d+)(?:st|nd|rd|th)\\b")
+    private val AMPM = Regex("(?i)\\b(\\d{1,2}(?::[0-5]\\d)?)([ap]m)\\b")
+    private val UNIT = Regex("(?<![\\p{L}\\d])(\\d[\\d,]*(?:\\.\\d+)?)\\s?(km/h|kph|km|kg|cm|mm|ml|GHz|MHz|° ?C|° ?F|°)(?![\\p{L}])")
+    private val UNIT_WORDS = mapOf("km/h" to "kilometres per hour", "kph" to "kilometres per hour", "km" to "kilometres", "kg" to "kilograms",
+        "cm" to "centimetres", "mm" to "millimetres", "ml" to "millilitres", "ghz" to "gigahertz", "mhz" to "megahertz",
+        "°c" to "degrees Celsius", "°f" to "degrees Fahrenheit", "°" to "degrees")
+    /** "v1.2" or "2.0.1" (two dots): a version, said "version one point two" / "two point zero point one". */
+    private val VERSION = Regex("(?i)(?<![\\p{L}\\d.])(?:(v)(\\d+(?:\\.\\d+)+)|(\\d+(?:\\.\\d+){2,}))(?![\\p{L}\\d]|\\.\\d)")
+    private val DECIMAL = Regex("\\b(\\d+)\\.(\\d+)\\b")
     /** A Ghana phone number: 0 and nine digits, or +233 / 233 and nine, together or in groups (spaces or dashes). */
     private val PHONE = Regex("(?<![\\d.,])(?:\\+233|233|0)(?:[ -]?\\d){9}(?![\\d.,]?\\d)")
     private val ENDING = Regex("(?i)\\b(ending(?: in)?)\\s+(\\d{2,4})\\b")
@@ -112,6 +120,22 @@ object Verbalize {
         t = MONEY_AFTER.replace(t) { m -> money(m.groupValues[1], m.groupValues[2]) }
         // the currency on its own ("Balance in GHS") is a word, not letters
         t = CUR_ALONE.replace(t, "cedis")
+        // A figure glued to its unit or suffix ("5pm" was "fivepm", "1st" "onest", "31°C" "thirty one°C", "v1.2" "vone.two"):
+        // ordinals as words, units as the words they stand for, versions as "version one point two" (P6, 25 October 2026).
+        t = ORDINAL.replace(t) { m ->
+            val n = m.groupValues[1].toLongOrNull()
+            if (n == null || n > 999_999) m.value else ordinal(n)
+        }
+        t = AMPM.replace(t, "$1 $2")
+        t = UNIT.replace(t) { m ->
+            val n = m.groupValues[1]
+            val word = UNIT_WORDS[m.groupValues[2].lowercase().replace(" ", "")] ?: return@replace m.value
+            n + " " + (if (n == "1") word.removeSuffix("s").replace("metres", "metre") else word)
+        }
+        t = VERSION.replace(t) { m ->
+            val v = m.groupValues[2].ifEmpty { m.groupValues[3] }
+            (if (m.groupValues[1].isNotEmpty()) "version " else "") + v.split('.').joinToString(" point ") { intToWords(it.toLongOrNull() ?: 0L) }
+        }
         // Comma-grouped figures are one number ("1,234" was "one,two hundred thirty four"; "2,500,000" ran into digit
         // groups), P6 reading round, 25 October 2026.
         t = GROUPED.replace(t) { m ->
@@ -171,6 +195,19 @@ object Verbalize {
         var t = text
         for ((word, spoken) in entries) t = Regex("(?<![\\p{L}\\p{N}])" + Regex.escape(word) + "(?![\\p{L}\\p{N}])").replace(t, Regex.escapeReplacement(spoken))
         return t
+    }
+
+    /** 1 → "first", 22 → "twenty second", 100 → "one hundredth". */
+    fun ordinal(n: Long): String {
+        val words = intToWords(n)
+        val cut = words.lastIndexOf(' ') + 1
+        val last = words.substring(cut)
+        val ord = when (last) {
+            "one" -> "first"; "two" -> "second"; "three" -> "third"; "five" -> "fifth"; "eight" -> "eighth"
+            "nine" -> "ninth"; "twelve" -> "twelfth"
+            else -> if (last.endsWith("y")) last.dropLast(1) + "ieth" else last + "th"
+        }
+        return words.substring(0, cut) + ord
     }
 
     fun intToWords(n: Long): String {
