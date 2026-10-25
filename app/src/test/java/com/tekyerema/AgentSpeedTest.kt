@@ -199,6 +199,57 @@ class AgentSpeedTest {
         assertTrue(c.expand(JSONObject().put("labels", (1..20).joinToString("|")), null) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
     }
 
+    // ---- P3-B1: a chain may open an app first and press Enter last (agent.chain.verbs)
+
+    private fun withVerbs(v: String?) = com.tekyerema.core.config.AppConfig.loadFrom(emptyList(),
+        v?.let { """{"agent":{"chain":{"verbs":"$it"}}}""" })
+
+    private fun expansion(args: JSONObject, expects: String? = null) = com.tekyerema.agent.ActionChain.expand(args, expects)
+
+    @org.junit.After fun resetChainConfig() = com.tekyerema.core.config.AppConfig.loadFrom(emptyList())
+
+    @Test fun open_app_and_enter_expand_in_order_when_the_verbs_allow_them() {
+        withVerbs("tap,type,open_app,enter")
+        val s = (expansion(JSONObject().put("open_app", "Chrome").put("labels", "Search or type URL").put("then_type", "cats").put("then_enter", true),
+            "element_present: cats") as com.tekyerema.agent.ActionChain.Expansion.Steps).steps
+        assertEquals(listOf("open_app", "tap", "type"), s.map { it.name })
+        assertEquals("Chrome", s[0].args.getString("app"))
+        assertEquals("element_present: Search or type URL", s[0].expects)
+        assertTrue(s[2].args.getBoolean("submit"))
+        assertEquals(listOf("chain:1/3", "chain:2/3", "chain:3/3"), s.map { it.rationale })
+    }
+
+    @Test fun open_app_and_enter_are_refused_unless_the_verbs_list_them() {
+        withVerbs(null)   // default "tap,type"
+        assertTrue(expansion(JSONObject().put("open_app", "Chrome").put("labels", "x")) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+        assertTrue(expansion(JSONObject().put("labels", "x").put("then_type", "y").put("then_enter", true)) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+        assertTrue(expansion(JSONObject().put("labels", "x")) is com.tekyerema.agent.ActionChain.Expansion.Steps)
+    }
+
+    @Test fun money_sends_and_calls_are_never_chained() {
+        withVerbs("tap,type,open_app,enter")
+        for (l in listOf("Send", "Pay now", "Call", "Transfer money", "Confirm"))
+            assertTrue("$l", expansion(JSONObject().put("labels", "Contacts|$l")) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+        assertTrue(expansion(JSONObject().put("open_app", "MTN MoMo").put("labels", "Home")) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+        assertTrue(expansion(JSONObject().put("labels", "Sound and vibration|Ringtone")) is com.tekyerema.agent.ActionChain.Expansion.Steps)
+    }
+
+    @Test fun the_open_app_step_counts_against_max_steps() {
+        withVerbs("tap,type,open_app,enter")
+        val eight = (1..8).joinToString("|") { "k$it" }
+        assertTrue(expansion(JSONObject().put("labels", eight)) is com.tekyerema.agent.ActionChain.Expansion.Steps)
+        assertTrue(expansion(JSONObject().put("open_app", "Calculator").put("labels", eight)) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+    }
+
+    @Test fun only_tap_type_and_open_app_ever_come_out_of_a_chain() {
+        withVerbs("tap,type,open_app,enter")
+        val s = (expansion(JSONObject().put("open_app", "Settings").put("labels", "Display").put("then_type", "a").put("then_enter", true))
+            as com.tekyerema.agent.ActionChain.Expansion.Steps).steps
+        assertTrue(s.all { it.name in setOf("open_app", "tap", "type") })   // never a TIER2+ tool
+        val tools = com.tekyerema.tools.defaultTools().associateBy { it.name }
+        assertTrue(s.all { tools.getValue(it.name).riskTier == com.tekyerema.policy.RiskTier.TIER1 || tools.getValue(it.name).riskTier == com.tekyerema.policy.RiskTier.TIER0 })
+    }
+
     @Test fun a_chain_goes_on_only_after_a_step_that_did_something() {
         val c = com.tekyerema.agent.ActionChain
         assertTrue(c.stepPassed(success = true, verified = true, changed = false))

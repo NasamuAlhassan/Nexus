@@ -37,8 +37,9 @@ object TapSequenceTool : Tool {
     override val riskTier = RiskTier.TIER1
     override val params = listOf(
         ToolParam("labels", "string", "Labels to tap in order, '|'-separated."),
+        ToolParam("open_app", "string", "App to open first.", required = false),
         ToolParam("then_type", "string", "Text to type into the field open after the taps.", required = false),
-        ToolParam("submit", "boolean", "Also press Enter/Search.", required = false),
+        ToolParam("then_enter", "boolean", "Press Enter after then_type.", required = false),
         ToolParam("expects", "string", "What the LAST step shows.", required = false)
     )
 
@@ -58,6 +59,14 @@ object ActionChain {
 
     fun enabled(): Boolean = com.tekyerema.core.config.FeatureFlags.isEnabled("G-11", true) && AppConfig.bool("agent.chain.enabled", true)
 
+    /** Verbs a chain may use (agent.chain.verbs): tap and type always at least; open_app and enter are opt-in. */
+    fun verbs(): Set<String> = AppConfig.string("agent.chain.verbs", "tap,type").split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+
+    private val consequential = Regex("(?i)\\b(send|pay|call|dial|transfer|confirm|momo|mobile money|withdraw|buy|purchase|delete|pin)\\b")
+
+    /** A label or app name that is money, a send or a call is never chained: it is its own step so it can be read back and confirmed. */
+    fun consequentialLabel(text: String): Boolean = consequential.containsMatchIn(text)
+
     private fun maxSteps() = AppConfig.int("agent.chain.maxSteps", 8).coerceIn(2, 12)
 
     /**
@@ -68,11 +77,28 @@ object ActionChain {
     fun expand(args: JSONObject, expects: String?): Expansion {
         val labels = args.str("labels").orEmpty().split('|').map { it.trim() }.filter { it.isNotEmpty() }
         val text = args.str("then_type")?.takeIf { it.isNotEmpty() }
-        val submit = args.boolOrDefault("submit", false)
-        if (labels.isEmpty() && text == null) return Expansion.Rejected("give the labels to tap, separated by '|'")
-        val total = labels.size + (if (text != null) 1 else 0)
+        val app = args.str("open_app")?.trim()?.takeIf { it.isNotEmpty() }
+        val enter = args.boolOrDefault("then_enter", false)
+        val submit = args.boolOrDefault("submit", false) || enter
+        if (labels.isEmpty() && text == null && app == null) return Expansion.Rejected("give the labels to tap, separated by '|'")
+        val v = verbs()
+        if (app != null && "open_app" !in v) return Expansion.Rejected("open_app is not allowed inside a sequence — open the app as its own step")
+        if (enter && "enter" !in v) return Expansion.Rejected("then_enter is not allowed inside a sequence — use type with submit")
+        if (enter && text == null) return Expansion.Rejected("then_enter goes with then_type")
+        (labels + listOfNotNull(app)).firstOrNull { consequentialLabel(it) }?.let {
+            return Expansion.Rejected("'$it' is money, a send or a call — do it as its own step so it can be confirmed")
+        }
+        val total = (if (app != null) 1 else 0) + labels.size + (if (text != null) 1 else 0)
         if (total > maxSteps()) return Expansion.Rejected("at most ${maxSteps()} steps in one sequence — do the rest next step")
         val out = ArrayList<AgentDecision.CallTool>()
+        if (app != null) {
+            val claim = when {
+                labels.isNotEmpty() -> "element_present: ${labels[0]}"
+                text != null -> null
+                else -> expects
+            }
+            out.add(AgentDecision.CallTool("open_app", JSONObject().put("app", app), "${TAG}1/$total", claim))
+        }
         labels.forEachIndexed { i, label ->
             val last = i == labels.lastIndex
             val claim = when {

@@ -41,7 +41,9 @@ class PromptBudgetTest {
         // Contacts) in the system prompt. Caps = measured + ~100.
         // Owner's night round (2026-10-20): + look_with_camera (our camera answers a question about a physical thing; "vision"
         // group — loaded per step only with seeing/holding/money words) measured 30,508. Cap = measured + ~100.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 30_610)
+        // P3-B1 (2026-10-25): tap_sequence gains open_app + then_enter (its `submit` param left the schema; expand still
+        // accepts it) — measured 30,677. Cap = measured + ~100.
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 30_780)
         // Owner, 21 Oct 2026 ("the brain should understand"): one line telling the brain it has eyes (look_with_camera, now a
         // core tool) — measured 5,935. Cap = measured + ~60.
         assertTrue("system prompt grew to $system chars", system <= 5_995)
