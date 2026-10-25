@@ -12,6 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -197,6 +198,59 @@ class AgentSpeedTest {
         val c = com.tekyerema.agent.ActionChain
         assertTrue(c.expand(JSONObject().put("labels", " | "), null) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
         assertTrue(c.expand(JSONObject().put("labels", (1..20).joinToString("|")), null) is com.tekyerema.agent.ActionChain.Expansion.Rejected)
+    }
+
+    // ---- P3-B3: local continuation (agent.plan.localContinue, default off)
+
+    private fun btn(id: Int, label: String, clickable: Boolean = true, editable: Boolean = false) =
+        com.tekyerema.accessibility.UiElement(id, "Button", label, com.tekyerema.accessibility.Box(0, 0, 10, 10), clickable = clickable, editable = editable)
+
+    private fun settledPlan(raw: String, firstCheckScreen: com.tekyerema.accessibility.UiSnapshot): com.tekyerema.agent.plan.PlanTracker {
+        val t = com.tekyerema.agent.plan.PlanTracker()
+        assertNotNull(t.offer(raw))
+        t.onStep(com.tekyerema.agent.plan.PlanTracker.StepEvidence(verified = true, read = false, failed = false, before = null, after = firstCheckScreen))
+        return t
+    }
+
+    private val twoSteps = "open Display => element_present: Font size; open Font size => element_present: Preview"
+
+    @Test fun local_continuation_is_off_by_default() {
+        com.tekyerema.core.config.AppConfig.loadFrom(emptyList())
+        assertFalse(com.tekyerema.agent.plan.LocalContinuation.enabled())
+    }
+
+    @Test fun the_next_plain_tap_on_a_label_that_is_on_screen_is_taken_locally() {
+        val screen = snap(btn(1, "Font size"), btn(2, "Brightness"))
+        val t = settledPlan(twoSteps, screen)
+        assertTrue(t.justSettled)
+        val d = com.tekyerema.agent.plan.LocalContinuation.next(t, screen)!!
+        assertEquals("tap", d.name); assertEquals("Font size", d.args.getString("label")); assertEquals("element_present: Preview", d.expects)
+    }
+
+    @Test fun it_asks_the_planner_when_the_label_is_missing_ambiguous_or_the_step_did_not_settle() {
+        val lc = com.tekyerema.agent.plan.LocalContinuation
+        val here = snap(btn(1, "Font size"))
+        assertNull(lc.next(settledPlan(twoSteps, here), snap(btn(2, "Brightness"))))                       // not on screen
+        assertNull(lc.next(settledPlan(twoSteps, here), snap(btn(1, "Font size"), btn(2, "Font size"))))     // ambiguous
+        assertNull(lc.next(settledPlan(twoSteps, here), snap(btn(1, "Font size", clickable = false))))       // not tappable
+        val t = com.tekyerema.agent.plan.PlanTracker(); t.offer(twoSteps)
+        assertNull(lc.next(t, snap(btn(1, "Font size"))))                                                    // nothing just settled
+    }
+
+    @Test fun it_never_continues_money_sends_calls_or_compound_subgoals() {
+        val lc = com.tekyerema.agent.plan.LocalContinuation
+        val here = snap(btn(1, "Contacts"))
+        for (next in listOf("tap Send", "tap Call", "tap Pay now", "open Transfer money", "open Contacts and call Ama", "type hello"))
+            assertNull(next, lc.next(settledPlan("open Contacts => element_present: Contacts; $next => element_present: Done", here),
+                snap(btn(1, "Send"), btn(2, "Call"), btn(3, "Pay now"), btn(4, "Transfer money"), btn(5, "Contacts"), btn(6, "hello"))))
+        assertEquals("Contacts", lc.targetLabel("open the Contacts page"))
+        assertNull(lc.targetLabel("search for Ama"))
+    }
+
+    @Test fun it_never_taps_a_field_or_a_password() {
+        val lc = com.tekyerema.agent.plan.LocalContinuation
+        val here = snap(btn(1, "Font size"))
+        assertNull(lc.next(settledPlan(twoSteps, here), snap(btn(1, "Font size", editable = true))))
     }
 
     // ---- P3-B1: a chain may open an app first and press Enter last (agent.chain.verbs)

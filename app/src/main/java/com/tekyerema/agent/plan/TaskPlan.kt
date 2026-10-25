@@ -140,6 +140,9 @@ class PlanTracker(
     private var overBudgetAsked = false
     /** How many replans the engine asked for (for traces/tests). */
     var replansRequested = 0; private set
+    /** True when the most recent [onStep] settled at least one subgoal (read by LocalContinuation, P3-B3). */
+    var justSettled = false; private set
+    fun clearSettled() { justSettled = false }
 
     /**
      * The model sent `plan` with its action. A first plan is adopted; a later one is a REPLAN: subgoals already done
@@ -158,6 +161,7 @@ class PlanTracker(
         dropped = old.filter { o -> o.open && fresh.none { same(it.text, o.text) } }.map { it.text }
         items = (keptDone + fresh).mapIndexed { i, it -> it.copy(id = i + 1) }
         version++
+        justSettled = false
         failures = 0
         replanWhy = null
         justDone = null
@@ -174,6 +178,7 @@ class PlanTracker(
 
     /** Tick subgoals from a step's verified outcome; count failures toward a REPLAN. Returns the subgoals just done. */
     fun onStep(e: StepEvidence): List<PlanItem> {
+        justSettled = false
         if (!hasPlan) return emptyList()
         val done = ArrayList<PlanItem>()
         if (e.verified || e.read) {
@@ -192,6 +197,7 @@ class PlanTracker(
             }
         }
         if (done.isNotEmpty()) {
+            justSettled = true
             failures = 0
             justDone = done.last()
             replanWhy = null

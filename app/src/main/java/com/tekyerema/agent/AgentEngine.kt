@@ -583,6 +583,7 @@ object AgentEngine {
         var chainDone = 0
         var chainPrevOk = true
         var chainTypeWaits = 0
+        var localContinues = 0   // P3-B3: subgoals continued without a planning call
         // I-03: a self-contained one-fact question goes straight to web_search; its answer is what the user hears.
         val webFirst = resume == null && forcedBrain == null && online && WebFirst.enabled() && WebFirst.eligible(goal, retrievalNeed)
         if (webFirst) {
@@ -907,6 +908,16 @@ object AgentEngine {
                         }
                         if (chain.isNotEmpty()) { chainStep = chain.removeFirst(); chainPrevOk = false; chainDone++ }
                     }
+                }
+                // P3-B3 (agent.plan.localContinue, off by default): a subgoal just settled and the next one is a plain tap on a label
+                // that is on this fresh screen once — tap it without a planning call. Same gate, stale check and verification below.
+                if (chainStep == null && planned.isEmpty() && !directStep && !unattended && localContinues < com.tekyerema.agent.plan.LocalContinuation.maxPerTask() &&
+                    com.tekyerema.agent.plan.LocalContinuation.enabled()) {
+                    com.tekyerema.agent.plan.LocalContinuation.next(taskMemory.plan, before)?.let {
+                        chainStep = it; localContinues++
+                        log(LogEntry.Kind.PLAN, "Step $step: local continuation — tap(${shortArgs(it.args)}) for the next subgoal, no planning call")
+                    }
+                    taskMemory.plan.clearSettled()   // one chance per settled subgoal
                 }
                 val t0 = SystemClock.uptimeMillis()
                 val decision = planned.removeFirstOrNull() ?: chainStep ?: brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo,
