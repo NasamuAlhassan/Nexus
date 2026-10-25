@@ -207,6 +207,11 @@ class CameraReadActivity : ComponentActivity() {
             AppConfig.bool("camera.currency.vision", true) && NetworkMonitor.isOnline() &&
             VisionLadder.canDescribe(settings)) {
             mode = MODE_DESCRIBE; moneyAsk = true
+        } else if (CediClassifier.useOffline(mode == MODE_DESCRIBE, VisionPrompts.isMoneyQuestion(question),
+                NetworkMonitor.isOnline() && VisionLadder.canDescribe(settings), CediClassifier.installed(this))) {
+            // A money question with no online vision (25 Oct 2026, A20e: "How much am I holding?" offline said "I can't describe
+            // it offline" and read text): the note classifier is on the phone for exactly this.
+            mode = MODE_CURRENCY
         }
         intervalMs = AppConfig.long("camera.analysis.intervalMs", 500L).coerceAtLeast(100L)
         ui.question = question

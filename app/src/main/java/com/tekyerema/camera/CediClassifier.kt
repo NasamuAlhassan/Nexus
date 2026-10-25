@@ -55,6 +55,10 @@ class CediClassifier private constructor(ctx: Context) {
          *  closed and the log held no spoken line at all). */
         const val NOT_INSTALLED = "The money reader isn't installed on this phone yet."
 
+        /** A money question that cannot go to the online vision models, with the note model in the build: use the phone's own. */
+        fun useOffline(describeMode: Boolean, moneyQuestion: Boolean, onlineVisionOk: Boolean, modelInstalled: Boolean): Boolean =
+            describeMode && moneyQuestion && !onlineVisionOk && modelInstalled
+
         /** Is the model file in the APK? A cheap look (no load) so the money mode can say so BEFORE opening the camera. */
         fun installed(ctx: Context): Boolean = try {
             ctx.assets.list(DIR)?.contains("cedi.onnx") == true
