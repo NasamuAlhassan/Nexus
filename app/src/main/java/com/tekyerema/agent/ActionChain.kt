@@ -60,7 +60,9 @@ object ActionChain {
     fun enabled(): Boolean = com.tekyerema.core.config.FeatureFlags.isEnabled("G-11", true) && AppConfig.bool("agent.chain.enabled", true)
 
     /** Verbs a chain may use (agent.chain.verbs): tap and type always at least; open_app and enter are opt-in. */
-    fun verbs(): Set<String> = AppConfig.string("agent.chain.verbs", "tap,type").split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
+    const val DEFAULT_VERBS = "tap,type,open_app,enter"
+
+    fun verbs(): Set<String> = AppConfig.string("agent.chain.verbs", DEFAULT_VERBS).split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
 
     private val consequential = Regex("(?i)\\b(send|pay|call|dial|transfer|confirm|momo|mobile money|withdraw|buy|purchase|delete|pin)\\b")
 

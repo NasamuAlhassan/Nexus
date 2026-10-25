@@ -31,7 +31,8 @@ object BrainPrompts {
         "probably misheard: ask the user, never go to an app store or sign in unless they asked to install;never read_state twice on an unchanged screen; if a contact isn't found, " +
         "ASK for the number (call ask_user — it waits for the answer and the task continues); an accelerator (open_app, search_contacts, make_call, set_alarm, run_ussd, " +
         "mobile_money…) is ONE sub-step — after it keep going until the goal is truly done, and if it finds nothing fall back to the app's own UI. " +
-        "Taps you can already predict (a keypad entry, a menu path, a search button then its text) go in ONE tap_sequence call.\n\n" +
+        "Steps you can already predict go in ONE tap_sequence call, not one call each: keypad labels='1|2|×|='; Settings path labels='Sound and vibration|Ringtone'; " +
+        "'open Chrome and search X' = open_app=Chrome labels='Search or type URL' then_type=X then_enter=true.\n\n" +
         // Workstream E (ambiguity, agent/research): the one ask-vs-act rule — keep it to this sentence.
         "Look before you ask (screen, contacts, apps, one web_search); ask_user only if 2+ options still fit and a wrong pick is costly: ≤3 short options, likeliest first, never repeat a question.\n\n" +
         "MOBILE MONEY (send money): gather number + amount + reference FIRST (ask if any is missing). With all three, call `momo_send` — ONE call walks *170# and " +
