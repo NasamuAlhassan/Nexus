@@ -24,7 +24,8 @@ object Verbalize {
     private val MD_LINK = Regex("!?\\[([^\\]\\n]*)]\\([^)\\s]*\\)")
     private val MD_ITALIC = Regex("(?<![\\p{L}\\p{N}_])_([^_\\n]+)_(?![\\p{L}\\p{N}_])")
     private val EMAIL = Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\\.[A-Za-z0-9-]+)+")
-    private val ISO_DATE = Regex("\\b(\\d{4})-(\\d{2})-(\\d{2})\\b")
+    private val RANGE = Regex("(\\d)\\s?[\\u2013\\u2014]\\s?(\\d)")
+    private val ISO_DATE =Regex("\\b(\\d{4})-(\\d{2})-(\\d{2})\\b")
     private const val MON = "Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept?|Oct|Nov|Dec"
     private val MON_AFTER_DAY = Regex("\\b(\\d{1,2}(?:st|nd|rd|th)?)\\s(" + MON + ")\\b\\.?")
     private val MON_BEFORE_DAY = Regex("\\b(" + MON + ")\\.?\\s(\\d{1,2})\\b")
@@ -135,6 +136,7 @@ object Verbalize {
         t = CUR_ALONE.replace(t, "cedis")
         // A figure glued to its unit or suffix ("5pm" was "fivepm", "1st" "onest", "31°C" "thirty one°C", "v1.2" "vone.two"):
         // ordinals as words, units as the words they stand for, versions as "version one point two" (P6, 25 October 2026).
+        t = RANGE.replace(t, "$1 to $2")   // "Oct 25 – 31", "10:00–11:30": a dash between figures is "to"
         t = ISO_DATE.replace(t) { m ->
             val mo = m.groupValues[2].toInt(); val d = m.groupValues[3].toInt()
             if (mo in 1..12 && d in 1..31) "$d ${MONTHS[mo - 1]} ${m.groupValues[1]}" else m.value

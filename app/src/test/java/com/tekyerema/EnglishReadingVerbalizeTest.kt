@@ -56,6 +56,11 @@ class EnglishReadingVerbalizeTest {
         assertEquals("Sun cream", say("Sun cream"))
     }
 
+    @Test fun aDashBetweenFiguresIsTo() {
+        assertEquals("October twenty five to thirty one", say("Oct 25 – 31"))
+        assertEquals("ten o'clock to eleven thirty", say("10:00–11:30"))
+    }
+
     @Test fun groupedNumbersLeaveListsAndMoneyAlone() {
         assertEquals("one, two, three", say("1, 2, 3"))
         assertEquals("one thousand two hundred fifty cedis fifty pesewas", say("GH₵1,250.50"))
