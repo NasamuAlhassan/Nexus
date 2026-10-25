@@ -502,7 +502,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             kotlinx.coroutines.delay(retryMs)
             val second = snapshotOnce()
             if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.d("Tekyerema", "[TREE] bare WebView: second look after $retryMs ms → ${second.snapshot.elements.size} elements (was ${first.snapshot.elements.size})")
-            return second.snapshot
+            // P2b (25 Oct 2026): still bare after the second look — say so, so a reader never presents the browser's toolbar
+            // as "the page". A login form behind it would be neither read nor recognised as a credential screen.
+            return if (second.bareWeb) second.snapshot.copy(webContentMissing = true) else second.snapshot
         }
         return first.snapshot
     }

@@ -103,7 +103,10 @@ data class UiSnapshot(
     /** F-01: the traversal hit its node cap — the screen is longer than what was read. */
     val truncated: Boolean = false,
     /** F-17: what the app just announced (TalkBack announcements, toasts) in the last few seconds. */
-    val announcements: List<String> = emptyList()
+    val announcements: List<String> = emptyList(),
+    /** P2b: a web container (Chrome's "Web View", a WebView) is on screen but its page content never reached the tree,
+     *  even after a second look. What was read is the app's chrome only; the page may hold anything (a login form). */
+    val webContentMissing: Boolean = false
 ) {
     fun element(id: Int): UiElement? = elements.firstOrNull { it.id == id }
 

@@ -1701,7 +1701,8 @@ class LocalFastRouter(
         // About a second: a warm app is in front by then ("X is open."). A cold start of a heavy app (Instagram, a bank app)
         // on a low-end phone takes 3-6 s — the launch is already under way, so say "Opening X." at once instead of waiting and
         // then handing a plain "open X" to the cloud brain (owner, 18 Oct 2026: "open Instagram" sat on "thinking").
-        val (ok, fg) = com.tekyerema.verifier.Verify.pollLaunched(c, app.packageName, prevFg, attempts = 5)
+        val (ok, fg) = com.tekyerema.verifier.Verify.pollLaunched(c, app.packageName, prevFg, attempts = 5,
+            notEvidence = setOfNotNull(com.tekyerema.tools.defaultLauncherPackage(appContext)))
         if (!ok) {
             Log.i(TAG, "[LOCAL_FAST_PATH] OPEN_APP ${app.packageName} still starting (fg=$fg) → said so, no agent")
             return action("OPEN_APP", "Opening ${app.label}.")

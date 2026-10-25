@@ -40,7 +40,11 @@ object Verify {
      */
     suspend fun pollLaunched(
         controller: AccessibilityController?, pkg: String, prevFg: String?,
-        attempts: Int = 24, intervalMs: Long = 250L, stablePolls: Int = 3
+        attempts: Int = 24, intervalMs: Long = 250L, stablePolls: Int = 3,
+        /** P2b (25 Oct 2026): packages that are never evidence that [pkg] opened — the home screen above all. The suite's
+         *  "open YouTube Music" said "YT Music is open." with the launcher in front: Settings was the previous screen, the
+         *  launcher "differed" from it for three polls, and the app never came up. */
+        notEvidence: Set<String> = emptySet()
     ): Pair<Boolean, String?> {
         var fg: String? = null
         var sameOther = 0
@@ -49,7 +53,7 @@ object Verify {
             val f = fg
             if (f != null && f.contains(pkg, ignoreCase = true)) return true to f
             // Only with a KNOWN prior screen can "something else came to front" be evidence of our launch.
-            if (f != null && prevFg != null && f != prevFg) { if (++sameOther >= stablePolls) return true to f } else sameOther = 0
+            if (f != null && prevFg != null && f != prevFg && f !in notEvidence) { if (++sameOther >= stablePolls) return true to f } else sameOther = 0
             // The event-tracked foreground can lag a cold start (A20e 2026-10-01: Calculator was in front, the tracker
             // still said the launcher, and a working launch went to the cloud as "not opened"). Ask the window itself —
             // sparingly, it is a blocking call into the app in front: from the half-way poll, every 4th, and at the end.

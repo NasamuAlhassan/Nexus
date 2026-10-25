@@ -645,6 +645,7 @@ object AgentEngine {
         val taskMemory = TaskMemory.fromJson(resumedFrom?.memory)   // Phase II P0 scratchpad (WS-A: restored on resume)
         var visionNext = false                  // the model asked for vision via read_state; carry it into the next observation
         var usedRead = false                    // §C.3 — did the run read the screen? (grounds a screen-derived answer)
+        var webUnseen = false                   // P2b — a read met a web page whose content never reached the tree
         // Mobile-Money / USSD: the user approves the transfer (recipient + amount) ONCE; after that we must
         // NOT re-ask at every menu step — an interactive USSD session times out, and the user chose guided
         // navigation. Once approved, subsequent steps ON THE DIALER/USSD surface proceed without a fresh
@@ -988,7 +989,7 @@ object AgentEngine {
                         // (because an earlier step didn't verify) both spoke a wrong "…but I couldn't confirm it"
                         // tail AND stopped the voice layer's ask-card/mic-reopen (which keys off a trailing "?").
                         val isQuestion = decision.summary.trim().endsWith("?")
-                        if (isQuestion || (planOpen == null && !ungroundedRead && notThere == null && (mutatingCount == 0 || substantiveOk))) {
+                        if (isQuestion || (planOpen == null && !ungroundedRead && !webUnseen && notThere == null && (mutatingCount == 0 || substantiveOk))) {
                             log(LogEntry.Kind.RESULT, spokenSummary)
                             pushConvo("Tɛkyerɛma: ${decision.summary}")
                             finish(AgentStatus.COMPLETED, stats, run = runCtx); return
@@ -996,6 +997,7 @@ object AgentEngine {
                         val why = when {
                             planOpen != null -> "plan subgoal(s) never verified: " + planOpen.joinToString("; ") { "${it.id}. ${it.text.take(50)}" }
                             notThere != null -> notThere.why
+                            webUnseen -> "the page's content never reached the screen reader (a bare web view)"
                             ungroundedRead -> "answer asserts detail not present on the observed screen"
                             lastMutatingVerified != true -> "the most recent state-changing action did not verify"
                             else -> "only $mutatingVerified of $assessed state-changing actions verified (ratio ${"%.2f".format(ratio)})"
@@ -1949,6 +1951,7 @@ object AgentEngine {
                             com.tekyerema.core.config.FeatureFlags.isEnabled("E-23", true))
                             com.tekyerema.core.TextEntities.detect(ctxApp, result.message) else emptyList()
                         entities.firstOrNull { it.type == com.tekyerema.core.TextEntities.PHONE }?.let { References.noteNumber(it.text) }
+                        if (result.data?.optBoolean("web_unseen") == true) webUnseen = true
                         val untrustedOut = com.tekyerema.tools.ToolManifest.meta(decision.name).untrustedOutput
                         if (untrustedOut && result.message.isNotBlank()) {
                             untrustedRead.add(result.message)

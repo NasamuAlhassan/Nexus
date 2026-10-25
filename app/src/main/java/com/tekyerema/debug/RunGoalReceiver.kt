@@ -333,6 +333,15 @@ class RunGoalReceiver : BroadcastReceiver() {
         intent.getStringExtra("reset_conversation")?.let {
             AgentEngine.resetConversation(); android.util.Log.i("Tekyerema", "[DEBUG] conversation reset"); return
         }
+        // P2b: the device suite's per-scenario language reset. A Twi request leaves the SESSION language on Twi (typed English
+        // is too weak a signal to flip it back), so the next English scenario was answered in Twi (fp_battery_level, 25 Oct).
+        // Only the session language moves; the user's language MODE is untouched.  --es session_lang gh_en|twi
+        intent.getStringExtra("session_lang")?.let { v ->
+            if (v == com.tekyerema.voice.Lang.GH_EN || v == com.tekyerema.voice.Lang.TWI)
+                com.tekyerema.settings.Settings(context.applicationContext).sessionLanguage = v
+            android.util.Log.i("Tekyerema", "[DEBUG] session language ${com.tekyerema.settings.Settings(context.applicationContext).sessionLanguage}")
+            return
+        }
         intent.getStringExtra("confirm")?.let {
             AgentEngine.confirm(it.equals("yes", true) || it.equals("true", true))
             return

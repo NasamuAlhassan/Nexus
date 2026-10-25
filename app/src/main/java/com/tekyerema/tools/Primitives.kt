@@ -535,6 +535,9 @@ object ReadScreenTool : Tool {
     override val params = listOf(ToolParam("continue", "boolean", "The next part of the same reading.", required = false))
 
     const val PRIVATE = "This is a private screen — a PIN, password or code — so I won't read it."
+    /** Says "can't confirm", so the voice layer adds no second doubt (SendReport.unverified). */
+    const val WEB_UNSEEN = "I can't confirm what is on this page: the browser has not shown me its content yet. " +
+        "Wait a moment and ask me to read it again."
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val ctrl = ctx.controller ?: return ToolResult(false, NO_SERVICE)
@@ -560,6 +563,12 @@ object ReadScreenTool : Tool {
             return ToolResult(true, "That app is on your do-not-read list, so I won't read it.", channel = "none")
         if (snap.secureWindow && snap.elements.none { !it.label.isNullOrBlank() })
             return ToolResult(true, SECURE_SCREEN, JSONObject().put("secure", true), channel = "none")
+        // P2b: a web page whose content never reached the tree. Reading the browser's toolbar back as "the page" was a false
+        // success (a login form could be behind it, unrecognised). Honest line, no OCR (it could be a credential page).
+        if (snap.webContentMissing) {
+            com.tekyerema.agent.ScreenReadCursor.clear()
+            return ToolResult(true, WEB_UNSEEN, JSONObject().put("web_unseen", true), channel = "none")
+        }
         // Parts sized to ~20 s of speech at the user's rate (voice/ReadingPace), not a fixed 480 characters (~30 s).
         val parts = com.tekyerema.agent.ScreenReadout.compose(snap, com.tekyerema.voice.ReadingPace.partChars())
         // K-15: "what changed?" compares against what was just read.
