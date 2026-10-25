@@ -273,11 +273,10 @@ class AgentSpeedTest {
         assertEquals(listOf("chain:1/3", "chain:2/3", "chain:3/3"), s.map { it.rationale })
     }
 
-    @Test fun the_planner_prompt_shows_chains_and_the_default_verbs_allow_them() {
-        val p = com.tekyerema.agent.BrainPrompts.SYSTEM
-        assertTrue(p.contains("open_app=Chrome") && p.contains("then_enter=true") && p.contains("Sound and vibration|Ringtone"))
+    @Test fun open_app_and_enter_are_opt_in_not_default() {
         withVerbs(null)
-        assertTrue(com.tekyerema.agent.ActionChain.verbs().containsAll(setOf("tap", "type", "open_app", "enter")))
+        assertEquals(setOf("tap", "type"), com.tekyerema.agent.ActionChain.verbs())
+        assertFalse(com.tekyerema.agent.BrainPrompts.SYSTEM.contains("then_enter"))   // the prompt does not offer what the default refuses
     }
 
     @Test fun open_app_and_enter_are_refused_unless_the_verbs_list_them() {

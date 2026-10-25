@@ -46,8 +46,7 @@ class PromptBudgetTest {
         assertTrue("compiled tool schema grew to $tools chars", tools <= 30_780)
         // Owner, 21 Oct 2026 ("the brain should understand"): one line telling the brain it has eyes (look_with_camera, now a
         // core tool) — measured 5,935. Cap = measured + ~60.
-        // P3-B2 (2026-10-25): the tap_sequence sentence now carries the open-app-and-search and Settings-path examples.
-        assertTrue("system prompt grew to $system chars", system <= 6_100)
+        assertTrue("system prompt grew to $system chars", system <= 5_995)
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */

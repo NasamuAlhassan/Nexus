@@ -60,7 +60,8 @@ object ActionChain {
     fun enabled(): Boolean = com.tekyerema.core.config.FeatureFlags.isEnabled("G-11", true) && AppConfig.bool("agent.chain.enabled", true)
 
     /** Verbs a chain may use (agent.chain.verbs): tap and type always at least; open_app and enter are opt-in. */
-    const val DEFAULT_VERBS = "tap,type,open_app,enter"
+    /** open_app and enter are opt-in (agent.chain.verbs = "tap,type,open_app,enter") until a clean A/B shows fewer planner calls. */
+    const val DEFAULT_VERBS = "tap,type"
 
     fun verbs(): Set<String> = AppConfig.string("agent.chain.verbs", DEFAULT_VERBS).split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }.toSet()
 
