@@ -37,6 +37,17 @@ class TelcoGuideTest {
         assertTrue(u is TelcoUssd.Request.Unsupported && u.line.contains("never guess"))
     }
 
+    /** A20e 2026-10-26 19:02: "tell my wife to send me mashup" opened MTN's *567# menu — it is a message to her. */
+    @Test fun `a message to someone is not the users own bundle purchase`() {
+        assertNull(parse("tell my wife to send me mashup"))
+        assertNull(parse("tell my wife to send me mashup tell my wife to send me mashup"))
+        assertNull(parse("ask Kofi to buy me a data bundle"))
+        assertNull(parse("please text Ama to send me data"))
+        // aimed at the phone, or the user's own purchase: still ours
+        assertEquals("*567#", (parse("buy a mashup bundle") as TelcoUssd.Request.Open).flow.code)
+        assertTrue(parse("tell me my data balance") is TelcoUssd.Request.Open)
+    }
+
     /** The A20e hands the WHOLE menu as one line (seen live 2026-09-30) — rows are found anywhere in it. */
     @Test fun `a single-line Samsung menu still yields its rows`() {
         val live = "Welcome to the Bundle Portal. Please select an option 1. Proceed to buy bundle (No 4G bonus) 99. More"

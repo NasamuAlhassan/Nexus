@@ -15,9 +15,29 @@ object UssdSpeech {
 
     /** The reply, paced and in words. [intro] is spoken first ("The network says"). */
     fun forEar(reply: String, intro: String = "The network says"): String {
-        val items = items(reply)
+        val items = sameBalanceOnce(items(reply))
         if (items.isEmpty()) return "$intro.${SpokenText.PAUSE}${reply.trim()}"
         return "$intro.${SpokenText.PAUSE}" + items.joinToString(SpokenText.PAUSE.toString()) { spoken(it) }
+    }
+
+    private val KIND_BALANCE = Regex("(?i)^(current|available|actual|ledger)\\s+bal(?:ance)?\\s*[:,]?\\s*(.+)$")
+
+    /** "Current Balance: GHS 5.83. Available Balance: GHS 5.83" said twice back to back (A20e, 26 Oct 2026) — when two adjacent
+     *  balance lines carry the same figure they are one item: "Current and available balance: GHS 5.83". Different figures stay
+     *  as they are. Pure → UssdSpeechTest. */
+    internal fun sameBalanceOnce(items: List<String>): List<String> {
+        val out = ArrayList<String>()
+        var i = 0
+        while (i < items.size) {
+            val a = KIND_BALANCE.find(items[i])
+            val b = items.getOrNull(i + 1)?.let { KIND_BALANCE.find(it) }
+            if (a != null && b != null && a.groupValues[1].lowercase() != b.groupValues[1].lowercase() &&
+                a.groupValues[2].filter { it.isDigit() } == b.groupValues[2].filter { it.isDigit() } && a.groupValues[2].any { it.isDigit() }) {
+                out.add("${a.groupValues[1].replaceFirstChar { it.uppercaseChar() }} and ${b.groupValues[1].lowercase()} balance: ${a.groupValues[2]}")
+                i += 2
+            } else { out.add(items[i]); i++ }
+        }
+        return out
     }
 
     /**

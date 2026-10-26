@@ -17,8 +17,9 @@ import org.json.JSONObject
  */
 object SendPhotoTool : Tool {
     override val name = "send_photo"
-    override val description = "Take a photo NOW with Tɛkyerɛma's camera (camera=front for a selfie; beep countdown) and open ANY app that " +
-        "takes shared pictures (chat, mail, notes, drive…) with it ready to send. Pick the person there; nothing is sent until Send is confirmed."
+    override val description = "The way to SEND a new photo or selfie: call it FIRST, before opening any app. Takes it with " +
+        "Tɛkyerɛma's camera (camera=front for a selfie; beep countdown) and opens ANY app that takes shared pictures with it " +
+        "ready. Pick the person there; nothing is sent until Send is confirmed."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true

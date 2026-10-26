@@ -104,10 +104,17 @@ object TelcoUssd {
     private val BUY_LEAD = Regex("^ (?:please |kindly |can you |could you |i want to |i'd like to |i would like to |help me )*" +
         "(?:buy|purchase|get me|get) ")
 
+    /** A request that OPENS with a messaging verb aimed at a person (on the normalised goal). "me" / "us" are the phone. */
+    private val MESSAGE_TO_SOMEONE = Regex("^ (?:(?:please|kindly|can you|could you|hey) )*(?:tell|ask|message|text|whatsapp|sms|let|remind) (?!me |us |myself )")
+
     /** What [goal] asks of the network's own menu on the [network] SIM ("mtn" | "telecel" | "airteltigo"), or null. */
     fun parse(goal: String, network: String?): Request? {
         val g = " " + goal.lowercase().replace('’', '\'').replace(Regex("[^\\p{L}\\p{N}' ]"), " ").replace(Regex("\\s+"), " ").trim() + " "
         if (g.isBlank() || network == null) return null
+        // A message TO someone ("tell my wife to send me mashup", "ask Kofi for a bundle") is a message, never the user's own
+        // purchase: the word "mashup" opened MTN's *567# menu instead and the cloud brain was never asked (A20e, 26 Oct 2026,
+        // 19:02 and 19:03). "tell me …" / "ask me …" are aimed at the phone, so they stay.
+        if (MESSAGE_TO_SOMEONE.containsMatchIn(g)) return null
         val net = nets().firstOrNull { it.key == network } ?: return null
         // A question ABOUT bundles — a comparison, prices, which is cheaper — is research, never a walk into the
         // network's purchase menu (A20e audit 2026-10-01, R04: "compare MTN and Telecel data bundle prices and tell me

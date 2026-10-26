@@ -93,6 +93,8 @@ object PinPad {
     /** When the volume keys last SENT a PIN (0 = never): the post-PIN watcher says "PIN sent" only after this. */
     @Volatile var lastSentAt = 0L; private set
     @Volatile private var counter: Counter? = null
+    /** Which input last counted — only for the log line at Send, never a digit. */
+    @Volatile private var lastVia = "the volume keys"
     private val pressedAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
     private val silencing: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     @Volatile private var hushUntil = 0L
@@ -156,6 +158,7 @@ object PinPad {
             return true
         }
         val c = counter ?: Counter().also { counter = it }
+        lastVia = "the screen"
         val ev = apply(c, g)
         scope.launch { act(ctrl, c, ev) }
         return true
@@ -184,6 +187,7 @@ object PinPad {
         if (action != KeyEvent.ACTION_UP) return true
         if (silencing.remove(keyCode)) return true   // that press only silenced the reading
         val c = counter ?: Counter().also { counter = it }
+        lastVia = "the volume keys"
         val ev = when {
             eventTime - (pressedAt[keyCode] ?: eventTime) >= HOLD_MS -> c.hold()
             keyCode == KeyEvent.KEYCODE_VOLUME_DOWN -> c.down()
@@ -219,7 +223,7 @@ object PinPad {
         val sent = box.sendId?.let { ctrl.clickElement(it) } ?: ctrl.setText(box.inputId!!, c.text(), submit = true)
         c.wipe()
         lastSentAt = System.currentTimeMillis()
-        android.util.Log.i("Tekyerema", "[PINPAD] sent with the volume keys (${if (sent) "Send pressed" else "no Send button"})")
+        android.util.Log.i("Tekyerema", "[PINPAD] sent with $lastVia (${if (sent) "Send pressed" else "no Send button"})")
         disarm()
     }
 

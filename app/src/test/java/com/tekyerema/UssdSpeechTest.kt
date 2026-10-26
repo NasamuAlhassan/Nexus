@@ -20,6 +20,19 @@ class UssdSpeechTest {
                 "BOR:0.00 GHC", "J4u:0.00 GHC", "Welcome to the new world"), items)
     }
 
+    /** A20e 2026-10-26: "Current Balance, five cedis eighty three pesewas. Available Balance, five cedis eighty three pesewas." */
+    @Test fun `two balance lines with the same figure are read once`() {
+        val same = UssdSpeech.sameBalanceOnce(listOf("Current Balance: GHS 5.83", "Available Balance: GHS 5.83"))
+        assertEquals(listOf("Current and available balance: GHS 5.83"), same)
+        // different figures stay as two items; an unrelated item is untouched
+        val diff = listOf("Current Balance: GHS 5.83", "Available Balance: GHS 3.00")
+        assertEquals(diff, UssdSpeech.sameBalanceOnce(diff))
+        assertEquals(listOf("Bonus: 0", "Current and available balance: GHS 5.83"),
+            UssdSpeech.sameBalanceOnce(listOf("Bonus: 0", "Current Balance: GHS 5.83", "Available Balance: GHS 5.83")))
+        val ear = UssdSpeech.forEar("Current Balance: GHS 5.83. Available Balance: GHS 5.83.", intro = "M T N says")
+        assertEquals(ear, 1, Regex("(?i)balance").findAll(ear).count())
+    }
+
     @Test fun `zeros are said as none, big megabytes as gigabytes, one pause per item`() {
         val ear = UssdSpeech.forEar(mtn)
         assertTrue(ear, ear.contains("Internet bundle, about 11.8 gigabytes."))
