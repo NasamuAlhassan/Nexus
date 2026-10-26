@@ -114,7 +114,11 @@ object OnDeviceVoice {
     fun plan(text: String, pauseMs: Long = 450, breakMs: Long = 900, maxChars: Int = 140, firstChars: Int = 60, breaths: Boolean = false, breathScale: Double = 1.0): List<Piece> {
         val out = ArrayList<Piece>()
         for (seg in SpokenText.segments(text, pauseMs, breakMs)) {
-            for (chunk in SpeechChunks.split(seg.text, maxChars)) {
+            val chunks = SpeechChunks.split(seg.text, maxChars)
+            for ((ci, chunk) in chunks.withIndex()) {
+                // A long text is cut into chunks, and the breath between two CHUNKS used to be lost (only the breaths inside a chunk
+                // were made): "…wear masks;" ran straight into "however, …" (reading probe, 26 Oct 2026).
+                if (breaths && ci > 0) breathMs(chunks[ci - 1].trimEnd().lastOrNull() ?: ' ', breathScale).takeIf { it > 0 }?.let { out += Piece(null, it) }
                 if (breaths) out += breathe(chunk, scale = breathScale)
                 else if (out.none { it.text != null }) out += opening(chunk, firstChars).map { Piece(it) }
                 else out += Piece(chunk)

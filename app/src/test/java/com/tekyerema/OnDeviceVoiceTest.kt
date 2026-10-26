@@ -104,4 +104,11 @@ class OnDeviceVoiceTest {
         assertEquals(0.7f, OnDeviceVoice.parse("""{"type":"vits-piper","model":"m.onnx","speed":0.7}""")!!.speed, 0.0001f)
         assertEquals(1f, OnDeviceVoice.parse("""{"type":"vits-piper","model":"m.onnx"}""")!!.speed, 0.0001f)
     }
+
+    @Test fun `a long text keeps its breath between chunks as well as inside them`() {
+        val text = "Dr. Mensah, speaking in Accra on Tuesday morning, urged the public to wear masks in crowded places; " +
+            "however, many people ignored the call and went on as before, which worried the ministry."
+        val p = OnDeviceVoice.plan(text, maxChars = 100, firstChars = 60, breaths = true)
+        for (i in 0 until p.lastIndex) assertTrue("two spoken pieces ran together at $i: $p", p[i].text == null || p[i + 1].text == null)
+    }
 }
