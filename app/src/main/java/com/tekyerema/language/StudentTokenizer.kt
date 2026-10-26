@@ -26,10 +26,13 @@ class StudentTokenizer(rows: List<Triple<String, Double, Int>>) {
         val sb = StringBuilder()
         var pendingSpace = false
         for (ch in nfkc) {
-            val blank = ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\u000b' || ch == '\u000c'
+            val c = ch.code
+            // tab, newline, vertical tab, form feed, carriage return, space, the zero-width characters U+200B-200D and the
+            // line/paragraph separators are all read as a space by the real normaliser
+            val blank = c == 32 || c in 9..13 || c in 0x200b..0x200d || c == 0x2028 || c == 0x2029
             if (blank) { pendingSpace = sb.isNotEmpty() }
-            else if (Character.isISOControl(ch) || ch == '​' || ch == '﻿') { /* dropped by nmt_nfkc */ }
-            else { if (pendingSpace) sb.append('▁'); pendingSpace = false; sb.append(ch) }
+            else if (c == 0xfeff) { /* byte-order mark: dropped */ }
+            else { if (pendingSpace) sb.append(0x2581.toChar()); pendingSpace = false; sb.append(ch) }
         }
         return if (sb.isEmpty()) "" else "▁$sb"
     }

@@ -1,6 +1,7 @@
 {
  "info": {
   "model_type": 2,
+  "model_type_name": "BPE",
   "vocab_size_model": 256000,
   "pieces_json_len": 30667,
   "normalizer": {
@@ -873,6 +874,296 @@
    ],
    "unknown_pieces": [],
    "roundtrip": "zero zero zero"
+  },
+  {
+   "text": "zero​width and joiner‍test",
+   "normalized": "zero width and joiner test",
+   "pieces": [
+    "▁zero",
+    "▁wid",
+    "th",
+    "▁and",
+    "▁jo",
+    "iner",
+    "▁test"
+   ],
+   "n_pieces": 7,
+   "truncated": false,
+   "ids": [
+    4,
+    16635,
+    8907,
+    359,
+    441,
+    821,
+    5315,
+    3418,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "zero width and joiner test"
+  },
+  {
+   "text": "soft­hyphen",
+   "normalized": "soft­hyphen",
+   "pieces": [
+    "▁soft",
+    "­",
+    "hy",
+    "phen"
+   ],
+   "n_pieces": 4,
+   "truncated": false,
+   "ids": [
+    4,
+    16326,
+    3,
+    1783,
+    26611,
+    2
+   ],
+   "unknown_pieces": [
+    "­"
+   ],
+   "roundtrip": "softhyphen"
+  },
+  {
+   "text": "﻿starts with BOM",
+   "normalized": " starts with BOM",
+   "pieces": [
+    "▁starts",
+    "▁with",
+    "▁B",
+    "OM"
+   ],
+   "n_pieces": 4,
+   "truncated": false,
+   "ids": [
+    4,
+    25785,
+    1611,
+    114,
+    5276,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "starts with BOM"
+  },
+  {
+   "text": "non breaking space",
+   "normalized": "non breaking space",
+   "pieces": [
+    "▁non",
+    "▁bre",
+    "aking",
+    "▁space"
+   ],
+   "n_pieces": 4,
+   "truncated": false,
+   "ids": [
+    4,
+    1043,
+    3347,
+    11240,
+    15188,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "non breaking space"
+  },
+  {
+   "text": "narrow no-break",
+   "normalized": "narrow no-break",
+   "pieces": [
+    "▁nar",
+    "row",
+    "▁no",
+    "-",
+    "break"
+   ],
+   "n_pieces": 5,
+   "truncated": false,
+   "ids": [
+    4,
+    2058,
+    5897,
+    230,
+    29955,
+    25507,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "narrow no-break"
+  },
+  {
+   "text": "é versus é",
+   "normalized": "é versus é",
+   "pieces": [
+    "▁é",
+    "▁vers",
+    "us",
+    "▁é"
+   ],
+   "n_pieces": 4,
+   "truncated": false,
+   "ids": [
+    4,
+    353,
+    3503,
+    63,
+    353,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "é versus é"
+  },
+  {
+   "text": "Ɛbɛ Ɔkɔ ... Ɛyɛ Ɔman",
+   "normalized": "Ɛbɛ Ɔkɔ ... Ɛyɛ Ɔman",
+   "pieces": [
+    "▁Ɛbɛ",
+    "▁Ɔ",
+    "kɔ",
+    "▁...",
+    "▁Ɛyɛ",
+    "▁Ɔ",
+    "man"
+   ],
+   "n_pieces": 7,
+   "truncated": false,
+   "ids": [
+    4,
+    14361,
+    4391,
+    3108,
+    503,
+    20389,
+    4391,
+    615,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "Ɛbɛ Ɔkɔ ... Ɛyɛ Ɔman"
+  },
+  {
+   "text": "it’s a curly apostrophe",
+   "normalized": "it’s a curly apostrophe",
+   "pieces": [
+    "▁it",
+    "’",
+    "s",
+    "▁a",
+    "▁cur",
+    "ly",
+    "▁ap",
+    "ostr",
+    "ophe"
+   ],
+   "n_pieces": 9,
+   "truncated": false,
+   "ids": [
+    4,
+    607,
+    3,
+    29917,
+    11,
+    3788,
+    689,
+    440,
+    8289,
+    16976,
+    2
+   ],
+   "unknown_pieces": [
+    "’"
+   ],
+   "roundtrip": "its a curly apostrophe"
+  },
+  {
+   "text": "line one\r\nline two",
+   "normalized": "line one  line two",
+   "pieces": [
+    "▁line",
+    "▁one",
+    "▁line",
+    "▁two"
+   ],
+   "n_pieces": 4,
+   "truncated": false,
+   "ids": [
+    4,
+    7040,
+    2546,
+    7040,
+    4201,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "line one line two"
+  },
+  {
+   "text": "Pay ₵50 now",
+   "normalized": "Pay ₵50 now",
+   "pieces": [
+    "▁Pay",
+    "▁",
+    "₵",
+    "50",
+    "▁now"
+   ],
+   "n_pieces": 5,
+   "truncated": false,
+   "ids": [
+    4,
+    6078,
+    29910,
+    3,
+    2346,
+    4424,
+    2
+   ],
+   "unknown_pieces": [
+    "₵"
+   ],
+   "roundtrip": "Pay 50 now"
+  },
+  {
+   "text": "[P1], [A1]. [N1]!",
+   "normalized": "[P1], [A1]. [N1]!",
+   "pieces": [
+    "▁[",
+    "P",
+    "1]",
+    ",",
+    "▁[",
+    "A",
+    "1]",
+    ".",
+    "▁[",
+    "N",
+    "1]",
+    "!"
+   ],
+   "n_pieces": 12,
+   "truncated": false,
+   "ids": [
+    4,
+    554,
+    30000,
+    1852,
+    29930,
+    554,
+    29936,
+    1852,
+    29926,
+    554,
+    29948,
+    1852,
+    30025,
+    2
+   ],
+   "unknown_pieces": [],
+   "roundtrip": "[P1], [A1]. [N1]!"
   },
   {
    "text": "Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again Please repeat the message to the recipient again",
