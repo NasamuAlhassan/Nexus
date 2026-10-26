@@ -306,6 +306,7 @@ class RunGoalReceiver : BroadcastReceiver() {
                 intent.getStringExtra("smt_prepack") == "1")
             return
         }
+        intent.getStringExtra("student_reply")?.let { text -> StudentMtDebug.reply(context.applicationContext, text); return }
         intent.getStringExtra("tts_test")?.let { text ->
             com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"),
                 save = intent.getStringExtra("tts_save") == "1")

@@ -5,6 +5,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.tekyerema.language.StudentTokenizer
 import com.tekyerema.language.StudentTranslator
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 
@@ -44,5 +45,22 @@ object StudentMtDebug {
                 }
             } catch (t: Throwable) { Log.w("Tekyerema", "[SMT] failed: $t") }
         }.start()
+    }
+
+    /** One reply through ReplyLocalizer + the offline student (tags, fallbacks, timing), plus the app's memory before/after:
+     *  --es student_reply "Your message to Ama has been sent." */
+    fun reply(context: Context, text: String) {
+        com.tekyerema.language.StudentMt.init(context)
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+            fun pssMb() = android.os.Debug.MemoryInfo().also { android.os.Debug.getMemoryInfo(it) }.totalPss / 1024
+            val before = pssMb()
+            val t0 = SystemClock.uptimeMillis()
+            val out = com.tekyerema.language.ReplyLocalizer(com.tekyerema.language.StudentMt, enabled = { true }, waitMs = { 30_000L })
+                .toTwi(text, 30_000L, everything = true)
+            Log.i("Tekyerema", "[SMT-REPLY] ${SystemClock.uptimeMillis() - t0} ms \"$text\" -> ${out?.let { "\"$it\"" } ?: "null (English / fixed line kept)"}; PSS ${before} -> ${pssMb()} MB")
+            com.tekyerema.language.StudentMt.release()
+            System.gc()
+            Log.i("Tekyerema", "[SMT-REPLY] after release PSS ${pssMb()} MB")
+        }
     }
 }
