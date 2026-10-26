@@ -300,6 +300,12 @@ class RunGoalReceiver : BroadcastReceiver() {
             }
             return
         }
+        // The offline student translator on its golden lines: --es student_mt smt --es smt_variant int8|q4 --es smt_prepack 1|0
+        intent.getStringExtra("student_mt")?.let { folder ->
+            StudentMtDebug.run(context.applicationContext, folder, intent.getStringExtra("smt_variant") ?: "int8",
+                intent.getStringExtra("smt_prepack") == "1")
+            return
+        }
         intent.getStringExtra("tts_test")?.let { text ->
             com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"),
                 save = intent.getStringExtra("tts_save") == "1")
