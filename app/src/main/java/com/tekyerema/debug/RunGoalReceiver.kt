@@ -361,6 +361,16 @@ class RunGoalReceiver : BroadcastReceiver() {
         // console) never reach the key filter on the Pixel emulator (13 October 2026), so this is how the pad's counting,
         // typing and Send are exercised against the USSD simulator; the physical-key delivery is the phone's test.
         //   adb ... --es pinpad_key down|up|hold_down|hold_up
+        // The screen as the pad (money/PinPad.onGesture), bypassing the touch layer: `--es pinpad_touch tap|long|two`.
+        // Real touches on the layer are exercised with `adb shell input tap` / `input swipe x y x y 700` while it is up.
+        intent.getStringExtra("pinpad_touch")?.let { which ->
+            val ctrl = AgentEngine.currentController() ?: run { Log.i("Tekyerema", "[PINPAD] no accessibility controller"); return }
+            val g = when (which) { "long" -> com.tekyerema.money.PinPad.Gesture.LONG_PRESS; "two" -> com.tekyerema.money.PinPad.Gesture.TWO_FINGER_TAP
+                else -> com.tekyerema.money.PinPad.Gesture.TAP }
+            val took = com.tekyerema.money.PinPad.onGesture(ctrl, g, android.os.SystemClock.uptimeMillis())
+            Log.i("Tekyerema", "[PINPAD] debug touch $which → ${if (took) "taken by the pad" else "not the pad's (not armed / no secure step / touch pad off)"}")
+            return
+        }
         intent.getStringExtra("pinpad_key")?.let { which ->
             val ctrl = AgentEngine.currentController() ?: run { Log.i("Tekyerema", "[PINPAD] no accessibility controller"); return }
             val code = if (which.endsWith("down")) android.view.KeyEvent.KEYCODE_VOLUME_DOWN else android.view.KeyEvent.KEYCODE_VOLUME_UP

@@ -78,11 +78,16 @@ object PinPad {
     /** How many digits the PIN has — it is sent on its own after the last one. MoMo: 4. */
     fun length(): Int = try { com.tekyerema.core.config.AppConfig.int("pin.volumeKeys.length", MIN_DIGITS) } catch (_: Throwable) { MIN_DIGITS }
 
+    /** Whether the screen is a PIN pad too (a tap counts, a long press keys the digit in — [onGesture]). */
+    fun touchEnabled(): Boolean = enabled() && try { com.tekyerema.core.config.AppConfig.bool("pin.touchPad.enabled", true) } catch (_: Throwable) { true }
+
     /** Said after the PIN hand-off line, so the user knows the keys are there. */
     fun handOffTip(): String = if (!enabled()) "" else if (com.tekyerema.core.Taught.teach("pin.volumeKeys.tip"))
         " You can also enter it with the volume keys: press volume down once for each " +
         "number, then volume up to put it in — volume up on its own is a zero. It sends by itself after the last digit. " +
-        "A press while I'm talking only stops me." else " The volume keys work too."   // taught three times, then short
+        (if (touchEnabled()) "The screen works the same way: tap for each number, press and hold to put it in, tap with two fingers to take one back, three fingers give the screen back to the keypad. " else "") +
+        "A press while I'm talking only stops me." else if (touchEnabled()) " The volume keys and the screen work too."
+        else " The volume keys work too."   // taught three times, then short
 
     @Volatile private var armed = false
     /** When the volume keys last SENT a PIN (0 = never): the post-PIN watcher says "PIN sent" only after this. */
@@ -96,12 +101,65 @@ object PinPad {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** The network's PIN screen was just handed to the user. */
-    fun arm() { sendJob?.cancel(); counter?.wipe(); counter = Counter(); silencing.clear(); hushUntil = 0L; armed = true }
+    fun arm() {
+        sendJob?.cancel(); counter?.wipe(); counter = Counter(); silencing.clear(); hushUntil = 0L; armed = true
+        com.tekyerema.accessibility.PinTouchPad.watch()   // the touch layer follows [handles] while the pad is armed
+    }
 
     fun disarm() { armed = false; sendJob?.cancel(); counter?.wipe(); counter = null; silencing.clear() }
 
     /** Whether the volume keys are the PIN pad right now. */
     fun handles(): Boolean = enabled() && armed && com.tekyerema.voice.SecureStep.active()
+
+    /** Armed (the PIN screen was handed over): the touch layer's watchdog keeps running while this is true. */
+    fun isArmed(): Boolean = armed
+
+    /** What a touch on the PIN screen means: the screen is the volume keys. */
+    enum class Gesture {
+        /** Volume DOWN: one more for the digit being counted. */
+        TAP,
+        /** Volume UP: the counted digit goes in (nothing counted is a 0). */
+        LONG_PRESS,
+        /** The key HELD: the counted digit is dropped, or else the last digit is taken out. */
+        TWO_FINGER_TAP
+    }
+
+    /** The gesture a finished touch was, or null (a swipe or drag is nothing). A long press is decided by the clock while
+     *  the finger is still down ([PinTouchPad]); this classifies what ended before it. Pure → PinTouchPadTest. */
+    fun classify(durationMs: Long, maxPointers: Int, movedPx: Float, slopPx: Float, longPressMs: Long): Gesture? = when {
+        movedPx > slopPx -> null
+        durationMs >= longPressMs -> null
+        maxPointers >= 3 -> null   // three fingers hand the screen back to the dialog ([PinTouchPad]); never a delete as well
+        maxPointers >= 2 -> Gesture.TWO_FINGER_TAP
+        else -> Gesture.TAP
+    }
+
+    /** The counting for a gesture — the same [Counter] the volume keys drive. Pure → PinTouchPadTest. */
+    internal fun apply(c: Counter, g: Gesture): Counter.Event = when (g) {
+        Gesture.TAP -> c.down()
+        Gesture.LONG_PRESS -> c.up()
+        Gesture.TWO_FINGER_TAP -> c.hold()
+    }
+
+    /**
+     * From the touch layer over the network's PIN screen. True = the touch was the PIN pad's. The same rules as the keys: a
+     * touch while the PIN line is still being read only STOPS the reading, a touch in the pause before Send stops the send,
+     * nothing is spoken, logged or kept.
+     */
+    fun onGesture(ctrl: AccessibilityController, g: Gesture, eventTime: Long): Boolean {
+        if (!handles() || !touchEnabled()) return false
+        sendJob?.cancel()   // a touch in the pause before Send: the user is still at it
+        val talking = try { com.tekyerema.voice.NowSpeaking.active } catch (_: Throwable) { false }
+        if (talking || eventTime < hushUntil) {
+            if (talking) { try { com.tekyerema.voice.VoiceEngine.hush() } catch (_: Throwable) {}; scope.launch { buzz(longArrayOf(0, 10, 60, 10)) } }
+            hushUntil = eventTime + HUSH_GRACE_MS
+            return true
+        }
+        val c = counter ?: Counter().also { counter = it }
+        val ev = apply(c, g)
+        scope.launch { act(ctrl, c, ev) }
+        return true
+    }
 
     /**
      * From the accessibility service's key filter. True = the key was the PIN pad's (consumed: the volume doesn't move, and
