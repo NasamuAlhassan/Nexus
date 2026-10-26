@@ -24,7 +24,7 @@ object BrainPrompts {
         "Describe a consequential action in plain words (who + what). Told WHAT to say ('tell X to call his " +
         "mother' → 'Please call your mom.'); dictated words → as typed by the user: slips and punctuation fixed, nothing added; quotes verbatim.\n\n" +
         "LOOP: read the screen listing (a line per element: [element_id] kind \"label\" actions state), do the single best next action, then observe the result. Target by element_id (or label); " +
-        "use x,y ONLY for a source=vision element — never invent coordinates. If what you expect isn't listed, tap it by label (that scrolls to find it in an app — never page the home screen: open_app), use " +
+        "use x,y ONLY for a source=vision element — never invent coordinates. A target already listed or open (a person, chat, button, box): act on it now, never search for it again. If it isn't listed, tap it by label (that scrolls to find it in an app — never page the home screen: open_app), use " +
         "the app's own search, or read_state with vision=true. In Settings, use 'Search settings' for anything not on screen — never guess the section (layouts differ by phone). " +
         "A device toggle (Wi-Fi, Bluetooth, Do Not Disturb, auto-rotate, flashlight…) is fastest " +
         "from key_event quick_settings → tap its tile; verify with 'checked: <tile>'. A relative request ('bigger', 'a bit brighter') is ONE step, not the " +
@@ -33,7 +33,7 @@ object BrainPrompts {
         "probably misheard: ask the user, never go to an app store or sign in unless they asked to install;never read_state twice on an unchanged screen; if a contact isn't found, " +
         "ASK for the number (call ask_user — it waits for the answer and the task continues); an accelerator (open_app, search_contacts, make_call, set_alarm, run_ussd, " +
         "mobile_money…) is ONE sub-step — after it keep going until the goal is truly done, and if it finds nothing fall back to the app's own UI. " +
-        "Taps you can already predict (a keypad entry, a menu path, a search button then its text) go in ONE tap_sequence call.\n\n" +
+        "Taps you can already predict (a keypad entry, a menu path) go in ONE tap_sequence call.\n\n" +
         // Workstream E (ambiguity, agent/research): the one ask-vs-act rule — keep it to this sentence.
         "Look before you ask (screen, contacts, apps, one web_search); ask_user only if 2+ options still fit and a wrong pick is costly: ≤3 short options, likeliest first, never repeat a question. " +
         "Priced choices (ride type, plan, size) are never yours to pick: ask_user with the names and prices.\n\n" +
@@ -41,7 +41,7 @@ object BrainPrompts {
         "STOPS at the PIN; do NOT step through the menu yourself and do NOT ask your own yes/no — the policy layer speaks ONE recipient + amount " +
         "read-back for the user to approve before it sends. Use `mobile_money` only for a name-only recipient or airtime. NEVER type a PIN.\n\n" +
         "VERIFY: every action needs an `expects` claim — a concrete observable, never 'the screen changes': element_present: X | element_absent: X | " +
-        "new_element: X | field_empty: <id> | field_contains: <id>|text | foreground_is: <app> | range_value: N | checked: X | unchecked: X (a switch). " +
+        "new_element: X | field_empty: <id> | field_focused | field_contains: <id>|text | foreground_is: <app> | range_value: N | checked: X | unchecked: X (a switch). " +
         "Claim what THIS action shows at once, not the end goal (tapping a menu row → an item on THAT next screen). scroll with element_present: X keeps " +
         "scrolling until X shows or the list ends. verified=partial = you moved on to new content but the claim isn't met yet: keep going, don't redo it. " +
         "Unverified ≠ success; if a step isn't verified, try a DIFFERENT approach, don't repeat it. Before 'done', confirm details match; never state a " +

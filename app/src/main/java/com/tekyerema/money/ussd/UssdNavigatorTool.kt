@@ -165,7 +165,10 @@ object UssdNavigatorTool : Tool {
             if (root == null || root !in roots) args.put(ARG_ROOT, roots.firstOrNull()
                 ?: return ToolResult(false, "I don't have the network's official menu code for this SIM, so I won't guess one.", recoverable = false))
             args.put(MoMoSendTool.ARG_SIM, sim.provider)
-            args.str("amount")?.let { com.tekyerema.money.MoneyLimits.parseAmount(it)?.let { a -> args.put("amount", a.toPlainString()) } ?: args.remove("amount") }
+            // The spending limit holds on a menu walk too (a savings deposit, a fee, a bill): before this it applied to sends only.
+            args.str("amount")?.let { com.tekyerema.money.MoneyLimits.parseAmount(it)?.let { a ->
+                com.tekyerema.money.MoneyLimits.check(a)?.let { problem -> return ToolResult(false, problem, recoverable = false) }
+                args.put("amount", a.toPlainString()) } ?: args.remove("amount") }
             // A goal walk can pay (a bill, a merchant, school fees): the on-call scam warning is read back as on a send or airtime (audit, 22 Oct 2026).
             if (com.tekyerema.tools.MoneyPrivacy.onCall(ctx.appContext)) args.put(MoMoSendTool.ARG_ON_CALL, true) else args.remove(MoMoSendTool.ARG_ON_CALL)
             if (args.str(ARG_CONTACT) != null || args.str("number") != null)

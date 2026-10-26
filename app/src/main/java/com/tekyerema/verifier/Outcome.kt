@@ -24,6 +24,9 @@ sealed class Expectation {
     data class FieldEmpty(val id: Int?) : Expectation()
     data class FieldFilled(val id: Int?) : Expectation()
     data class FieldContains(val id: Int?, val text: String) : Expectation()
+    /** A text box has the cursor (the keyboard is up for it): what "tap the search box" should leave. [label] is only a hint,
+     *  never required — a box's name differs between its hint and its caption. */
+    data class FieldFocused(val label: String?) : Expectation()
     data class RangeValue(val value: Double, val tolerance: Double) : Expectation()
     data class ForegroundIs(val token: String) : Expectation()
     /** A switch/checkbox/toggle tile labelled [label] is ON ([on]=true) or OFF — the goal state of "turn X on/off". */
@@ -61,6 +64,8 @@ object Expects {
                 arg.takeIf { it.isNotEmpty() }?.let { Expectation.ElementAbsent(it) } ?: Expectation.Unparsed(s)
             "new_element", "new" ->
                 arg.takeIf { it.isNotEmpty() }?.let { Expectation.NewElement(it) } ?: Expectation.Unparsed(s)
+            "field_focused", "focused", "field_focus", "input_focused", "cursor_in", "keyboard_open", "keyboard_shown" ->
+                Expectation.FieldFocused(arg.takeIf { it.isNotEmpty() })
             "field_empty" -> Expectation.FieldEmpty(arg.toIntOrNull())
             "field_filled", "field_nonempty", "field_not_empty" -> Expectation.FieldFilled(arg.toIntOrNull())
             "field_contains" -> {
@@ -180,6 +185,12 @@ object OutcomeVerifier {
                         "new element '${nowEls.first { !it.editable }.label!!.take(60)}' appeared (it left the text box and now shows on the page)")
                     else -> VerificationResult(false, "'${e.label}' was already present before the action (${prior.size} before, ${now.size} now) — not new; possible duplicate or no-op")
                 }
+            }
+            is Expectation.FieldFocused -> {
+                // The claim is that a text box now has focus: any editable element with it counts (the name is only a hint).
+                val field = after?.elements?.firstOrNull { it.editable && it.focused }
+                if (field != null) VerificationResult(true, "a text box has the cursor${field.hint?.takeIf { it.isNotBlank() }?.let { " ('${it.take(40)}')" } ?: ""}")
+                else VerificationResult(false, "no text box has the cursor yet")
             }
             is Expectation.FieldEmpty -> {
                 val field = e.id?.let { after?.element(it) }

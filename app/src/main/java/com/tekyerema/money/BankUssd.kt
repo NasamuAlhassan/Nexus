@@ -96,6 +96,7 @@ object BankUssd {
     fun parse(goal: String): Request? {
         val g = norm(goal)
         if (g.isEmpty()) return null
+        if (com.tekyerema.agent.MessageToSomeone.matches(g)) return null   // "tell Kofi to send money from my Stanbic account" is a message
         if (SUPPORTED_Q.containsMatchIn(g)) return Request.Supported
         val found = findBank(g)
         // Mobile Money is not a bank: "send money from my MoMo to my Stanbic account" stays with Mobile Money — unless the

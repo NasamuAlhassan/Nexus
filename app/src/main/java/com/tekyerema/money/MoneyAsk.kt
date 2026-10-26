@@ -40,6 +40,7 @@ object MoneyAsk {
 
     /** The request as a financial ask, or null when it is not one (or is one this layer must leave to the planner). */
     fun parse(text: String): Ask? {
+        if (com.tekyerema.agent.MessageToSomeone.matches(text)) return null   // "tell Kofi to send me 50 cedis" is a message, not a send by the user
         // Repaired here for EVERY money request, typed ones too — on purpose: "typed" text is often a keyboard's own
         // dictation, and in a request that is already about money "10 pesos" can only be pesewas. (A typed request
         // that is not about money never reaches a repair: VoiceController.runTurn repairs speech only.)

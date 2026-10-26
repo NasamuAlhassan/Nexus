@@ -201,6 +201,9 @@ object FastIntentClassifier {
     fun classify(raw: String, routines: Boolean = true): FastIntent? {
         val g = raw.trim().lowercase().replace('’', '\'').replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
         if (g.isEmpty()) return null
+        // A message FOR someone ("tell Ama my battery is dead", "tell Kofi to go back to the shop"): its words are not commands
+        // for the phone, whatever keywords they hold — the brain understands it (agent/MessageToSomeone).
+        if (MessageToSomeone.matches(g)) return null
         // X-03: phrasings from the per-locale rule files come first (config, not code).
         if (com.tekyerema.core.config.FeatureFlags.isEnabled("X-03", true)) RouterRules.match(g)?.let { return it }
         // H-02: a routine the user taught, by its name — then a new routine being taught. Both are whole utterances and

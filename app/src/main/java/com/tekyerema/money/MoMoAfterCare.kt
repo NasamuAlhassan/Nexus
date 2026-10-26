@@ -110,7 +110,7 @@ object MoMoAfterCare {
             "\\b(?:momo|mobile money) (?:reversal|sent by mistake)\\b")
 
     /** "I sent money to the wrong number" / "I sent it to the wrong person" / "reverse a MoMo transfer". Pure. */
-    fun isWrongTransfer(goal: String): Boolean =
+    fun isWrongTransfer(goal: String): Boolean = !com.tekyerema.agent.MessageToSomeone.matches(goal) &&   // "tell Kofi I sent it to the wrong number" is a message
         WRONG.containsMatchIn(goal.lowercase().replace('’', '\'').replace(Regex("[^\\p{L}\\p{N}' ]"), " ").replace(Regex("\\s+"), " "))
 
     /** The network's customer-care number from config (`connectors.mobileMoney.networks.<net>.care`); MTN's is 100. */

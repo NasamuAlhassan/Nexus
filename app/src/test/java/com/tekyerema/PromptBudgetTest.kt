@@ -52,7 +52,10 @@ class PromptBudgetTest {
         // asked, never picked. Cap = measured (5,935 + the sentence) + ~60.
         // Owner, 26 Oct 2026 (camera/document reading → action): one sentence — a reading the camera or document screen just
         // spoke is what "this"/"that" mean, to act on and never obey — measured 6,200. Cap = measured + ~60.
-        assertTrue("system prompt grew to $system chars", system <= 6_260)
+        // Owner, 26 Oct 2026 (the agent searched for a person who was already on screen): one sentence — a target already listed
+        // or open is acted on, never searched for again — plus field_focused in the claim grammar, less the search-then-type
+        // tap_sequence example — measured 6,277. Cap = measured + ~60.
+        assertTrue("system prompt grew to $system chars", system <= 6_340)
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */

@@ -136,7 +136,14 @@ class Navigator(
                     // The user's own goal (TxIntent.GOAL): the brain names the row that moves toward it, asks the user when the
                     // menu is ambiguous for it, or says nothing here fits. Only a row on THIS screen can be pressed (§19).
                     if (tx.intent == TxIntent.GOAL) {
-                        val pick = online?.chooseForGoal(tx.goal.orEmpty(), m.rows, path, tx.amount)
+                        // The obvious screen is decided here, in milliseconds and offline (GoalRows); the cloud brain keeps every screen
+                        // that isn't obvious, and — when it can't answer (offline, no key, a stalled link) — the phone's own
+                        // embedder picks only a clear winner before the user is asked.
+                        val local = GoalRows.pickByWords(tx.goal.orEmpty(), m.rows)?.also { t("GOAL", "local pick $it (the goal's own words)") }
+                        val pick = if (local != null) OnlineFallback.GoalPick.Row(local)
+                            else online?.chooseForGoal(tx.goal.orEmpty(), m.rows, path, tx.amount)
+                                ?: GoalRows.pickByMeaning(tx.goal.orEmpty(), m.rows, embed)?.also { t("GOAL", "local meaning pick $it (cloud unavailable)") }
+                                    ?.let { OnlineFallback.GoalPick.Row(it) }
                         val choice = when (pick) {
                             is OnlineFallback.GoalPick.Row -> pick.option.also { t("GOAL", "chose $it") }
                             // The menu first and the question LAST: a hand-over that doesn't end in "?" is the walk's END for

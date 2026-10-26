@@ -30,7 +30,12 @@ object DoneCheck {
      * Null when the request names no page, or its last page is in the heading; otherwise what is missing and what the
      * screen shows instead. [heading] = the final screen's first labels (only the first three count, with the window title).
      */
+    /** A web page, not a page of an app: "open the Apple website" is done when the browser is in front — it once sent the planner to
+     *  open_app "Apple website" (Infinix and A20e traces, 26 Oct 2026). */
+    private val WEB_PAGE = Regex("(?i)\\b(?:web ?sites?|web ?pages?|url|link)\\b|\\b[a-z0-9-]+\\.(?:com|org|net|gh|io|co|edu|gov)\\b")
+
     fun check(goal: String, screenTitle: String?, heading: List<String>): NotThere? {
+        if (WEB_PAGE.containsMatchIn(goal)) return null
         val target = targets(goal).lastOrNull() ?: return null
         val wanted = tokens(target).filter { it !in STOP }
         if (wanted.isEmpty()) return null
