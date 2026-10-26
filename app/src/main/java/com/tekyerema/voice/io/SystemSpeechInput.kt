@@ -94,6 +94,9 @@ data class SystemSpeechConfig(
     val completeSilenceMs: Long = 2_000,
     val possiblyCompleteSilenceMs: Long = 1_500,
     val minimumLengthMs: Long = 0,
+    /** A yes/no answer is one word: the recognizer need not wait the 2 s a sentence gets for the user to go on (owner, 26 Oct 2026: "the wait makes things feel laggy"). */
+    val yesNoCompleteSilenceMs: Long = 900,
+    val yesNoPossiblyCompleteSilenceMs: Long = 600,
     /** A new SpeechRecognizer per listen: the only sure way a stopped session's late callbacks can't reach the next
      *  one (field reports: ERROR_CLIENT / leaked results on quick restarts; destroy + recreate fixed it). */
     val freshPerListen: Boolean = true,
@@ -124,6 +127,8 @@ data class SystemSpeechConfig(
                 completeSilenceMs = o.optLong("completeSilenceMs", d.completeSilenceMs),
                 possiblyCompleteSilenceMs = o.optLong("possiblyCompleteSilenceMs", d.possiblyCompleteSilenceMs),
                 minimumLengthMs = o.optLong("minimumLengthMs", d.minimumLengthMs),
+                yesNoCompleteSilenceMs = o.optLong("yesNoCompleteSilenceMs", d.yesNoCompleteSilenceMs),
+                yesNoPossiblyCompleteSilenceMs = o.optLong("yesNoPossiblyCompleteSilenceMs", d.yesNoPossiblyCompleteSilenceMs),
                 freshPerListen = o.optBoolean("freshPerListen", d.freshPerListen),
                 patientRelistens = o.optInt("patientRelistens", d.patientRelistens).coerceIn(0, 3),
                 nbestRerank = o.optBoolean("nbestRerank", d.nbestRerank)
@@ -228,7 +233,9 @@ class SystemSpeechInput(
                     languageTag = if (fallbackThisListen && cfg.fallbackTag.isNotBlank()) cfg.fallbackTag else tag(cfg), preferOffline = preferOffline,
                     maxResults = if (spec.purpose == ListenPurpose.YES_NO) cfg.yesNoMaxResults else maxOf(cfg.maxResults, spec.maxAlternatives),
                     partials = cfg.partials && !spec.sensitive,
-                    silenceMs = if (cfg.silenceExtras) Triple(cfg.completeSilenceMs, cfg.possiblyCompleteSilenceMs, cfg.minimumLengthMs) else null
+                    silenceMs = if (!cfg.silenceExtras) null
+                        else if (spec.purpose == ListenPurpose.YES_NO) Triple(cfg.yesNoCompleteSilenceMs, cfg.yesNoPossiblyCompleteSilenceMs, cfg.minimumLengthMs)
+                        else Triple(cfg.completeSilenceMs, cfg.possiblyCompleteSilenceMs, cfg.minimumLengthMs)
                 )
                 val out = session(request, events, cfg, playCue = cue)
                 cue = false
