@@ -254,10 +254,10 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
         lastUsedAt = android.os.SystemClock.elapsedRealtime()
         if (!OnDeviceVoice.speaks(s, language)) return false
         if (!enabled() || loadError != null) return false
-        // A released voice (low memory) takes ~7 s to load again on the A20e: the owner heard 10 s of silence (26 Oct 2026). The
+        // OFF by default (owner, 26 Oct 2026: "I still want my Kafui voice"): a different voice for one line was not wanted. A released voice (low memory) takes ~7 s to load again on the A20e: the owner heard 10 s of silence (26 Oct 2026). The
         // English line goes to the phone's own engine NOW (return false → the next voice in the chain) while this one reloads in
         // the background for the next line. Twi has no other voice, so it waits for its load.
-        if (engine == null && s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.coldFallback", true)) {
+        if (engine == null && s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.coldFallback", false)) {
             Log.i("Tekyerema", "[TTS] on-device voice is cold — the phone's engine says this line; reloading in the background")
             warm()
             return false
