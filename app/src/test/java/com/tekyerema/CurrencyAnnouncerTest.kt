@@ -18,6 +18,14 @@ class CurrencyAnnouncerTest {
         assertEquals("Twenty cedis.", g.offer("note_20", 0.96, 600))
     }
 
+    @Test fun `a class v2 confuses needs a higher bar - a 1 cedi coin at 0_94 does not speak, at 0_98 it does`() {
+        val g = a()
+        assertNull(g.offer("coin_1_cedi", 0.94, 100))
+        assertNull(g.offer("coin_1_cedi", 0.94, 600))        // two agreeing frames, but under that class's bar
+        assertNull(g.offer("coin_1_cedi", 0.98, 1100))
+        assertEquals("One cedi — a coin.", g.offer("coin_1_cedi", 0.98, 1600))
+    }
+
     @Test fun `a sub-gate frame never speaks and breaks the run`() {
         val g = a()
         assertNull(g.offer("note_50", 0.70, 100))            // unsure
