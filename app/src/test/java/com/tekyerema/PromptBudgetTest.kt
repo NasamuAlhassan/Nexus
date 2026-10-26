@@ -46,7 +46,9 @@ class PromptBudgetTest {
         assertTrue("compiled tool schema grew to $tools chars", tools <= 30_780)
         // Owner, 21 Oct 2026 ("the brain should understand"): one line telling the brain it has eyes (look_with_camera, now a
         // core tool) — measured 5,935. Cap = measured + ~60.
-        assertTrue("system prompt grew to $system chars", system <= 5_995)
+        // Owner, 26 Oct 2026 (Uber: the brain picked UberX without reading out the options): one sentence — a priced choice is
+        // asked, never picked. Cap = measured (5,935 + the sentence) + ~60.
+        assertTrue("system prompt grew to $system chars", system <= 6_090)
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */
