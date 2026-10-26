@@ -135,16 +135,17 @@ object LanguageLayer {
     private fun side(lang: String) = when (lang) { Lang.TWI -> "twi"; Lang.KUS -> "kus"; else -> "en" }
 
     /** The configured translator for a direction (resting providers skipped at call time), or null. */
-    fun translator(from: String, to: String, registry: Map<String, TranslationProvider>, isOnline: () -> Boolean): TranslationProvider? {
+    fun translator(from: String, to: String, registry: Map<String, TranslationProvider>, isOnline: () -> Boolean,
+                   offline: TranslationProvider? = null): TranslationProvider? {
         val chain = SpeechProviders.resolve(mtIds(from, to), registry) {
             Log.w(TAG, "[LANG] mt.${direction(from, to)}: no client '$it' — skipped")
         }
-        if (chain.isEmpty()) return null
+        if (chain.isEmpty() && offline == null) return null
         val inner = if (chain.size == 1) chain[0] else FallbackTranslator(chain)
         return object : TranslationProvider {
             override val name = inner.name
             override suspend fun translate(text: String, from: String, to: String): String? =
-                if (!isOnline()) null else inner.translate(text, from, to)
+                if (!isOnline()) offline?.translate(text, from, to) else inner.translate(text, from, to)
         }
     }
 }

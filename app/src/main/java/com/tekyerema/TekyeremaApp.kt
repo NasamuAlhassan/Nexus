@@ -60,5 +60,6 @@ class TekyeremaApp : Application() {
         super.onTrimMemory(level)
         com.tekyerema.core.telemetry.Telemetry.noteTrim(level)   // Q-10
         VoiceEngine.onTrimMemory(level)
+        com.tekyerema.language.StudentMt.onTrimMemory(level)
     }
 }
