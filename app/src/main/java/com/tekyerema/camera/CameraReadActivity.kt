@@ -167,6 +167,8 @@ class CameraReadActivity : ComponentActivity() {
     private var cedi: CediClassifier? = null
     private var cediTried = false
     private var rgbBuf: FloatArray? = null
+    private var smallBuf: FloatArray? = null     // the 96 px grid the object is found on
+    private var tightBuf: FloatArray? = null     // the object crop the model reads
     /** When money was last SEEN but not readable — drives the honest "I can see money but…" coaching. */
     private var moneySeenAt = 0L
     private var lastCurrencyHintAt = 0L
@@ -568,7 +570,15 @@ class CameraReadActivity : ComponentActivity() {
         if (luma < AppConfig.double("camera.quality.darkBelow", QualityGate.DARK_BELOW)) main.post { turnTorchOn() }
 
         val rgb = RgbSquare.from(image, CediClassifier.SIDE, rgbBuf).also { rgbBuf = it }
-        val (cls, confidence) = model.classify(rgb)
+        // The object, cropped (ObjectCrop): a coin is ~15 % of the centre square and was misread at that size. Off: camera.currency.tightCrop.
+        val tight = if (AppConfig.bool("camera.currency.tightCrop", true)) {
+            val small = RgbSquare.from(image, ObjectCrop.GRID, smallBuf).also { smallBuf = it }
+            ObjectCrop.find(small, ObjectCrop.GRID)?.takeIf { ObjectCrop.plausible(it) }?.let { box ->
+                val w = ObjectCrop.window(box, image.width, image.height)
+                RgbSquare.window(image, CediClassifier.SIDE, tightBuf, w.x, w.y, w.size).also { tightBuf = it }
+            }
+        } else null
+        val (cls, confidence) = model.classifyBoth(rgb, tight)
         main.post { onCurrency(cls, confidence) }
     }
 

@@ -118,12 +118,14 @@ object FrameConvert {
  */
 object RgbSquare {
     fun from(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?): FloatArray {
+        val crop = minOf(image.width, image.height)          // the centre square of the sensor frame
+        return window(image, side, reuse, (image.width - crop) / 2, (image.height - crop) / 2, crop)
+    }
+
+    /** A [crop]-pixel square window of the frame starting at ([x0], [y0]), sampled to [side]×[side] — the object crop reads the
+     *  camera's own pixels at full detail, not an already-shrunk copy (ObjectCrop). */
+    fun window(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?, x0: Int, y0: Int, crop: Int): FloatArray {
         val out = if (reuse != null && reuse.size == side * side * 3) reuse else FloatArray(side * side * 3)
-        val w = image.width
-        val h = image.height
-        val crop = minOf(w, h)               // the centre square of the sensor frame
-        val x0 = (w - crop) / 2
-        val y0 = (h - crop) / 2
         val yP = image.planes[0]
         val uP = image.planes[1]
         val vP = image.planes[2]

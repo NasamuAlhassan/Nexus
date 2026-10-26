@@ -375,7 +375,7 @@ class CurrencyAnnouncer(
     private val repeatMs: Long = 4_000L,
     /** Classes v2 gets wrong with confidence need more: on the real held-out photos (26 Oct 2026) a 10 pesewas coin read as "1 cedi"
      *  came with 0.85–0.96, none above 0.97; the 20 pesewas and note_2 misses sat at 0.91–0.93. Fitted on that one test set. */
-    private val stricter: Map<String, Double> = mapOf("coin_1_cedi" to 0.97, "coin_20_pesewas" to 0.95, "note_2" to 0.95)
+    private val stricter: Map<String, Double> = STRICTER
 ) {
     private var runClass: String? = null
     private var runLength = 0
@@ -403,6 +403,12 @@ class CurrencyAnnouncer(
 
     companion object {
         const val NOT_MONEY = "not_money"
+
+        /** The per-class confidence a class needs beyond the base gate (see the constructor note). */
+        val STRICTER: Map<String, Double> = mapOf("coin_1_cedi" to 0.97, "coin_20_pesewas" to 0.95, "note_2" to 0.95)
+
+        /** The confidence [cls] must reach before it may be spoken. */
+        fun gateFor(cls: String, base: Double = 0.85): Double = maxOf(base, STRICTER[cls] ?: 0.0)
 
         /** The class as a person says it. Verbalize runs on the output as everywhere else. */
         fun spokenFor(cls: String): String = when (cls) {

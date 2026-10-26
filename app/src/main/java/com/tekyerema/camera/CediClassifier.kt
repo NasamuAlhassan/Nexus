@@ -46,6 +46,15 @@ class CediClassifier private constructor(ctx: Context) {
         } finally { tensor.close() }
     }
 
+    /** The reading from the whole centre square [full] and, when the object was found, from its crop [tight] — see [ObjectCrop.decide]. */
+    fun classifyBoth(full: FloatArray, tight: FloatArray?): Pair<String, Double> {
+        val (fl, fc) = classify(full)
+        if (tight == null) return fl to fc
+        val (tl, tc) = classify(tight)
+        val base = com.tekyerema.core.config.AppConfig.double("camera.currency.gate", 0.85)
+        return ObjectCrop.decide(fl, fc, tl, tc) { cls -> CurrencyAnnouncer.gateFor(cls, base) }
+    }
+
     fun close() = try { session.close() } catch (_: Throwable) {}
 
     companion object {
