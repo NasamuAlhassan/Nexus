@@ -77,6 +77,7 @@ fun defaultTools(): List<Tool> = listOf(
     // Real-world app tasks (loaded per step by the "apps" tool-search group, D-02)
     InstallAppTool,       // E-01 Play Store install of a FREE app — TIER2, confirmed
     TakePhotoTool,        // E-21 photo / selfie in the camera app, with an audible countdown
+    SendPhotoTool,        // a photo / selfie from our own camera, handed straight to a chat app to send
     AskAppTool,           // E-20 ask ChatGPT / Gemini / Claude… and read the answer back
     GoogleSignInTool,     // G-13 "Continue with Google" — TIER2, confirmed; stops at passwords and extra access
     MobileMoneyTool,

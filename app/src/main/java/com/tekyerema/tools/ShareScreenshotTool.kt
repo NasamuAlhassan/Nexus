@@ -54,36 +54,49 @@ object ShareScreenshotTool : Tool {
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val context = ctx.appContext
         val controller = ctx.controller ?: return ToolResult(false, "I can't see the screen right now, so I couldn't capture it.")
-        val appName = args.str("app")?.trim()?.takeIf { it.isNotEmpty() }
         val caption = args.str("caption")?.trim()?.takeIf { it.isNotEmpty() }
         // Resolve the app BEFORE capturing: a name that matches nothing must not leave a stray picture behind.
-        val target = if (appName == null) null else when (val m = AppResolver.resolveDetailed(context, appName)) {
-            is AppResolver.Match.One -> m.app
-            is AppResolver.Match.Ambiguous -> return ToolResult(
-                false, "More than one app matches '$appName': ${m.options.joinToString(", ") { it.label }}. Which one?",
-                needsDisambiguation = true)
-            AppResolver.Match.None -> return ToolResult(false, "I couldn't find an app called '$appName'. I can open the share sheet instead.")
-        }
-        if (target != null) launchRefusal(target.packageName, target.label)?.let { return ToolResult(false, it, recoverable = false) }
+        val (target, refusal) = resolveTarget(context, args.str("app"))
+        refusal?.let { return it }
 
         val bitmap = try { controller.captureScreenshot() } catch (t: Throwable) { null }
             ?: return ToolResult(false, "I couldn't capture the screen — this screen may be protected.")
         val file = try { save(context.cacheDir, bitmap) } catch (t: Throwable) {
             return ToolResult(false, "I captured the screen but couldn't save the picture: ${t.message}")
         } finally { try { bitmap.recycle() } catch (_: Throwable) {} }
+        return handOver(context, file, target, caption, "captured the screen")
+    }
 
+    /** The app named [appName] to hand a picture to (null = the share sheet), or the reply to give instead: several apps
+     *  match, none does, or it is an app Tɛkyerɛma never drives. Shared with send_photo. */
+    internal fun resolveTarget(context: android.content.Context, appName: String?): Pair<AppResolver.AppInfo?, ToolResult?> {
+        val name = appName?.trim()?.takeIf { it.isNotEmpty() } ?: return null to null
+        val target = when (val m = AppResolver.resolveDetailed(context, name)) {
+            is AppResolver.Match.One -> m.app
+            is AppResolver.Match.Ambiguous -> return null to ToolResult(
+                false, "More than one app matches '$name': ${m.options.joinToString(", ") { it.label }}. Which one?",
+                needsDisambiguation = true)
+            AppResolver.Match.None -> return null to ToolResult(false, "I couldn't find an app called '$name'. I can open the share sheet instead.")
+        }
+        launchRefusal(target.packageName, target.label)?.let { return null to ToolResult(false, it, recoverable = false) }
+        return target to null
+    }
+
+    /** Hand [file] (a JPEG in cache/exports) to [target], or to the share sheet, with Android's share intent and a one-off
+     *  read grant. [did] starts the reply: "captured the screen", "took the photo". Shared with send_photo. */
+    internal fun handOver(context: android.content.Context, file: File, target: AppResolver.AppInfo?, caption: String?, did: String): ToolResult {
         val uri = try { FileProvider.getUriForFile(context, "${context.packageName}.exports", file) } catch (t: Throwable) {
             return ToolResult(false, "I couldn't prepare the picture for sharing: ${t.message}")
         }
         val send = Intent(Intent.ACTION_SEND).setType("image/jpeg").putExtra(Intent.EXTRA_STREAM, uri)
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        send.clipData = ClipData.newRawUri("screenshot", uri)
+        send.clipData = ClipData.newRawUri("picture", uri)
         if (caption != null) send.putExtra(Intent.EXTRA_TEXT, caption)
 
         if (target == null) {
             return try {
                 context.startActivity(Intent.createChooser(send, "Share with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION))
-                ToolResult(true, "I captured the screen and opened the share sheet — pick an app. Nothing is sent until you tap Send.", channel = "intent")
+                ToolResult(true, "I $did and opened the share sheet — pick an app. Nothing is sent until you tap Send.", channel = "intent")
             } catch (t: Throwable) { ToolResult(false, "Couldn't open the share sheet: ${t.message}") }
         }
         send.setPackage(target.packageName).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -92,7 +105,7 @@ object ShareScreenshotTool : Tool {
         return try {
             context.startActivity(send)
             ToolResult(true,
-                "I captured the screen and opened ${target.label} with the picture ready" + (if (caption != null) " and your caption" else "") +
+                "I $did and opened ${target.label} with the picture ready" + (if (caption != null) " and your caption" else "") +
                     ". ${target.label} is asking who to send it to — choose the chat there. Nothing is sent until Send is confirmed.",
                 data = JSONObject().put("package", target.packageName), channel = "intent")
         } catch (t: Throwable) { ToolResult(false, "Couldn't open ${target.label}: ${t.message}") }
@@ -107,9 +120,9 @@ object ShareScreenshotTool : Tool {
         return file
     }
 
-    /** Delete all but the newest [keep] screenshots this tool made (never the user's own export). Pure file logic. */
-    internal fun prune(dir: File, keep: Int): Int {
-        val old = dir.listFiles { f -> f.isFile && f.name.startsWith("screenshot-") && f.name.endsWith(".jpg") }
+    /** Delete all but the newest [keep] pictures with [prefix] this tool (or send_photo) made — never the user's own export. */
+    internal fun prune(dir: File, keep: Int, prefix: String = "screenshot-"): Int {
+        val old = dir.listFiles { f -> f.isFile && f.name.startsWith(prefix) && f.name.endsWith(".jpg") }
             ?.sortedByDescending { it.lastModified() }?.drop(keep.coerceAtLeast(0)) ?: return 0
         return old.count { it.delete() }
     }

@@ -352,6 +352,12 @@
     "planner"
    ]
   },
+  "send_photo": {
+   "feature": "E-21",
+   "callers": [
+    "planner"
+   ]
+  },
   "open_intent": {
    "feature": "D-14"
   },
@@ -440,6 +446,7 @@
      "tools": [
       "install_app",
       "take_photo",
+      "send_photo",
       "ask_app",
       "google_sign_in",
       "play_music"

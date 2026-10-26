@@ -254,7 +254,7 @@ object StepLabels {
             "scroll", "swipe" -> "Looking through the screen"
             "key_event" -> "Pressing a key"
             "open_url", "open_link" -> "Opening the link"
-            "take_photo", "read_image", "camera" -> "Looking through the camera"
+            "take_photo", "send_photo", "read_image", "camera" -> "Looking through the camera"
             else -> "Working on it"
         }
     }
@@ -288,7 +288,7 @@ object StepLabels {
             "scroll", "swipe" -> "Looked through the screen"
             "key_event" -> "Pressed a key"
             "open_url", "open_link" -> "Opened the link"
-            "take_photo", "read_image", "camera" -> "Looked through the camera"
+            "take_photo", "send_photo", "read_image", "camera" -> "Looked through the camera"
             else -> "Did a step"
         }
     }

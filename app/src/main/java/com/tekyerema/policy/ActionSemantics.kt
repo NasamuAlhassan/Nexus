@@ -99,13 +99,37 @@ object ActionSemantics {
         return if (name == null) recipient else "$name ($recipient)"
     }
 
+    /** What an earlier step of THIS task handed to an app to send, from its history lines: "photo" or "screenshot". The step's
+     *  own result is the source, so the Send read-back needs no app's wording to say what is going. */
+    fun handedOver(history: List<String>): String? = history.lastOrNull { l -> HANDS_OVER.keys.any { l.startsWith("$it(") } && "→ success" in l }
+        ?.let { l -> HANDS_OVER.entries.first { l.startsWith("${it.key}(") }.value }
+    private val HANDS_OVER = mapOf("send_photo" to "photo", "share_screenshot" to "screenshot")
+
+    /** Whoever the screen says a pending send goes to, in any app's own box: "… send … to Prince?". */
+    private val TO_WHOM = Regex("(?i)\\bsend\\b[^?]{0,60}?\\bto (.{1,40}?)\\s*\\?\\s*$")
+
+    /** The Send read-back for something handed over earlier in the task (a picture has no typed words, so the read-back was
+     *  bare and the gate refused every tap: Infinix 26 Oct 2026, "… I cannot complete sending"). Who comes from the screen's
+     *  recipient, else from the app's own "send … to X?" text; null when the screen doesn't say who (then the gate still holds). */
+    private fun handedOverLine(before: UiSnapshot?, what: String?, recipient: String?): String? {
+        if (what == null) return null
+        // The app's own "send … to X?" text names who exactly; the general recipient guess comes second (on Telegram's box it
+        // picked up the heading "Send message").
+        val to = before?.elements.orEmpty().mapNotNull { it.label?.trim() }
+            .firstNotNullOfOrNull { TO_WHOM.find(it)?.groupValues?.get(1)?.trim()?.trimEnd('?', ' ')?.takeIf { w -> w.isNotEmpty() } }
+            ?: recipient ?: return null
+        val app = before?.appName?.takeIf { it.isNotBlank() }?.let { " on $it" }.orEmpty()
+        return "Send this $what to $to$app?"
+    }
+
     /** A confirmation sentence, or null to fall back to the tool's own prompt. [nameOfNumber]: the address book's name
-     *  for a phone number (null = not known / no permission). */
+     *  for a phone number (null = not known / no permission). [handedOver]: see [handedOver]. */
     fun confirmation(
         primitive: String, target: UiElement?, requestedLabel: String?, before: UiSnapshot?,
         submit: Boolean = false, typedText: String? = null, nameOfNumber: ((String) -> String?)? = null,
         /** The user's request, so a Send whose composer holds OTHER words than the ones dictated says so (S-05). */
-        goal: String? = null
+        goal: String? = null,
+        handedOver: String? = null
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
@@ -127,9 +151,11 @@ object ActionSemantics {
             // The composer holds words the user did not dictate (the planner rephrased, or a draft was already there): both
             // are read, and the user decides — never a silent send of other words (S-05).
             val differs = goal?.let { com.tekyerema.agent.MessageFidelity.composerNotice(msg, it) }
+            val shared = if (msg.isNullOrBlank()) handedOverLine(before, handedOver, recipient) else null
             return when {
                 !msg.isNullOrBlank() && differs != null -> "$differs Send it$who anyway?"
                 !msg.isNullOrBlank() -> "Send this message$who?\n“$msg”"
+                shared != null -> shared
                 // nothing composed — don't claim "this message": name the control as it reads ("Send to 5554?")
                 isTapSend && labelRecipient != null -> "${text.trim().take(60).trimEnd('?', '.')}?"
                 else -> "Send this message$who?"

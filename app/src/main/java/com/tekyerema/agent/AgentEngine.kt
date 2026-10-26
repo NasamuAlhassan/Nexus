@@ -1366,6 +1366,11 @@ object AgentEngine {
 
                         // ---- policy: target semantics + provenance, keyed on the resolved target, not the tool name ----
                         val cls = TargetSemantics.classify(decision.name, resolved?.element, requestedLabel, decision.args.boolOrDefault("submit", false), before)
+                            .let { c ->
+                                // The user said "take a selfie/photo": pressing the camera's shutter IS the request — no second question.
+                                if (c.block == null && c.tier != null && decision.name == "tap" &&
+                                    TargetSemantics.photoShutterAskedFor(resolved?.element?.label ?: requestedLabel, goal)) TargetSemantics.Classification.NONE else c
+                            }
                         // D: provenance (with taint after third-party reads), the policy decision, hidden-target and remote
                         // floors and the payload injection check — one pure function the injection suite tests (StepGate).
                         val gate = com.tekyerema.policy.StepGate.assess(tool, decision.args, goal, before, untrustedRead,
@@ -1506,7 +1511,8 @@ object AgentEngine {
                                     decision.args.boolOrDefault("submit", false), decision.args.str("text"),
                                     // a chat titled by a bare number is read with the saved name (QA M01, 3 October 2026)
                                     nameOfNumber = { n -> appContext()?.let { c -> com.tekyerema.android.ContactResolver.lookupByNumber(c, n).firstOrNull()?.name } },
-                                    goal = goal   // S-05: a composer holding other words than the user dictated is read with both
+                                    goal = goal,   // S-05: a composer holding other words than the user dictated is read with both
+                                    handedOver = com.tekyerema.policy.ActionSemantics.handedOver(history)   // a picture handed over earlier in this task
                                 )
                                 var semantic = readBack(readBackScreen)
                                 // A bare "Send this message?" (no recipient, no text) usually means the screen is still

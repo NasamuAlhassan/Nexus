@@ -141,6 +141,15 @@
 
         <!-- P-03/P-06/P-01 camera reading: its own task so closing it returns to whatever was open.
              No fixed screenOrientation: API 26 crashes when a translucent activity locks orientation. -->
+        <!-- send_photo: our own camera takes one photo (beep countdown) and hands it back to the tool; not exported. -->
+        <activity
+            android:name=".camera.PhotoCaptureActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:theme="@style/Theme.Tekyerema.Voice" />
+
         <activity
             android:name=".camera.CameraReadActivity"
             android:exported="false"

@@ -25,9 +25,20 @@ object AppMention {
         Regex("^(?:in|on|using)\\s+(?:the\\s+|my\\s+)?$NAME(?:\\s+app)?\\s*,")
     )
 
+    /** The app at the END of a request ("… on telegram") is only the START of the task when that is the whole request. With
+     *  several actions before it the app may be where the result GOES: "take a selfie and send it to Prince on telegram" opened
+     *  Telegram first and the selfie was never taken (Infinix traces 12:51 and 12:52, 26 Oct 2026). Putting several actions in
+     *  order is the planner's job, so a trailing mention after "and" / "then" / a comma names no starting app. No vocabulary. */
+    private val SEVERAL_ACTIONS = Regex("\\b(?:and|then|after|before|while)\\b|,|;")
+    private const val TRAILING = 2   // index in PATTERNS of the "in / on / using / with / via <app>" at the end
+
     fun candidates(goal: String): List<String> {
         val g = goal.trim().lowercase().trimEnd('.', '!', '?').replace(Regex("\\s+"), " ")
-        return PATTERNS.mapNotNull { it.find(g)?.groupValues?.get(1)?.trim() }
+        return PATTERNS.withIndex().mapNotNull { (i, p) ->
+            val m = p.find(g) ?: return@mapNotNull null
+            if (i == TRAILING && SEVERAL_ACTIONS.containsMatchIn(g.substring(0, m.range.first))) null
+            else m.groupValues[1].trim()
+        }
             .filter { it.isNotEmpty() && it !in NOT_APPS && !isTheDevice(g, it) }
             .distinct()
     }

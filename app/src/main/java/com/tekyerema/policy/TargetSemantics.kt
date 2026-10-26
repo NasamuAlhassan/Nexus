@@ -23,6 +23,15 @@ object TargetSemantics {
         RegexOption.IGNORE_CASE
     )
 
+    private val PHOTO_SHUTTER = Regex("(?i)^(?:camera |photo )?(?:shutter(?: button)?|capture|take (?:a )?(?:photo|picture|selfie|pic))$")
+    private val ASKED_FOR_PHOTO = Regex("(?i)\\b(?:take|snap|capture|shoot)\\b.{0,24}\\b(?:selfie|photo|picture|pic)s?\\b|\\bselfie\\b")
+
+    /** The photo shutter pressed for a request that itself says to take a photo or selfie: the user's own words are the
+     *  approval, so it isn't asked again (Infinix, 26 Oct 2026: "take a selfie and send it to Prince on telegram" asked
+     *  "Tap Shutter?" — the one question belongs at the Send). Never video ("record"), never a goal that doesn't ask for a picture. */
+    fun photoShutterAskedFor(label: String?, goal: String?): Boolean =
+        label != null && goal != null && PHOTO_SHUTTER.matches(label.trim()) && ASKED_FOR_PHOTO.containsMatchIn(goal)
+
     /**
      * J-02: a button that COMMITS what was typed into a form — a new contact, an event, an edited profile. Found by the
      * device suite (A20e, 2026-09-28): asked to "save a new contact", the model went through the Contacts app's own

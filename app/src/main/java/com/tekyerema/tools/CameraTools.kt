@@ -71,7 +71,8 @@ object CameraUi {
  */
 object TakePhotoTool : Tool {
     override val name = "take_photo"
-    override val description = "Take a photo in the camera app after a beep countdown (camera=front for a selfie); saved to Gallery."
+    override val description = "Take a photo in the camera app after a beep countdown (camera=front for a selfie); saved to the Gallery " +
+        "only — it cannot send it. To send or share a photo anywhere, use send_photo, which does both."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true
@@ -147,7 +148,7 @@ object TakePhotoTool : Tool {
     }
 
     /** One short beep per second, a higher one at zero — a countdown the user can hear. */
-    private suspend fun beepCountdown(seconds: Int) {
+    internal suspend fun beepCountdown(seconds: Int) {
         if (seconds <= 0) return
         val tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 80) } catch (_: Throwable) { null }
         try {
