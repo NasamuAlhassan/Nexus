@@ -63,6 +63,7 @@ class DocumentReadActivity : Activity() {
     private var closing = false
     private var current: Bitmap? = null
     private val prepared = HashMap<Int, String>()
+    private val readPages = java.util.TreeMap<Int, String>()
     private var prefetch: Job? = null
     private lateinit var image: ImageView
     private lateinit var caption: TextView
@@ -110,6 +111,8 @@ class DocumentReadActivity : Activity() {
             val tOcr = SystemClock.uptimeMillis() - t0 - tRender
             Log.i(TAG, "[DOC] page ${index + 1}/$pages render=${tRender}ms ocr=${tOcr}ms chars=${text.length}")
             if (closing) return@launch
+            // The agent remembers the pages read so far, so "remind me of the deadline" can act on them next.
+            if (text.isNotBlank()) { readPages[index] = text; com.tekyerema.agent.AgentEngine.noteReading("document", readPages.values.joinToString("\n")) }
             // A Word page has no picture: its words are the page, shown large; a PDF page shows a few lines under its picture.
             caption.maxLines = if (bmp == null) 60 else 4
             caption.text = if (text.isBlank()) DocumentLines.empty(index, pages) else text.take(if (bmp == null) 2000 else 400)

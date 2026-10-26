@@ -315,14 +315,14 @@ class CameraReadActivity : ComponentActivity() {
                     .addOnSuccessListener { result ->
                         if (closing) return@addOnSuccessListener
                         val text = ImportedImage.readingOrder(result.textBlocks)
-                        deliver(text.ifBlank { phrase("importNoText", "I couldn't find any text in that picture.") })
+                        if (text.isBlank()) deliver(phrase("importNoText", "I couldn't find any text in that picture."), reading = false) else deliver(text)
                     }
                     .addOnFailureListener { t ->
                         Log.w(TAG, "[IMPORT] OCR failed: ${t.javaClass.simpleName}")
-                        deliver(phrase("importOcrFailed", "I couldn't read that picture."))
+                        deliver(phrase("importOcrFailed", "I couldn't read that picture."), reading = false)
                     }
             } catch (t: Throwable) {
-                runOnUiThread { deliver(phrase("importOcrFailed", "I couldn't read that picture.")) }
+                runOnUiThread { deliver(phrase("importOcrFailed", "I couldn't read that picture."), reading = false) }
             }
         }
     }
@@ -590,7 +590,7 @@ class CameraReadActivity : ComponentActivity() {
             else -> return
         }
         lastCurrencyHintAt = now
-        deliver(line)
+        deliver(line, reading = false)
     }
 
     // ------------------------------------------------------------------------------------------------ P-01 / P-09 describe
@@ -814,12 +814,14 @@ class CameraReadActivity : ComponentActivity() {
 
     // ------------------------------------------------------------------------------------------------ output
 
-    /** A new result: show it, say it, and restart the idle clock. */
-    private fun deliver(text: String) {
+    /** A new result: show it, say it, and restart the idle clock. [reading] = false for a hint or a failure line. */
+    private fun deliver(text: String, reading: Boolean = true) {
         if (closing) return
         spokeResult = true
         main.removeCallbacks(noTextHint)
         showCaption(text, CameraPhase.ANSWER)
+        // The agent remembers what was read, so "send that to my wife" or "remind me of the date" can act on it next.
+        if (reading && mode != MODE_COLOR) com.tekyerema.agent.AgentEngine.noteReading("camera", text)
         speak(text)
         resetIdleTimer()
     }

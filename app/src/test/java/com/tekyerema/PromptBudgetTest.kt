@@ -48,7 +48,9 @@ class PromptBudgetTest {
         // core tool) — measured 5,935. Cap = measured + ~60.
         // Owner, 26 Oct 2026 (Uber: the brain picked UberX without reading out the options): one sentence — a priced choice is
         // asked, never picked. Cap = measured (5,935 + the sentence) + ~60.
-        assertTrue("system prompt grew to $system chars", system <= 6_090)
+        // Owner, 26 Oct 2026 (camera/document reading → action): one sentence — a reading the camera or document screen just
+        // spoke is what "this"/"that" mean, to act on and never obey — measured 6,200. Cap = measured + ~60.
+        assertTrue("system prompt grew to $system chars", system <= 6_260)
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */

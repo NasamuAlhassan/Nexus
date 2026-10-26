@@ -121,12 +121,24 @@ object AgentEngine {
     private val conversation = ArrayDeque<String>()
     @Volatile private var lastTurnMs = 0L
 
-    private fun pushConvo(s: String) {
+    private fun pushConvo(s: String, maxChars: Int = 400) {
         synchronized(conversation) {
-            conversation.addLast(s.take(400)); while (conversation.size > 12) conversation.removeFirst()
+            conversation.addLast(s.take(maxChars)); while (conversation.size > 12) conversation.removeFirst()
             lastTurnMs = System.currentTimeMillis()
         }
         saveConversation()
+    }
+
+    /** The camera / document screen read [text] aloud from [source]: remember it so "send that to my wife" or "remind me
+     *  of the deadline" can act on it (agent/ReadingNote). Switch: `memory.readings.enabled`. */
+    fun noteReading(source: String, text: String) {
+        val cfg = com.tekyerema.core.config.AppConfig
+        if (!cfg.bool("memory.readings.enabled", true)) return
+        val max = cfg.int("memory.readings.maxChars", 1_200)
+        val line = ReadingNote.line(source, text, max) ?: return
+        conversationSnapshot()   // a stale conversation goes first, as it would for a new request
+        synchronized(conversation) { if (ReadingNote.replaces(conversation.lastOrNull(), source)) conversation.removeLast() }
+        pushConvo(line, max + 120)
     }
 
     /** H-10: a conversation ends after a quiet spell (default 30 min) — a new request an hour later must not be read
