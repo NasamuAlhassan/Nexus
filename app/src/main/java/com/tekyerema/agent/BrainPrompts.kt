@@ -146,7 +146,8 @@ object BrainPrompts {
      * The extra guidance that rides right after the goal, only for the kinds of request it is about — one table, so the next
      * kind of request is one more row (pattern → rule), not a new code path, and nothing is paid on other requests.
      */
-    private val GOAL_RULES: List<Pair<Regex, String>> = listOf(COMMS_GOAL to COMMS_RULES, PLACE_GOAL to PLACE_RULES)
+    private val GOAL_RULES: List<Pair<Regex, String>> = listOf(COMMS_GOAL to COMMS_RULES, PLACE_GOAL to PLACE_RULES,
+        com.tekyerema.money.MoneyServices.NAME to com.tekyerema.money.MoneyServices.RULE)
 
     /** Every rule in [GOAL_RULES] whose pattern matches [goal], joined; null when none does. Pure. */
     internal fun goalRules(goal: String): String? =

@@ -206,7 +206,9 @@ object MoneyAsk {
         var ref: String? = reference?.trim(*TRIM)?.takeIf { it.isNotEmpty() }
 
         val restLow = rest.lowercase()
-        if (DATA_WORD.containsMatchIn(restLow) || AIRTIME_WORD.containsMatchIn(restLow) || BILL.containsMatchIn(restLow)) return null
+        // A MoMo service ("my yello save") is a menu row, not a person to look up: the planner walks the menu toward it.
+        if (DATA_WORD.containsMatchIn(restLow) || AIRTIME_WORD.containsMatchIn(restLow) || BILL.containsMatchIn(restLow) ||
+            MoneyServices.NAME.containsMatchIn(restLow)) return null
 
         var t = toks(rest)
         val phone = findPhone(t)

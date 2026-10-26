@@ -300,6 +300,12 @@ class SystemSpeechInput(
             var began = false
             var ended = false
             var ready = false
+            // Timing only, never words: where a listen that "heard nothing" actually broke (the owner's repeated "I say it, it
+            // restarts, I say it again", A20e 26 Oct 2026) — mic open → speech began → speech ended → result or error.
+            val t0 = System.currentTimeMillis()
+            var tReady = -1L; var tBegan = -1L; var tEnded = -1L
+            fun timing(what: String) = log("[VOICE] listen timing: ready ${tReady}ms, speech began ${tBegan}ms, ended ${tEnded}ms, $what at ${System.currentTimeMillis() - t0}ms" +
+                " (online=${isOnline()}, offlineAsked=${request.preferOffline}, session #$id)")
             val out = try {
                 suspendCancellableCoroutine<Outcome> { cont ->
                     val cb = object : RecognizerCallbacks {
@@ -307,19 +313,19 @@ class SystemSpeechInput(
                         private fun end(o: Outcome) { current = null; currentCont = null; cont.resume(o) }
                         override fun onReady() {
                             if (!live() || ready) return          // onReadyForSpeech has been seen to fire twice
-                            ready = true
+                            ready = true; tReady = System.currentTimeMillis() - t0
                             if (cfg.playsOwnCue && playCue) events.onReady()
                         }
-                        override fun onBeginningOfSpeech() { if (live() && !began) { began = true; events.onSpeechStart() } }
+                        override fun onBeginningOfSpeech() { if (live() && !began) { began = true; tBegan = System.currentTimeMillis() - t0; events.onSpeechStart() } }
                         override fun onRms(db: Float) { if (live()) levelOf(db).let { _level.value = it; events.onLevel(it) } }
-                        override fun onEndOfSpeech() { if (live() && !ended) { ended = true; _level.value = 0f; events.onCaptured() } }
+                        override fun onEndOfSpeech() { if (live() && !ended) { ended = true; tEnded = System.currentTimeMillis() - t0; _level.value = 0f; events.onCaptured() } }
                         override fun onPartial(best: String?) {
                             if (live() && request.partials && !best.isNullOrBlank()) events.onPartial(best)   // UI only; never logged
                         }
                         override fun onResults(hypotheses: List<String>, confidences: FloatArray?) {
-                            if (live()) end(Outcome.Results(hypotheses, confidences, began))
+                            if (live()) { timing("results"); end(Outcome.Results(hypotheses, confidences, began)) }
                         }
-                        override fun onError(code: Int) { if (live()) end(Outcome.Error(code, began)) }
+                        override fun onError(code: Int) { if (live()) { timing("error $code"); end(Outcome.Error(code, began)) } }
                     }
                     current = cb
                     currentCont = cont
