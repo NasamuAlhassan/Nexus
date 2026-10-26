@@ -21,11 +21,9 @@ object TtsAbDebug {
 
     val VARIANTS = listOf(
         SherpaTts.ReadingVariant("A_now"),
-        SherpaTts.ReadingVariant("B_sil1_lightbreaths", silenceScale = 1.0f, breathScale = 0.5),
-        SherpaTts.ReadingVariant("C_sil1_nobreaths", silenceScale = 1.0f, breaths = false),
-        SherpaTts.ReadingVariant("D_steadier", noiseScale = 0.55f, noiseScaleW = 0.5f),
-        SherpaTts.ReadingVariant("E_sil1_steadier_light", silenceScale = 1.0f, noiseScale = 0.55f, noiseScaleW = 0.5f, breathScale = 0.5),
-        SherpaTts.ReadingVariant("F_E_faster", silenceScale = 1.0f, noiseScale = 0.55f, noiseScaleW = 0.5f, breathScale = 0.5, speedFactor = 1.12f)
+        SherpaTts.ReadingVariant("H_breath_1_3", breathScale = 1.3),
+        SherpaTts.ReadingVariant("I_breath_1_6", breathScale = 1.6),
+        SherpaTts.ReadingVariant("J_breath_2_0", breathScale = 2.0)
     )
 
     fun run(context: Context) {
