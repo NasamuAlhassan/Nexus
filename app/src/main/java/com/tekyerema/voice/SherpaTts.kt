@@ -310,6 +310,51 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
         }
     }
 
+    /** One way of reading, for the listening comparison (debug hook `tts_ab`). */
+    data class ReadingVariant(val name: String, val silenceScale: Float = 0.2f, val noiseScale: Float? = null, val noiseScaleW: Float? = null,
+                              val speedFactor: Float = 1f, val breaths: Boolean = true, val breathScale: Double = 1.0)
+
+    /** [text] read the way the app reads it (same pieces, silences, speed) under each [variants] setting, one WAV per variant in
+     *  [outDir]. Each variant loads its own model (the settings are fixed at load), one after the other. Worker thread. */
+    fun renderReadings(text: String, variants: List<ReadingVariant>, outDir: File, tag: String) {
+        val s = spec ?: return
+        worker.execute {
+            for (v in variants) {
+                var tts: OfflineTts? = null
+                try {
+                    val data = s.dataDir?.let { extract("$dir/$it", File(app.filesDir, "ondevice/tts/$it")) } ?: ""
+                    val vits = OfflineTtsVitsModelConfig(model = "$dir/${s.model}", tokens = "$dir/${s.tokens}", dataDir = data,
+                        noiseScale = v.noiseScale ?: s.noiseScale, noiseScaleW = v.noiseScaleW ?: s.noiseScaleW, lengthScale = s.lengthScale)
+                    tts = OfflineTts(app.assets, OfflineTtsConfig(model = OfflineTtsModelConfig(vits = vits, numThreads = s.threads, debug = false, provider = "cpu"),
+                        silenceScale = v.silenceScale))
+                    val pieces = OnDeviceVoice.plan(Verbalize.apply(text), AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
+                        AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60),
+                        breaths = v.breaths, breathScale = v.breathScale)
+                        .map { pc -> pc.text?.let { x -> pc.copy(text = OnDeviceVoice.forModel(s, OnDeviceVoice.say(x, s.say))) } ?: pc }
+                    val speed = (s.speed * v.speedFactor).coerceIn(0.5f, 1.6f)
+                    val hz = tts.sampleRate()
+                    val all = java.io.ByteArrayOutputStream()
+                    var speechMs = 0L; var silenceMs = 0L
+                    for (pc in pieces) {
+                        val pcm = if (pc.text == null) { silenceMs += pc.silenceMs; ShortArray((hz * pc.silenceMs / 1000).toInt()) }
+                                  else OnDeviceVoice.pcm16(tts.generate(pc.text, 0, speed).samples).also { speechMs += it.size * 1000L / hz }
+                        val b = java.nio.ByteBuffer.allocate(pcm.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        for (x in pcm) b.putShort(x)
+                        all.write(b.array())
+                    }
+                    val bytes = all.toByteArray()
+                    val sh = ShortArray(bytes.size / 2) { i -> ((bytes[2 * i + 1].toInt() shl 8) or (bytes[2 * i].toInt() and 0xff)).toShort() }
+                    outDir.mkdirs()
+                    File(outDir, "${tag}_${v.name}.wav").writeBytes(wav16(sh, hz))
+                    Log.i("Tekyerema", "[TTS-AB] ${tag}_${v.name}: speech ${speechMs} ms + app silences ${silenceMs} ms, ${pieces.count { it.text != null }} pieces")
+                } catch (t: Throwable) {
+                    Log.w("Tekyerema", "[TTS-AB] ${v.name} failed: $t")
+                } finally { try { tts?.release() } catch (_: Throwable) {} }
+            }
+            Log.i("Tekyerema", "[TTS-AB] $tag done")
+        }
+    }
+
     private fun wav16(pcm: ShortArray, hz: Int): ByteArray {
         val data = pcm.size * 2
         val b = java.nio.ByteBuffer.allocate(44 + data).order(java.nio.ByteOrder.LITTLE_ENDIAN)
@@ -456,7 +501,10 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
             // `speech.tts.onDevice.threads.<language>` (eng | twi …) overrides voice.json — the A20e has 2 big + 6 little cores, so the
             // best count is measured, not assumed (judge, 21 Oct 2026).
             val threads = AppConfig.int("speech.tts.onDevice.threads.${s.language ?: "eng"}", s.threads).coerceIn(1, 8)
-            val cfg = OfflineTtsConfig(model = OfflineTtsModelConfig(vits = vits, numThreads = threads, debug = false, provider = "cpu"))
+            // sherpa-onnx cuts every silent run of 0.2 s or more inside a piece to `silenceScale` (default 0.2) of its length, so the
+            // pauses the model itself makes at commas and sentence ends shrink to a fifth. `speech.tts.onDevice.silenceScale`.
+            val cfg = OfflineTtsConfig(model = OfflineTtsModelConfig(vits = vits, numThreads = threads, debug = false, provider = "cpu"),
+                silenceScale = AppConfig.double("speech.tts.onDevice.silenceScale", 0.2).toFloat().coerceIn(0.05f, 1.5f))
             OfflineTts(app.assets, cfg).also {
                 engine = it
                 Log.i("Tekyerema", "[TTS] on-device voice loaded: ${s.label} ${it.sampleRate()} Hz, $threads threads (${android.os.SystemClock.uptimeMillis() - t0} ms)")
