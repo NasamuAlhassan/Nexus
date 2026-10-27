@@ -17,4 +17,18 @@ object TrimPolicy {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) return true
         return graceMs <= 0L || msSinceLastUse !in 0 until graceMs   // RUNNING_LOW: only what has sat unused
     }
+
+    /**
+     * The same question for the SMALL English voice (64 MB), which the 650 MB recogniser cannot be allowed to evict every turn:
+     * on the A20e offline (27 Oct 2026) "running critical" arrived after each answer, the voice was dropped at once and the next
+     * line waited 6-9 s for it to load. A voice used within [graceMs] stays through "running low" AND "running critical" (the
+     * app is still in front, being used); it goes when it has sat unused, or when the app itself is no longer in front (a background level).
+     * The recogniser's own memory guard still frees it on demand when a model really needs the room.
+     */
+    fun shouldReleaseSmallVoice(level: Int, msSinceLastUse: Long, graceMs: Long): Boolean {
+        if (level == ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) return false
+        if (level < ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) return false
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_BACKGROUND) return true
+        return graceMs <= 0L || msSinceLastUse !in 0 until graceMs
+    }
 }

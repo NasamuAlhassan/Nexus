@@ -709,7 +709,7 @@ object VoiceEngine {
         val grace = com.tekyerema.core.config.AppConfig.long("speech.trim.graceMs", 90_000L)
         fun drop(lastUsedAt: Long) = TrimPolicy.shouldRelease(level, now - lastUsedAt, grace)
         sherpa?.let { s -> if (drop(s.lastUsedAt)) scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
-        ownVoice?.let { v -> if (drop(v.lastUsedAt)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
+        ownVoice?.let { v -> if (TrimPolicy.shouldReleaseSmallVoice(level, now - v.lastUsedAt, grace)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
         twiLocal?.let { v -> if (drop(v.lastUsedAt)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
         langVoices.values.forEach { v -> scope.launch(Dispatchers.Default) { try { if (TrimPolicy.shouldRelease(level, Long.MAX_VALUE, grace)) v.release() } catch (_: Throwable) {} } }
     }

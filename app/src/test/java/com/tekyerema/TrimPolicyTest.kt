@@ -33,4 +33,14 @@ class TrimPolicyTest {
     @Test fun zeroGraceIsTheOldBehaviour() {
         assertTrue(TrimPolicy.shouldRelease(CC.TRIM_MEMORY_RUNNING_LOW, 0L, 0L))
     }
+    @Test fun theSmallVoiceStaysThroughCriticalWhileInUseButNotInTheBackground() {
+        // A20e offline, 27 Oct 2026: "running critical" after every answer dropped the 64 MB voice; the next line waited 6-9 s
+        assertFalse(TrimPolicy.shouldReleaseSmallVoice(CC.TRIM_MEMORY_RUNNING_CRITICAL, 5_000L, grace))
+        assertFalse(TrimPolicy.shouldReleaseSmallVoice(CC.TRIM_MEMORY_RUNNING_LOW, 5_000L, grace))
+        assertTrue(TrimPolicy.shouldReleaseSmallVoice(CC.TRIM_MEMORY_RUNNING_CRITICAL, 90_000L, grace))
+        for (level in listOf(CC.TRIM_MEMORY_BACKGROUND, CC.TRIM_MEMORY_MODERATE, CC.TRIM_MEMORY_COMPLETE))
+            assertTrue("level $level", TrimPolicy.shouldReleaseSmallVoice(level, 1_000L, grace))
+        assertFalse(TrimPolicy.shouldReleaseSmallVoice(CC.TRIM_MEMORY_UI_HIDDEN, Long.MAX_VALUE, grace))
+        assertTrue(TrimPolicy.shouldReleaseSmallVoice(CC.TRIM_MEMORY_RUNNING_CRITICAL, 1_000L, 0L))   // grace 0 = the old behaviour
+    }
 }
