@@ -20,6 +20,7 @@ import com.tekyerema.live.LiveKind
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -54,7 +55,7 @@ object WalkGuide {
         val context = ctx.applicationContext.also { app = it }
         if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
             return "I need permission to use your location for walking directions. You can allow it in Tɛkyerɛma's settings."
-        val here = currentLocation(context) ?: return openMaps(context, destination, "I can't tell where you are right now")
+        val here = currentLocation(context) ?: return openMaps(context, destination, "GPS has no fix right now, which is common indoors, so I can't tell where you are")
         val (generic, rest) = OsmClient.kindOnly(destination)
         val category = OsmClient.categoryOf(rest)
         val label = rest
@@ -65,8 +66,17 @@ object WalkGuide {
             if (look.reached && look.place == null) look = OsmClient.nearestOf(category, here.latitude, here.longitude, 10_000, label)
             if (!look.reached) return openMaps(context, "$label near me", "I couldn't reach the map service")
             place = look.place ?: return "I couldn't find a $label within 10 kilometres of you."
+            if (!place.name.startsWith("the nearest ")) PlaceMemory.rememberPlace(context, place.name, place)
         } else {
-            place = OsmClient.search(rest, here.latitude, here.longitude) ?: return openMaps(context, dest, "I couldn't find $dest on the map")
+            val found = bounded(if (PlaceMemory.isOnline(context)) 9_000L else 4_000L) { OsmClient.search(rest, here.latitude, here.longitude) }
+            if (found == null) {
+                // no map service: say what the phone's GPS and an earlier lookup can, then still hand over to Google Maps
+                val saved = PlaceMemory.findPlace(context, rest)
+                val line = saved?.let { offlineDistance(it, here) + " " }.orEmpty()
+                return line + openMaps(context, dest, "I couldn't find $dest on the map")
+            }
+            PlaceMemory.rememberPlace(context, rest, found)
+            place = found
         }
         val route = OsmClient.walkRoute(here.latitude, here.longitude, place) ?: return openMaps(context, place.name, "I couldn't plan the walk")
         stopUpdates()
@@ -114,15 +124,37 @@ object WalkGuide {
             return "I need permission to use your location to tell you how far it is. You can allow it in Tɛkyerɛma's settings."
         // a distance needs no exact fix: the last one the phone knows if it is under 2 hours old, else a new one (8 s)
         val here = currentLocation(context, 2 * 3_600_000L, waitMs = 8_000L)
-            ?: return "I can't tell where you are right now, so I can't say how far it is."
-        val place = OsmClient.search(destination, here.latitude, here.longitude)
-            ?: return "I couldn't find $destination on the map."
+            ?: return "GPS has no fix right now, which is common indoors, so I can't say how far it is. Try near a window or outside."
+        // a dead link must not eat the whole budget: bounded waits, then the places this phone has looked up before
+        val online = PlaceMemory.isOnline(context)
+        val place = bounded(if (online) 9_000L else 4_000L) { OsmClient.search(destination, here.latitude, here.longitude) }
+        if (place == null) {
+            val saved = PlaceMemory.findPlace(context, destination)
+                ?: return if (online) "I couldn't find $destination on the map."
+                else "I'm offline and I haven't looked up $destination before, so I can't say how far it is."
+            return offlineDistance(saved, here)
+        }
+        PlaceMemory.rememberPlace(context, destination, place)
         val straight = NavMath.distance(here.latitude, here.longitude, place.lat, place.lon)
-        val route = OsmClient.walkRoute(here.latitude, here.longitude, place)
+        val route = bounded(4_000L) { OsmClient.walkRoute(here.latitude, here.longitude, place) }
         val far = "${place.name} is about ${NavWords.distance(straight)} from you"
         if (route == null) return "$far, in a straight line."
         val mins = (route.durationS / 60.0).toInt().coerceAtLeast(1)
         return "$far. Walking it is ${NavWords.distance(route.totalM)}, about ${if (mins >= 90) "${mins / 60} hours" else "$mins minutes"}."
+    }
+
+    /** GPS position + a place saved from an earlier lookup: straight-line distance and direction, honest about its age. */
+    private fun offlineDistance(saved: PlaceNote, here: Location): String {
+        val now = System.currentTimeMillis()
+        val straight = NavMath.distance(here.latitude, here.longitude, saved.lat, saved.lon)
+        val bearing = NavMath.bearing(here.latitude, here.longitude, saved.lat, saved.lon)
+        return PlaceBook.distanceOffline(saved, straight, bearing, now, (now - here.time).coerceAtLeast(0L))
+    }
+
+    /** Runs a blocking lookup on its own IO job and stops WAITING after [ms] (the socket itself can't be interrupted). */
+    private suspend fun <T> bounded(ms: Long, block: suspend () -> T?): T? {
+        val job = CoroutineScope(Dispatchers.IO).async { try { block() } catch (_: Throwable) { null } }
+        return withTimeoutOrNull(ms) { job.await() }.also { if (it == null) job.cancel() }
     }
 
     private fun end() {

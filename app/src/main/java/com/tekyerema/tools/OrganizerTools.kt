@@ -453,7 +453,7 @@ object LocationTool : Tool {
             ?: freshFix(app, lm, liveProviders(lm, fine), timeout)
             ?: cached
             ?: return ToolResult(
-                false, "I couldn't get a location fix right now. Try again in a moment, ideally near a window or outside.",
+                false, "GPS has no fix right now, which is common indoors. Try again in a moment, ideally near a window or outside.",
                 recoverable = false
             )
 
@@ -474,14 +474,33 @@ object LocationTool : Tool {
             return ToolResult(true, "Map link to your position: $link.$accNote$stale", data = data, channel = "native")
         }
 
-        val addr = reverseGeocode(app, lat, lng, AppConfig.long("os.location.geocodeTimeoutMs", 8_000L))
+        // a dead link must not make the user wait: without a validated internet connection the street lookup gets 3 s
+        val online = com.tekyerema.live.nav.PlaceMemory.isOnline(app)
+        val addr = reverseGeocode(app, lat, lng, if (online) AppConfig.long("os.location.geocodeTimeoutMs", 8_000L) else 3_000L)
         if (com.tekyerema.BuildConfig.DEV_HOOKS)   // no coordinates or place names in logs, even in debug
             Log.d(ORG_TAG, "[LOCATION] provider=${loc.provider} acc=$acc ageMs=$age geocoded=${addr != null}")
-        if (addr == null)
-            return ToolResult(true, "${LocationFormat.NO_STREET} Map link: $link.$stale", data = data, channel = "native")
+        if (addr == null) {
+            // GPS still works offline: name the position from a street/area saved by an earlier lookup (with its age), never a guess
+            val saved = com.tekyerema.live.nav.PlaceMemory.nearestArea(app, lat, lng)
+            if (saved != null) {
+                val (note, dist) = saved
+                val bearing = com.tekyerema.live.nav.NavMath.bearing(note.lat, note.lon, lat, lng)
+                val heading = if (loc.hasBearing() && loc.hasSpeed() && loc.speed >= 1f && age < 30_000L) loc.bearing.toDouble() else null
+                val said = com.tekyerema.live.nav.PlaceBook.whereOffline(
+                    note, dist, bearing, System.currentTimeMillis(), LocationFormat.accuracyPhrase(acc), heading
+                )
+                data.put("offline", true).put("savedAgeMs", System.currentTimeMillis() - note.atMs)
+                return ToolResult(true, "$said Map link: $link.$stale", data = data, channel = "native")
+            }
+            val none = if (online) "" else " You seem to be offline, and I have no saved street names near here yet."
+            return ToolResult(true, "${LocationFormat.NO_STREET}$none Map link: $link.$stale", data = data, channel = "native")
+        }
         val sentence = LocationFormat.spoken(
             addr.thoroughfare, addr.featureName, addr.locality ?: addr.subLocality ?: addr.subAdminArea, addr.adminArea, acc
         )
+        (addr.locality ?: addr.subLocality ?: addr.subAdminArea ?: addr.adminArea).let { area ->
+            com.tekyerema.live.nav.PlaceMemory.rememberArea(app, lat, lng, addr.thoroughfare, area)
+        }
         data.put("street", addr.thoroughfare ?: "").put("locality", addr.locality ?: "").put("region", addr.adminArea ?: "")
         val extra = if (sentence == LocationFormat.NO_STREET) " Map link: $link." else ""
         return ToolResult(true, sentence + extra + stale, data = data, channel = "native")
