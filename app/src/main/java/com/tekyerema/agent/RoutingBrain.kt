@@ -327,6 +327,11 @@ class RoutingBrain(
         val d = openInsteadOfHunting(ctx, FinalActionGuard.apply(com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal, ctx.history),
             ctx.goal, ctx.history, ctx.screen.toString(), ctx.screen.optString("app").takeIf { it.isNotBlank() }))
         if (d is AgentDecision.Done && ctx.simple) answers?.put(ctx.goal, d.summary)
+        // Mid-task, the internet drops and all that is left is to READ what the last step opened: reading needs no internet (the
+        // screen tree, or OCR on the phone), so it is done here instead of pausing for "carry on" (Infinix, 27 Oct 2026, the
+        // judge's demo: "open the most recent PDF and read it" stopped with the PDF open and the answer one step away).
+        if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && !nothingDoneYet(ctx.history))
+            readWhatIsOpen(ctx)?.let { return it }
         if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && nothingDoneYet(ctx.history)) {
             android.util.Log.i("Tekyerema", "[ROUTE] the cloud couldn't be reached — answering the offline way")
             stickyCloud = false
@@ -336,6 +341,23 @@ class RoutingBrain(
     }
 
     private fun nothingDoneYet(history: List<String>): Boolean = history.all { READ_ONLY_STEP.containsMatchIn(it) }
+
+    /**
+     * The task's LAST clause is a reading ("…, open the most recent PDF and read it") and the step before it was verified: read
+     * the screen on the phone and finish. null (the task pauses as before) when the last clause is anything else, the previous
+     * step was not verified (the screen may not be the one meant), or the reading itself already failed.
+     */
+    internal fun readWhatIsOpen(ctx: BrainContext): AgentDecision? {
+        val clause = ctx.goal.split(Regex("\\s*(?:,|;|\\bthen\\b|\\band\\b)\\s*")).lastOrNull { it.isNotBlank() }?.trim().orEmpty()
+        if (!ScreenReadIntent.isRead(clause)) return null
+        val last = LocalBrain.lastStep(ctx.history)
+        if (last.startsWith("read_screen(")) {
+            return if ("→ ok" in last || "→ success" in last) AgentDecision.Done(LocalBrain.resultMessage(last)) else null
+        }
+        if (!Regex("verified=true").containsMatchIn(last)) return null
+        return AgentDecision.CallTool("read_screen", org.json.JSONObject().put("continue", false),
+            "the internet dropped; reading what is open needs none")
+    }
 
     /**
      * The planner reaches for the HOME SCREEN (a tap, a long-press, a swipe) while the goal names an installed app that
