@@ -281,9 +281,9 @@ fun HomeContent(
         androidx.compose.animation.AnimatedVisibility(
             visible = live.isNotEmpty() && !surfaceVisible,
             modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 4.dp, start = 14.dp, end = 14.dp),
-            enter = androidx.compose.animation.slideInVertically(androidx.compose.animation.core.spring(0.78f, 190f)) { -it - 60 } +
+            enter = if (reduceMotion) androidx.compose.animation.EnterTransition.None else androidx.compose.animation.slideInVertically(androidx.compose.animation.core.spring(0.78f, 190f)) { -it - 60 } +
                 androidx.compose.animation.fadeIn(),
-            exit = androidx.compose.animation.slideOutVertically { -it - 60 } + androidx.compose.animation.fadeOut()
+            exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.slideOutVertically { -it - 60 } + androidx.compose.animation.fadeOut()
         ) {
             androidx.compose.runtime.CompositionLocalProvider(com.tekyerema.ui.assistant.LocalGlass provides
                     if (Tk.palette.dark) com.tekyerema.ui.assistant.DarkGlass else com.tekyerema.ui.assistant.LightGlass) {

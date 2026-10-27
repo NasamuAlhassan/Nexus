@@ -116,7 +116,7 @@ val DarkGlass = GlassPalette(
 val LightGlass = GlassPalette(
     dark = false,
     top = Color(0xF7FFFFFF), bottom = Color(0xF2EEF7F4),
-    text = Color(0xFF0E1B1C), textSecondary = Color(0xC20E1B1C), textTertiary = Color(0x8A0E1B1C),
+    text = Color(0xFF0E1B1C), textSecondary = Color(0xD90E1B1C), textTertiary = Color(0xB80E1B1C),
     accent = Color(0xFF0B7F71), warm = Color(0xFFB0560C), fail = Color(0xFFC4441C),
     quietFill = Color(0x0F0E1B1C), primaryA = Spectrum.Teal.copy(alpha = 0.24f), primaryB = Spectrum.Aqua.copy(alpha = 0.20f),
     chosenA = Spectrum.Teal.copy(alpha = 0.45f), chosenB = Spectrum.Aqua.copy(alpha = 0.40f), onPrimary = Color(0xFF053F38),
@@ -162,7 +162,7 @@ object GlassTiers {
         val power = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isPowerSaveMode == true
         val override = try { com.tekyerema.core.config.AppConfig.string("ui.glassTier", "auto") } catch (_: Throwable) { "auto" }
         return of(Build.VERSION.SDK_INT, mem.totalMem, am?.isLowRamDevice == true, power,
-            com.tekyerema.ui.theme.systemAnimatorScale(context), calm, override)
+            com.tekyerema.ui.theme.systemAnimatorScale(context), calm || com.tekyerema.ui.theme.simpleUi(), override)
     }
 }
 

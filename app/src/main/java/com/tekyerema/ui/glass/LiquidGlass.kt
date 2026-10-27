@@ -139,6 +139,17 @@ fun Modifier.liquidGlass(
     val hc = style.border != null
     val lite = glassLite()
     val body = tint ?: style.fill
+    if (com.tekyerema.ui.theme.simpleUi()) {
+        // Simple mode (ui.simple): a flat, opaque panel with a clear border (≥ 3:1 against the body), no light effects, no
+        // shadow, no animation inputs read. The one switch for the whole app's glass.
+        val flatBody = body.copy(alpha = 1f)
+        val flatBorder = style.border ?: if (style.dark) Color(0xFF9DB0AD) else Color(0xFF5A6B69)
+        val flatStroke = Stroke(width = 1.5.dp.toPx())
+        return@drawWithCache onDrawBehind {
+            drawPath(path, flatBody)
+            drawPath(rimPath, flatBorder, style = flatStroke)
+        }
+    }
     val thickness = Brush.verticalGradient(0f to style.thickTop, 0.45f to Color.Transparent, 1f to style.thickBottom)
     // The refraction band: light gathered just inside the edge, strongest at the top, a faint caustic at the bottom.
     val edgeBrush = Brush.verticalGradient(0f to Color.White, 0.5f to Color.White.copy(alpha = 0.30f), 1f to Color.White.copy(alpha = 0.62f))

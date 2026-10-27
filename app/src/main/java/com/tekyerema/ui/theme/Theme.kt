@@ -154,6 +154,7 @@ fun Modifier.pageBackground(): Modifier = composed {
             Triple(Offset(w * 1.00f, h * 0.38f), w * 0.85f, p.field[1]),
             Triple(Offset(w * 0.15f, h * 0.95f), w * 0.90f, p.field[2])
         ).map { (c, r, col) -> Brush.radialGradient(0f to col, 1f to col.copy(alpha = 0f), center = c, radius = r) }
+        if (simpleUi()) return@drawWithCache onDrawBehind { drawRect(p.ink) }     // simple mode: one flat colour, no gradients or lights
         onDrawBehind {
             drawRect(base)
             lights.forEach { drawRect(it) }
@@ -227,7 +228,8 @@ fun TekyeremaTheme(forceDark: Boolean = false, content: @Composable () -> Unit) 
     val settings = remember(context) { Settings(context) }
     val version by settings.changes.collectAsState()
     val userReduce = remember(version) { settings.reduceMotion }
-    val calm = MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
+    // Simple mode (ui.simple, default on) is always calm: no decorative motion; the system's setting still counts too.
+    val calm = simpleUi() || MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
     val palette = if (forceDark || rememberDarkTheme()) DarkPalette else LightPalette
     CompositionLocalProvider(LocalCalmMotion provides calm, LocalTkPalette provides palette) {
         MaterialTheme(colorScheme = schemeOf(palette), typography = TkTypography, shapes = TkShapes, content = content)

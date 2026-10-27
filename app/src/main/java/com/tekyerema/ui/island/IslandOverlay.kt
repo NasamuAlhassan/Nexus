@@ -115,6 +115,7 @@ object IslandOverlay {
         }
         val state = MutableTransitionState(false).apply { targetState = true }
         visible = state
+        val simple = com.tekyerema.ui.theme.simpleUi()
         val tier = GlassTiers.detect(ctx, calm = false)
         val panel = ComposeView(host)
         val life = IslandOwner()
@@ -129,9 +130,9 @@ object IslandOverlay {
                     Box(Modifier.padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 22.dp)) {
                         AnimatedVisibility(
                             visibleState = state,
-                            enter = slideInVertically(spring(0.78f, 190f)) { -it - 60 } + fadeIn(tween(160)) +
+                            enter = if (simple) androidx.compose.animation.EnterTransition.None else slideInVertically(spring(0.78f, 190f)) { -it - 60 } + fadeIn(tween(160)) +
                                 scaleIn(spring(0.78f, 190f), initialScale = 0.86f, transformOrigin = TransformOrigin(0.5f, 0f)),
-                            exit = slideOutVertically(tween(220)) { -it - 60 } + fadeOut(tween(180)) +
+                            exit = if (simple) androidx.compose.animation.ExitTransition.None else slideOutVertically(tween(220)) { -it - 60 } + fadeOut(tween(180)) +
                                 scaleOut(tween(220), targetScale = 0.9f, transformOrigin = TransformOrigin(0.5f, 0f))
                         ) {
                             LiveIsland(acts, onAction = { id, a -> LiveActivities.act(id, a) }, tier = tier)

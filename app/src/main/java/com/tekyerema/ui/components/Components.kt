@@ -576,11 +576,12 @@ fun CommandField(
               }
               IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to Tɛkyerɛma" }) {
                 Box(
-                    Modifier.size(40.dp).clip(CircleShape).background(
-                        Brush.linearGradient(listOf(Spectrum.Aqua, Spectrum.Green), start = Offset.Zero, end = Offset(90f, 90f))
-                    ),
+                    Modifier.size(40.dp).clip(CircleShape).let { m ->
+                        if (com.tekyerema.ui.theme.simpleUi()) m.background(Tk.Cyan)    // flat, and the glyph reads at AA
+                        else m.background(Brush.linearGradient(listOf(Spectrum.Aqua, Spectrum.Green), start = Offset.Zero, end = Offset(90f, 90f)))
+                    },
                     contentAlignment = Alignment.Center
-                ) { MicGlyph(Color.White, Modifier.size(20.dp)) }
+                ) { MicGlyph(if (com.tekyerema.ui.theme.simpleUi()) Tk.OnAccent else Color.White, Modifier.size(20.dp)) }
               }
             }
             else -> Spacer(Modifier.width(14.dp))

@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
@@ -121,9 +122,9 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
     // Arrival: the dimming fades up (effects spring) while the presence rises and grows into place on a spatial
     // spring with a touch of overshoot — it "arrives" rather than appears. Calm motion: a fade only.
     val scrim by animateFloatAsState(if (visible) 0.94f else 0f,
-        if (visible) spring(1f, 300f) else tween(EXIT_MS, easing = FastOutLinearInEasing), label = "scrim")
+        if (calm) snap<Float>() else if (visible) spring(1f, 300f) else tween(EXIT_MS, easing = FastOutLinearInEasing), label = "scrim")
     val rise by animateFloatAsState(if (visible) 1f else 0f,
-        if (visible) spring(0.72f, 220f) else tween(EXIT_MS, easing = FastOutLinearInEasing), label = "rise")
+        if (calm) snap<Float>() else if (visible) spring(0.72f, 220f) else tween(EXIT_MS, easing = FastOutLinearInEasing), label = "rise")
     val riseY = with(LocalDensity.current) { 56.dp.toPx() }
 
     // Start listening as soon as we arrive (asking for the microphone first if we must).

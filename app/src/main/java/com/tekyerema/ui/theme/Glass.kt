@@ -36,6 +36,13 @@ fun Modifier.glass(
     )
 }
 
+/**
+ * Simple mode (config `ui.simple`, default TRUE; owner 27 Oct 2026: no Liquid Glass, no decorative animation, for blind and
+ * low-vision users): every glass surface draws as a flat, opaque, bordered panel and all motion snaps. One switch; set
+ * `"ui": {"simple": false}` in a config file to bring the glass look back.
+ */
+fun simpleUi(): Boolean = try { com.tekyerema.core.config.AppConfig.bool("ui.simple", true) } catch (_: Throwable) { true }
+
 /** The user's glass setting: tinted (default), solid (less see-through) or high contrast (settings `ui.glassMode`). */
 fun glassMode(): com.tekyerema.ui.glass.GlassMode = when (try {
     com.tekyerema.core.config.AppConfig.string("ui.glassMode", "tinted").lowercase()
