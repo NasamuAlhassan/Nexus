@@ -272,11 +272,11 @@ class LanguageLayerTest {
         assertTrue("the gateway has no translation", r.mt.isEmpty())
         // owner, 16 Oct 2026: the lab paused — Twi hearing and voice are the Khaya web platform's (its clients stay built)
         // 18 Oct 2026: our own Twi hearing model on the Space backs the lab up (the lab has 10 hearings a day)
-        assertEquals(listOf("space_asr", "hcilab_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
+        assertEquals(listOf("hcilab_asr", "space_asr"), AppConfig.stringList("providers.speech.asr.online.twi", emptyList()))
         // 17 Oct 2026 (owner, option 2): the lab's VOICE first again, Khaya hears and backs it up
         // 18 Oct 2026: our own Twi voice on the Space is the second voice (the lab's new lines take 20-90 s)
         // 21 Oct 2026 (owner: online for the demo, the Space kept warm — "it's faster"): our Space's voice first, the lab's second
-        assertEquals(listOf("space_tts", "hcilab_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
+        assertEquals(listOf("hcilab_tts", "space_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
         // 17 Oct 2026 (owner, final): the lab's ASR and TTS alone for Twi — Khaya's speech clients are disabled (translation stays)
         val withKhaya = LanguageLayer.build(clients, mapOf("SPEECH_HCILAB_TOKEN" to "speech_live_x", "SPEECH_KHAYA_WEB_KEY" to "k"), FakeTransport { json(200, "{}") }, { FakeSink() })
         assertEquals(setOf("hcilab_asr"), withKhaya.asr.keys); assertEquals(setOf("hcilab_tts"), withKhaya.tts.keys)

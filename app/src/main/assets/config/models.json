@@ -17,8 +17,8 @@
      "system"
     ],
     "twi": [
-     "space_tts",
      "hcilab_tts",
+     "space_tts",
      "system"
     ],
     "_twiNote": "21 Oct 2026 (owner: 'I'll use the online side … keep the space warm because I feel like it's faster'): our Space's Twi voice first, the HCI Lab's second (ttsHedgeMs), the phone's own Twi voice when offline (OfflineFirstTts).",
@@ -40,8 +40,8 @@
     "hedgeMs": 7000,
     "online": {
      "twi": [
-      "space_asr",
-      "hcilab_asr"
+      "hcilab_asr",
+      "space_asr"
      ],
      "kus": [
       "space_asr_kus"
