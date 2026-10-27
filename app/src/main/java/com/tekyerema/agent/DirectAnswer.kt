@@ -36,6 +36,9 @@ object DirectAnswer {
         val g = goal.trim().lowercase()
         if (g.isEmpty() || !QUESTION.containsMatchIn(g)) return false
         if (ScreenReadIntent.isRead(g)) return false   // "what does it say?" is about the screen, not general knowledge
+        // "Where is the closest pizza joint?" is about where the phone IS: the web has no location, so it named an outlet as "the nearest"
+        // (A20e, 27 October 2026). The full toolset has walk_directions, which does.
+        if (BrainPrompts.PLACE_GOAL.containsMatchIn(g)) return false
         // "tell me a joke": the opener's "me" is the listener, not the user's own things.
         val research = RESEARCH_CUE.containsMatchIn(g)
         val body = g.replaceFirst(Regex("^(?:please\\s+)?tell me\\s+"), "")

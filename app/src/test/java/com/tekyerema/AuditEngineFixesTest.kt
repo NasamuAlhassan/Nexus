@@ -109,7 +109,7 @@ class AuditEngineFixesTest {
     }
 
     @Test fun a_bare_pronoun_is_never_looked_up_as_a_contact() {
-        for (w in listOf("him", "Her", "them.", "that person", "ɔno")) assertTrue(w, com.tekyerema.android.ContactResolver.isPronoun(w))
+        for (w in listOf("him", "Her", "them.", "that person", "ɔno", "them for me", "him now", "her please")) assertTrue(w, com.tekyerema.android.ContactResolver.isPronoun(w))
         for (w in listOf("Kim", "Himmat", "Prince Melanin", "Theo")) assertFalse(w, com.tekyerema.android.ContactResolver.isPronoun(w))
     }
 

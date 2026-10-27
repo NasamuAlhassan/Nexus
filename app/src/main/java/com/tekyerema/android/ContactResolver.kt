@@ -94,7 +94,12 @@ object ContactResolver {
 
     /** Words that point at a person without naming one. A substring search for "him" found "Phimona", and a bare
      *  "call him" was read back as a call to her (A20e 2026-10-01). Pure. */
-    fun isPronoun(name: String): Boolean = name.trim().lowercase().trimEnd('.', '?', '!') in PRONOUNS
+    fun isPronoun(name: String): Boolean {
+        // "call them for me" reaches the tool as the name "them for me": the filler tail is not part of it, and what is left is
+        // a pronoun. Unchecked, it was matched by sound to a stranger ("The Manuel Life") and dialled (A20e, 27 October 2026).
+        val bare = name.trim().replace(FILLER_TAIL, "").trim().lowercase().trimEnd('.', '?', '!').trim()
+        return bare in PRONOUNS
+    }
     private val PRONOUNS = setOf("him", "her", "them", "he", "she", "they", "it", "that", "this", "someone", "somebody",
         "that person", "this person", "the person", "that number", "this number", "ɔno", "ono", "wɔn", "won")
 

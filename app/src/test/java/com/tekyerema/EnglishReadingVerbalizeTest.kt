@@ -66,4 +66,13 @@ class EnglishReadingVerbalizeTest {
         assertEquals("one thousand two hundred fifty cedis fifty pesewas", say("GH₵1,250.50"))
         assertFalse(say("1,234").contains(","))
     }
+
+    @Test fun aPhoneNumberWithNoBreakSpacesIsStillADigitByDigitPhoneNumber() {
+        // the pizza answer on the A20e, 27 October 2026: the model wrote "050<U+202F>556<U+202F>6566" and it was read as a quantity
+        val narrow = "Call 050\u202F556\u202F6566 for reservations."
+        val plain = "Call 050 556 6566 for reservations."
+        assertEquals(say(plain), say(narrow))
+        assertFalse(say(narrow).contains("hundred") || say(narrow).contains("thousand"))
+        assertEquals("Call zero five zero, five five six, six five six six for reservations.", say(plain))
+    }
 }

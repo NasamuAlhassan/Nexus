@@ -98,9 +98,14 @@ object Verbalize {
         "a/c" to "account"
     )
 
+    /** The no-break and thin spaces a model writes between digit groups ("050 556 6566"): to a regex they are not a space. */
+    private val ODD_SPACES = Regex("[\\u00A0\\u2007\\u2009\\u200A\\u202F]")
+
     fun apply(text: String): String {
         // [text](url) is just "text"; an e-mail address is said "kofi dot mensah at gmail dot com", never as a raw string.
-        var t = text.replace(MD_LINK, "$1").replace(URL, "a link")
+        // Odd spaces first: a phone number written with narrow no-break spaces (A20e, 27 October 2026, the pizza answer) fell
+        // through the phone rule and was read as "zero five zero five hundred fifty six, six thousand five hundred sixty six".
+        var t = text.replace(ODD_SPACES, " ").replace(MD_LINK, "$1").replace(URL, "a link")
             .replace(EMAIL) { m -> m.value.replace(".", " dot ").replace("@", " at ").replace("_", " underscore ").replace("-", " dash ") }
             .replace(EMOJI, "").replace(MARKDOWN, "").replace(MD_ITALIC, "$1")
         t = lexicon(t)

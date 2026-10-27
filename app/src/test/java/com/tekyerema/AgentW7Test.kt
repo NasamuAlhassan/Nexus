@@ -24,7 +24,9 @@ class AgentW7Test {
         for (q in listOf("What is my balance?", "Who called me?", "What's on my screen?", "Open WhatsApp",
                 "What is this?", "How do I turn on WiFi", "Is my phone locked?", "Send Ama a text",
                 "Can you start the journey to legon Hall", "Can you navigate to Accra Mall",
-                "Where is the route to Kumasi", "Can you show me directions to the airport"))
+                "Where is the route to Kumasi", "Can you show me directions to the airport",
+                // about where the phone is: the web has no location (A20e 27 Oct 2026, "the nearest pizza place" was invented)
+                "Where is the closest pizza joint", "Is there a pharmacy near me"))
             assertFalse(q, DirectAnswer.isKnowledgeQuestion(q))
     }
 
