@@ -144,8 +144,16 @@ object LanguageLayer {
         val inner = if (chain.size == 1) chain[0] else FallbackTranslator(chain)
         return object : TranslationProvider {
             override val name = inner.name
-            override suspend fun translate(text: String, from: String, to: String): String? =
-                if (!isOnline()) offline?.translate(text, from, to) else inner.translate(text, from, to)
+            override suspend fun translate(text: String, from: String, to: String): String? {
+                if (!isOnline()) return offline?.translate(text, from, to)
+                if (offline == null) return inner.translate(text, from, to)
+                // Online but slow or failing (the Space took over 8 s on the camp Wi-Fi, 27 Oct 2026, and the reply became the Twi
+                // "I can't translate this now"): after `providers.speech.mt.onlineBeforeLocalMs` the phone's own translator tries.
+                val budget = com.tekyerema.core.config.AppConfig.long("providers.speech.mt.onlineBeforeLocalMs", 2_500L)
+                val online = try { kotlinx.coroutines.withTimeoutOrNull(budget) { inner.translate(text, from, to) } }
+                    catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+                return online ?: offline.translate(text, from, to)
+            }
         }
     }
 }
