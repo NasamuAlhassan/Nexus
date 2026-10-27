@@ -25,6 +25,8 @@ object DataControl {
             Item("Activity log", safe { com.tekyerema.audit.AuditLog.count() }, "$days days", "entries"),
             Item("Recent messages and notifications", safe { com.tekyerema.notifications.MessageIndex.size() }, "a week", "items"),
             Item("Who your family and friends are", safe { com.tekyerema.android.Relations.all().size }, null, "people"),
+            Item("What I learned about you: preferences, contacts you use most, things you ask often", safe {
+                com.tekyerema.memory.UserMemory.ensureLoaded(app); com.tekyerema.memory.UserMemory.snapshot().entries.size }, null, "things"),
             Item("Your routines", safe { com.tekyerema.agent.Routines.names().size }, null, "routines"),
             Item("Your schedules", safe { com.tekyerema.agent.triggers.ScheduledTasks.list(app).count { !it.id.startsWith("cfg:") } }, null, "schedules"),
             Item("Message alerts", safe { com.tekyerema.agent.triggers.NotificationTriggers.userRules(app).size }, null, "alerts"),
@@ -75,6 +77,7 @@ object DataControl {
         }
         step("learned wordings") { com.tekyerema.agent.IntentMatcher.get(app)?.forgetPersonal() }
         step("relations") { com.tekyerema.android.Relations.ensureLoaded(app); com.tekyerema.android.Relations.clear() }
+        step("memory") { com.tekyerema.memory.UserMemory.clearAll(app) }   // preferences, frequent contacts, repeated tasks, told facts
         step("routines") {
             com.tekyerema.agent.Routines.ensureLoaded(app)
             com.tekyerema.agent.Routines.names().forEach { com.tekyerema.agent.Routines.remove(it) }

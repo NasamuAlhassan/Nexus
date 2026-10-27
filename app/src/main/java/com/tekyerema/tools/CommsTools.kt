@@ -34,7 +34,7 @@ object MakeCallTool : Tool {
         if (!number.isNullOrBlank()) return com.tekyerema.agent.helper.TrustFast.toolRefusal(ctx, contact, number)
         if (contact.isNullOrBlank()) return null
         // One person saved twice is one match; "Prince Alhassan ending 323" (an option we offered) picks that entry.
-        val matches = ContactChoice.resolve(ctx.appContext, contact)
+        val matches = ContactChoice.resolve(ctx.appContext, contact, preferFrequent = true)
         return when {
             // "call him" with nobody remembered: no one is named — the question is WHO, not a number (audit K02 retest).
             com.tekyerema.android.ContactResolver.isPronoun(contact) -> ToolResult(false,
@@ -52,13 +52,14 @@ object MakeCallTool : Tool {
         var number = args.str("number")?.filter { it.isDigit() || it == '+' }
         val contact = args.str("contact")
         var name = contact
+        var saved = false   // the name came from a saved contact (memory notes only those)
         if (number.isNullOrBlank() && !contact.isNullOrBlank()) {
-            val matches = ContactChoice.resolve(ctx.appContext, contact)   // as preflight resolved it
+            val matches = ContactChoice.resolve(ctx.appContext, contact, preferFrequent = true)   // as preflight resolved it
             when {
                 matches.isEmpty() ->
                     return ToolResult(false, "No contact found matching '$contact'. Ask the user for the number.", recoverable = false)
                 matches.size > 1 -> return ContactChoice.result(ctx.appContext, ContactChoice.narrow(contact).first, matches)
-                else -> { number = matches[0].number; name = matches[0].name }
+                else -> { number = matches[0].number; name = matches[0].name; saved = true }
             }
         }
         if (number.isNullOrBlank()) return ToolResult(false, "No phone number to call.")
@@ -76,6 +77,7 @@ object MakeCallTool : Tool {
         com.tekyerema.phone.IncomingCall.speakerForNextCall()
         return try {
             ctx.appContext.startActivity(intent)
+            if (saved) com.tekyerema.memory.UserMemory.noteContact(ctx.appContext, name, number.orEmpty())   // the name only, for "who you call most"
             ToolResult(true, "Calling ${name ?: number} ($number).", channel = "native")
         } catch (t: Throwable) {
             ToolResult(false, "Failed to place call: ${t.message}")

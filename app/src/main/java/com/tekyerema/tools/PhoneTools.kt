@@ -249,7 +249,7 @@ object SendSmsTool : Tool {
         if (!ctx.appContext.granted(Manifest.permission.READ_CONTACTS))
             return Recipient.Problem(ToolResult(false, "I can't look up $contact without contacts access — allow it for Tɛkyerɛma in Settings, or tell me the number.", recoverable = false))
         // One person saved twice is one match; "Ama ending 456" (an option we offered) picks that entry.
-        val matches = ContactChoice.resolve(ctx.appContext, contact)
+        val matches = ContactChoice.resolve(ctx.appContext, contact, preferFrequent = true)
         return when {
             com.tekyerema.android.ContactResolver.isPronoun(contact) -> Recipient.Problem(ToolResult(false,
                 "I don't know who “$contact” is — no one was named. Ask the user who the message is for (ask_user)."))
@@ -323,10 +323,14 @@ object SendSmsTool : Tool {
         }
         val who = target.name ?: CallLogFormat.spokenNumber(target.number)
         val app = ctx.appContext
-        if (viaWhatsApp(args)) return sendWhatsApp(ctx, target.number, message, who)
-        if (!app.granted(Manifest.permission.SEND_SMS)) return openComposer(ctx, target.number, message, who)
-        val sms = smsManager(app) ?: return openComposer(ctx, target.number, message, who)
-        return sendDirect(app, sms, target.number, message, who)
+        val result = when {
+            viaWhatsApp(args) -> sendWhatsApp(ctx, target.number, message, who)
+            !app.granted(Manifest.permission.SEND_SMS) -> openComposer(ctx, target.number, message, who)
+            else -> smsManager(app)?.let { sendDirect(app, it, target.number, message, who) } ?: openComposer(ctx, target.number, message, who)
+        }
+        // Memory: who the user texts most — the contact's name only (never the message), and only a saved contact's.
+        if (result.success && target.name != null) com.tekyerema.memory.UserMemory.noteContact(app, target.name, target.number)
+        return result
     }
 
     @Suppress("DEPRECATION")

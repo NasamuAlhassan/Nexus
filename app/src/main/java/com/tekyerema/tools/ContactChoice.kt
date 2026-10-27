@@ -103,13 +103,16 @@ object ContactChoice {
     }
 
     /** The contacts [said] means: an option label from [build] picks its one entry; duplicates of one person collapse. */
-    fun resolve(context: Context, said: String): List<ContactResolver.Contact> {
+    fun resolve(context: Context, said: String, preferFrequent: Boolean = false): List<ContactResolver.Contact> {
         val (name, digits) = narrow(said)
         if (digits != null) {
             val hit = withEnding(ContactResolver.resolve(context, name), digits)
             if (hit.isNotEmpty()) return distinct(hit).distinctBy { tail(it.number) }
         }
-        return distinct(ContactResolver.resolve(context, said))
+        val all = distinct(ContactResolver.resolve(context, said))
+        // Calls and texts only (never money): of equally good matches, the one the user uses far more (memory/UserMemory) —
+        // the recipient is still read back in full before anything happens.
+        return if (preferFrequent) com.tekyerema.memory.UserMemory.preferContact(context, name, all, { it.name }, { it.number }) else all
     }
 
     /** The preflight result for several matches: short message for the planner, the question + options as data. */

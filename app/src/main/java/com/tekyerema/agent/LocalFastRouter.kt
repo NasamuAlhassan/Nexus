@@ -136,6 +136,13 @@ class LocalFastRouter(
         // Money safety round 2 (money/MoneyCommands): the user's Mobile Money limits by voice ("set my MoMo limit to 200 cedis",
         // "what is my MoMo limit") — the user's own controls, so like the ones above they always work.
         com.tekyerema.money.MoneyCommands.handle(text)?.let { return ownControl(it) }
+        // The user's memory by voice (memory/): "what do you remember about me", "forget everything" (asked first), "remember that I prefer slow speech".
+        // Encrypted file behind it, so off the main thread; "forget everything" confirmed = the full forget below.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.tekyerema.memory.MemoryCommands.handle(appContext, text)
+        }?.let { o ->
+            return ownControl(if (com.tekyerema.memory.MemoryCommands.takeWipeConfirmed()) forget(FastIntent.Forget("all")) else o)
+        }
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" / "next" / "more" in the middle of reading messages reads the next ones (MessageReading).
         if (com.tekyerema.notifications.MessageCursor.pending && ScreenReadIntent.isContinue(text))
@@ -180,6 +187,8 @@ class LocalFastRouter(
             return null
         }
         val out = run(intent)
+        // Memory (memory/UserMemory): a request that ran well is counted by how the user worded it (only safe wordings are kept).
+        if (out != null && out.ok) com.tekyerema.memory.UserMemory.noteTask(appContext, text, intent.name)
         // "close X" where X turned out not to be an installed app: the words were not ours after all — the offline
         // meaning matcher gets the turn it would have had if the classifier had passed.
         if (out == null && intent is FastIntent.CloseApp && intent.query != null) return meaning(text, language)
@@ -554,6 +563,7 @@ class LocalFastRouter(
                 ScreenMemory.clear()
                 ScreenReadCursor.clear(); screenReadAt = 0L
                 com.tekyerema.android.Relations.clear()   // who "my mother" is: personal, like the conversation
+                com.tekyerema.memory.UserMemory.clearAll(appContext)   // preferences, frequent contacts, repeated tasks, told facts
                 com.tekyerema.agent.habits.Habits.forgetHistory(appContext)   // when everyday requests come (agent/habits)
                 IntentMatcher.get(appContext)?.forgetPersonal()   // learned wordings are the user's words too (audit half 1 #1)
                 "Okay, I've forgotten our conversations, the messages I was keeping and who your family are. " +
