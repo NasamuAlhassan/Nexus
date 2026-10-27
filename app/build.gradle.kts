@@ -13,12 +13,16 @@ val localProps = Properties().apply {
     if (f.exists()) FileInputStream(f).use { load(it) }
 }
 val defaultGeminiKey: String = localProps.getProperty("GEMINI_API_KEY", "")
+val defaultGeminiKey2: String = localProps.getProperty("GEMINI_API_KEY_2", "")
+val defaultGeminiKey3: String = localProps.getProperty("GEMINI_API_KEY_3", "")
 val defaultGroqKey: String = localProps.getProperty("GROQ_API_KEY", "")
 // Extra Groq keys for rotation on rate-limit (429). Free-tier per-minute limits are the main cap on
 // multi-step cloud tasks; rotating across keys multiplies the effective quota. Blank slots are ignored.
 val defaultGroqKey2: String = localProps.getProperty("GROQ_API_KEY_2", "")
 val defaultGroqKey3: String = localProps.getProperty("GROQ_API_KEY_3", "")
 val defaultGroqKey4: String = localProps.getProperty("GROQ_API_KEY_4", "")
+val defaultGroqKey5: String = localProps.getProperty("GROQ_API_KEY_5", "")
+val defaultGroqKey6: String = localProps.getProperty("GROQ_API_KEY_6", "")
 // Optional overrides so the same OpenAI-compatible brain slot can point at a local Ollama
 // server instead of Groq's cloud endpoint (e.g. GROQ_BASE_URL=http://<mac-lan-ip>:11434/v1).
 // Blank means "use the Settings.kt cloud default" — no behavior change for anyone not using these.
@@ -55,10 +59,14 @@ val defaultPlannerKeys: String = localProps.stringPropertyNames()
 
 val secretBuildFields = linkedMapOf(
     "DEFAULT_GEMINI_KEY" to defaultGeminiKey,
+    "DEFAULT_GEMINI_KEY_2" to defaultGeminiKey2,
+    "DEFAULT_GEMINI_KEY_3" to defaultGeminiKey3,
     "DEFAULT_GROQ_KEY" to defaultGroqKey,
     "DEFAULT_GROQ_KEY_2" to defaultGroqKey2,
     "DEFAULT_GROQ_KEY_3" to defaultGroqKey3,
     "DEFAULT_GROQ_KEY_4" to defaultGroqKey4,
+    "DEFAULT_GROQ_KEY_5" to defaultGroqKey5,
+    "DEFAULT_GROQ_KEY_6" to defaultGroqKey6,
     "DEFAULT_ASR_ONLINE_KEY" to defaultAsrOnlineKey,
     "DEFAULT_PLANNER_KEYS" to defaultPlannerKeys
 )

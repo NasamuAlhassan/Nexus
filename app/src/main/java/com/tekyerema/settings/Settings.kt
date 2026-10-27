@@ -70,7 +70,8 @@ class Settings(context: Context) {
      *  WS-C: with the user's own server, only the user's own key. */
     val groqApiKeys: List<String>
         get() = (if (usesOwnServer) listOf(storedGroqKey)
-            else listOf(groqApiKey, BuildConfig.DEFAULT_GROQ_KEY_2, BuildConfig.DEFAULT_GROQ_KEY_3, BuildConfig.DEFAULT_GROQ_KEY_4))
+            else listOf(groqApiKey, BuildConfig.DEFAULT_GROQ_KEY_2, BuildConfig.DEFAULT_GROQ_KEY_3, BuildConfig.DEFAULT_GROQ_KEY_4,
+                BuildConfig.DEFAULT_GROQ_KEY_5, BuildConfig.DEFAULT_GROQ_KEY_6))
             .map { it.trim() }.filter { it.isNotBlank() }.distinct()
 
     /** P1-15: keys for the extra planner rungs (`PLANNER_KEY_<ID>` in local.properties → debug builds only), id → key. */

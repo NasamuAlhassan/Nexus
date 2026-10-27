@@ -61,8 +61,31 @@ object GeminiVision {
     /** [prompt]: the camera's default, or F-09's screen/picture prompt (DescribeScreenTool). [structured] (P5-07): ask for
      *  JSON back, at low media resolution and minimal thinking (`camera.describe.mediaResolution`, `camera.describe.thinking`,
      *  both config-gated); a 400 from a model that rejects those fields is retried once as a plain request. */
-    suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT, structured: Boolean = false): VisionResult = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) return@withContext VisionResult.Failed("no Gemini key")
+    suspend fun describe(jpeg: ByteArray, apiKey: String, model: String, prompt: String = PROMPT, structured: Boolean = false): VisionResult {
+        if (apiKey.isBlank()) return VisionResult.Failed("no Gemini key")
+        // The build's own key may have spares (GEMINI_API_KEY_2/3): when one is out of quota (429) or refused (403) the next is tried,
+        // and a key that failed rests for a while so the next photo does not wait on it. A key the user typed in is used alone.
+        val now = android.os.SystemClock.elapsedRealtime()
+        val pool = if (apiKey == BuildConfig.DEFAULT_GEMINI_KEY)
+            listOf(apiKey, BuildConfig.DEFAULT_GEMINI_KEY_2, BuildConfig.DEFAULT_GEMINI_KEY_3).map { it.trim() }.filter { it.isNotBlank() }.distinct()
+        else listOf(apiKey)
+        val ready = pool.filter { (restUntil[it] ?: 0L) <= now }.ifEmpty { pool }
+        var last: VisionResult = VisionResult.Failed("no Gemini key")
+        for (key in ready) {
+            last = describeWithKey(jpeg, key, model, prompt, structured)
+            val reason = (last as? VisionResult.Failed)?.reason
+            if (reason == "HTTP 429" || reason == "HTTP 403") {
+                restUntil[key] = android.os.SystemClock.elapsedRealtime() + if (reason == "HTTP 429") 30_000L else 6 * 3_600_000L
+                continue
+            }
+            return last
+        }
+        return last
+    }
+
+    private val restUntil = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
+    private suspend fun describeWithKey(jpeg: ByteArray, apiKey: String, model: String, prompt: String, structured: Boolean): VisionResult = withContext(Dispatchers.IO) {
         val first = describeOnce(jpeg, apiKey, model, prompt, structured)
         // Only a 400 that names the extra fields (thinking, media resolution, the JSON type) is retried bare; any other 400 — a bad
         // image, a too-large request — would fail the same way again and spend a second request (R-05).
