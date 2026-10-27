@@ -91,7 +91,7 @@ class VoiceLogicTest {
     // ---------------------------------------------------------------- §A.1 Twi confirmation templates
     @Test fun twi_confirmation_preserves_name_verbatim_and_digits_intact() {
         // digit-by-digit Twi numerals, exact:
-        assertEquals("zero mmienu anan anan zero zero zero zero baako baako", com.tekyerema.voice.ConfirmTemplates.twiDigits("0244000011"))
+        assertEquals("sero mmienu anan anan sero sero sero sero baako baako", com.tekyerema.voice.ConfirmTemplates.twiDigits("0244000011"))
         assertEquals("0 2 4 4 0 0 0 0 1 1", com.tekyerema.voice.ConfirmTemplates.enDigits("0244000011"))
         // a call to a resolved contact: NON-ASCII name survives verbatim, 10-digit 0xx number intact
         val spec = com.tekyerema.voice.ConfirmTemplates.Spec(
@@ -103,7 +103,7 @@ class VoiceLogicTest {
         assertEquals("Wopɛ sɛ mefrɛ Kwabɛna Owusu-Ansah? Ka aane anaa daabi.", q)
         val bare = com.tekyerema.voice.ConfirmTemplates.twi(com.tekyerema.voice.ConfirmTemplates.Spec(
             com.tekyerema.voice.ConfirmTemplates.Spec.Kind.CALL, number = "0244000011"))
-        assertTrue("every digit must survive: $bare", bare.contains("zero mmienu anan, anan zero zero, zero zero baako baako"))
+        assertTrue("every digit must survive: $bare", bare.contains("sero mmienu anan, anan sero sero, sero sero baako baako"))
         assertTrue("must be a Twi question", q.contains("Wopɛ sɛ mefrɛ") && q.contains("aane anaa daabi"))
         // send money: the amount in Twi words, recipient verbatim (one voice, 4 October 2026)
         val money = com.tekyerema.voice.ConfirmTemplates.twi(com.tekyerema.voice.ConfirmTemplates.Spec(

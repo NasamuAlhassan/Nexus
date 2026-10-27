@@ -263,8 +263,8 @@ class SpeechRobustnessTest {
             Verbalize.apply("Send 0.1 cedis to Osei Kwame, on 0 5 4, 2 9 0, 6 6 6 6, an MTN number, with Mobile Money?"))
         // Twi: the same, whether the line comes straight or through the English verbaliser first
         for ((line, twi) in mapOf(
-            "Frɛ +233 55 209 3690?" to "Frɛ zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero?",
-            "Frɛ *170#" to "Frɛ star baako nson zero hash",
+            "Frɛ +233 55 209 3690?" to "Frɛ sero anum anum, mmienu sero nkron, mmiɛnsa nsia nkron sero?",
+            "Frɛ *170#" to "Frɛ star baako nson sero hash",
             "Wo balance yɛ GHS 1,000,000." to "Wo balance yɛ sidi ɔpepem.",
             "data 2.5GB" to "data gigabyte mmienu pɔint anum",
             "Fee yɛ GH₵ 0.38." to "Fee yɛ pesewa aduasa nwɔtwe.")) {
@@ -414,7 +414,7 @@ class SpeechRobustnessTest {
 
     @Test fun `the Twi voice gets every figure as Twi words`() {
         assertEquals("Mede sidi du ne pesewa aduonum rekɔma Kwame. Wopene?", TwiSpeechText.prepare("Mede GH₵ 10.50 rekɔma Kwame. Wopene?"))
-        assertEquals("Mede sidi anum rekɔma zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero.",
+        assertEquals("Mede sidi anum rekɔma sero anum anum, mmienu sero nkron, mmiɛnsa nsia nkron sero.",
             TwiSpeechText.prepare("Mede sidi 5 rekɔma 0552093690."))
         assertEquals("Me nsa aka pesewa aduonum.", TwiSpeechText.prepare("Me nsa aka 50 pesewas."))
         assertEquals("Wo balance yɛ sidi apem ne ahaanu ne aduonum ne pesewa aduɔson anum.", TwiSpeechText.prepare("Wo balance yɛ GHS 1,250.75."))
@@ -425,7 +425,7 @@ class SpeechRobustnessTest {
         // VoiceController runs every line through Verbalize before the voice: the English number words go back to Twi
         assertEquals("Mede sidi du ne pesewa aduonum rekɔma Kwame. Wopene?",
             TwiSpeechText.prepare(Verbalize.apply("Mede GH₵ 10.50 rekɔma Kwame. Wopene?")))
-        assertEquals("Mede sidi anum rekɔma zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero.",
+        assertEquals("Mede sidi anum rekɔma sero anum anum, mmienu sero nkron, mmiɛnsa nsia nkron sero.",
             TwiSpeechText.prepare(Verbalize.apply("Mede sidi 5 rekɔma 0552093690.")))
     }
 

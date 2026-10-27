@@ -115,7 +115,7 @@ object TwiSpeechText {
         val parts = listOfNotNull(
             if (ced > 0) "sidi " + (words(ced) ?: return null) else null,
             if (pes > 0) "pesewa " + (words(pes) ?: return null) else null)
-        return parts.joinToString(" ne ").ifEmpty { "sidi zero" }
+        return parts.joinToString(" ne ").ifEmpty { "sidi sero" }
     }
 
     /** A plain figure in Twi: a numeral to 999,999, a decimal or a longer run digit by digit. */
@@ -131,7 +131,7 @@ object TwiSpeechText {
 
     /** 0–999,999,999 as a Twi numeral, or null. 1–199 from [ConfirmTemplates.twiWords] (the verified range). */
     fun words(n: Long): String? {
-        if (n == 0L) return "zero"
+        if (n == 0L) return "sero"
         if (n in 1..199) return ConfirmTemplates.twiWords(n.toInt())
         if (n in 200..999) {
             val h = HUNDREDS[(n / 100).toInt()]; val r = (n % 100).toInt()

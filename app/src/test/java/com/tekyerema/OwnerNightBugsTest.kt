@@ -45,7 +45,7 @@ class OwnerNightBugsTest {
     }
 
     @Test fun theTwiReadBackSaysTheNumbersEnding() {
-        assertEquals(", nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron zero", ConfirmTemplates.endingTwi("My wife", "0552093690"))
+        assertEquals(", nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron sero", ConfirmTemplates.endingTwi("My wife", "0552093690"))
         assertEquals("", ConfirmTemplates.endingTwi(null, "0552093690"))
         assertEquals("", ConfirmTemplates.endingTwi("Ama", null))
     }

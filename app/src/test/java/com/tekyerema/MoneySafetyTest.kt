@@ -194,7 +194,7 @@ class MoneySafetyTest {
         assertEquals("Send 5 cedis to Ama with Mobile Money? I'll go through the menu; you'll enter your PIN.", named)
         assertTrue(MobileMoneyTool.confirmationPrompt(JSONObject().put("_kind", "send_money").put("_number", "0123238011")).contains("\nThat number doesn't start like"))
         assertEquals("Call 0 5 5, 3 2 3, 8 0 1 1?", com.tekyerema.tools.MakeCallTool.confirmationPrompt(JSONObject().put("number", "0553238011")))
-        assertEquals("zero anum anum, mmiɛnsa mmienu mmiɛnsa, nwɔtwe zero baako baako", ConfirmTemplates.twiNumber("0553238011"))
+        assertEquals("sero anum anum, mmiɛnsa mmienu mmiɛnsa, nwɔtwe sero baako baako", ConfirmTemplates.twiNumber("0553238011"))
         // LocalBrain's misheard number: grouped, and the network it starts like.
         val d = kotlinx.coroutines.runBlocking { LocalBrain().decide(com.tekyerema.agent.BrainContext("send 5 cedis to 055323801",
             JSONObject(), emptyList(), org.json.JSONArray(), org.json.JSONArray())) }

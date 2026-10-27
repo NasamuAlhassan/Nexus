@@ -61,12 +61,12 @@ object TwiRespell {
         "papa" to "papa", "brother" to "nuabarima", "sister" to "nuabaa")
     private val KIN_NAME = Regex("(?i)(?<![\\p{L}])my\\s+(wife|yere|husband|kunu|mum|mom|mother|maame|dad|father|papa|brother|sister)(?![\\p{L}])")
 
-    private const val DIGIT_WORDS = "zero|oh|one|two|three|four|five|six|seven|eight|nine|baako|mmienu|abien|mmiɛnsa|abiɛsa|anan|" +
+    private const val DIGIT_WORDS = "zero|sero|oh|one|two|three|four|five|six|seven|eight|nine|baako|mmienu|abien|mmiɛnsa|abiɛsa|anan|" +
         "anum|nsia|nson|nwɔtwe|nkron"
     private val DIGIT_TOKEN = Regex("(?i)\\d|\\b(?:$DIGIT_WORDS)\\b")
     private val ENDING = Regex("(?i)\\bending(?:\\s+(?:in|with))?[\\s:,]+((?:(?:\\d|\\b(?:$DIGIT_WORDS)\\b)[\\s,]*){3,6})")
     private fun digitOf(t: String): Char? = when (t.lowercase()) {
-        "zero", "oh" -> '0'; "one", "baako" -> '1'; "two", "mmienu", "abien" -> '2'; "three", "mmiɛnsa", "abiɛsa" -> '3'
+        "zero", "sero", "oh" -> '0'; "one", "baako" -> '1'; "two", "mmienu", "abien" -> '2'; "three", "mmiɛnsa", "abiɛsa" -> '3'
         "four", "anan" -> '4'; "five", "anum" -> '5'; "six", "nsia" -> '6'; "seven", "nson" -> '7'; "eight", "nwɔtwe" -> '8'
         "nine", "nkron" -> '9'
         else -> t.singleOrNull()?.takeIf { it.isDigit() }

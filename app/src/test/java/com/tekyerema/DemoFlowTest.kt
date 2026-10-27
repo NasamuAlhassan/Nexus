@@ -38,7 +38,7 @@ class DemoFlowTest {
         }
         // a number with no name: Twi digit groups, still one voice
         val bare = ConfirmTemplates.twi(Spec(Spec.Kind.CALL, number = "0552093690"))
-        assertEquals("Wopɛ sɛ mefrɛ zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero? Ka aane anaa daabi.", bare)
+        assertEquals("Wopɛ sɛ mefrɛ sero anum anum, mmienu sero nkron, mmiɛnsa nsia nkron sero? Ka aane anaa daabi.", bare)
     }
 
     @Test fun `amounts in Twi words`() {

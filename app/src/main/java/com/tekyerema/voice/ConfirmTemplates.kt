@@ -29,21 +29,21 @@ object ConfirmTemplates {
         enum class Kind { CALL, SEND_MONEY, BUY_AIRTIME, SEND_MESSAGE, GENERIC }
     }
 
-    // digit → Twi numeral (1–9 from the project's TWI numeral table; 0 kept as "zero", widely understood).
+    // digit → Twi numeral (1–9 from the project's TWI numeral table; 0 is "sero": Twi has no z, owner 27 Oct 2026).
     // [owner: verify Twi digit words + frames with a native speaker before shipping.]
     private val TWI_DIGIT = mapOf(
-        '0' to "zero", '1' to "baako", '2' to "mmienu", '3' to "mmiɛnsa", '4' to "anan",
+        '0' to "sero", '1' to "baako", '2' to "mmienu", '3' to "mmiɛnsa", '4' to "anan",
         '5' to "anum", '6' to "nsia", '7' to "nson", '8' to "nwɔtwe", '9' to "nkron"
     )
 
-    /** Read a phone number / amount digit-by-digit in Twi numerals ("024" → "zero mmienu anan"). */
+    /** Read a phone number / amount digit-by-digit in Twi numerals ("024" → "sero mmienu anan"). */
     fun twiDigits(s: String): String =
         s.filter { it.isDigit() || it == '+' }
             .map { if (it == '+') "plus" else TWI_DIGIT[it] ?: it.toString() }
             .joinToString(" ")
 
     /** A phone number in Twi numerals, in the groups people check it in (3-3-4, a pause between groups):
-     *  "0553238011" → "zero anum anum, mmiɛnsa mmienu mmiɛnsa, nwɔtwe zero baako baako" (money safety, 2026-09-29). */
+     *  "0553238011" → "sero anum anum, mmiɛnsa mmienu mmiɛnsa, nwɔtwe sero baako baako" (money safety, 2026-09-29). */
     fun twiNumber(s: String): String {
         val groups = com.tekyerema.agent.NumberSpeech.groups(s)
         if (groups.isEmpty()) return twiDigits(s)

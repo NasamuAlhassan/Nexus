@@ -24,7 +24,7 @@ class TwiMoneyConfirmTest {
         assertNotNull(spec)
         val twi = ConfirmTemplates.twi(spec!!)
         // owner, 4 October 2026: ONE voice — the amount in Twi words and the name, said by the lab's Twi voice (no English stretch)
-        assertEquals("Menbue Mobile Money sɛ wode sidi anum kɔma Prince Alhassan, nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron zero? Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi.", twi)
+        assertEquals("Menbue Mobile Money sɛ wode sidi anum kɔma Prince Alhassan, nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron sero? Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi.", twi)
         assertEquals(listOf(twi to false), EntityTags.segments(twi))
     }
 
@@ -35,7 +35,7 @@ class TwiMoneyConfirmTest {
 
     @Test fun `a reference is read back in the Twi frame, not machine-translated`() {
         val twi = ConfirmTemplates.twi(UssdNavigatorTool.twiSpec(send("reference" to "aduane"))!!)
-        assertEquals("Menbue Mobile Money sɛ wode sidi anum kɔma Prince Alhassan, nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron zero? Nkyerɛkyerɛmu: aduane. Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi.", twi)
+        assertEquals("Menbue Mobile Money sɛ wode sidi anum kɔma Prince Alhassan, nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron sero? Nkyerɛkyerɛmu: aduane. Wo ankasa na wobɛhyɛ PIN. Ka aane anaa daabi.", twi)
     }
 
     @Test fun `a balance check has no template`() {

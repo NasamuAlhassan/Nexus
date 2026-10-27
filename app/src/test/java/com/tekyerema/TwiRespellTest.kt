@@ -24,7 +24,7 @@ class TwiRespellTest {
     @Test fun aNumbersEndingIsSaidInTwi() {
         val twiEnding = "nɔma a n'awieɛ yɛ mmiɛnsa nsia nkron sero"   // "zero" then the letter rule (z → s)
         assertEquals("Mefrɛ wo yere, $twiEnding?", TwiRespell.apply("Mefrɛ My yere, ending 3 6 9 0?", emptyMap()))
-        assertEquals("Mefrɛ wo yere, $twiEnding?", TwiRespell.apply("Mefrɛ My yere, ending mmiɛnsa nsia nkron zero?", emptyMap()))
+        assertEquals("Mefrɛ wo yere, $twiEnding?", TwiRespell.apply("Mefrɛ My yere, ending mmiɛnsa nsia nkron sero?", emptyMap()))
         assertEquals("Ama, $twiEnding na ɛyɛ MTN.", TwiRespell.apply("Ama, ending three six nine zero na ɛyɛ MTN.", emptyMap()))
         // not a number's ending
         assertEquals("Ending no yɛ fɛ.", TwiRespell.apply("Ending no yɛ fɛ.", emptyMap()))

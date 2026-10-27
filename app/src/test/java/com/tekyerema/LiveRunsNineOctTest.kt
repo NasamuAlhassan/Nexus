@@ -65,7 +65,7 @@ class LiveRunsNineOctTest {
     @Test fun `the balance is one Twi sentence with the amount in Twi words`() {
         assertEquals("MTN se: wo Momo mu sika a aka yɛ sidi dumienu ne pesewa aduonum.",
             UssdSpeech.twiBalance("Current Balance: GHS 12.50 Available Balance: GHS 12.50", "MTN"))
-        assertEquals("MTN se: wo Momo mu sika a aka yɛ sidi zero.", UssdSpeech.twiBalance("Available Balance: GHS 0.00", "MTN"))
+        assertEquals("MTN se: wo Momo mu sika a aka yɛ sidi sero.", UssdSpeech.twiBalance("Available Balance: GHS 0.00", "MTN"))
         val big = UssdSpeech.twiBalance("Available Balance: GHS 1,234.00", "MTN")!!
         assertFalse(big, big.any { it.isDigit() })
         // no balance in it: read as the network wrote it

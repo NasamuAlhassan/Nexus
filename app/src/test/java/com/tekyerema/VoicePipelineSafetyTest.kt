@@ -172,7 +172,7 @@ class VoicePipelineSafetyTest {
     @Test fun `phone number answers in English or Twi digits`() {
         val q = "I couldn't catch the phone number. Please say the phone number again."
         for (a in listOf("0552093690", "oh five five two oh nine three six nine oh", "zero double five two zero nine three six nine zero",
-                "+233 55 209 3690", "055 209 3690", "zero anum anum, mmienu zero nkron, mmiɛnsa nsia nkron zero"))
+                "+233 55 209 3690", "055 209 3690", "sero anum anum, mmienu sero nkron, mmiɛnsa nsia nkron sero"))
             assertEquals(a, "0552093690", AnswerContext.read(a, q))
         // missing digits are never invented
         assertEquals("055 209", AnswerContext.read("055 209", q))

@@ -64,7 +64,7 @@ object AnswerContext {
     /** Number words as figures, with the spoken-digit rules ("oh five five", "double five", "two point five"). */
     private fun numbers(a: String): String = try { Normalizer.normalize(a, Lang.GH_EN) } catch (_: Throwable) { a }
 
-    private val TWI_DIGIT = mapOf("zero" to "0", "hwee" to "0", "baako" to "1", "biako" to "1", "mmienu" to "2", "abien" to "2",
+    private val TWI_DIGIT = mapOf("zero" to "0", "sero" to "0", "hwee" to "0", "baako" to "1", "biako" to "1", "mmienu" to "2", "abien" to "2",
         "mmiɛnsa" to "3", "mmiensa" to "3", "abiɛsa" to "3", "anan" to "4", "anum" to "5", "nsia" to "6", "nson" to "7",
         "nnson" to "7", "nwɔtwe" to "8", "nwotwe" to "8", "awɔtwe" to "8", "nkron" to "9", "akron" to "9")
 
