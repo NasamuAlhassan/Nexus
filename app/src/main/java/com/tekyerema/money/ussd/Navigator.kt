@@ -274,16 +274,45 @@ class Navigator(
         })
     }
 
-    /** Type [value] into the CURRENT dialog and wait for the next one; null when nothing came. */
+    /** Type [value] into the CURRENT dialog and wait for the next one; null when nothing came. A balance check (it moves
+     *  nothing) that gets no answer is tried ONCE more from the menu still in front — not from scratch ([retryAction]). */
     private suspend fun press(prevText: String, value: String): UssdDialog.Screen? {
         val now = UssdDialog.awaitCurrent(ctrl) ?: return null
         if (!UssdDialog.answer(ctrl, now, value)) return null
-        kotlinx.coroutines.delay(400)
-        return UssdDialog.awaitNext(ctrl, prevText, 18_000L)
+        kotlinx.coroutines.delay(AFTER_PRESS_MS)
+        UssdDialog.awaitNext(ctrl, prevText, 18_000L)?.let { return it }
+        val again = UssdDialog.read(ctrl)
+        return when (retryAction(tx.intent, prevText, again)) {
+            Retry.TAKE_NOW -> again
+            Retry.PRESS_AGAIN -> {
+                t("RETRY", "no answer — pressing the same option once more")
+                try { com.tekyerema.voice.VoiceEngine.announce("The network did not answer. Trying once more.") } catch (_: Throwable) {}
+                if (!UssdDialog.answer(ctrl, again!!, value)) null
+                else { kotlinx.coroutines.delay(AFTER_PRESS_MS); UssdDialog.awaitNext(ctrl, prevText, 14_000L) }
+            }
+            Retry.GIVE_UP -> null
+        }
     }
 
     companion object {
         private const val TAG = "Tekyerema"
+        /** The wait after a press before the next screen is looked for (was 400 ms; the poll itself now runs every 250 ms). */
+        private const val AFTER_PRESS_MS = 150L
+
+        enum class Retry { GIVE_UP, TAKE_NOW, PRESS_AGAIN }
+
+        /**
+         * What to do when a press got no new screen in time. Only a balance check (read-only; the PIN is still the user's) is
+         * retried: a screen that is NOW different from the one pressed on is simply taken (it arrived late); the very same
+         * menu, still in front with its entry box, is pressed once more. Anything that moves money, or no dialog at all, is
+         * never repeated blind. Pure → unit-tested.
+         */
+        internal fun retryAction(intent: TxIntent, prevText: String, now: UssdDialog.Screen?): Retry = when {
+            intent != TxIntent.CHECK_BALANCE || now == null -> Retry.GIVE_UP
+            now.text != prevText -> Retry.TAKE_NOW
+            now.hasInput && !now.masked -> Retry.PRESS_AGAIN
+            else -> Retry.GIVE_UP
+        }
 
         /** A last message that says the request went on (a prompt to approve will follow, it is being processed). */
         internal val IN_PROGRESS = Regex("(?i)\\bprompt\\b|\\bapprov|\\bauthori[sz]|being processed|\\bprocessing\\b|will receive|\\bsubmitted\\b|\\bsuccess")

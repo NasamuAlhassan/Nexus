@@ -249,7 +249,7 @@ object TelcoUssdTool : Tool {
             else "[TELCO] reply (${value.length} chars)")
         if (!UssdDialog.answer(ctrl, now, value))
             return ToolResult(false, "I couldn't type into ${session.flow.netName}'s menu. Nothing was bought.", recoverable = false)
-        delay(400)
+        delay(150)
         val next = UssdDialog.awaitNext(ctrl, now.text, 18_000L)
             ?: return ToolResult(false, "${session.flow.netName}'s menu didn't answer in time, so it may have closed. Nothing is paid without your PIN.",
                 recoverable = false)

@@ -43,6 +43,10 @@ object AfterPin {
     private const val TAG = "Tekyerema"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var job: Job? = null
+    /** Polling after the PIN (was 900 ms; the answer is spoken that much sooner). The "closed with no answer" notice keeps its ~7 s, the give-up its ~22 s. */
+    private const val POLL_MS = 500L
+    private const val GONE_TOLD = 14
+    private const val GONE_GIVE_UP = 44
 
     /** What is said for the network's answer; [settled] when it closed a hand-off in the ledger. */
     data class Spoken(val english: String, val twi: String?, val settled: TxLedger.Settled?)
@@ -95,7 +99,7 @@ object AfterPin {
             var confirmAsked = false
             val started = System.currentTimeMillis()
             while (android.os.SystemClock.uptimeMillis() < deadline) {
-                delay(900)
+                delay(POLL_MS)
                 val s = try { UssdDialog.read(ctrl) } catch (_: Throwable) { null }
                 if (s == null) {
                     gone++
@@ -103,7 +107,7 @@ object AfterPin {
                     // silence (the owner's Mashup, 17 Oct 2026: "I didn't complete it") — say so, once.
                     // ~7 s, not ~4.5 s: the click on the dialog's Cancel can reach the service a moment after the dialog has gone, and a
                     // cancel must not be followed by "the MTN screen closed…" (A20e Twi take 22, 20 Oct 2026).
-                    if (gone == 8 && !told) {
+                    if (gone == GONE_TOLD && !told) {
                         told = true
                         if (com.tekyerema.phone.PinCurtain.cancelledSince(started)) { PinPad.disarm(); SecureStep.end(); return@launch }
                         Log.i(TAG, "[MONEY] the dialog closed after the PIN with no answer on screen — told the user the result comes by text")
@@ -114,7 +118,7 @@ object AfterPin {
                         else "The MTN screen closed. If you entered your PIN, MTN will text you the result. If you cancelled, nothing was sent."
                         try { VoiceEngine.announce(line) } catch (_: Throwable) {}
                     }
-                    if (gone > 25) { PinPad.disarm(); SecureStep.end(); return@launch }   // no dialog for ~22 s: closed or cancelled
+                    if (gone > GONE_GIVE_UP) { PinPad.disarm(); SecureStep.end(); return@launch }   // no dialog for ~22 s: closed or cancelled
                     continue
                 }
                 gone = 0

@@ -77,7 +77,7 @@ internal object UssdDialog {
         val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
         var sawGap = prevText.isBlank()
         while (android.os.SystemClock.uptimeMillis() < deadline) {
-            delay(500)
+            delay(POLL_MS)
             val s = read(ctrl)
             if (s == null) { sawGap = true; continue }
             if (sawGap || s.text != prevText) return s
@@ -115,7 +115,7 @@ internal object UssdDialog {
         while (true) {
             read(ctrl)?.let { return it }
             if (android.os.SystemClock.uptimeMillis() >= deadline) return null
-            delay(400)
+            delay(POLL_MS)
         }
     }
 
@@ -179,6 +179,9 @@ internal object UssdDialog {
         return null
     }
 
+    /** How often the dialog is looked at while waiting for the network's next screen (was 500 ms: every hop lost up to half a second to it). */
+    const val POLL_MS = 250L
+
     /** How much longer than the wait a first screen may take before the dial is given up. */
     const val LATE_GRACE_MS = 10_000L
 
@@ -201,7 +204,7 @@ internal object UssdDialog {
     suspend fun answer(ctrl: AccessibilityController, s: Screen, value: String): Boolean {
         val id = s.inputId ?: return false
         val send = s.sendId
-        return if (send != null) { ctrl.setText(id, value, submit = false); delay(250); ctrl.clickElement(send) }
+        return if (send != null) { ctrl.setText(id, value, submit = false); delay(150); ctrl.clickElement(send) }
         else ctrl.setText(id, value, submit = true)
     }
 }
