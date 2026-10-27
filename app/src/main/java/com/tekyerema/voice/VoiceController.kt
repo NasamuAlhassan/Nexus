@@ -1219,6 +1219,9 @@ class VoiceController(
             val ack = Acknowledgements.next(forceLanguage() ?: sessionLanguage())
             set(VoiceState.LISTENING, ack)
             agent.prewarm()   // N-04: open the brain's connection while the user talks
+            // A follow-up opens the recogniser a beat after our own voice stops (A20e 26 Oct 19:03: 37 ms — it heard the tail of the
+            // reply and the user had to say it twice). Bounded: never more than the settle time.
+            if (quiet) { var settled = 0L; while (settled < WakeGuards.SETTLE_AFTER_SPEECH_MS && NowSpeaking.recently(WakeGuards.SETTLE_AFTER_SPEECH_MS)) { kotlinx.coroutines.delay(25); settled += 25 } }
             val heard = listen(if (quiet) com.tekyerema.voice.io.ListenPurpose.FOLLOW_UP else com.tekyerema.voice.io.ListenPurpose.REQUEST, events(
                 ready = { listenCue(); set(VoiceState.LISTENING, ack) },   // tone once the mic is open
                 speech = {

@@ -98,7 +98,7 @@ class RunGoalReceiver : BroadcastReceiver() {
             // voice= / voiceBusy= let scripts/device_suite.py wait until a reply has been read aloud (a request typed
             // while the voice layer is busy is dropped). "?" when the voice layer isn't initialised yet.
             val voice = try { "${com.tekyerema.voice.VoiceEngine.state.value.state} voiceBusy=${com.tekyerema.voice.VoiceEngine.isRunning}" } catch (_: Throwable) { "? voiceBusy=?" }
-            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()} windows=${AgentEngine.currentController()?.windowCount()} voice=$voice twi='${try { com.tekyerema.voice.TwiVoiceStatus.shared.status() } catch (_: Throwable) { "?" }}'")
+            Log.i("Tekyerema", "[PING] serviceReady=${s.serviceReady} hasApiKey=${s.hasApiKey} brain=${s.brain} status=${s.status} fg=${AgentEngine.currentController()?.foregroundPackage()} windows=${AgentEngine.currentController()?.windowCount()} voice=$voice twi='${try { com.tekyerema.voice.TwiVoiceStatus.shared.status() } catch (_: Throwable) { "?" }}' wake=[${try { com.tekyerema.voice.WakeWordService.status() } catch (_: Throwable) { "?" }}]")
             return
         }
         // Deterministic infrastructure scenario, zero LLM cost — see TestBrain.

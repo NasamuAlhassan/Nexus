@@ -62,6 +62,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     // it exists exactly as long as screen control is on.
     private val triggerScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var triggerJob: Job? = null
+    private var wakeTickJob: Job? = null
     @Volatile private var ourAppInFront = false
     /** The last real app in front before our own UI took over (so a handoff can return there, not HOME). */
     @Volatile private var priorApp: String? = null
@@ -101,6 +102,15 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 // Hands-free wake word: arm/disarm live with the setting + AccessKey. No-op when not configured.
                 if (settings.wakeWordActive) com.tekyerema.voice.WakeWordService.start(this@TekyeremaAccessibilityService)
                 else com.tekyerema.voice.WakeWordService.stop(this@TekyeremaAccessibilityService)
+            }
+        }
+        // Wake-word watchdog (27 Oct 2026): the setting only changes rarely, so a dead wake service (killed, its loop ended) was
+        // never started again. Every 15 s: if the wake word should be on, make sure it is (start() is a no-op when it is).
+        wakeTickJob?.cancel()
+        wakeTickJob = triggerScope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(15_000)
+                try { if (settings.wakeWordActive) com.tekyerema.voice.WakeWordService.start(this@TekyeremaAccessibilityService) } catch (_: Throwable) {}
             }
         }
     }
@@ -188,6 +198,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         AgentEngine.detachController()
         com.tekyerema.phone.IncomingCall.stop(this)
         triggerJob?.cancel()
+        wakeTickJob?.cancel()
         TriggerBubble.hide(this)
         com.tekyerema.voice.WakeWordService.stop(this)
         if (Build.VERSION.SDK_INT >= 26) try { buttonCallback?.let { accessibilityButtonController.unregisterAccessibilityButtonCallback(it) } } catch (_: Throwable) {}

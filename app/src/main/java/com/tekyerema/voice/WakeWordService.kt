@@ -53,6 +53,13 @@ class WakeWordService : Service() {
     /** C-12: an interjection (a wake heard while a task works) is opening the answer mic. Separate from [handling],
      *  which belongs to the turn the first wake started and must not be cleared by the interjection. */
     @Volatile private var interjecting = false
+    private var tickJob: Job? = null
+    /** Why the mic is open/closed right now (WakeResume reason) — in the heartbeat and the PING line. */
+    @Volatile private var why = "starting"
+    /** The watchdog decided the app's busy state is stuck: a wake then cancels that turn first. */
+    @Volatile private var stuckBusy = false
+    @Volatile private var loopBeat = android.os.SystemClock.uptimeMillis()
+    @Volatile private var liveRec: AudioRecord? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onCreate() { super.onCreate(); instance = this }
@@ -60,21 +67,67 @@ class WakeWordService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel(this)
         startForegroundSafe()
-        if (!Settings(this).wakeWordEnabled) { Log.i(TAG, "[WAKE] disabled by setting"); stopSelf(); return START_NOT_STICKY }
+        if (!Settings(this).wakeWordEnabled) { Log.i(TAG, "[WAKE] disabled by setting"); running = false; stopSelf(); return START_NOT_STICKY }
         if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.i(TAG, "[WAKE] microphone permission not granted — not arming"); stopSelf(); return START_NOT_STICKY
+            Log.i(TAG, "[WAKE] microphone permission not granted — not arming"); running = false; stopSelf(); return START_NOT_STICKY
         }
         armLoop()
+        startWatchdog()
         return START_STICKY
     }
 
+    /** The loop, supervised: whatever ends it (an exception, a model that would not load once) it is started again after
+     *  a short backoff — the wake word must never stay deaf until the user taps the icon. */
     private fun armLoop() {
         if (loopJob?.isActive == true) return
         loopJob = scope.launch(Dispatchers.IO) {
-            val scorer = WakeScorer(applicationContext)
-            if (!scorer.load()) { Log.w(TAG, "[WAKE] wake models failed to load (assets/wakeword/) — not arming"); stopSelf(); return@launch }
-            Log.i(TAG, "[WAKE] armed — say 'Hey Tɛkyerɛma'")
-            try { listen(scorer) } finally { scorer.close() }
+            var attempt = 0
+            var loadFails = 0
+            while (isActive) {
+                val scorer = WakeScorer(applicationContext)
+                if (!scorer.load()) {
+                    if (++loadFails >= MAX_LOAD_FAILS) {
+                        Log.w(TAG, "[WAKE] wake models failed to load (assets/wakeword/) — not arming"); running = false; stopSelf(); return@launch
+                    }
+                    Log.w(TAG, "[WAKE] wake models failed to load — retrying ($loadFails/$MAX_LOAD_FAILS)")
+                    delay(WakeBackoff.delayMs(attempt++)); continue
+                }
+                Log.i(TAG, "[WAKE] armed — say 'Hey Tɛkyerɛma'")
+                val t0 = android.os.SystemClock.uptimeMillis()
+                try { listen(scorer) } finally { scorer.close() }
+                if (!isActive) break
+                // listen() only returns while active after an error it logged: restart it.
+                attempt = WakeBackoff.nextAttempt(attempt, android.os.SystemClock.uptimeMillis() - t0)
+                noteRestart("listen loop ended")
+                delay(WakeBackoff.delayMs(attempt))
+            }
+        }
+    }
+
+    private fun noteRestart(reason: String) {
+        restarts++; lastRestart = reason
+        Log.w(TAG, "[WAKE] watchdog: restarted ($reason) restarts=$restarts")
+    }
+
+    /** Every [TICK_MS]: the loop must be alive and coming round. Dead → start it; stalled in a mic read → free the mic so the
+     *  read returns, cancel and start it again. */
+    private fun startWatchdog() {
+        tickJob?.cancel()
+        tickJob = scope.launch {
+            val settings = Settings(applicationContext)
+            while (isActive) {
+                delay(TICK_MS)
+                try {
+                    if (!settings.wakeWordEnabled) continue
+                    val job = loopJob
+                    if (job == null || !job.isActive) { noteRestart("loop not running"); armLoop() }
+                    else if (WakeGuards.stalled(micOpen, android.os.SystemClock.uptimeMillis() - loopBeat)) {
+                        noteRestart("loop stalled ${(android.os.SystemClock.uptimeMillis() - loopBeat) / 1000} s in a mic read")
+                        liveRec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }
+                        job.cancel(); loopBeat = android.os.SystemClock.uptimeMillis(); armLoop()
+                    }
+                } catch (c: CancellationException) { throw c } catch (t: Throwable) { Log.w(TAG, "[WAKE] watchdog error: ${t.message}") }
+            }
         }
     }
 
@@ -84,16 +137,18 @@ class WakeWordService : Service() {
         val frame = FloatArray(WakeScorer.FRAME)
         val minBuf = AudioRecord.getMinBufferSize(WakeScorer.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
         var rec: AudioRecord? = null
-        fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null; micOpen = false }
+        fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null; liveRec = null; micOpen = false }
         var hb = 0L; var top = 0f
+        var busySince = 0L; var zeroFrames = 0
         try {
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
+                loopBeat = android.os.SystemClock.uptimeMillis()
                 if (now - hb >= 10_000) {                          // heartbeat: the tuning window into live scores
                     // frames = 80 ms frames scored in these ~10 s (125 = keeping up with real time); ms = scorer time
                     // per frame (must stay under 80); full = frames that needed the full recompute (the peak changed).
                     val st = scorer.takeStats()
-                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} top=${"%.2f".format(top)} bar=${WakeGate.bar()} " +
+                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} why='$why' top=${"%.2f".format(top)} bar=${WakeGate.bar()} " +
                         "frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} full=${st[3]} incremental=${scorer.incremental} ${scorer.takeReasons()}")
                     hb = now; top = 0f
                 }
@@ -103,13 +158,26 @@ class WakeWordService : Service() {
                 // the mic was released for an entire task and "Hey Tɛkyerɛma, stop" could not be heard.)
                 // Listen while a task works with the mic free (interjection) or waits on a reply nobody is listening for.
                 // voice/io: the phone's recognizer asked for the mic (handOver) — closed until it is done, plus a grace period.
-                if (handedOver()) { release(); delay(50); continue }
-                if (interjecting || ((handling || VoiceEngine.isRunning) && !VoiceEngine.canInterject && !VoiceEngine.canRespond)) { release(); delay(250); continue }
+                // The decision is WakeResume.decide (pure, tested). The idle tail of a finished turn and a turn the watchdog
+                // calls stuck now keep the wake word listening — they used to close it until the job ended, if ever.
+                val busy = handling || VoiceEngine.isRunning
+                if (!busy) busySince = 0L else if (busySince == 0L) busySince = now
+                val ho = handedOver()
+                val d = WakeResume.decide(WakeResume.Inputs(
+                    handedOver = ho, interjecting = interjecting, busy = busy,
+                    canInterject = VoiceEngine.canInterject, canRespond = VoiceEngine.canRespond, canPreempt = VoiceEngine.canPreempt,
+                    speaking = NowSpeaking.active, busyMs = if (busySince == 0L) 0L else now - busySince))
+                if (d.reason != why) {
+                    why = d.reason
+                    if (d.stuck) Log.w(TAG, "[WAKE] watchdog: busy state looks stuck — listening again (${d.reason})")
+                }
+                stuckBusy = d.stuck
+                if (!d.listen) { release(); delay(if (ho) 50 else 250); continue }
                 if (rec == null) {
                     // ~2.5 s of buffering (32 frames): a slow scoring frame is absorbed instead of dropping audio.
                     rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 32))
                     if (rec == null) { delay(1000); continue }
-                    micOpen = true
+                    micOpen = true; liveRec = rec; zeroFrames = 0
                     gate.reset(); scorer.reset()                     // fresh listen: no audio from before the pause
                 }
                 val got = rec!!.read(frame, 0, WakeScorer.FRAME, AudioRecord.READ_BLOCKING)
@@ -120,6 +188,10 @@ class WakeWordService : Service() {
                 var e = 0f
                 for (j in 0 until got) e += frame[j] * frame[j]
                 val rms = sqrt(e / got)
+                // Exact digital silence for 20 s: the system silenced this capture (a call, another app) and may never give
+                // it back — close and reopen it instead of listening to nothing.
+                if (e == 0f) { if (WakeGuards.silentTooLong(++zeroFrames)) { Log.i(TAG, "[WAKE] watchdog: restarted (mic silent for 20 s — reopening)"); restarts++; lastRestart = "mic silent"; release(); delay(300); continue } }
+                else zeroFrames = 0
                 val scores = scorer.feed(if (got == frame.size) frame else frame.copyOf(got))
                 scores[WakeScorer.FIRE_HEAD]?.let { if (it > top) top = it }
                 val fired = gate.feed(rms, scores)
@@ -246,7 +318,12 @@ class WakeWordService : Service() {
             // C-12: a task is working — this wake is an interjection, heard on the answer mic while the task runs on;
             // or the task waits on the user — this wake is the reply (VoiceEngine.start routes it to respond()).
             // Checked BEFORE [handling]: a task started by an earlier wake keeps `handling` set until it ends.
-            if (!(VoiceEngine.canInterject || VoiceEngine.canRespond) || interjecting) return
+            if (stuckBusy && !(VoiceEngine.canInterject || VoiceEngine.canRespond || VoiceEngine.canPreempt)) {
+                Log.w(TAG, "[WAKE] watchdog: wake while the app looks stuck busy — cancelling that turn and listening")
+                scope.launch { withContext(Dispatchers.Main) { VoiceEngine.cancel() }; delay(400); withContext(Dispatchers.Main) { VoiceEngine.start() } }
+                return
+            }
+            if (!(VoiceEngine.canInterject || VoiceEngine.canRespond || VoiceEngine.canPreempt) || interjecting) return
             interjecting = true
             scope.launch {
                 try { withContext(Dispatchers.Main) { VoiceEngine.start() }; delay(1_500) } finally { interjecting = false }
@@ -276,7 +353,7 @@ class WakeWordService : Service() {
                 withTimeoutOrNull(180_000) {
                     while (VoiceEngine.isRunning || VoiceEngine.state.value.state != VoiceState.IDLE) delay(150)
                 }
-                delay(400)
+                delay(WakeGuards.SETTLE_AFTER_SPEECH_MS)       // was 400: the next command must not wait
             } finally { handling = false }
         }
     }
@@ -301,6 +378,8 @@ class WakeWordService : Service() {
     }
 
     override fun onDestroy() {
+        running = false
+        tickJob?.cancel()
         loopJob?.cancel()
         if (instance === this) instance = null
         scope.cancel()
@@ -314,6 +393,10 @@ class WakeWordService : Service() {
         /** How long after our own voice stops a wake detection is still taken to be that voice: the scorer looks at the
          *  last 2.7 s of sound, and a room keeps ringing a little. */
         private const val OWN_VOICE_TAIL_MS = 1200L
+        private const val TICK_MS = 5_000L
+        private const val MAX_LOAD_FAILS = 4
+        @Volatile private var restarts = 0
+        @Volatile private var lastRestart = "-"
         @Volatile private var running = false
         @Volatile private var instance: WakeWordService? = null
         /** Monitor mode (debug): stream scores + save/transcribe candidate clips. Runtime-only, never persisted. */
@@ -330,8 +413,18 @@ class WakeWordService : Service() {
                 })
         }
 
+        /** One line for the PING hook / adb: is the wake loop alive, is the mic open, and why not. */
+        fun status(): String {
+            val s = instance
+            return "loop=${s?.loopJob?.isActive == true} mic=$micOpen why='${s?.why ?: "no service"}' restarts=$restarts last='$lastRestart' holders=${holders.get()}"
+        }
+
+        /** Idempotent: starts the service if it is not running, or running with a dead loop. Called on setting changes and
+         *  by the accessibility service's periodic check. */
         fun start(ctx: Context) {
-            if (running || !Settings(ctx).wakeWordEnabled) return
+            if (!Settings(ctx).wakeWordEnabled) return
+            if (running && instance?.loopJob?.isActive == true) return
+            if (running && instance != null) { instance?.armLoop(); instance?.startWatchdog(); return }
             running = true
             val i = Intent(ctx, WakeWordService::class.java)
             try { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i) else ctx.startService(i) }
@@ -351,11 +444,21 @@ class WakeWordService : Service() {
         @Volatile private var micOpen = false
         private val holders = java.util.concurrent.atomic.AtomicInteger(0)
         @Volatile private var reopenAfter = 0L
-        private fun handedOver() = holders.get() > 0 || android.os.SystemClock.uptimeMillis() < reopenAfter
+        @Volatile private var holderSince = 0L
+        private fun handedOver(): Boolean {
+            val now = android.os.SystemClock.uptimeMillis()
+            // A hand-over nobody reclaimed (a cancel between handOver and its finally) must not keep the wake word shut forever.
+            if (WakeGuards.holderExpired(holders.get(), holderSince, now)) {
+                Log.w(TAG, "[WAKE] watchdog: restarted (a mic hand-over was never reclaimed for ${(now - holderSince) / 1000} s — dropped)")
+                restarts++; lastRestart = "stale hand-over"
+                holders.set(0); holderSince = 0L
+            }
+            return holders.get() > 0 || now < reopenAfter
+        }
 
         /** Close the wake word's microphone and wait (≤ [timeoutMs]) until it is really released. Pair with [reclaim]. */
         suspend fun handOver(timeoutMs: Long = 800): Boolean {
-            holders.incrementAndGet()
+            if (holders.incrementAndGet() == 1) holderSince = android.os.SystemClock.uptimeMillis()
             val deadline = android.os.SystemClock.uptimeMillis() + timeoutMs
             while (micOpen && android.os.SystemClock.uptimeMillis() < deadline) delay(20)
             if (micOpen) Log.w(TAG, "[WAKE] hand-over: the wake mic is still open after ${timeoutMs} ms")
@@ -365,7 +468,7 @@ class WakeWordService : Service() {
         /** The recognizer is done with the mic: the wake word may re-arm after [graceMs]. */
         fun reclaim(graceMs: Long = 300) {
             reopenAfter = android.os.SystemClock.uptimeMillis() + graceMs
-            holders.updateAndGet { if (it > 0) it - 1 else 0 }
+            if (holders.updateAndGet { if (it > 0) it - 1 else 0 } == 0) holderSince = 0L
         }
 
         /** DEBUG/testing: simulate a detection (no audio) → activation path. */
