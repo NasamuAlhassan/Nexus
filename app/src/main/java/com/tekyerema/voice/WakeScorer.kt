@@ -38,6 +38,10 @@ class WakeScorer(private val ctx: Context) {
         /** The only head allowed to fire: the bare head scored 0.93–0.94 on plain white/fan noise and fired
          *  2–5×/30 s; the "hey" head stays at 0.66–0.70 on the same noise. The bare head is logged only. */
         const val FIRE_HEAD = "hey_tekyerema"
+        const val DANGER_HEAD = "danger_code"
+        /** The danger head fires at this score on this many frames in a row (80 ms each) — a false alarm calls the police. */
+        const val DANGER_BAR = 0.995f
+        const val DANGER_FRAMES = 3
         private const val DIR = "wakeword"
     }
 
@@ -94,10 +98,14 @@ class WakeScorer(private val ctx: Context) {
         mel = e.createSession(asset("$DIR/melspectrogram.onnx"), opts)
         emb = e.createSession(asset("$DIR/embedding_model.onnx"), opts)
         for (k in PHRASES.keys) heads[k] = e.createSession(asset("$DIR/$k.onnx"), opts)
+        // The danger code word's head (assets/wakeword/danger_code.onnx, trained on the user's phrase) rides along when the build has one.
+        if (hasAsset("$DIR/$DANGER_HEAD.onnx")) try { heads[DANGER_HEAD] = e.createSession(asset("$DIR/$DANGER_HEAD.onnx"), opts) } catch (_: Throwable) {}
         incremental = selfCheck()
         android.util.Log.i("Tekyerema", "[WAKE] scorer loaded: incremental=$incremental threads=${minOf(2, Runtime.getRuntime().availableProcessors())}")
         true
     } catch (t: Throwable) { close(); false }
+
+    private fun hasAsset(path: String): Boolean = try { ctx.assets.open(path).close(); true } catch (_: Throwable) { false }
 
     private fun asset(path: String): ByteArray = ctx.assets.open(path).use { it.readBytes() }
 

@@ -1414,6 +1414,22 @@ class VoiceController(
             // to a made-up contact. It never reaches the fast path, the agent or any tool — nothing can be sent.
             if (Practice.matches(tr.canonical)) { runPractice(); return }
 
+            // The danger code word (safety/DangerAlert): checked before anything is routed. A cancel during the five-second window,
+            // the code word itself, or the spoken set-up ("set my code word to ...") is handled here and never reaches the agent.
+            run {
+                val app = com.tekyerema.agent.AgentEngine.appContext() ?: return@run
+                if (com.tekyerema.safety.DangerAlert.heard(app, tr.canonical)) {
+                    _state.update { it.copy(state = VoiceState.IDLE) }
+                    return
+                }
+                com.tekyerema.safety.DangerCommands.handle(app, tr.canonical)?.let { line ->
+                    set(VoiceState.SPEAKING, line)
+                    try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                    _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
+                    return
+                }
+            }
+
             // "Say that again." — the last reply is spoken again, exactly, never re-run (a blind user's reflex when a
             // line went by too fast; micro_details.md quick win 2). Before the fast path and the agent.
             if (RepeatIntent.matches(tr.canonical)) {

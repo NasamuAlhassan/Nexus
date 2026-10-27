@@ -65,6 +65,7 @@ class InteropArchitectureTest {
         assertEquals(mapOf(
             "agent/AgentEngine.kt" to 2,        // the step loop (after the gate) and the goal-directed extra scrolls of an ALLOWed scroll
             "agent/LocalFastRouter.kt" to 1,    // runTool: only when PolicyEngine.evaluate(...) == ALLOW and ToolManifest allows "local"
+            "safety/DangerAlert.kt" to 2,       // the danger code word: location link + SMS, only after the user turned it on and the cancel window ran out
             "tools/EmergencyTool.kt" to 2       // inside EmergencyTool.execute (TIER2, confirmed): its location link and SMS
         ), found)
         // The MCP and interop packages never execute a tool themselves.

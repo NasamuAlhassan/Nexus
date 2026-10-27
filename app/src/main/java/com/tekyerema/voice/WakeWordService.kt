@@ -139,7 +139,7 @@ class WakeWordService : Service() {
         var rec: AudioRecord? = null
         fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null; liveRec = null; micOpen = false }
         var hb = 0L; var top = 0f
-        var busySince = 0L; var zeroFrames = 0
+        var busySince = 0L; var zeroFrames = 0; var dangerRun = 0
         try {
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
@@ -195,6 +195,14 @@ class WakeWordService : Service() {
                 val scores = scorer.feed(if (got == frame.size) frame else frame.copyOf(got))
                 scores[WakeScorer.FIRE_HEAD]?.let { if (it > top) top = it }
                 val fired = gate.feed(rms, scores)
+                // The danger code word's own head (only when this build carries one): several frames in a row, then the cancel window.
+                scores[WakeScorer.DANGER_HEAD]?.let { p ->
+                    dangerRun = if (p >= WakeScorer.DANGER_BAR) dangerRun + 1 else 0
+                    if (dangerRun >= WakeScorer.DANGER_FRAMES) {
+                        dangerRun = 0; scorer.reset()
+                        com.tekyerema.safety.DangerAlert.trigger(applicationContext, "always-on code word head")
+                    }
+                }
                 if (monitor) mon.frame(rms, scores, fired, scorer)
                 if (fired && SecureStep.active()) {
                     // The user is typing a PIN and TalkBack is speaking the keys — never open the mic by ourselves now.

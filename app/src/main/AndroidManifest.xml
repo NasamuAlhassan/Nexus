@@ -29,6 +29,8 @@
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- The danger code word (safety/DangerAlert) finds a position when the app is not in front. Granted by the user in Settings. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <!-- P-01/P-03/P-06: read text, name colours and describe what's in front of the camera (owner approved). -->
     <uses-permission android:name="android.permission.CAMERA" />
@@ -308,6 +310,9 @@
         </provider>
 
         <!-- Tɛkyerɛma's own timer: the backstop alarm (live/LiveTimer). Not exported. -->
+        <receiver android:name=".safety.DangerCancelReceiver" android:exported="false">
+            <intent-filter><action android:name="com.tekyerema.DANGER_CANCEL" /></intent-filter>
+        </receiver>
         <receiver
             android:name=".live.TimerReceiver"
             android:exported="false" />

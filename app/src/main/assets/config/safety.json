@@ -1,0 +1,14 @@
+{
+  "safety": {
+    "_doc": "Danger code word (safety/DangerAlert). Numbers are tried in order; Android never lets an app place a call to an emergency number such as 112 by itself, so the first number the app can dial alone is the police toll-free line 191, and the dial pad is opened on 112 if the call cannot start. Re-verify the numbers before release.",
+    "danger": {
+      "numbers": ["191", "112"],
+      "testNumber": "",
+      "dryRun": false,
+      "cancelSeconds": 5,
+      "speaker": true,
+      "backendUrl": "",
+      "locationWaitMs": 8000
+    }
+  }
+}

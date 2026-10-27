@@ -271,6 +271,24 @@ class Settings(context: Context) {
         get() = prefs.getString("emergency_contact_number", "").orEmpty()
         set(v) = put { putString("emergency_contact_number", v.filter { it.isDigit() || it == '+' }) }
 
+    /** The danger code word (safety/DangerAlert): the phrase that, once heard, starts the emergency alert after a short cancel window.
+     *  Off until the user chooses a phrase and turns it on. The cancel PIN is kept like the other secrets. */
+    var dangerEnabled: Boolean
+        get() = prefs.getBoolean("danger_enabled", false) && dangerCodeWord.isNotBlank()
+        set(v) = put { putBoolean("danger_enabled", v) }
+    var dangerCodeWord: String
+        get() = getSecret("danger_code_word")
+        set(v) = putSecret("danger_code_word", v.trim().lowercase())
+    var dangerCancelPin: String
+        get() = getSecret("danger_cancel_pin")
+        set(v) = putSecret("danger_cancel_pin", v.filter { it.isDigit() })
+    /** People texted the user's location when the alert fires: "name|number" lines, at most [MAX_TRUSTED]. The emergency contact is always one. */
+    var trustedContacts: List<Pair<String, String>>
+        get() = prefs.getString("trusted_contacts", "").orEmpty().lines().mapNotNull { l ->
+            val i = l.indexOf('|'); if (i <= 0) null else l.substring(0, i) to l.substring(i + 1)
+        }.filter { it.second.isNotBlank() }
+        set(v) = put { putString("trusted_contacts", v.take(MAX_TRUSTED).joinToString("\n") { (n, num) -> "${n.replace('|', ' ')}|${num.filter { it.isDigit() || it == '+' }}" }) }
+
     /** Private reading (2026-09-29, notifications/PrivateReading): on the loudspeaker, say who messages are from and how
      *  many — not what they say — until the user says "read them". Headphones read them in full. Off by default. */
     var privateReading: Boolean
@@ -352,6 +370,7 @@ class Settings(context: Context) {
         set(v) = put { putBoolean("alerts_private", v) }
 
     companion object {
+        const val MAX_TRUSTED = 3
         const val PREFS_NAME = "tekyerema"
         private val sharedChanges = kotlinx.coroutines.flow.MutableStateFlow(0L)
         /** A preference was written outside this class (J-13 undo restoring voice settings). */
