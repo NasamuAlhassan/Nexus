@@ -56,6 +56,7 @@ import com.tekyerema.ui.components.BrandRow
 import com.tekyerema.ui.components.CommandField
 import com.tekyerema.ui.components.PageMargin
 import com.tekyerema.ui.theme.LocalCalmMotion
+import com.tekyerema.ui.theme.LocalOrbCalm
 import com.tekyerema.ui.theme.Tk
 import com.tekyerema.ui.theme.TkHaptic
 import com.tekyerema.ui.voice.LivingVoice
@@ -97,7 +98,8 @@ fun HomeContent(
     // The mic level is NOT collected here: the orb reads it once per frame, so a talking user no longer recomposes
     // this whole screen on every audio buffer.
     val settingsVersion by settings.changes.collectAsState()
-    val reduceMotion = LocalCalmMotion.current      // Reduce motion OR the system's "Remove animations"
+    val reduceMotion = LocalCalmMotion.current      // Reduce motion OR the system's "Remove animations" OR simple mode: the page's transitions
+    val orbCalm = LocalOrbCalm.current              // the orb alone ignores simple mode: it keeps moving (owner, 27 Oct)
     val speakAloud = remember(settingsVersion) { settings.speakAloud }
     val speechRate = remember(settingsVersion) { settings.speechRate }
     val twi = remember(settingsVersion) { settings.languageMode == Settings.LANG_MODE_TWI }
@@ -210,7 +212,7 @@ fun HomeContent(
             LivingVoice(
                 presence = presence,
                 level = { VoiceEngine.level.value },
-                reduceMotion = reduceMotion || (orbPaused && presence != Presence.LISTENING && presence != Presence.CONFIRM_LISTENING),
+                reduceMotion = orbCalm || (orbPaused && presence != Presence.LISTENING && presence != Presence.CONFIRM_LISTENING),
                 contentDescription = label,
                 stateDescription = stateText,
                 circularHitArea = circularHitArea,

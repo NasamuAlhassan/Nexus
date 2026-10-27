@@ -103,6 +103,10 @@ object MotionPolicy {
 /** True when this screen should use calm motion. Provided by [TekyeremaTheme]. */
 val LocalCalmMotion = compositionLocalOf { false }
 
+/** The same for the living orb only: simple mode keeps it moving (owner, 27 Oct: "the orb animations aren't bad"); only the user's
+ *  Reduce motion or the system's "Remove animations" make the orb calm. Provided by [TekyeremaTheme]. */
+val LocalOrbCalm = compositionLocalOf { false }
+
 /** The system animator duration scale ("Remove animations" sets it to 0). */
 fun systemAnimatorScale(context: Context): Float = try {
     android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f)

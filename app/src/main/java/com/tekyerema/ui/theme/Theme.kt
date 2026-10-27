@@ -231,7 +231,8 @@ fun TekyeremaTheme(forceDark: Boolean = false, content: @Composable () -> Unit) 
     // Simple mode (ui.simple, default on) is always calm: no decorative motion; the system's setting still counts too.
     val calm = simpleUi() || MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
     val palette = if (forceDark || rememberDarkTheme()) DarkPalette else LightPalette
-    CompositionLocalProvider(LocalCalmMotion provides calm, LocalTkPalette provides palette) {
+    val orbCalm = MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
+    CompositionLocalProvider(LocalCalmMotion provides calm, LocalOrbCalm provides orbCalm, LocalTkPalette provides palette) {
         MaterialTheme(colorScheme = schemeOf(palette), typography = TkTypography, shapes = TkShapes, content = content)
     }
 }

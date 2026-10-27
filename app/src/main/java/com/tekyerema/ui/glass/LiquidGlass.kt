@@ -10,6 +10,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.ImageShader
 import androidx.compose.ui.graphics.Path
@@ -142,7 +143,10 @@ fun Modifier.liquidGlass(
     if (com.tekyerema.ui.theme.simpleUi()) {
         // Simple mode (ui.simple): a flat, opaque panel with a clear border (≥ 3:1 against the body), no light effects, no
         // shadow, no animation inputs read. The one switch for the whole app's glass.
-        val flatBody = body.copy(alpha = 1f)
+        // A tint is a see-through WASH (white at 14 %, the primary at 30 %…) meant to lie over the style's body. Made opaque on its own
+        // it became solid white behind light text — the yes/no buttons had no readable words (owner, 27 Oct 2026). So the wash is
+        // composited over the style's own opaque body: the text colours chosen for that style stay readable on it.
+        val flatBody = body.compositeOver(style.fill.copy(alpha = 1f))
         val flatBorder = style.border ?: if (style.dark) Color(0xFF9DB0AD) else Color(0xFF5A6B69)
         val flatStroke = Stroke(width = 1.5.dp.toPx())
         return@drawWithCache onDrawBehind {
