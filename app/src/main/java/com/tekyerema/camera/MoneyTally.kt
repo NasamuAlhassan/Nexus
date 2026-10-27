@@ -81,6 +81,36 @@ object MoneyTally {
     /** The tally of a model's answer, or null when it is not a money answer. */
     fun of(json: String): Tally? = parse(json)?.let { reconcile(it) }
 
+    /** [json] with each boxed piece re-read by the phone ([Checked.json]); [read] pieces had a sure on-phone reading, [changed] of
+     *  them differed from the model's (value or note/coin) and now carry the phone's; [boxed] pieces had a usable box. */
+    data class Checked(val json: String, val read: Int, val changed: Int, val boxed: Int)
+
+    /**
+     * 27 Oct 2026: the cloud models read a coin as 2, 1 and 0.5 cedis in three tries. Where the cedi model on the phone reads a
+     * piece's box for sure ([reader] gets the box as [ymin, xmin, ymax, xmax] on 0–1000 and returns the item, or null when it is
+     * not sure), the phone's reading wins — it is the one with a held-out record of zero wrong answers. Pieces without a box, or
+     * without a sure reading, are left as the model said them. Null when [json] is not a `notes` answer.
+     */
+    fun withOnDevice(json: String, reader: (FloatArray) -> MoneyItems.Item?): Checked? {
+        val o = obj(json) ?: return null
+        val arr = o.optJSONArray("notes") ?: return null
+        var read = 0; var changed = 0; var boxed = 0
+        for (i in 0 until arr.length()) {
+            val p = arr.optJSONObject(i) ?: continue
+            val box = p.optJSONArray("box")?.takeIf { it.length() == 4 }?.let { a ->
+                FloatArray(4) { a.optDouble(it, Double.NaN).toFloat() }.takeIf { b -> b.none { it.isNaN() } && b[2] > b[0] && b[3] > b[1] }
+            } ?: continue
+            boxed++
+            val item = reader(box) ?: continue
+            read++
+            val v = p.optDouble("value_ghs", Double.NaN)
+            val same = !v.isNaN() && Math.abs(v - item.value) < 1e-6 && (p.optString("kind", "note") != "coin") == item.note
+            if (!same) changed++
+            p.put("value_ghs", item.value).put("kind", if (item.note) "note" else "coin").put("sure", true)
+        }
+        return Checked(o.toString(), read, changed, boxed)
+    }
+
     // ---------------------------------------------------------------------------------------------------------------- boxes
 
     private fun area(b: FloatArray) = max(0f, b[2] - b[0]) * max(0f, b[3] - b[1])

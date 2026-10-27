@@ -87,7 +87,7 @@ class DocumentReadActivity : Activity() {
             reader = r; pages = r.pageCount
             Log.i(TAG, "[DOC] opened kind=${Documents.kindOf(file)} pages=$pages")
             if (pages == 0) { speak("That document has no pages.") { finishQuietly() }; return@launch }
-            speak(DocumentLines.intro(pages), flush = true)
+            speak(if (isTwi()) DocumentLines.introTwi(pages) else DocumentLines.intro(pages), flush = true)
             readPage(0)
         }
     }
@@ -115,12 +115,13 @@ class DocumentReadActivity : Activity() {
             if (text.isNotBlank()) { readPages[index] = text; com.tekyerema.agent.AgentEngine.noteReading("document", readPages.values.joinToString("\n")) }
             // A Word page has no picture: its words are the page, shown large; a PDF page shows a few lines under its picture.
             caption.maxLines = if (bmp == null) 60 else 4
-            caption.text = if (text.isBlank()) DocumentLines.empty(index, pages) else text.take(if (bmp == null) 2000 else 400)
+            caption.text = if (text.isBlank()) emptyLine(index) else text.take(if (bmp == null) 2000 else 400)
             prefetchNext(index + 1)
-            val lines = if (text.isBlank()) listOf(DocumentLines.empty(index, pages))
-                else listOf(DocumentLines.pageStart(index)) + SpeechChunks.split(TextStabilizer.spokenForm(text, Int.MAX_VALUE), AppConfig.int("document.chunkChars", 180))
-            lines.forEachIndexed { i, line -> speak(line, flush = i == 0 && index > 0, then = null) }
-            speak(DocumentLines.pageEnd(index, pages), flush = false) { busy = false; resetIdleTimer() }
+            val words = if (text.isBlank()) emptyList() else SpeechChunks.split(TextStabilizer.spokenForm(text, Int.MAX_VALUE), AppConfig.int("document.chunkChars", 180))
+            val lines = if (text.isBlank()) listOf(emptyLine(index)) else listOf(startLine(index)) + words
+            // The page's own words (not our lines) are marked, so a Twi conversation with no internet reads English print in English.
+            lines.forEachIndexed { i, line -> speak(line, flush = i == 0 && index > 0, then = null, content = i > 0 && text.isNotBlank()) }
+            speak(endLine(index), flush = false) { busy = false; resetIdleTimer() }
             busy = false
         }
     }
@@ -162,7 +163,7 @@ class DocumentReadActivity : Activity() {
         if (busy) return
         if (page + 1 < pages) readPage(page + 1)
         else if (pages == 1) readPage(0)
-        else speak(DocumentLines.pageEnd(page, pages), flush = true)
+        else speak(endLine(page), flush = true)
     }
 
     // ---------------------------------------------------------------- speech (the camera reader's pattern, reduced)
@@ -178,10 +179,18 @@ class DocumentReadActivity : Activity() {
         queued.forEach { (line, then) -> utter(line, flush = false, then = then) }
     }
 
-    private fun speak(text: String, flush: Boolean = false, then: (() -> Unit)? = null) = utter(Verbalize.apply(text), flush, then)
+    private fun speak(text: String, flush: Boolean = false, content: Boolean = false, then: (() -> Unit)? = null) =
+        utter(Verbalize.apply(text), flush, then, content)
 
-    private fun utter(line: String, flush: Boolean, then: (() -> Unit)?) {
+    /** The conversation is in Twi: the reader's own lines are said in Twi with no translator (DocumentLines.*Twi). */
+    private fun isTwi(): Boolean = try { com.tekyerema.voice.VoiceEngine.language() == com.tekyerema.voice.Lang.TWI } catch (_: Throwable) { false }
+    private fun emptyLine(i: Int) = if (isTwi()) DocumentLines.emptyTwi(i, pages) else DocumentLines.empty(i, pages)
+    private fun startLine(i: Int) = if (isTwi()) DocumentLines.pageStartTwi(i) else DocumentLines.pageStart(i)
+    private fun endLine(i: Int) = if (isTwi()) DocumentLines.pageEndTwi(i, pages) else DocumentLines.pageEnd(i, pages)
+
+    private fun utter(line: String, flush: Boolean, then: (() -> Unit)?, content: Boolean = false) {
         if (line.isBlank()) { then?.invoke(); return }
+        if (content && ReaderVoice.englishOffline(line)) { systemUtter(line, flush, then); return }
         // The app's own voice in the language the user set (Kafui's Ghanaian English, or Twi translated) — owner, 20 + 21 Oct 2026.
         if (ReaderVoice.use()) { appVoice.say(line, flush, then); return }
         systemUtter(line, flush, then)

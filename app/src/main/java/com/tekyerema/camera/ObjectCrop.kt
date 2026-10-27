@@ -30,6 +30,77 @@ object ObjectCrop {
     /** The object in [rgb] (side×side×3 floats 0–255, row-major), or null when none stands out from the background. */
     fun find(rgb: FloatArray, side: Int): Box? {
         val n = side * side
+        val fg = foreground(rgb, side) ?: return null
+        val half = 0.45f * side
+        val c = side / 2f
+        val xs = IntArray(n); val ys = IntArray(n)
+        var m = 0
+        for (y in 0 until side) for (x in 0 until side) {
+            if (fg[y * side + x] && Math.abs(y - c) < half && Math.abs(x - c) < half) { xs[m] = x; ys[m] = y; m++ }
+        }
+        if (m < 0.002f * n) return null
+        val sx = xs.copyOf(m).also { it.sort() }; val sy = ys.copyOf(m).also { it.sort() }
+        val x0 = percentile(sx, 0.01f); val x1 = percentile(sx, 0.99f)
+        val y0 = percentile(sy, 0.01f); val y1 = percentile(sy, 0.99f)
+        return Box(x0, y0, x1, y1, ((x1 - x0) * (y1 - y0)) / n)
+    }
+
+    /**
+     * Every separate object in [rgb] (the same background-colour method as [find]): the foreground pixels, joined across gaps of
+     * a pixel or two (a note's printing is not one flat colour), split into pieces that touch nothing else, each piece's box.
+     * Pieces under 0.4 % of the grid are noise; a box over 85 % is the whole picture. At most [maxItems], the biggest, left to
+     * right. A note lying on a coin is ONE piece (the user is asked to spread them out). Empty when nothing stands out. Pure.
+     */
+    fun findAll(rgb: FloatArray, side: Int, maxItems: Int = 6): List<Box> {
+        val n = side * side
+        val fg = foreground(rgb, side) ?: return emptyList()
+        val half = 0.45f * side
+        val c = side / 2f
+        val inside = BooleanArray(n)
+        for (y in 0 until side) for (x in 0 until side)
+            inside[y * side + x] = fg[y * side + x] && Math.abs(y - c) < half && Math.abs(x - c) < half
+        // dilate by 2 px (a square window) so a pale patch inside a note does not split it
+        val grow = BooleanArray(n)
+        for (y in 0 until side) for (x in 0 until side) {
+            if (!inside[y * side + x]) continue
+            for (yy in maxOf(0, y - 2)..minOf(side - 1, y + 2)) for (xx in maxOf(0, x - 2)..minOf(side - 1, x + 2)) grow[yy * side + xx] = true
+        }
+        val seen = BooleanArray(n)
+        val stack = IntArray(n)
+        val boxes = ArrayList<Box>()
+        for (start in 0 until n) {
+            if (!grow[start] || seen[start]) continue
+            var sp = 0
+            stack[sp++] = start; seen[start] = true
+            var count = 0
+            var x0 = side; var y0 = side; var x1 = -1; var y1 = -1
+            while (sp > 0) {
+                val p = stack[--sp]
+                val px = p % side; val py = p / side
+                if (inside[p]) {
+                    count++
+                    if (px < x0) x0 = px; if (px > x1) x1 = px
+                    if (py < y0) y0 = py; if (py > y1) y1 = py
+                }
+                for (dy in -1..1) for (dx in -1..1) {
+                    if (dx == 0 && dy == 0) continue
+                    val nx = px + dx; val ny = py + dy
+                    if (nx < 0 || ny < 0 || nx >= side || ny >= side) continue
+                    val q = ny * side + nx
+                    if (grow[q] && !seen[q]) { seen[q] = true; stack[sp++] = q }
+                }
+            }
+            if (count < 0.004f * n || x1 < x0) continue
+            val b = Box(x0.toFloat(), y0.toFloat(), (x1 + 1).toFloat(), (y1 + 1).toFloat(), ((x1 + 1 - x0) * (y1 + 1 - y0)).toFloat() / n)
+            if (b.frac in 0.01f..0.85f) boxes.add(b)
+        }
+        return boxes.sortedByDescending { it.frac }.take(maxItems).sortedBy { it.x0 }
+    }
+
+    /** Which pixels differ from the background colour (the frame's border ring, median) by more than an Otsu threshold (never
+     *  below [MIN_DIST]), over the whole grid; null when the frame has no such contrast. */
+    private fun foreground(rgb: FloatArray, side: Int): BooleanArray? {
+        val n = side * side
         if (rgb.size < n * 3) return null
         val ring = maxOf(2, (0.06f * side).toInt())
         val inner = side - 2 * ring
@@ -71,18 +142,7 @@ object ObjectCrop {
             if (s > bestV) { bestV = s; best = i }
         }
         val t = maxOf(MIN_DIST, best * span / BINS)
-        val half = 0.45f * side
-        val c = side / 2f
-        val xs = IntArray(n); val ys = IntArray(n)
-        var m = 0
-        for (y in 0 until side) for (x in 0 until side) {
-            if (d[y * side + x] > t && Math.abs(y - c) < half && Math.abs(x - c) < half) { xs[m] = x; ys[m] = y; m++ }
-        }
-        if (m < 0.002f * n) return null
-        val sx = xs.copyOf(m).also { it.sort() }; val sy = ys.copyOf(m).also { it.sort() }
-        val x0 = percentile(sx, 0.01f); val x1 = percentile(sx, 0.99f)
-        val y0 = percentile(sy, 0.01f); val y1 = percentile(sy, 0.99f)
-        return Box(x0, y0, x1, y1, ((x1 - x0) * (y1 - y0)) / n)
+        return BooleanArray(n) { d[it] > t }
     }
 
     /** numpy-style linear-interpolated percentile of a sorted array. */

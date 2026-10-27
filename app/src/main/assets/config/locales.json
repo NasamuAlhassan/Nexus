@@ -22,7 +22,17 @@
    "Stopped": "Magyae.",
    "Okay, I won't.": "Yoo, merenyɛ.",
    "I didn't catch that. Please say it again.": "Mante. Mepa wo kyɛw, ka bio.",
-   "I didn't get an answer, so I stopped. Ask me again when you're ready.": "Mantie mmuaeɛ biara, enti magyae. Sɛ woawie a, bisa me bio."
+   "I didn't get an answer, so I stopped. Ask me again when you're ready.": "Mantie mmuaeɛ biara, enti magyae. Sɛ woawie a, bisa me bio.",
+   "_camera": "27 Oct 2026: the camera and money reader's fixed lines, so they are said in Twi with no internet. Written by the agent, not a speaker [owner to listen and correct every line below].",
+   "Got it, one moment.": "Mahu, twɛn kakra.",
+   "Checking money. Hold the note flat, about a hand away.": "Merehwɛ sika no. Fa no si fam, nsa baako kwan.",
+   "Hold the money flat in front of the camera. I'll count it.": "Fa sika no si kamera no anim. Mebɛkan.",
+   "I don't see any money yet. Hold the note flat, about a hand away.": "Minhu sika biara bi. Fa no si fam, nsa baako kwan.",
+   "I couldn't count it online, so I'll read it on this phone. Hold each note or coin flat, a hand away.": "Antumi ankan no wɔ intanɛt so, enti mɛkenkan no wɔ fon yi so. Fa baako baako si fam.",
+   "Reading text. Point the camera at it.": "Merekenkan nsɛm no. Fa kamera no kyerɛ so.",
+   "No text yet. Move the phone slowly.": "Nkyerɛwee biara nni hɔ. Twe fon no brɛoo.",
+   "I couldn't open the camera.": "Antumi anbue kamera no.",
+   "I couldn't open that document.": "Antumi anbue krataa no."
   }
  }
 }

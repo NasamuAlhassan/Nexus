@@ -61,5 +61,18 @@ class ReaderVoice(
     companion object {
         /** The app's voice is up and the readers should use it (`camera.appVoice`, default on). */
         fun use(): Boolean = VoiceEngine.ready() && com.tekyerema.core.config.AppConfig.bool("camera.appVoice", true)
+
+        /**
+         * Words printed on a page or screen, in English, to be read in a Twi conversation with no internet: the translator cannot
+         * be reached, and the Twi voice would only say "I can't put this into Twi" and nothing of the page. The page's own English
+         * is read by the phone's English voice instead (`camera.twi.readEnglishOffline`, default on) — the words, not a reply.
+         * [owner to decide: reverses "no English in a Twi conversation" for printed text only, and only offline]
+         */
+        fun englishOffline(line: String): Boolean = try {
+            com.tekyerema.core.config.AppConfig.bool("camera.twi.readEnglishOffline", true) &&
+                VoiceEngine.language() == com.tekyerema.voice.Lang.TWI &&
+                !com.tekyerema.core.NetworkMonitor.isOnline() &&
+                com.tekyerema.language.ReplyLocalizer.englishForVoice(line)
+        } catch (_: Throwable) { false }
     }
 }

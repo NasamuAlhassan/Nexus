@@ -163,6 +163,7 @@ class CameraReadActivity : ComponentActivity() {
             agreeFrames = AppConfig.int("camera.currency.agreeFrames", 2)
         )
     }
+    private val itemsAnnouncer by lazy { ItemsAnnouncer(AppConfig.int("camera.currency.agreeFrames", 2)) }
     /** Loaded on the first currency frame (~0.2 s); null when the model isn't bundled (said honestly, once). */
     private var cedi: CediClassifier? = null
     private var cediTried = false
@@ -573,6 +574,20 @@ class CameraReadActivity : ComponentActivity() {
         // The object, cropped (ObjectCrop): a coin is ~15 % of the centre square and was misread at that size. Off: camera.currency.tightCrop.
         val tight = if (AppConfig.bool("camera.currency.tightCrop", true)) {
             val small = RgbSquare.from(image, ObjectCrop.GRID, smallBuf).also { smallBuf = it }
+            // Two or more separate things in view (a note and a coin): each is read by itself, on the phone, and counted only when
+            // it is sure (MoneyItems). One thing, or none that is money, goes on to the single-item reading below.
+            if (AppConfig.bool("camera.currency.multi", true)) {
+                val boxes = ObjectCrop.findAll(small, ObjectCrop.GRID, AppConfig.int("camera.currency.maxItems", 6))
+                if (boxes.size >= 2) {
+                    val readings = boxes.map { box ->
+                        val w = ObjectCrop.window(box, image.width, image.height)
+                        val px = RgbSquare.window(image, CediClassifier.SIDE, tightBuf, w.x, w.y, w.size).also { tightBuf = it }
+                        model.classify(px).let { (c, p) -> MoneyItems.Reading(c, p) }
+                    }
+                    val count = MoneyItems.count(readings, AppConfig.double("camera.currency.gate", 0.85))
+                    if (count.seen >= 2) { main.post { onItems(count) }; return }
+                }
+            }
             ObjectCrop.find(small, ObjectCrop.GRID)?.takeIf { ObjectCrop.plausible(it) }?.let { box ->
                 val w = ObjectCrop.window(box, image.width, image.height)
                 RgbSquare.window(image, CediClassifier.SIDE, tightBuf, w.x, w.y, w.size).also { tightBuf = it }
@@ -586,15 +601,31 @@ class CameraReadActivity : ComponentActivity() {
         if (closing || mode != MODE_CURRENCY) return
         val now = SystemClock.elapsedRealtime()
         if (CurrencyAnnouncer.isMoney(cls)) moneySeenAt = now
-        currencyAnnouncer.offer(cls, confidence, now)?.let { deliver(it); return }
-        // Silence is ambiguous to someone who can't see the screen — say WHY, on the guidance cadence, and never a
-        // number below the gate (a wrong amount is worse than no answer).
+        currencyAnnouncer.offer(cls, confidence, now)?.let { deliver(if (isTwi()) MoneyItems.spokenTwiOf(cls) ?: it else it); return }
+        hintCurrency(now)
+    }
+
+    /** Main thread. Two or more things in view, each read by itself ([MoneyItems]): the ones read and their total, said once the
+     *  same set holds on two frames; what was not read is said as not read. */
+    private fun onItems(count: MoneyItems.Count) {
+        if (closing || mode != MODE_CURRENCY) return
+        val now = SystemClock.elapsedRealtime()
+        moneySeenAt = now
+        val say = itemsAnnouncer.offer(count, now)
+        if (say == null) { hintCurrency(now); return }
+        Log.i(TAG, "[CAMERA] money on the phone: ${say.sure.size} read, ${say.unsure} not read, ${say.ignored} not money")
+        (if (isTwi()) MoneyItems.spokenTwi(say) else MoneyItems.spoken(say))?.let { deliver(it) }
+    }
+
+    /** Silence is ambiguous to someone who can't see the screen — say WHY, on the guidance cadence, and never a number below the
+     *  gate (a wrong amount is worse than no answer). The unsure line names money, not "note": a coin may be what is held. */
+    private fun hintCurrency(now: Long) {
         if (isSpeaking() || now - lastCurrencyHintAt < AppConfig.long("camera.currency.hintEveryMs", 6_000L)) return
         val sawMoney = moneySeenAt > 0 && now - moneySeenAt < 2_000L
         val waited = now - describeStartedAt
         val line = when {
             sawMoney && waited > AppConfig.long("camera.currency.unsureHintMs", 8_000L) ->
-                phrase("currencyUnsure", "I can see money but I can't tell which note. Hold it flatter and fill the screen.")
+                if (isTwi()) MoneyItems.UNSURE_TW else phrase("currencyUnsure", MoneyItems.UNSURE_EN)
             !sawMoney && waited > AppConfig.long("camera.currency.noMoneyHintMs", 10_000L) ->
                 phrase("currencyNone", "I don't see any money yet. Hold the note flat, about a hand away.")
             else -> return
@@ -602,6 +633,9 @@ class CameraReadActivity : ComponentActivity() {
         lastCurrencyHintAt = now
         deliver(line, reading = false)
     }
+
+    /** The conversation is in Twi: money and reading lines that have a Twi form are said in it, with no translator. */
+    private fun isTwi(): Boolean = try { com.tekyerema.voice.VoiceEngine.language() == com.tekyerema.voice.Lang.TWI } catch (_: Throwable) { false }
 
     // ------------------------------------------------------------------------------------------------ P-01 / P-09 describe
 
@@ -750,7 +784,21 @@ class CameraReadActivity : ComponentActivity() {
             val ocr = async(Dispatchers.Default) {
                 try { ocrOf(InputImage.fromByteArray(nv21, width, height, rotation, android.graphics.ImageFormat.NV21)) } catch (_: Throwable) { null }
             }
-            val result = if (jpeg == null) VisionResult.Failed("encode")
+            // Money: the phone's own cedi model re-reads each note or coin the cloud model boxed, and its sure reading replaces the
+            // cloud's value (27 Oct 2026: a coin came back as 2, 1 and 0.5 cedis in three tries). Nothing leaves the phone for this.
+            val photo = if (moneyAsk && jpeg != null) withContext(Dispatchers.Default) {
+                if (loadCedi() == null) null else android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
+            } else null
+            val onPhone: (String) -> MoneyTally.Checked? = { text ->
+                val model = cedi
+                if (photo == null || model == null) null
+                else MoneyTally.withOnDevice(text) { box ->
+                    CediCrops.rgb(photo, box)?.let { px ->
+                        model.classify(px).let { (c, p) -> MoneyItems.sureItem(MoneyItems.Reading(c, p), AppConfig.double("camera.currency.gate", 0.85)) }
+                    }
+                }
+            }
+            val answer = if (jpeg == null) VisionResult.Failed("encode")
             else {
                 // Held (memory only, dropped when this screen closes) so a follow-up question — "what colour is
                 // the shirt?" — can go back to the cloud with THIS photo (VisionQa, the Be My AI pattern).
@@ -758,20 +806,28 @@ class CameraReadActivity : ComponentActivity() {
                 val q = question
                 when {
                     moneyAsk -> VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true,
-                        agree = { a, b -> VisionPrompts.moneyDisagreement(a, b, phrase("moneyDisagree", "I can't be sure of the total — I " +
-                            "counted it two ways. Hold the money flat, one note at a time, and ask me again.")) })
+                        agree = { a, b -> VisionPrompts.moneyDisagreement(onPhone(a)?.json ?: a, onPhone(b)?.json ?: b,
+                            phrase("moneyDisagree", "I can't be sure of the total — I counted it two ways. Hold the money flat, " +
+                                "one note at a time, and ask me again.")) })
                     q != null -> VisionLadder.describe(jpeg, VisionPrompts.forQuestion(q), settings, structured = false, smart = true)
                     else -> VisionLadder.describe(jpeg, StructuredDescribe.PROMPT, settings, structured = true)   // N-06; Groq and Gemini hedged (VisionLadder.race)
                 }
             }
             if (closing) return@launch
+            val checked = if (moneyAsk && answer is VisionResult.Described) onPhone(answer.text) else null
+            val result = if (checked != null && answer is VisionResult.Described) answer.copy(text = checked.json) else answer
             when (result) {
                 is VisionResult.Described -> deliver(when {
                     moneyAsk -> {
+                        val listed = MoneyTally.parse(result.text)
+                        // Every piece read for sure by the phone's own model: nothing left to cross-check with a second cloud frame.
+                        val allOnPhone = checked != null && listed != null && listed.isNotEmpty() && checked.read == listed.size
                         // P5-a: one model alone is not trusted with a count — a second frame must give the same tally.
-                        val twoFramesAgree = secondFrameAgrees(result)
+                        val twoFramesAgree = allOnPhone || secondFrameAgrees(result)
+                        if (checked != null) Log.i(TAG, "[CAMERA] money on the phone: ${checked.read} of ${checked.boxed} boxed pieces read, " +
+                            "${checked.changed} differed from the cloud model's value")
                         // How the phone counted (no amounts in a release log): pieces the model listed, merged duplicates, overlap.
-                        MoneyTally.parse(result.text)?.let { p -> val t = MoneyTally.reconcile(p)
+                        listed?.let { p -> val t = MoneyTally.reconcile(p)
                             Log.i(TAG, "[CAMERA] money: ${p.size} listed, ${p.count { it.box != null }} with a box, ${t.merged} merged as one note, " +
                                 "unstable=${t.unstable}" + if (com.tekyerema.BuildConfig.DEV_HOOKS) " model='${result.text.take(600)}'" else "") }
                         if (!twoFramesAgree) VisionPrompts.SPREAD_OUT
@@ -782,10 +838,24 @@ class CameraReadActivity : ComponentActivity() {
                 })
                 is VisionResult.Failed -> {
                     Log.w(TAG, "[CAMERA] describe failed: ${result.reason}")
-                    fallBackToText(phrase("describeFailed", "I couldn't get a description just now. I'll read any text I see instead."))
+                    // Counting money must not end in text reading: the phone's own cedi model reads each note and coin without the net.
+                    if (moneyAsk && CediClassifier.installed(this@CameraReadActivity)) {
+                        moneyAsk = false
+                        mode = MODE_CURRENCY
+                        describeStartedAt = SystemClock.elapsedRealtime()
+                        itemsAnnouncer.offer(MoneyItems.Count(emptyList(), 0, 0), 0L)   // a fresh run
+                        announce(phrase("moneyOnPhone", "I couldn't count it online, so I'll read it on this phone. Hold each note or coin flat, a hand away."))
+                        resetIdleTimer()
+                    } else fallBackToText(phrase("describeFailed", "I couldn't get a description just now. I'll read any text I see instead."))
                 }
             }
         }
+    }
+
+    /** The cedi model, loaded once (~0.2 s); null when it isn't in the build or cannot load. */
+    private fun loadCedi(): CediClassifier? {
+        if (!cediTried) { cediTried = true; cedi = CediClassifier.create(this) }
+        return cedi
     }
 
     /**
@@ -832,7 +902,8 @@ class CameraReadActivity : ComponentActivity() {
         showCaption(text, CameraPhase.ANSWER)
         // The agent remembers what was read, so "send that to my wife" or "remind me of the date" can act on it next.
         if (reading && mode != MODE_COLOR) com.tekyerema.agent.AgentEngine.noteReading("camera", text)
-        speak(text)
+        // Printed English in a Twi conversation with no internet: the page's own words in the English voice (ReaderVoice.englishOffline).
+        if (reading && mode == MODE_TEXT && ReaderVoice.englishOffline(text)) systemUtter(Verbalize.apply(text), true, null) else speak(text)
         resetIdleTimer()
     }
 

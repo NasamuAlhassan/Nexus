@@ -78,4 +78,17 @@ object DocumentLines {
     fun empty(index: Int, pages: Int): String =
         if (pages <= 1) "I couldn't find any text in this document." else "I couldn't find any text on page ${index + 1}."
     fun pageStart(index: Int): String = "Page ${index + 1}."
+
+    // The same lines in Twi, for a Twi conversation with no internet (no translator): numbers are Twi words. Short on purpose.
+    // [owner to listen: written by the agent, not by a speaker]
+    private fun n(i: Int): String = com.tekyerema.voice.understand.TwiSpeechText.words(i.toLong()) ?: i.toString()
+    fun introTwi(pages: Int): String = if (pages <= 1) "Kratafa baako." else "Nkratafa ${n(pages)} wɔ ha. Kratafa a ɛdi kan."
+    fun pageEndTwi(index: Int, pages: Int): String = when {
+        pages <= 1 -> "Wie. Mia na bio, anaa san kɔ akyi."
+        index + 1 >= pages -> "Kratafa a ɛtwa toɔ ni. San kɔ akyi."
+        else -> "Mia na kɔ kratafa a edi hɔ."
+    }
+    fun emptyTwi(index: Int, pages: Int): String =
+        if (pages <= 1) "Manhu nkyerɛwee biara wɔ ha." else "Manhu nkyerɛwee biara wɔ kratafa ${n(index + 1)}."
+    fun pageStartTwi(index: Int): String = "Kratafa ${n(index + 1)}."
 }

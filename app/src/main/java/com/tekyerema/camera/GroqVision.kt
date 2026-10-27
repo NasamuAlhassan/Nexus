@@ -26,13 +26,19 @@ import org.json.JSONObject
 object GroqVision {
     private const val TAG = "Tekyerema"
 
+    private val rest = KeyRest()
+
     /** Groq's current vision-capable model (the llama-4 scout/maverick pair left their list, 30 Sep 2026). */
     fun model(): String = AppConfig.string("providers.groq.visionModel", "qwen/qwen3.8-27b")
 
     /** Same contract as [GeminiVision.describe]: one photo in, spoken text or a log-only failure out. */
     suspend fun describe(jpeg: ByteArray, apiKeys: List<String>, baseUrl: String, prompt: String): VisionResult = withContext(Dispatchers.IO) {
-        val keys = apiKeys.filter { it.isNotBlank() }
-        if (keys.isEmpty()) return@withContext VisionResult.Failed("no Groq key")
+        val all = apiKeys.filter { it.isNotBlank() }
+        if (all.isEmpty()) return@withContext VisionResult.Failed("no Groq key")
+        // A key that was refused (401/403) is skipped for hours and one that was rate-limited for a short while — the camera
+        // used to try #1 (429) and #2 (401) on every photo, about a second lost each time (A20e log, 27 Oct 2026).
+        val keys = rest.usable(all)
+        if (keys.isEmpty()) return@withContext VisionResult.Failed("Groq keys resting")
         val timeoutSec = AppConfig.long("camera.describe.timeoutSec", 30L).coerceAtLeast(5L)
         val client = com.tekyerema.core.Http.client(minOf(timeoutSec, 15L), timeoutSec)
         val payload = requestBody(
@@ -68,9 +74,13 @@ object GroqVision {
                         (usage?.let { ", prompt=${it.optInt("prompt_tokens")} out=${it.optInt("completion_tokens")}" } ?: "") + ")")
                     return@withContext VisionResult.Described(description)
                 }
-                // This key is spent or refused; the next one has a budget of its own.
+                // This key is spent or refused; the next one has a budget of its own. Never tried again in this call, and
+                // not on the next photo until its rest is over.
                 code == 429 || code == 401 || code == 403 -> {
-                    Log.w(TAG, "[CAMERA] groq describe HTTP $code on key #${i + 1}/${keys.size}")
+                    val ms = KeyRest.restFor(code, text,
+                        AppConfig.long("camera.vision.badKeyMs", 6 * 3_600_000L), AppConfig.long("camera.vision.rateRestMs", 30_000L))
+                    rest.rest(key, ms)
+                    Log.w(TAG, "[CAMERA] groq describe HTTP $code on key #${i + 1}/${keys.size} — resting it for ${ms / 1000} s")
                     lastReason = "HTTP $code"
                 }
                 else -> {
@@ -105,5 +115,33 @@ object GroqVision {
         val message = json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message") ?: return null
         val content = message.opt("content") as? String ?: return null
         return content.trim().ifBlank { null }
+    }
+}
+
+/**
+ * Which of the camera's Groq keys are worth a request right now (the text planner's 6-hour skip of a rejected key, OpenAiCompatBrain,
+ * for the camera too). Keys are held in memory only, by hash, and never logged. Pure over [clock] → KeyRestTest.
+ */
+class KeyRest(private val clock: () -> Long = { System.currentTimeMillis() }) {
+    private val until = java.util.concurrent.ConcurrentHashMap<Int, Long>()
+
+    /** [keys] without the ones still resting, in order. */
+    fun usable(keys: List<String>): List<String> {
+        val now = clock()
+        return keys.filter { (until[it.hashCode()] ?: 0L) <= now }
+    }
+
+    fun rest(key: String, ms: Long) { until[key.hashCode()] = clock() + ms }
+
+    companion object {
+        private val DAILY = Regex("(?i)per day|\\(TPD\\)|\\(RPD\\)")
+
+        /** How long a key rests after [code]: refused (401/403) = [badMs]; rate-limited (429) = [rateMs], an hour when the body says
+         *  its DAILY cap is spent. */
+        fun restFor(code: Int, body: String, badMs: Long, rateMs: Long): Long = when {
+            code == 401 || code == 403 -> badMs
+            DAILY.containsMatchIn(body) -> 3_600_000L
+            else -> rateMs
+        }
     }
 }
