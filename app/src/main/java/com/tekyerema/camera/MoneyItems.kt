@@ -42,6 +42,16 @@ object MoneyItems {
     fun sureItem(r: Reading, base: Double = 0.85): Item? =
         itemOf(r.cls)?.takeIf { r.conf >= CurrencyAnnouncer.gateFor(r.cls, base) }
 
+    /**
+     * One piece read in the four quarter-turns of its crop (a note is held any way up). 27 Oct 2026: a 50 cedis note was read as 200.
+     * Sure only when at least two turns give the same item and no turn gives a different one; otherwise null — the cloud's value stays.
+     */
+    fun consensus(turns: List<Reading>, base: Double = 0.85): Item? {
+        val items = turns.mapNotNull { sureItem(it, base) }
+        val first = items.firstOrNull() ?: return null
+        return first.takeIf { items.size >= 2 && items.all { it == first } }
+    }
+
     /** Sort the readings of a frame's boxes into read, not read, and not money. */
     fun count(readings: List<Reading>, base: Double = 0.85): Count {
         val sure = ArrayList<Item>()

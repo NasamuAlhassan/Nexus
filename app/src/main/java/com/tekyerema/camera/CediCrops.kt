@@ -8,6 +8,19 @@ import android.graphics.Bitmap
  * way [ObjectCrop.window] frames the live camera's object crop. Touches Bitmap, so it is not unit-tested.
  */
 object CediCrops {
+    /** [rgb] (side×side×3, row-major) turned [k] quarter-turns clockwise. */
+    fun turned(rgb: FloatArray, side: Int, k: Int): FloatArray {
+        val n = ((k % 4) + 4) % 4
+        if (n == 0) return rgb
+        val out = FloatArray(rgb.size)
+        for (y in 0 until side) for (x in 0 until side) {
+            val (nx, ny) = when (n) { 1 -> (side - 1 - y) to x; 2 -> (side - 1 - x) to (side - 1 - y); else -> y to (side - 1 - x) }
+            val from = (y * side + x) * 3; val to = (ny * side + nx) * 3
+            out[to] = rgb[from]; out[to + 1] = rgb[from + 1]; out[to + 2] = rgb[from + 2]
+        }
+        return out
+    }
+
     /** [box] = [ymin, xmin, ymax, xmax] on 0–1000, as the vision prompt asks for. Null when the window is unusable. */
     fun rgb(bmp: Bitmap, box: FloatArray, margin: Float = 1.25f): FloatArray? {
         val w = bmp.width; val h = bmp.height

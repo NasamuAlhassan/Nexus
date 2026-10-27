@@ -793,8 +793,10 @@ class CameraReadActivity : ComponentActivity() {
                 val model = cedi
                 if (photo == null || model == null) null
                 else MoneyTally.withOnDevice(text) { box ->
+                    // A note is held any way up: the crop is read in all four quarter-turns and trusted only when they agree.
                     CediCrops.rgb(photo, box)?.let { px ->
-                        model.classify(px).let { (c, p) -> MoneyItems.sureItem(MoneyItems.Reading(c, p), AppConfig.double("camera.currency.gate", 0.85)) }
+                        MoneyItems.consensus((0..3).map { k -> model.classify(CediCrops.turned(px, CediClassifier.SIDE, k)).let { (c, p) -> MoneyItems.Reading(c, p) } },
+                            AppConfig.double("camera.currency.gate", 0.85))
                     }
                 }
             }

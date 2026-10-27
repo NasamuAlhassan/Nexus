@@ -163,4 +163,26 @@ class MoneyItemsTest {
         assertTrue(DocumentLines.pageStartTwi(1).none { it.isDigit() })
         assertTrue(DocumentLines.emptyTwi(2, 5).none { it.isDigit() })
     }
+
+    @Test fun aNoteHeldAnyWayUpIsTrustedOnlyWhenTheQuarterTurnsAgree() {
+        val n50 = Reading("note_50", 0.97); val n200 = Reading("note_200", 0.97); val unsure = Reading("note_50", 0.4)
+        assertEquals(MoneyItems.Item(50.0, true), MoneyItems.consensus(listOf(n50, n50, n50, n50)))
+        assertEquals(MoneyItems.Item(50.0, true), MoneyItems.consensus(listOf(n50, unsure, n50, unsure)))
+        assertNull(MoneyItems.consensus(listOf(n50, unsure, unsure, unsure)))      // one turn alone is not enough
+        assertNull(MoneyItems.consensus(listOf(n200, n50, n50, n50)))              // a turn that says something else vetoes
+        assertNull(MoneyItems.consensus(listOf(unsure, unsure, unsure, unsure)))
+    }
+
+    @Test fun quarterTurnsOfTheCropRoundTrip() {
+        val side = 4
+        val a = FloatArray(side * side * 3) { it.toFloat() }
+        assertTrue(com.tekyerema.camera.CediCrops.turned(a, side, 4).contentEquals(a))
+        var r = a
+        repeat(4) { r = com.tekyerema.camera.CediCrops.turned(r, side, 1) }
+        assertTrue(r.contentEquals(a))
+        assertTrue(com.tekyerema.camera.CediCrops.turned(com.tekyerema.camera.CediCrops.turned(a, side, 2), side, 2).contentEquals(a))
+        // the top-left pixel goes to the top-right after one clockwise quarter-turn
+        val t = com.tekyerema.camera.CediCrops.turned(a, side, 1)
+        assertEquals(a[0], t[(0 * side + (side - 1)) * 3], 0f)
+    }
 }
