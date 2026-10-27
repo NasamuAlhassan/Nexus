@@ -160,7 +160,8 @@ object TelcoUssd {
         // with them — the brain chooses by their words, and asks where they said nothing (2 October 2026: "Dial star 138
         // hash" placed a phone call to 138, and "run the USSD code *138#" failed as a one-shot request).
         MENU_CODE.find(goal)?.value?.let { code ->
-            val menus = checkedCodes() + com.tekyerema.money.ussd.Provider.momoRoots(network)
+            // A one-shot code (the airtime balance, *124#) named by the user stays run_ussd's — it is not a menu to walk.
+            val menus = (checkedCodes() - nets().mapNotNull { it.airtime }.toSet()) + com.tekyerema.money.ussd.Provider.momoRoots(network)
             if (code in menus) return open(MENU, code, emptyList(), "its menu at ${spokenCode(code)}", "that menu",
                 buys = words.isNotEmpty() || amount != null)
         }
