@@ -70,6 +70,17 @@ object SimChoice {
         return hits(STRONG).singleOrNull() ?: hits(WEAK).singleOrNull()
     }
 
+
+    private val MENTION = Regex("(?i)[\\s,]*\\b(?:using|on|with|from|via|through|use)?\\s*(?:the |my )?(?:(first|second|1st|2nd|one|two|1|2|mtn|telecel|vodafone|airtel ?tigo|at)\\s+)?sim(?:\\s*(?:card|tool|slot))?(?:\\s+(one|two|1|2|mtn|telecel|vodafone))?\\s*$")
+
+    /** "0552093690 using SIM two" → ("0552093690", "two"); a request that names no SIM comes back unchanged with null. */
+    fun extractMention(text: String): Pair<String, String?> {
+        val m = MENTION.find(text) ?: return text to null
+        val said = (m.groupValues[1].ifBlank { m.groupValues[2] }).lowercase().ifBlank { null }
+        val rest = text.substring(0, m.range.first).trim().trimEnd(',', '.')
+        return if (rest.isEmpty()) text to null else rest to said
+    }
+
     // ------------------------------------------------------------------------------------------------------ the phone
 
     /** Tools of money (a code on one network) ask for a SIM on that network; calls and texts ask whichever is meant. */
@@ -82,6 +93,15 @@ object SimChoice {
      */
     fun preflight(ctx: Context, tool: String, args: JSONObject): ToolResult? {
         val sims = active(ctx)
+        // "call 0552093690 using SIM two": the planner leaves the words in the contact; take them out and use them.
+        for (key in listOf("contact", "number")) {
+            val v = args.optString(key).takeIf { it.isNotBlank() } ?: continue
+            val (clean, said) = extractMention(v)
+            if (clean != v) {
+                args.put(key, clean)
+                said?.let { w -> parseAnswer(w, sims)?.let { choose(it) } }
+            }
+        }
         args.optInt("sim", -1).takeIf { it >= 0 }?.let { id -> sims.firstOrNull { it.subId == id }?.let { choose(it); return null } }
         when (val d = decide(sims, preferredNetwork(tool, args), current(ctx))) {
             is Decision.Use -> { choose(d.sim); return null }

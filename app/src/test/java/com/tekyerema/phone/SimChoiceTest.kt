@@ -45,4 +45,13 @@ class SimChoiceTest {
         assertNull(SimChoice.parseAnswer("MTN", listOf(mtn, mtn2)))                        // two MTN SIMs: the name does not tell
         assertEquals(mtn2, SimChoice.parseAnswer("second", listOf(mtn, mtn2)))
     }
+
+    @Test fun aSimNamedInTheRequestIsTakenOutOfTheContact() {
+        assertEquals("0552093690" to "two", SimChoice.extractMention("0552093690 using SIM two"))
+        assertEquals("0552093690" to null, SimChoice.extractMention("0552093690 using sim tool"))
+        assertEquals("Ama" to "second", SimChoice.extractMention("Ama on the second sim"))
+        assertEquals("Ama" to "mtn", SimChoice.extractMention("Ama with my MTN sim"))
+        assertEquals("Ama Simpson" to null, SimChoice.extractMention("Ama Simpson"))
+        assertEquals("Simon" to null, SimChoice.extractMention("Simon"))
+    }
 }
