@@ -49,7 +49,8 @@ object MoneyItems {
     fun consensus(turns: List<Reading>, base: Double = 0.85): Item? {
         val items = turns.mapNotNull { sureItem(it, base) }
         val first = items.firstOrNull() ?: return null
-        return first.takeIf { items.size >= 2 && items.all { it == first } }
+        val need = if (turns.size >= 8) 3 else 2     // two crops (tight and wide) in four turns each: three readings must agree
+        return first.takeIf { items.size >= need && items.all { it == first } }
     }
 
     /** Sort the readings of a frame's boxes into read, not read, and not money. */

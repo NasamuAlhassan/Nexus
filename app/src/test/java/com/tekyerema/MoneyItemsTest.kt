@@ -173,6 +173,12 @@ class MoneyItemsTest {
         assertNull(MoneyItems.consensus(listOf(unsure, unsure, unsure, unsure)))
     }
 
+    @Test fun tightAndWideCropsNeedThreeAgreeingReadings() {
+        val n50 = Reading("note_50", 0.97); val unsure = Reading("note_50", 0.4)
+        assertNull(MoneyItems.consensus(listOf(n50, n50, unsure, unsure, unsure, unsure, unsure, unsure)))     // two of eight: not enough
+        assertEquals(MoneyItems.Item(50.0, true), MoneyItems.consensus(listOf(n50, n50, n50, unsure, unsure, unsure, unsure, unsure)))
+    }
+
     @Test fun quarterTurnsOfTheCropRoundTrip() {
         val side = 4
         val a = FloatArray(side * side * 3) { it.toFloat() }

@@ -789,15 +789,21 @@ class CameraReadActivity : ComponentActivity() {
             val photo = if (moneyAsk && jpeg != null) withContext(Dispatchers.Default) {
                 if (loadCedi() == null) null else android.graphics.BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size)
             } else null
+            val moneyDebug = java.util.Collections.synchronizedList(ArrayList<String>())
             val onPhone: (String) -> MoneyTally.Checked? = { text ->
                 val model = cedi
                 if (photo == null || model == null) null
                 else MoneyTally.withOnDevice(text) { box ->
-                    // A note is held any way up: the crop is read in all four quarter-turns and trusted only when they agree.
-                    CediCrops.rgb(photo, box)?.let { px ->
-                        MoneyItems.consensus((0..3).map { k -> model.classify(CediCrops.turned(px, CediClassifier.SIDE, k)).let { (c, p) -> MoneyItems.Reading(c, p) } },
-                            AppConfig.double("camera.currency.gate", 0.85))
+                    // A note is held any way up and the cloud's box may be loose or tight: the piece is read in a tight and a wide
+                    // crop, each in all four quarter-turns, and the phone's word is taken only when the readings agree.
+                    val readings = ArrayList<MoneyItems.Reading>()
+                    for (margin in floatArrayOf(1.25f, 1.7f)) CediCrops.rgb(photo, box, margin)?.let { px ->
+                        for (k in 0..3) model.classify(CediCrops.turned(px, CediClassifier.SIDE, k)).let { (c, p) -> readings.add(MoneyItems.Reading(c, p)) }
                     }
+                    val item = if (readings.isEmpty()) null else MoneyItems.consensus(readings, AppConfig.double("camera.currency.gate", 0.85))
+                    if (com.tekyerema.BuildConfig.DEV_HOOKS) moneyDebug.add("box=${box.joinToString(",") { it.toInt().toString() }} " +
+                        "reads=${readings.joinToString(" ") { "${it.cls}:${"%.2f".format(it.conf)}" }} → ${item?.let { "${it.value}${if (it.note) "n" else "c"}" } ?: "unsure"}")
+                    item
                 }
             }
             val answer = if (jpeg == null) VisionResult.Failed("encode")
@@ -817,6 +823,13 @@ class CameraReadActivity : ComponentActivity() {
             }
             if (closing) return@launch
             val checked = if (moneyAsk && answer is VisionResult.Described) onPhone(answer.text) else null
+            // Debug builds keep the frame and what each model said about it (files/money_debug), so a wrong count can be looked at afterwards.
+            if (com.tekyerema.BuildConfig.DEV_HOOKS && moneyAsk && jpeg != null && answer is VisionResult.Described) try {
+                val dir = java.io.File(filesDir, "money_debug").apply { mkdirs() }
+                val stamp = System.currentTimeMillis()
+                java.io.File(dir, "$stamp.jpg").writeBytes(jpeg)
+                java.io.File(dir, "$stamp.txt").writeText("cloud: ${answer.text}\n" + moneyDebug.joinToString("\n"))
+            } catch (_: Throwable) {}
             val result = if (checked != null && answer is VisionResult.Described) answer.copy(text = checked.json) else answer
             when (result) {
                 is VisionResult.Described -> deliver(when {
