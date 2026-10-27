@@ -1393,7 +1393,7 @@ class VoiceController(
             return
         }
         if (kusEnglish != null) Log.i("Tekyerema", "[KUS] understood through the translator → '${com.tekyerema.core.Privacy.content(kusEnglish)}'")
-        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = kusEnglish ?: glossed ?: repaired)
+        val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = kusEnglish ?: glossed ?: com.tekyerema.agent.SpokenRepeat.clean(repaired))
         try {
             hideAsking()   // a new turn (e.g. the answer to a question) clears any "asking" card
             com.tekyerema.ui.ReplyCard.hide()

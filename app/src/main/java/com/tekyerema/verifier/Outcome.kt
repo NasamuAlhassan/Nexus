@@ -63,7 +63,9 @@ object Expects {
             "element_absent", "absent", "gone" ->
                 arg.takeIf { it.isNotEmpty() }?.let { Expectation.ElementAbsent(it) } ?: Expectation.Unparsed(s)
             "new_element", "new" ->
-                arg.takeIf { it.isNotEmpty() }?.let { Expectation.NewElement(it) } ?: Expectation.Unparsed(s)
+                // A bare "new_element" (no label) means "something new appeared": the weak screen-changed claim, not an unreadable one
+                // (Infinix, 27 Oct 2026: it was "not understood" and cost an OCR detour of 6 s).
+                arg.takeIf { it.isNotEmpty() }?.let { Expectation.NewElement(it) } ?: Expectation.ScreenChanged
             "field_focused", "focused", "field_focus", "input_focused", "cursor_in", "keyboard_open", "keyboard_shown" ->
                 Expectation.FieldFocused(arg.takeIf { it.isNotEmpty() })
             "field_empty" -> Expectation.FieldEmpty(arg.toIntOrNull())

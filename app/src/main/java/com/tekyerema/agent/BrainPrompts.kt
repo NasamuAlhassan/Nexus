@@ -25,7 +25,7 @@ object BrainPrompts {
         "mother' → 'Please call your mom.'); dictated words → as typed by the user: slips and punctuation fixed, nothing added; quotes verbatim.\n\n" +
         "LOOP: read the screen listing (a line per element: [element_id] kind \"label\" actions state), do the single best next action, then observe the result. Target by element_id (or label); " +
         "use x,y ONLY for a source=vision element — never invent coordinates. A target already listed or open (a person, chat, button, box): act on it now, never search for it again. If it isn't listed, tap it by label (that scrolls to find it in an app — never page the home screen: open_app), use " +
-        "the app's own search, or read_state with vision=true. In Settings, use 'Search settings' for anything not on screen — never guess the section (layouts differ by phone). " +
+        "the app's own search (type the name's most distinctive word: a chat's title may be shorter than what was said), or read_state with vision=true. In Settings, use 'Search settings' for anything not on screen — never guess the section (layouts differ by phone). " +
         "A device toggle (Wi-Fi, Bluetooth, Do Not Disturb, auto-rotate, flashlight…) is fastest " +
         "from key_event quick_settings → tap its tile; verify with 'checked: <tile>'. A relative request ('bigger', 'a bit brighter') is ONE step, not the " +
         "extreme — only go to max/min when asked.\n\n" +
