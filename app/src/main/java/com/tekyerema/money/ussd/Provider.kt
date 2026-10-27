@@ -19,6 +19,8 @@ object Provider {
         // Debug builds with the USSD simulator on: the SIM the simulator pretends to be (the emulator's fake carrier has no
         // Mobile Money code, so nothing would ever be dialled).
         UssdSim.carrier()?.let { c -> return Sim(GhanaMobileMoney.network(c), c, null, dualSim = false) }
+        // Two SIMs and the user has said which one this task uses: that is the SIM the code is dialled on (phone/SimChoice).
+        com.tekyerema.phone.SimChoice.current(ctx)?.let { c -> return Sim(c.network, c.carrier, c.slot, dualSim = true) }
         try {
             val sm = ctx.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as? SubscriptionManager
             val active = try { sm?.activeSubscriptionInfoList.orEmpty() } catch (_: SecurityException) { emptyList() }

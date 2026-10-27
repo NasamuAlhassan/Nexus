@@ -137,6 +137,7 @@ object ContactChoice {
         for (i in 0 until a.length()) {
             val o = a.optJSONObject(i) ?: continue
             if (o.optString("label").equals(pickedLabel.trim(), ignoreCase = true)) {
+                if (o.has("sim")) { args.put("sim", o.optInt("sim")); return true }   // a SIM pick (phone/SimChoice)
                 args.put("contact", o.optString("name")).put("number", o.optString("number"))
                 return true
             }

@@ -89,7 +89,7 @@ object BankUssdTool : Tool {
             return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open ${bank.name}'s menu. Allow Phone for Tɛkyerɛma in Settings.", recoverable = false)
         BankSession.end()
         try {
-            ctx.appContext.startActivity(Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(bank.code))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            ctx.appContext.startActivity(com.tekyerema.phone.SimChoice.attach(ctx.appContext, Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(bank.code))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)))
         } catch (t: Throwable) {
             return ToolResult(false, "I couldn't open ${bank.name}'s menu.", recoverable = false)
         }

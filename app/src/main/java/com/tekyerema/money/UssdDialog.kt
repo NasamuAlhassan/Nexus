@@ -161,8 +161,8 @@ internal object UssdDialog {
         repeat(2) { attempt ->
             // Debug builds with the simulator on: the recorded MTN screens instead of the network (money/ussd/UssdSim).
             if (com.tekyerema.money.ussd.UssdSim.enabled()) com.tekyerema.money.ussd.UssdSim.start(app, code)
-            else app.startActivity(android.content.Intent(android.content.Intent.ACTION_CALL,
-                android.net.Uri.parse("tel:" + android.net.Uri.encode(code))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            else app.startActivity(com.tekyerema.phone.SimChoice.attach(app, android.content.Intent(android.content.Intent.ACTION_CALL,
+                android.net.Uri.parse("tel:" + android.net.Uri.encode(code))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)))
             // MTN's "Connection problem or invalid MMI code" can come AFTER its own ~30 s: a short grace past the wait
             // catches it, so it is closed and redialled instead of popping up behind "didn't open in time" (A20e,
             // 3 October 2026: 2 of 3 dials in one batch; also 2 October). A late screen that is a real menu is used.

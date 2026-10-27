@@ -98,8 +98,11 @@ object AgentEngine {
     private const val WHO_THEN_TWI = "Ɛnneɛ hwan ni? Ka ne din sɛnea wokyerɛw too wo fɔn mu, anaa ne nɔma."
     /** Tools whose read-back names a contact: a correction "ending 2019" finds that contact (ContactEnding). */
     private val ENDING_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME)
+    /** Tools that place a call, dial a code or send a text: with two SIMs the user says which one (phone/SimChoice). */
+    private val SIM_TOOLS = setOf("send_sms", "make_call", "run_ussd", "mobile_money", "momo_send",
+        com.tekyerema.money.ussd.UssdNavigatorTool.NAME, com.tekyerema.money.TelcoUssdTool.NAME, com.tekyerema.money.BankUssdTool.NAME)
     private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
-        com.tekyerema.money.TelcoUssdTool.NAME)
+        com.tekyerema.money.TelcoUssdTool.NAME) + SIM_TOOLS
     private const val TAG = "Tekyerema"
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
@@ -1286,7 +1289,7 @@ object AgentEngine {
                         }
 
                         // ---- preflight: can this action proceed at all? (side-effect free, BEFORE any confirmation) ----
-                        val pre = try { tool.preflight(decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = before)) }
+                        val pre = try { preflightWithSim(tool, decision.args, ToolContext(ctxApp, controller, NotificationStore, observedBefore = before)) }
                             catch (t: Throwable) { null }
                         if (pre != null) {
                             // Several contacts match the name: ask the short question the tool built (three options, twins
@@ -2317,6 +2320,17 @@ object AgentEngine {
     /** C-13 / G-12: ask the user and WAIT for the answer inside the task. null = no answer in time, or the task was stopped. */
     /** @param twiWording the question's own Twi wording when the app made the question (ContactChoice) — used in a Twi
      *  conversation instead of a translation. */
+    /**
+     * The tool's own preflight — except that with two SIMs the question "which SIM?" comes first (phone/SimChoice): asked once, then
+     * remembered for ten minutes, and not asked when the task belongs to one network and exactly one SIM is on it. The question rides
+     * the same road as "which Prince?": the pick is put back into the tool's arguments (ContactChoice.apply) and the call runs again.
+     * Kept out of [runTask], which is at the JVM's method-size limit.
+     */
+    private suspend fun preflightWithSim(tool: com.tekyerema.tools.Tool, args: org.json.JSONObject, ctx: ToolContext): com.tekyerema.tools.ToolResult? {
+        if (tool.name in SIM_TOOLS) com.tekyerema.phone.SimChoice.preflight(ctx.appContext, tool.name, args)?.let { return it }
+        return tool.preflight(args, ctx)
+    }
+
     private suspend fun askUser(question: String, spokenIn: String, twiWording: String? = null): String? {
         // Owner, 19 Oct 2026: in Twi / Kusaal a question is just the question — the planner's bracketed hints
         // ("(You can leave blank for none)", "(Enter the amount for 0 cedis)") are English the translator leaves behind.

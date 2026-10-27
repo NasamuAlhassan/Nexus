@@ -173,7 +173,7 @@ object MobileMoneyTool : Tool {
         val recipient = args.str("_recipient") ?: args.str("_number")
         // Encode '#' for a tel: USSD so the dialer starts the INTERACTIVE session (user drives it + PIN).
         val uri = Uri.parse("tel:" + Uri.encode(root))
-        val intent = Intent(Intent.ACTION_CALL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        val intent = com.tekyerema.phone.SimChoice.attach(ctx.appContext, Intent(Intent.ACTION_CALL, uri).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return try {
             ctx.appContext.startActivity(intent)
             val what = when (kind) {

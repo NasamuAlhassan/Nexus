@@ -124,9 +124,8 @@ object MoMoSendTool : Tool {
 
         // Open the interactive USSD session.
         try {
-            ctx.appContext.startActivity(
-                Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(root))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
+            ctx.appContext.startActivity(com.tekyerema.phone.SimChoice.attach(ctx.appContext,
+                Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(root))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)))
         } catch (t: Throwable) {
             return ToolResult(false, "Couldn't open Mobile Money: ${t.message}", recoverable = true)
         }

@@ -334,10 +334,7 @@ object SendSmsTool : Tool {
     }
 
     @Suppress("DEPRECATION")
-    private fun smsManager(app: Context): SmsManager? = try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) app.getSystemService(SmsManager::class.java)
-        else SmsManager.getDefault()
-    } catch (t: Throwable) { null }
+    private fun smsManager(app: Context): SmsManager? = com.tekyerema.phone.SimChoice.smsManager(app)
 
     /**
      * No SEND_SMS (the A20e): hand the draft to the Messages app, then — the user has ALREADY approved exactly this text
