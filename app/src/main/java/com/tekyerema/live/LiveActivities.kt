@@ -47,6 +47,9 @@ object LiveActivities {
 
     /** Start or update [a]; [onAction] answers its buttons (the action ids it declares). */
     fun upsert(a: LiveActivity, onAction: ((String) -> Unit)? = null) {
+        // Owner, 27 Oct 2026: the music island is removed (any app's song and our own player). The music plays as before; only the
+        // island is not shown. `island.music.enabled` brings it back.
+        if (a.kind == LiveKind.MUSIC && !com.tekyerema.core.config.AppConfig.bool("island.music.enabled", false)) return
         onAction?.let { handlers[a.id] = it }
         _state.update { list -> (list.filterNot { it.id == a.id } + a).sortedWith(ORDER) }
     }

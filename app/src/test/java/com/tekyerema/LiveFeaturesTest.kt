@@ -68,6 +68,18 @@ class LiveFeaturesTest {
         LiveActivities.clear()
     }
 
+    @Test fun the_music_island_is_off_unless_switched_on() {
+        // owner, 27 Oct 2026: "the music Dynamic Island, remove it" — music plays, no island; island.music.enabled brings it back
+        LiveActivities.clear()
+        LiveActivities.upsert(LiveActivity("m", LiveKind.MUSIC, "Song", "Artist", priority = 1, glyph = LiveGlyph.MUSIC))
+        assertNull(LiveActivities.get("m"))
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("island.json" to """{"island":{"music":{"enabled":true}}}"""))
+        try {
+            LiveActivities.upsert(LiveActivity("m", LiveKind.MUSIC, "Song", "Artist", priority = 1, glyph = LiveGlyph.MUSIC))
+            assertEquals("m", LiveActivities.get("m")?.id)
+        } finally { com.tekyerema.core.config.AppConfig.loadFrom(emptyList()); LiveActivities.clear() }
+    }
+
     // ---------------------------------------------------------------- walking directions
     @Test fun where_to_kind_or_name() {
         assertEquals(true to "mall", OsmClient.kindOnly("the nearest mall"))

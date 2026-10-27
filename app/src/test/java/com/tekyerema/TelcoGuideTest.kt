@@ -27,6 +27,12 @@ class TelcoGuideTest {
         assertEquals("data_balance", (parse("check my data balance") as TelcoUssd.Request.Open).flow.key)
         assertEquals("*567#", (parse("buy a mashup bundle") as TelcoUssd.Request.Open).flow.code)
         assertEquals("*141#", (parse("what are my offers") as TelcoUssd.Request.Open).flow.code)
+        // owner feedback 27 Oct 2026: balances are asked offline too — the airtime balance is MTN's *124#, never a purchase
+        for (g in listOf("check my airtime balance", "how much airtime do I have", "airtime balance", "how much credit do I have"))
+            assertEquals(g, "*124#", (parse(g) as TelcoUssd.Request.Open).flow.code)
+        assertEquals("data_balance", (parse("check my data") as TelcoUssd.Request.Open).flow.key)
+        assertNull(parse("buy 5 cedis airtime"))
+        assertNull(parse("borrow airtime"))
         assertEquals("*700#", (parse("buy data", net = "telecel") as TelcoUssd.Request.Open).flow.code)
         assertTrue((parse("buy data", net = "telecel") as TelcoUssd.Request.Open).flow.auto.isEmpty())   // tree unpublished → all guided
         assertNull(parse("buy airtime"))                       // Mobile Money's, as before

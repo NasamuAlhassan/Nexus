@@ -50,10 +50,10 @@ object TelcoUssd {
         data class Unsupported(val line: String) : Request()
     }
 
-    private data class Net(val key: String, val name: String, val data: String?, val mashup: String?, val offers: String?)
+    private data class Net(val key: String, val name: String, val data: String?, val mashup: String?, val offers: String?, val airtime: String? = null)
 
     private val DEFAULTS = listOf(
-        Net("mtn", "MTN", data = "*138#", mashup = "*567#", offers = "*141#"),
+        Net("mtn", "MTN", data = "*138#", mashup = "*567#", offers = "*141#", airtime = "*124#"),   // *124# = airtime balance (research ghana_ussd_flows.md, HIGH on MTN)
         Net("telecel", "Telecel", data = "*700#", mashup = null, offers = null),
         Net("airteltigo", "AT", data = "*111#", mashup = null, offers = null)
     )
@@ -64,7 +64,7 @@ object TelcoUssd {
         for (k in o.keys()) {
             val n = o.optJSONObject(k) ?: continue
             fun code(name: String) = n.optString(name).trim().takeIf { CODE.matches(it) }
-            out.add(Net(k, n.optString("name").ifBlank { k }, code("data"), code("mashup"), code("offers")))
+            out.add(Net(k, n.optString("name").ifBlank { k }, code("data"), code("mashup"), code("offers"), code("airtime")))
         }
         return out.ifEmpty { DEFAULTS }
     }
@@ -72,7 +72,7 @@ object TelcoUssd {
     private val CODE = Regex("^\\*[0-9*]+#$")
 
     /** Every network-menu code this table has for any network (the only ones a model may dial unasked). */
-    fun checkedCodes(): Set<String> = nets().flatMap { listOfNotNull(it.data, it.mashup, it.offers) }.toSet()
+    fun checkedCodes(): Set<String> = nets().flatMap { listOfNotNull(it.data, it.mashup, it.offers, it.airtime) }.toSet()
     private val PAY_MOMO = Regex("\\b(?:with|using|from|by|via|through)\\s+(?:my\\s+)?(?:momo|mobile money|wallet)\\b")
     private val PAY_AIRTIME = Regex("\\b(?:with|using|from|by)\\s+(?:my\\s+)?(?:airtime|credit)\\b")
     private val MONEY_WORD = Regex("\\b(?:cedis?|pesewas?|ghs|ghc|gh)\\b|₵|¢")
@@ -168,8 +168,13 @@ object TelcoUssd {
             // "what are my offers", "any offers for me", "just4u" — the personalised-offers menu (MTN *141#, HIGH).
             Regex("\\b(?:my |any )?offers?\\b|just ?4 ?u|just for you\\b").containsMatchIn(g) && !g.contains(" send ") ->
                 open("offers", net.offers, emptyList(), "your ${net.name} offers", "its offers menu")
+            // "check my airtime balance", "how much airtime do I have", "how much credit" — the network's own airtime balance
+            // (MTN *124#, one reply, no PIN). Buying airtime stays Mobile Money's; "my balance" alone is MoneyFlow's question.
+            Regex("\\b(?:airtime|credit) balance\\b|how much (?:airtime|credit)\\b|(?:airtime|credit) (?:do i have|left|remaining)\\b").containsMatchIn(g) &&
+                !Regex("\\b(?:buy|top ?up|recharge|load|send|give|transfer|borrow)\\b").containsMatchIn(g) ->
+                open("airtime_balance", net.airtime, emptyList(), "your ${net.name} airtime balance", "its airtime balance", buys = false)
             // "check my data balance", "how much data do I have left" — MTN: *138# → buy → (More…) → Check Bundle Balance.
-            Regex("\\bdata balance\\b|how much data\\b|\\bbundle balance\\b|data (?:do i have|left|remaining)").containsMatchIn(g) ->
+            Regex("\\bdata balance\\b|how much data\\b|\\bbundle balance\\b|data (?:do i have|left|remaining)|\\bcheck my data\\b").containsMatchIn(g) ->
                 open("data_balance", net.data, listOf(BUY, BALANCE), "your ${net.name} data balance", "its data menu")
             // "buy a mashup/pulse bundle" — MTN's no-expiry voice+data combos. The LIVE *567# menu (A20e 2026-09-30)
             // goes buy → "MashUp for Self / Others" directly; steps are skippable anyway, but the plan matches reality.
