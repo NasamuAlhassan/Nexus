@@ -81,6 +81,8 @@ class CameraReadActivity : ComponentActivity() {
         const val MODE_COLOR = "color"
         const val MODE_DESCRIBE = "describe"
         const val MODE_CURRENCY = "currency"
+        /** Offline "what is this" (WhatIsThis): the thing in front of the camera named on the phone. */
+        const val MODE_IDENTIFY = "identify"
 
         private const val TAG = "Tekyerema"
         /** Finish even if the TTS engine never reports the last line done (engine died, no voice). */
@@ -175,6 +177,13 @@ class CameraReadActivity : ComponentActivity() {
     private var detBuf: FloatArray? = null       // the whole frame squeezed to 320 px for the detector
     /** When money was last SEEN but not readable — drives the honest "I can see money but…" coaching. */
     private var moneySeenAt = 0L
+    private var whatIs: WhatIsThis? = null
+    private var whatIsTried = false
+    private var idBuf: FloatArray? = null
+    private var idLast: String? = null           // the label the previous frame gave
+    private var idSaid: String? = null           // the label last spoken, and when
+    private var idSaidAt = 0L
+    private var idHintAt = 0L
     private var lastCurrencyHintAt = 0L
 
     // --- describe (P-01 / P-09) ---
@@ -377,6 +386,14 @@ class CameraReadActivity : ComponentActivity() {
         if (closing) return
         if (mode == MODE_DESCRIBE) {
             when {
+                // 28 Oct 2026 (owner: offline is the main feature): no network, no key or no cloud allowed → the phone names what it
+                // sees by itself (WhatIsThis) instead of "I can't describe it offline". `camera.describe.offlineFirst` = always.
+                question == null && !moneyAsk && WhatIsThis.installed(this) && (AppConfig.bool("camera.describe.offlineFirst", false) ||
+                    VisionLadder.allowedRungs(settings).isEmpty() || !VisionLadder.canDescribe(settings) || !NetworkMonitor.isOnline()) -> {
+                    mode = MODE_IDENTIFY
+                    describeStartedAt = SystemClock.elapsedRealtime()
+                    announce(phrase("modeIdentify", "I'll name what's in front of you, on this phone. Point the camera at it and hold still."))
+                }
                 // J-18: the user switched the Gemini backup off — a photo must not leave the phone behind their back.
                 VisionLadder.allowedRungs(settings).isEmpty() -> {
                     speakThenFinish(phrase("describeDisabled",
@@ -445,7 +462,8 @@ class CameraReadActivity : ComponentActivity() {
                 val preview = Preview.Builder().build().also { it.setSurfaceProvider(previewView.surfaceProvider) }
                 // Sizes are in the sensor's (landscape) orientation. Text/colour stay small for speed on a 2.8 GB phone;
                 // describe asks for more pixels because that one frame is all the model gets to read labels from.
-                val target = if (mode == MODE_DESCRIBE)
+                // Money too (28 Oct 2026): the detector's coin boxes are cropped from these pixels, and a coin is a small part of the frame.
+                val target = if (mode == MODE_DESCRIBE || (mode == MODE_CURRENCY && AppConfig.bool("camera.currency.hiRes", true)))
                     Size(AppConfig.int("camera.describe.width", 1280), AppConfig.int("camera.describe.height", 960))
                 else
                     Size(AppConfig.int("camera.analysis.width", 640), AppConfig.int("camera.analysis.height", 480))
@@ -493,6 +511,7 @@ class CameraReadActivity : ComponentActivity() {
         when (mode) {
             MODE_TEXT -> readText(image)   // closes the image when OCR completes
             MODE_COLOR -> try { checkColour(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
+            MODE_IDENTIFY -> try { checkIdentify(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
             MODE_CURRENCY -> try { checkCurrency(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
             else -> try { gateForDescribe(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
         }
@@ -668,6 +687,41 @@ class CameraReadActivity : ComponentActivity() {
         }
         lastCurrencyHintAt = now
         deliver(line, reading = false)
+    }
+
+    /** Analyser thread: the centre square → the offline namer. Never speaks itself. */
+    private fun checkIdentify(image: ImageProxy) {
+        if (closing || mode != MODE_IDENTIFY) return
+        if (!whatIsTried) { whatIsTried = true; whatIs = WhatIsThis.create(this) }
+        val model = whatIs ?: run {
+            main.post { if (!closing) { mode = MODE_TEXT; announce(phrase("describeOffline", "I can't describe it offline, but I can read any text I see.")) } }
+            return
+        }
+        val t0 = SystemClock.elapsedRealtime()
+        val a = model.identify(RgbSquare.from(image, WhatIsThis.SIDE, idBuf).also { idBuf = it })
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[WHATIS] ${a.kind} ${a.label} p=${"%.3f".format(a.p)} in ${SystemClock.elapsedRealtime() - t0} ms")
+        main.post { onIdentify(a) }
+    }
+
+    /** Main thread. Said once the same answer holds on two frames in a row; the same thing is not said again for 10 s. */
+    private fun onIdentify(a: WhatIsThis.Answer) {
+        if (closing || mode != MODE_IDENTIFY) return
+        val now = SystemClock.elapsedRealtime()
+        val key = a.label?.let { "${a.kind}:$it" }
+        val steady = key != null && key == idLast
+        idLast = key
+        if (steady && !isSpeaking() && (key != idSaid || now - idSaidAt > AppConfig.long("camera.identify.repeatMs", 10_000L))) {
+            WhatIsThis.spoken(a)?.let { line ->
+                idSaid = key; idSaidAt = now
+                Log.i(TAG, "[CAMERA] named offline: ${a.kind}")
+                deliver(line)
+                return
+            }
+        }
+        if (key == null && !isSpeaking() && now - describeStartedAt > 6_000L && now - idHintAt > 8_000L && now - idSaidAt > 8_000L) {
+            idHintAt = now
+            deliver(phrase("identifyUnsure", "I'm not sure what this is. Move it a little closer, or into better light."), reading = false)
+        }
     }
 
     /** The conversation is in Twi: money and reading lines that have a Twi form are said in it, with no translator. */
@@ -991,6 +1045,7 @@ class CameraReadActivity : ComponentActivity() {
         mode == MODE_DESCRIBE -> phrase("labelDescribe", "Describing")
         mode == MODE_CURRENCY -> phrase("labelCurrency", "Checking money")
         mode == MODE_COLOR -> phrase("labelColor", "Colour and light")
+        mode == MODE_IDENTIFY -> phrase("labelIdentify", "Naming it, offline")
         else -> phrase("labelText", "Reading text")
     }
 
