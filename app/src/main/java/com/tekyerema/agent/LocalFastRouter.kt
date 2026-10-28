@@ -183,6 +183,10 @@ class LocalFastRouter(
             // keep their own rules.
             visionFollowUp(text)?.let { return it }
             meaning(text, language)?.let { return it }
+            // Offline, a bare "what is this?" cannot reach the agent, so it is the camera's (28 Oct 2026: it went to the agent and
+            // nothing was said). Online it stays the agent's to decide (it may mean the screen).
+            if (!com.tekyerema.core.NetworkMonitor.isOnline() && RE_BARE_WHAT.matches(text.trim().lowercase().trimEnd('.', '!', '?')))
+                openCameraReader("describe", text)?.let { return it }
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
         }
@@ -1828,6 +1832,8 @@ class LocalFastRouter(
         }
         /** A bare "read this" — its meaning depends on what is in front (see tryHandle). */
         private val RE_BARE_READ = Regex("(?:please )?(?:read|scan) (?:this|it|that)(?: (?:out|aloud|for me|please))*")
+        /** "what is this", "what's that", "what are these" — the whole request (offline: the camera names it). */
+        private val RE_BARE_WHAT = Regex("(?:please |so |okay |ok )?(?:tell me )?what(?:'s| is| are) (?:this|that|these|those)(?: thing| object)?(?: please)?")
         /** Camera apps: the phrase means the CAMERA while one of these is in front. */
         private val CAMERA_APPS = listOf("camera", "com.sec.android.app.camera", "com.google.android.GoogleCamera")
 

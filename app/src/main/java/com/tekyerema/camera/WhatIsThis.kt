@@ -21,7 +21,7 @@ import java.nio.ByteOrder
 class WhatIsThis private constructor(ctx: Context) {
     data class Label(val label: String, val family: String, val isFamily: Boolean)
     enum class Kind { ITEM, FAMILY, UNSURE }
-    data class Answer(val label: String?, val kind: Kind, val p: Double)
+    data class Answer(val label: String?, val kind: Kind, val p: Double, val top: String? = null)
 
     private val env = ai.onnxruntime.OrtEnvironment.getEnvironment()
     private val session: ai.onnxruntime.OrtSession
@@ -90,11 +90,11 @@ class WhatIsThis private constructor(ctx: Context) {
             val sum = e.sum()
             val best = cos.indices.maxByOrNull { cos[it] }!!
             val pBest = e[best] / sum
-            if (!labels[best].isFamily && pBest >= a) return Answer(labels[best].label, Kind.ITEM, pBest)
+            if (!labels[best].isFamily && pBest >= a) return Answer(labels[best].label, Kind.ITEM, pBest, labels[best].label)
             val fam = labels[best].family
             val pFam = labels.indices.filter { labels[it].family == fam }.sumOf { e[it] } / sum
-            if (pFam >= b) return Answer(fam, Kind.FAMILY, pFam)
-            return Answer(null, Kind.UNSURE, pBest)
+            if (pFam >= b) return Answer(fam, Kind.FAMILY, pFam, labels[best].label)
+            return Answer(null, Kind.UNSURE, pBest, labels[best].label)
         }
 
         /** "okada (motorbike taxi)" → "an okada, a motorbike taxi"; "MacBook" → "a MacBook"; "keys on a key ring" → "keys on a key ring". */

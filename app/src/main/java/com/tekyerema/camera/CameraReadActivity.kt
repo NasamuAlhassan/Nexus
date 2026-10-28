@@ -699,7 +699,7 @@ class CameraReadActivity : ComponentActivity() {
         }
         val t0 = SystemClock.elapsedRealtime()
         val a = model.identify(RgbSquare.from(image, WhatIsThis.SIDE, idBuf).also { idBuf = it })
-        if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[WHATIS] ${a.kind} ${a.label} p=${"%.3f".format(a.p)} in ${SystemClock.elapsedRealtime() - t0} ms")
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[WHATIS] ${a.kind} ${a.label} p=${"%.3f".format(a.p)} top=${a.top} in ${SystemClock.elapsedRealtime() - t0} ms")
         main.post { onIdentify(a) }
     }
 
@@ -708,7 +708,8 @@ class CameraReadActivity : ComponentActivity() {
         if (closing || mode != MODE_IDENTIFY) return
         val now = SystemClock.elapsedRealtime()
         val key = a.label?.let { "${a.kind}:$it" }
-        val steady = key != null && key == idLast
+        // Two frames in a row, or one very sure item: on the Infinix a frame takes ~1.8 s, so waiting for two cost ~4 s.
+        val steady = key != null && (key == idLast || (a.kind == WhatIsThis.Kind.ITEM && a.p >= AppConfig.double("camera.identify.sureAt", 0.85)))
         idLast = key
         if (steady && !isSpeaking() && (key != idSaid || now - idSaidAt > AppConfig.long("camera.identify.repeatMs", 10_000L))) {
             WhatIsThis.spoken(a)?.let { line ->
