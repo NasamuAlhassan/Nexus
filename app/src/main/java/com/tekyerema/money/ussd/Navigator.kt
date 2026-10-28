@@ -315,13 +315,21 @@ class Navigator(
         }
 
         /** A last message that says the request went on (a prompt to approve will follow, it is being processed). */
+        private val HEADER = Regex("(?i)^\\s*(?:mtn|telecel|vodafone|airteltigo|at)(?:\\s+gh(?:ana)?)?\\s+message\\s*[:.]?\\s*")
+        private val NO_FUNDS = Regex("(?i)\\b(?:not enough|insufficient)\\s+(?:funds|balance|money)")
         internal val IN_PROGRESS = Regex("(?i)\\bprompt\\b|\\bapprov|\\bauthori[sz]|being processed|\\bprocessing\\b|will receive|\\bsubmitted\\b|\\bsuccess")
 
         /** A money walk that the network ended with a message before any PIN was asked for: its words, then — in the
          *  intent's own word — what did not happen (no PIN was entered, so nothing moved). Pure. */
         internal fun endedBeforePin(tx: TxContext, screen: String): String {
             val net = tx.provider?.let { com.tekyerema.agent.NumberSpeech.networkName(it) } ?: "The network"
-            val said = UssdSpeech.forEar(screen, intro = "$net says").trimEnd().let { if (it.last() in ".!?") it else "$it." }
+            // The dialog's title line ("MTN GH Message") is not what MTN said (Infinix, 28 Oct 2026: "MTN says. MTN GH Message. Not
+            // enough funds…" — and the Twi of it came out as "M T N says. M T N [P2] [P1]").
+            val body = screen.replace(HEADER, "").trim().ifEmpty { screen }
+            if (NO_FUNDS.containsMatchIn(body))
+                return "$net says there isn't enough money in your Mobile Money wallet for this." + com.tekyerema.voice.SpokenText.PAUSE +
+                    (if (tx.intent == TxIntent.SEND_MONEY) "Nothing was sent." else "Nothing was bought.")
+            val said = UssdSpeech.forEar(body, intro = "$net says").trimEnd().let { if (it.last() in ".!?") it else "$it." }
             return said + com.tekyerema.voice.SpokenText.PAUSE + (if (tx.intent == TxIntent.SEND_MONEY) "Nothing was sent." else "Nothing was bought.")
         }
 

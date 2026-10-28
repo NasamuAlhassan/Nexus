@@ -98,7 +98,7 @@ object TwiCommands {
     private val TWI_NUMBER = mapOf("baako" to 1, "biako" to 1, "mmienu" to 2, "abien" to 2, "mmiɛnsa" to 3, "abiɛsa" to 3, "anan" to 4,
         "anum" to 5, "nsia" to 6, "nson" to 7, "nwɔtwe" to 8, "nkron" to 9, "du" to 10, "dunum" to 15, "aduonu" to 20, "aduasa" to 30)
     private val MOMO_BALANCE = Regex("^(?:me\\s+(?:momo|mobile money)(?:\\s+mu)?\\s+sika(?:\\s+a\\s+aka)?\\s+(?:yɛ|aka|ka)\\s+sɛn" +
-        "|hwɛ\\s+me\\s+(?:momo\\s+)?sika(?:\\s+a\\s+aka|\\s+no)?|mewɔ\\s+sika\\s+sɛn)$")
+        "|hwɛ\\s+me\\s+(?:momo\\s+)?sika(?:\\s+a\\s+aka|\\s+no)?|mewɔ\\s+sika\\s+sɛn|me\\s+sika(?:\\s+a)?\\s+a?r?ka\\s+sɛn)$")
     private val AIRTIME_BALANCE = Regex("^me\\s+(?:kredit|krɛdit|credit|airtime)(?:\\s+no)?\\s+(?:aka|ka|yɛ)\\s+sɛn$")
     /** Everyday code-mixed forms, as Ghana's Abena app lists them in its help (3 October 2026): "Aka me credit sɛn?" (how much
      *  credit have I left), "Checki me MTN credit no ma me" (check my MTN credit for me) — and the same for MoMo and data. */

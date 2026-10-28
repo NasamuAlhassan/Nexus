@@ -77,10 +77,13 @@ class UssdSweepFixesTest {
 
     @Test fun `a refusal before the PIN says what did not happen`() {
         val send = TxContext(TxIntent.SEND_MONEY, "mtn", recipient = "0552093690", amount = "1")
-        val line = Navigator.endedBeforePin(send, "Not enough funds to perform this transaction.")
-        assertTrue(line, line.startsWith("MTN says."))
-        assertTrue(line, line.contains("Not enough funds to perform this transaction"))
+        // As the Infinix showed it, 28 Oct 2026: the dialog's title first, then MTN's words — said plainly, without the title.
+        val line = Navigator.endedBeforePin(send, "MTN GH Message\nNot enough funds to perform this transaction.")
+        assertTrue(line, line.startsWith("MTN says there isn't enough money in your Mobile Money wallet for this."))
+        assertTrue(line, !line.contains("GH Message"))
         assertTrue(line, line.endsWith("Nothing was sent."))
+        val other = Navigator.endedBeforePin(send, "MTN GH Message\nThe number is not registered for MoMo.")
+        assertTrue(other, other.startsWith("MTN says") && "registered" in other && !other.contains("GH Message"))
         val airtime = TxContext(TxIntent.BUY_AIRTIME, "mtn", amount = "1")
         assertTrue(Navigator.endedBeforePin(airtime, "Not enough funds").endsWith("Nothing was bought."))
     }

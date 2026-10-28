@@ -33,4 +33,9 @@ class TwiMoneyMendTest {
         assertEquals(false, com.tekyerema.voice.SpeechVocabulary.isContactPhrase("aduane", v))
         assertEquals(false, com.tekyerema.voice.SpeechVocabulary.isContactPhrase("majority", v))
     }
+
+    @Test fun howMuchMoneyIsLeftIsTheMoMoBalance() {
+        assertEquals("check my mobile money balance", TwiCommands.gloss("me sika arka sɛn"))
+        assertEquals("check my mobile money balance", TwiCommands.gloss("me sika aka sɛn"))
+    }
 }
