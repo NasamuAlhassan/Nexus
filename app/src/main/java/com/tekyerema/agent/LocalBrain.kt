@@ -651,6 +651,8 @@ class LocalBrain : AgentBrain {
 
     /** §A.2 — buy airtime: extract the cedi amount if present, open the network's MoMo menu, hand off. */
     private fun buyAirtimeDecision(raw: String): AgentDecision? {
+        // Online with MTN's app (money/MtnApp, the finale demo): the purchase is the planner's, in the app. Offline: the menu below.
+        if (com.tekyerema.money.MtnApp.useApp()) return defer("online: airtime in MTN's app")
         // Airtime "to"/"for" someone is never airtime for this phone: the brain (or the money flow) finds the person in the contacts
         // and reads it back. The owner's "send 2 cedis airtime to Loglo" lost the name in the recogniser and became airtime for
         // the owner's own phone (live test, 22 Oct 2026).
@@ -684,6 +686,8 @@ class LocalBrain : AgentBrain {
     /** §A.2 — send money: needs an amount AND a recipient (after "to"/Twi "ma"); opens the menu, user does PIN. */
     private fun sendMoneyDecision(raw: String): AgentDecision? {
         val canon = Normalizer.normalize(raw, if (twi) Lang.TWI else Lang.GH_EN)
+        // Online with MTN's app (money/MtnApp): the send is the planner's, in the app, with its read-back; offline, the USSD walk below.
+        if (!MONEY_CONTROL.containsMatchIn(canon) && com.tekyerema.money.MtnApp.useApp()) return defer("online: the send in MTN's app")
         // A money CONTROL is never a send: "set my mobile money limit to 20 cedis per send" was read back as "Send 20 cedis
         // to per send" (emulator, 13 October 2026). The limit commands are money/MoneyCommands' (RoutingBrain answers them).
         if (MONEY_CONTROL.containsMatchIn(canon)) return null

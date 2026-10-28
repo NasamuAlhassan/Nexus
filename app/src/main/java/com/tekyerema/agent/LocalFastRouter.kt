@@ -869,10 +869,14 @@ class LocalFastRouter(
         val msgs = capturedMessages().filter { !it.text.isNullOrBlank() && com.tekyerema.notifications.NotificationDigest.isMessage(it, extra) }
             .sortedByDescending { it.t }
         fun whoOf(m: com.tekyerema.notifications.IndexedMessage) = (m.sender ?: m.title)?.trim().orEmpty()
-        val want = intent.from ?: References.recentPerson()
-        val m = want?.let { w -> msgs.firstOrNull { whoOf(it).isNotEmpty() && (whoOf(it).contains(w, true) || w.contains(whoOf(it), true)) } }
-            ?: (if (intent.from != null) null else msgs.firstOrNull())
-            ?: return handled(intent, if (intent.from != null) "I can't find a message from ${intent.from}." else "You have no new messages.")
+        // "from Angela on my WhatsApp": the app is a filter, not part of the name (Infinix, 28 Oct 2026: "Angela on my WhatsApp" matched
+        // WhatsApp's own "505 messages from 40 chats" summary, whose sender is "WhatsApp"), and an app's summary is never a message.
+        val (wantRaw, appSaid) = MessageWho.split(intent.from ?: References.recentPerson())
+        val want = wantRaw
+        val pool = msgs.filter { !MessageWho.isSummary(whoOf(it), it.text) && (appSaid == null || CHAT_APPS[appSaid].orEmpty().any { p -> it.pkg.startsWith(p) }) }
+        val m = want?.let { w -> pool.firstOrNull { MessageWho.matches(whoOf(it), w) } }
+            ?: (if (intent.from != null) null else pool.firstOrNull())
+            ?: return handled(intent, if (intent.from != null) "I can't find a message from ${want ?: intent.from}${appSaid?.let { " on $it" } ?: ""}." else "You have no new messages.")
         val who = whoOf(m).ifEmpty { "someone" }
         References.noteRead(who, channelOf(m.pkg))
         val text = m.text!!.trim()
