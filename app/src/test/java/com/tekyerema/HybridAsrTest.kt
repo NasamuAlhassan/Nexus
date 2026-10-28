@@ -25,6 +25,10 @@ import org.junit.Test
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class HybridAsrTest {
+    /** The phone-wide link breaker is wall-clock state: a network failure in an earlier test class opened it for a minute and
+     *  these routing tests then saw 'offline' (28 Oct 2026, order-dependent failures). Each test starts with it closed. */
+    @org.junit.Before fun closedLinkBreaker() = com.tekyerema.core.LinkHealth.reset()
+
 
     private class FakeOnDevice(override val ready: Boolean = true, val raw: String = "open whatsapp") : SpeechToRaw {
         override val name = "fake-ondevice"
