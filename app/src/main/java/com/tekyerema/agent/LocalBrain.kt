@@ -120,7 +120,8 @@ class LocalBrain : AgentBrain {
                 pendingResultSpeak = true
                 return call("run_ussd", JSONObject().put("code", airtimeBalanceCode()), "airtime balance")
             }
-            if (isMomoBalanceAsk(g)) return momoBalanceDecision()
+            // Online with MTN's app in app mode (money/MtnApp, the finale demo), the MoMo balance is the planner's, in the app.
+            if (isMomoBalanceAsk(g) && !com.tekyerema.money.MtnApp.useApp()) return momoBalanceDecision()
             // "what is Richmond's number?" — the contacts look-up (search_contacts), answered on the phone with the NAME it
             // matched. Question-shaped, so before the network gate: the cloud used to answer "The phone number I found is
             // 024…" for a match that was Richmond's Dad, the name dropped (QA D11, 3 October 2026).

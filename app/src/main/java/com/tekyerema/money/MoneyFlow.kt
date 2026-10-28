@@ -189,6 +189,8 @@ object MoneyFlow {
         return roots.any { code == "$it#" }
     }
 
+    private val APP_KINDS = setOf(MoneyAsk.Kind.SEND, MoneyAsk.Kind.AIRTIME, MoneyAsk.Kind.BALANCE_MOMO, MoneyAsk.Kind.BALANCE_UNCLEAR)
+
     fun decide(goal: String, history: List<String>): AgentDecision? {
         if (!enabled()) return null
         // A correction the engine could not apply itself is the planner's (RoutingBrain.pendingRevision) — never re-proposed here.
@@ -200,6 +202,9 @@ object MoneyFlow {
         if (!walked(history) && BARE_BUY.matches(goal.lowercase().replace('’', '\'').trim())) return question(history, WHAT_PREFIX, WHAT_WORDINGS)
         val ask = try { MoneyAsk.parse(goal) } catch (_: Throwable) { null }
             ?: return if (history.isEmpty()) notYet(goal)?.let { AgentDecision.Done(it) } else null
+        // The finale demo (owner, 28 Oct 2026): online, MoMo transactions are done in MTN's app by the planner (MtnApp.RULE); offline,
+        // the USSD walk below. The phone's own records (status, last, spent) stay here either way.
+        if (ask.kind in APP_KINDS && MtnApp.useApp()) return null
         return when (ask.kind) {
             MoneyAsk.Kind.SEND -> send(ask, history, goal)
             MoneyAsk.Kind.AIRTIME -> airtime(ask, history)
