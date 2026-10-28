@@ -179,6 +179,8 @@ class LocalFastRouter(
         // Wi-Fi join with a spoken password, the networks around, and "is Wi-Fi / Bluetooth / mobile data on" (phone/WifiJoin).
         try { com.tekyerema.phone.WifiJoin.handle(appContext, text) } catch (_: Throwable) { null }?.let {
             Log.i(TAG, "[LOCAL_FAST_PATH] intent=WIFI llm_called=false result='$it'"); return FastOutcome("WIFI", it) }
+        try { com.tekyerema.phone.DeviceFacts.handle(appContext, text) } catch (_: Throwable) { null }?.let {
+            Log.i(TAG, "[LOCAL_FAST_PATH] intent=DEVICE_FACT llm_called=false result='$it'"); return FastOutcome("DEVICE_FACT", it) }
         val intent = FastIntentClassifier.classify(text) ?: run {
             // Vision follow-up (camera/VisionQa, the Be My AI pattern): while the camera's last photo is still held,
             // a question nothing above claimed is asked OF THAT PHOTO — "what's in front of me" … "what colour is
@@ -1233,6 +1235,7 @@ class LocalFastRouter(
         try { com.tekyerema.core.LinkProbe.kick() } catch (_: Throwable) {}
         val line = com.tekyerema.core.ConnectivityLine.describe(via,
             caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true, health, t.lastProbeMs())
+            .let { l -> if (via == "Wi-Fi") com.tekyerema.phone.WifiJoin.ssid(appContext)?.let { n -> l.replaceFirst("Wi-Fi", "Wi-Fi, $n") } ?: l else l }
         handled(FastIntent.Connectivity, line)
     } catch (t: Throwable) { null }
 

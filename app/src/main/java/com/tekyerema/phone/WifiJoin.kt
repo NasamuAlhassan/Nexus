@@ -31,7 +31,14 @@ object WifiJoin {
     private val PW_ONLY = Regex("(?i)^(?:the |its |my )?$PW\\s*(?:is|:|=)\\s*(.+)$")
     private val NO_PW = Regex("(?i)\\b(?:no password|open network|it(?:'s| is| has) (?:open|no password))\\b")
     private val LIST = Regex("(?i)\\b(?:show|list|tell|read|what are|which)\\b.*\\b(?:wi-?fi|wireless) networks?\\b|\\bavailable (?:wi-?fi|networks)\\b")
+    /** "Which Wi-Fi am I connected to", "what network am I on", "what's my Wi-Fi name" — a question, never a toggle (28 Oct 2026: the
+     *  recogniser's "which Wi-Fi am I connecting" went to the planner, which tapped the Wi-Fi tile and asked to switch it off). */
+    private val WHICH = Regex("(?i)^(?:please |tell me )?(?:which|what)(?:'s| is)? (?:wi-?fi|wireless|network|internet)(?: network| name)? (?:am i|is (?:this|my) phone|are we|i'?m) (?:connected|connecting|on|using|joined)(?: to| on)?|" +
+        "^(?:what(?:'s| is) )(?:my|the|this) (?:wi-?fi|wireless|network)(?:'s)?(?: network)? name|^(?:which|what) wi-?fi is (?:this|it)")
     private val STATE = Regex("(?i)^(?:is|are)\\s+(?:my |the )?(wi-?fi|bluetooth|mobile data|data)\\s+(?:on|off|enabled|working|connected)\\b")
+
+    /** A which-network question (never a toggle). Pure. */
+    fun isWhich(text: String): Boolean = WHICH.containsMatchIn(text.trim().trimEnd('.', '!', '?'))
 
     /** "Home Wi-Fi" + "hunter 2" → the request; null when [text] is not one. Pure. */
     fun parse(text: String): Req? {
@@ -73,6 +80,7 @@ object WifiJoin {
     /** The spoken line for a (masked) request about Wi-Fi joining, networks or device states; null when it is not one. */
     fun handle(ctx: Context, maskedText: String): String? {
         val t = maskedText.trim().trimEnd('.', '!', '?')
+        if (WHICH.containsMatchIn(t)) return state(ctx, "wifi")
         STATE.find(t)?.let { m -> return state(ctx, m.groupValues[1].lowercase()) }
         if (LIST.containsMatchIn(t)) return networks(ctx)
         val r = parse(t) ?: return null
@@ -134,6 +142,9 @@ object WifiJoin {
             if (n?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) { Log.i(TAG, "[WIFI] pressed '$label' on the system sheet"); return }
         }
     }
+
+    /** The Wi-Fi network's name, or null (not on Wi-Fi, or Android hides it without location permission). */
+    fun ssid(ctx: Context): String? = connectedTo(ctx)
 
     @Suppress("DEPRECATION")
     private fun connectedTo(ctx: Context): String? = try {
