@@ -213,7 +213,7 @@ object MoneyFlow {
             MoneyAsk.Kind.BALANCE_AIRTIME -> null                     // LocalBrain's own rule (it knows the Twi wordings too)
             MoneyAsk.Kind.STATUS -> records(MoneyStatusTool.STATUS, history)
             MoneyAsk.Kind.LAST -> records(MoneyStatusTool.LAST, history)
-            MoneyAsk.Kind.SPENT -> records(MoneyStatusTool.SPENT, history)
+            MoneyAsk.Kind.SPENT -> records(MoneyStatusTool.SPENT, history, day = if (Regex("(?i)\\byesterday\\b|\\bɛnnora\\b|\\bennora\\b").containsMatchIn(goal)) "yesterday" else null)
         }
     }
 
@@ -339,10 +339,10 @@ object MoneyFlow {
     }
 
     // ------------------------------------------------------------------ status / history
-    private fun records(mode: String, history: List<String>): AgentDecision {
+    private fun records(mode: String, history: List<String>, day: String? = null): AgentDecision {
         val last = LocalBrain.lastStep(history)
         if (last.startsWith("${MoneyStatusTool.NAME}(")) return spoken(last, "I couldn't read your Mobile Money records just now.")
-        return AgentDecision.CallTool(MoneyStatusTool.NAME, JSONObject().put(MoneyStatusTool.ARG_MODE, mode), R_STATUS)
+        return AgentDecision.CallTool(MoneyStatusTool.NAME, JSONObject().put(MoneyStatusTool.ARG_MODE, mode).apply { day?.let { put("day", it) } }, R_STATUS)
     }
 
     /** A read's own result is the answer; its failure is said as a failure, never as a completion. */

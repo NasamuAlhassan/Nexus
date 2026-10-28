@@ -163,7 +163,8 @@ object MoneyStatusTool : Tool {
             set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0) }.timeInMillis
         val week = now - 7 * 24 * 3_600_000L
         val line = when (args.str(ARG_MODE) ?: STATUS) {
-            SPENT -> TxLedger.spentLine(dayStart, now)
+            SPENT -> if (args.str("day") == "yesterday") TxLedger.spentLine(dayStart - 24 * 3_600_000L, now, until = dayStart, day = "yesterday")
+                else TxLedger.spentLine(dayStart, now)
             RECEIVED -> if (!canRead) NO_SMS else MoneyStatus.Lines.receivedToday(MoneyStatus.inbox(app, dayStart))
             MESSAGE -> if (!canRead) NO_SMS else MoneyStatus.Lines.lastMessage(MoneyStatus.inbox(app, now - 30L * 24 * 3_600_000L), withBalance, now)
             LAST -> if (TxLedger.all(now).isNotEmpty()) TxLedger.lastLine(now)

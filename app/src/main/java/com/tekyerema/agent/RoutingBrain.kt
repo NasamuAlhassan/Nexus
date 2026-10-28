@@ -225,7 +225,7 @@ class RoutingBrain(
                 android.util.Log.i("Tekyerema", "[ROUTE] the network dropped mid MTN-app task → asking to finish on the USSD menu")
                 return AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", com.tekyerema.money.AppToUssd.ASK), "network dropped mid app task")
             }
-            is com.tekyerema.money.AppToUssd.Outcome.Stop -> { stickyCloud = false; return AgentDecision.Done(o.line) }
+            is com.tekyerema.money.AppToUssd.Outcome.Stop -> { stickyCloud = false; return com.tekyerema.money.AppToUssd.stopDecision(o.line, ctx.history) }
             is com.tekyerema.money.AppToUssd.Outcome.Switch -> {
                 stickyCloud = false
                 val rest = ctx.copy(history = o.history)
@@ -358,7 +358,7 @@ class RoutingBrain(
                     android.util.Log.i("Tekyerema", "[ROUTE] the cloud call failed mid MTN-app task → asking to finish on the USSD menu")
                     return AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", com.tekyerema.money.AppToUssd.ASK), "network dropped mid app task")
                 }
-                is com.tekyerema.money.AppToUssd.Outcome.Stop -> { stickyCloud = false; return AgentDecision.Done(o.line) }
+                is com.tekyerema.money.AppToUssd.Outcome.Stop -> { stickyCloud = false; return com.tekyerema.money.AppToUssd.stopDecision(o.line, ctx.history) }
                 else -> {}
             }
         }

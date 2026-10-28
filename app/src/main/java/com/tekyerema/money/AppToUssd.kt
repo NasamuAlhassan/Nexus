@@ -47,6 +47,23 @@ object AppToUssd {
         return if (menuCanDoIt) Outcome.Ask else Outcome.Stop(NO_MENU)
     }
 
+    /**
+     * The decision for a [Outcome.Stop]. After the read-back or the PIN the phone first reads the network's own Mobile Money messages
+     * ([MoneyStatusTool], works offline) and says what they show, instead of only telling the user to check — then the task ends.
+     */
+    fun stopDecision(line: String, history: List<String>): com.tekyerema.agent.AgentDecision {
+        if (line != CHECK_FIRST) return com.tekyerema.agent.AgentDecision.Done(line)
+        val last = com.tekyerema.agent.LocalBrain.lastStep(history)
+        if (last.startsWith("${MoneyStatusTool.NAME}(")) {
+            val said = MoneyPlan.spokenPart(com.tekyerema.agent.LocalBrain.resultMessage(last))
+            return com.tekyerema.agent.AgentDecision.Done(
+                "The internet dropped after you confirmed in the MTN app. " + said.ifBlank { "I couldn't read your MoMo messages." } +
+                    " I won't do it a second time; if you're not sure, check your balance before trying again.")
+        }
+        return com.tekyerema.agent.AgentDecision.CallTool(MoneyStatusTool.NAME,
+            org.json.JSONObject().put(MoneyStatusTool.ARG_MODE, MoneyStatusTool.STATUS), "network dropped after the confirmation: what do the MoMo messages say")
+    }
+
     /** The app task reached the PIN, or the user said yes to a money read-back: the money may already have gone. */
     internal fun pastConfirm(history: List<String>): Boolean =
         history.any { PIN_STEP.containsMatchIn(it) } ||

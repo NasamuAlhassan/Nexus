@@ -290,14 +290,16 @@ object TxLedger {
     }
 
     /** "How much have I sent today?" — confirmed and not-yet-confirmed apart. [dayStart] = local midnight. */
-    fun spentLine(dayStart: Long, now: Long = System.currentTimeMillis()): String {
-        val today = all(now).filter { it.at >= dayStart }
+    fun spentLine(dayStart: Long, now: Long = System.currentTimeMillis(), until: Long = Long.MAX_VALUE, day: String = "today"): String {
+        val today = all(now).filter { it.at >= dayStart && it.at < until }
         val done = today.filter { it.state == State.DONE }
         val open = today.filter { it.state == State.AT_PIN || it.state == State.UNKNOWN }
         fun total(l: List<Tx>) = l.mapNotNull { decimal(it.amount) }.fold(BigDecimal.ZERO, BigDecimal::add)
-        if (done.isEmpty() && open.isEmpty()) return "I haven't taken any Mobile Money payment to your PIN today."
-        val a = if (done.isEmpty()) "Nothing I took to your PIN today has been confirmed yet."
-            else "Today the network has confirmed ${cedis(total(done))} through me, in ${count(done.size)}."
+        val past = day != "today"
+        if (done.isEmpty() && open.isEmpty())
+            return if (past) "I didn't take any Mobile Money payment to your PIN $day." else "I haven't taken any Mobile Money payment to your PIN today."
+        val a = if (done.isEmpty()) "Nothing I took to your PIN $day has been confirmed yet."
+            else "${day.replaceFirstChar { it.uppercase() }} the network ${if (past) "confirmed" else "has confirmed"} ${cedis(total(done))} through me, in ${count(done.size)}."
         val b = if (open.isEmpty()) "" else " Another ${cedis(total(open))} in ${count(open.size)} reached your PIN, but I haven't seen it confirmed."
         return a + b + " That's only what went through me — your Mobile Money statement has everything."
     }

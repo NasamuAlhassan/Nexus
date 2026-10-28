@@ -38,6 +38,12 @@ class AppToUssdTest {
         assertEquals(Outcome.Stop(AppToUssd.STOPPED), AppToUssd.decide(no, online = false, menuCanDoIt = true, isYes = yes))
     }
 
+    @Test fun afterTheConfirmationTheMoMoMessagesAreReadFirst() {
+        val d = AppToUssd.stopDecision(AppToUssd.CHECK_FIRST, inApp)
+        assertTrue(d is com.tekyerema.agent.AgentDecision.CallTool && d.name == com.tekyerema.money.MoneyStatusTool.NAME)
+        assertEquals(com.tekyerema.agent.AgentDecision.Done(AppToUssd.STOPPED), AppToUssd.stopDecision(AppToUssd.STOPPED, inApp))
+    }
+
     @Test fun afterTheReadBackOrThePinTheMenuIsNeverOffered() {
         val confirmed = inApp + "ask_user(\"Send 20 cedis to Ama Mensah, 024 123 4567?\") → the user answered: \"yes\""
         assertEquals(Outcome.Stop(AppToUssd.CHECK_FIRST), AppToUssd.decide(confirmed, online = false, menuCanDoIt = true, isYes = yes))
