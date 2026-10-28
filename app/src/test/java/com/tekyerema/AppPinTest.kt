@@ -56,6 +56,38 @@ class AppPinTest {
         assertEquals(true, k.digits.isEmpty())
     }
 
+    @Test fun theBoxTheKeyboardIsOnTakesThePin() {
+        val els = listOf(UiElement(1, "EditText", "0552093690", Box(0, 200, 1000, 300), editable = true, hint = "Phone number"),
+            UiElement(2, "EditText", "5", Box(0, 400, 1000, 500), editable = true, hint = "Amount"),
+            UiElement(3, "EditText", null, Box(0, 1200, 1000, 1300), editable = true, focused = true),
+            UiElement(4, "TextView", "Enter your MoMo PIN", Box(0, 1100, 1000, 1150)))
+        assertEquals(3, AppPin.find(UiSnapshot("com.mtngh.mymtn", "PIN", els, 0L))!!.field)
+    }
+
+    @Test fun aFocusedFormBoxIsNeverThePinBox() {
+        val els = listOf(UiElement(1, "EditText", "laptop", Box(0, 200, 1000, 300), editable = true, hint = "Reference", focused = true),
+            UiElement(2, "EditText", "5", Box(0, 400, 1000, 500), editable = true, hint = "Amount"))
+        assertNull(AppPin.find(UiSnapshot("com.mtngh.mymtn", "PIN", els, 0L)))
+    }
+
+    @Test fun oneDigitPerBoxGoesLeftToRight() {
+        val els = (0 until 4).map { i -> UiElement(10 + (3 - i), "EditText", null, Box(100 + i * 200, 900, 250 + i * 200, 1050), editable = true) } +
+            UiElement(1, "EditText", "5", Box(0, 400, 1000, 500), editable = true, hint = "Amount")
+        assertEquals(listOf(13, 12, 11, 10), AppPin.find(UiSnapshot("com.mtngh.mymtn", "PIN", els, 0L))!!.cells)
+    }
+
+    @Test fun theLayoutLogNeverHoldsWhatABoxHolds() {
+        val els = listOf(UiElement(1, "TextView", "Enter your PIN", Box(0, 0, 10, 10)),
+            UiElement(2, "EditText", "4821", Box(0, 20, 10, 30), editable = true, hint = "PIN"),
+            UiElement(3, "TextView", "• • 8 •", Box(0, 40, 10, 50)),
+            UiElement(4, "EditText", "laptop", Box(0, 60, 10, 70), editable = true))
+        val lines = AppPin.layout(UiSnapshot("com.mtngh.mymtn", "PIN", els, 0L))
+        assertEquals(4, lines.size)
+        assertEquals(true, lines.none { l -> l.substringBefore(' ').let { _ -> l.replace(Regex("#\\d+|\\d+,\\d+,\\d+,\\d+|<\\d+ chars>"), "") }.any { it.isDigit() } })
+        assertEquals(true, lines.none { "laptop" in it })
+        assertEquals(true, "'Enter your PIN'" in lines[0] && "hint='PIN'" in lines[1] && "EDIT" in lines[1])
+    }
+
     @Test fun theReferenceIsTheUsersWordsOnly() {
         val screen = org.json.JSONObject().put("app", "com.mtngh.mymtn").put("elements", org.json.JSONArray()
             .put(org.json.JSONObject().put("id", 15).put("label", "Reference")).put(org.json.JSONObject().put("id", 13).put("label", "Amount")))

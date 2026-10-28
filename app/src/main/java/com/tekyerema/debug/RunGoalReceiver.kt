@@ -261,6 +261,21 @@ class RunGoalReceiver : BroadcastReceiver() {
                 "ok=$ok cls=${target.className?.toString()?.substringAfterLast('.')} desc='${target.contentDescription}' text='${target.text}'")
             return
         }
+        // A PIN screen's shape only (money/AppPin.layout — no box text, safe at the secure step):  --es pin_layout 1
+        intent.getStringExtra("pin_layout")?.let {
+            val pending = goAsync()
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
+                try {
+                    val snap = AgentEngine.currentController()?.buildSnapshot()
+                    if (snap == null) Log.i("Tekyerema", "[PINPAD] layout: no screen")
+                    else {
+                        Log.i("Tekyerema", "[PINPAD] layout of ${snap.appPackage}: n=${snap.elements.size} keypad=${com.tekyerema.money.AppPin.find(snap)?.let { k -> if (k.field != null) "box" else "keys" } ?: "none"}")
+                        com.tekyerema.money.AppPin.layout(snap).forEach { Log.i("Tekyerema", "[PINPAD] layout $it") }
+                    }
+                } finally { pending.finish() }
+            }
+            return
+        }
         intent.getStringExtra("dump_screen")?.let {
             val pending = goAsync()
             kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launch {
