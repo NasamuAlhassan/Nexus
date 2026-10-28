@@ -18,7 +18,9 @@ object AppPin {
     /** The app's own 0–9 buttons ([digits]), or — when it shows a PIN BOX with the phone's keyboard instead — that box ([field]). */
     data class Keypad(val digits: Map<Char, Int>, val delete: Int?, val confirm: Int?, val area: Box, val field: Int? = null,
                       /** A row of one-digit boxes, left to right: one digit each. */
-                      val cells: List<Int> = emptyList())
+                      val cells: List<Int> = emptyList(),
+                      /** Drawn PIN cells over a HIDDEN box (MyMTN): tap this cell once, then fill the box with input focus. */
+                      val hiddenBoxCell: Int? = null)
 
     private val PIN_WORDS = Regex("(?i)\\b(?:pin|passcode|password|pass code|secret code)\\b")
     private val PIN_VIEW_ID = Regex("(?i)(?:pin|passcode|password|otp|secret)")
@@ -43,11 +45,14 @@ object AppPin {
             // 28 Oct 2026 (MyMTN, "the PIN isn't working" — owner: "since the keyboard was supposed to be used, convert that input to
             // be the buttons, just like the USSD way"): no 0–9 buttons — the PIN goes into a box the phone's keyboard would type. The
             // volume keys fill it. Which box: a password box, a box named PIN, the box the keyboard is on (input focus), the only box.
-            val edits = els.filter { it.editable && it.enabled }
-            if (edits.isEmpty()) return null
             val w = els.maxOf { it.bounds.right }
             val h = els.maxOf { it.bounds.bottom }
             val area = Box(0, h / 2, w, h)
+            // MyMTN (28 Oct 2026, its PIN sheet's layout): four tap cells "otp-input" and no box at all — the real box is hidden; a
+            // tap on a cell gives it input focus and the keyboard. The volume keys fill that focused box.
+            pinCellRow(els)?.let { row -> if (els.none { it.editable && it.enabled }) return Keypad(emptyMap(), null, ok?.id, area, hiddenBoxCell = row.first()) }
+            val edits = els.filter { it.editable && it.enabled }
+            if (edits.isEmpty()) return null
             pinCells(edits, w)?.let { return Keypad(emptyMap(), null, ok?.id, area, cells = it) }
             val box = edits.firstOrNull { it.password }
                 ?: edits.firstOrNull { e -> PIN_WORDS.containsMatchIn(e.hint.orEmpty()) || PIN_VIEW_ID.containsMatchIn(e.viewId?.substringAfter(":id/").orEmpty()) }
@@ -66,6 +71,14 @@ object AppPin {
     private fun namedOther(e: com.tekyerema.accessibility.UiElement): Boolean =
         NOT_PIN.containsMatchIn(e.hint.orEmpty()) || NOT_PIN.containsMatchIn(e.viewId?.substringAfter(":id/").orEmpty())
     private val NOT_PIN = Regex("(?i)(?:amount|reference|ref|note|narration|description|purpose|phone|number|msisdn|recipient|wallet|search|name|email|message)")
+
+    /** Four to eight cells named PIN / OTP by their view id, side by side (not boxes — drawn cells), left to right; null otherwise. Pure. */
+    fun pinCellRow(els: List<com.tekyerema.accessibility.UiElement>): List<Int>? {
+        val named = els.filter { e -> e.bounds.width >= 40 && e.bounds.height >= 40 && PIN_VIEW_ID.containsMatchIn(e.viewId?.substringAfter(":id/").orEmpty()) }
+        val row = named.groupBy { it.viewId }.values.maxByOrNull { it.size } ?: return null
+        if (row.size !in 4..8 || row.map { it.bounds.top / 40 }.distinct().size != 1) return null
+        return row.sortedBy { it.bounds.left }.map { it.id }
+    }
 
     /** Four to eight small boxes side by side on one row (a "one digit per box" PIN), left to right; null otherwise. Pure. */
     internal fun pinCells(edits: List<com.tekyerema.accessibility.UiElement>, screenWidth: Int): List<Int>? {
@@ -115,9 +128,10 @@ object AppPin {
             return false
         }
         keypad = k; pkg = s.appPackage; typed = 0
+        k.hiddenBoxCell?.let { try { ctrl.clickElement(it) } catch (_: Throwable) {} }   // the hidden box takes focus, as a finger's tap would
         com.tekyerema.voice.SecureStep.begin(appPackage = s.appPackage)
         PinPad.arm()
-        android.util.Log.i("Tekyerema", "[PINPAD] armed on ${s.appPackage}'s ${if (k.field != null) "PIN box" else if (k.cells.isNotEmpty()) "${k.cells.size} PIN boxes" else "own keypad"} (confirm=${k.confirm != null}, delete=${k.delete != null})")
+        android.util.Log.i("Tekyerema", "[PINPAD] armed on ${s.appPackage}'s ${if (k.field != null) "PIN box" else if (k.hiddenBoxCell != null) "PIN cells (hidden box)" else if (k.cells.isNotEmpty()) "${k.cells.size} PIN boxes" else "own keypad"} (confirm=${k.confirm != null}, delete=${k.delete != null})")
         if (com.tekyerema.core.Taught.teach("pin.app.keys.tip")) try {
             com.tekyerema.voice.VoiceEngine.announce("Use the volume keys for your PIN: press volume down once for each number, then volume up " +
                 "to put it in — volume up on its own is a zero. One buzz means it went in. Hold either key to take one back.")
@@ -143,6 +157,12 @@ object AppPin {
     suspend fun enter(ctrl: AccessibilityController, soFar: String, added: Boolean): Boolean {
         val k = keypad ?: return false
         if (k.field != null) return ctrl.setText(k.field, soFar, submit = false).also { if (it) typed = soFar.length }
+        if (k.hiddenBoxCell != null) {
+            // The box behind the cells: filled whole each time; if it lost focus, a tap on the first cell gives it back once.
+            var ok = ctrl.setFocusedText(soFar)
+            if (!ok) { fresh(ctrl)?.hiddenBoxCell?.let { ctrl.clickElement(it) }; kotlinx.coroutines.delay(250); ok = ctrl.setFocusedText(soFar) }
+            return ok.also { if (it) typed = soFar.length }
+        }
         if (k.cells.isNotEmpty()) {
             // One digit per box: the newest digit into its own box, or the box just emptied when one is taken back.
             val i = if (added) soFar.length - 1 else soFar.length

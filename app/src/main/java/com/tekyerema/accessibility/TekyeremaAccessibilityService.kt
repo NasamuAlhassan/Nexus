@@ -871,6 +871,15 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         return set
     }
 
+    override suspend fun setFocusedText(text: String): Boolean {
+        val node = try { findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Throwable) { null } ?: return false
+        if (!node.isEditable) return false
+        return try {
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
+                Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) })
+        } catch (_: Throwable) { false }
+    }
+
     override suspend fun scrollElement(id: Int, direction: String): Boolean {
         val node = nodeMap[id] ?: return false
         val scrollable = if (node.isScrollable) node else ancestorWhere(node, 8) { it.isScrollable } ?: return false

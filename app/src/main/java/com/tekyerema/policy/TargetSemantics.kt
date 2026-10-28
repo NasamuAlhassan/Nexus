@@ -110,6 +110,8 @@ object TargetSemantics {
     fun isCredentialScreen(screen: UiSnapshot, confirmationAsked: Boolean = false): Boolean {
         if (screen.secureWindow) return true                       // FLAG_SECURE (system PIN/lock/keyguard-like)
         if (screen.elements.any { it.password }) return true       // a masked password/PIN field
+        // MyMTN's PIN sheet (28 Oct 2026): four "otp-input" cells over a hidden box — no editable in the tree at all.
+        if (com.tekyerema.money.AppPin.pinCellRow(screen.elements) != null) return true
         val inputs = screen.elements.filter { it.editable }
         if (inputs.isEmpty()) return false
         val pkg = screen.appPackage.orEmpty()

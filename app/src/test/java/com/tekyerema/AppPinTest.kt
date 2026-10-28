@@ -76,6 +76,28 @@ class AppPinTest {
         assertEquals(listOf(13, 12, 11, 10), AppPin.find(UiSnapshot("com.mtngh.mymtn", "PIN", els, 0L))!!.cells)
     }
 
+    /** MyMTN's PIN sheet as logged on the Infinix, 28 Oct 2026 (structure only). */
+    private fun mymtnPinSheet() = UiSnapshot("com.mtngh.mymtn", "MoMo", listOf(
+        UiElement(0, "Button", "Bottom sheet backdrop", Box(0, 0, 1080, 2358), clickable = true),
+        UiElement(4, "View", "Enter your MoMo pin", Box(63, 905, 1017, 995)),
+        UiElement(5, "TextView", "Enter Pin", Box(63, 1100, 1017, 1148)),
+        UiElement(6, "ViewGroup", null, Box(63, 1169, 194, 1290), clickable = true, viewId = "otp-input"),
+        UiElement(7, "ViewGroup", null, Box(126, 1190, 131, 1269), clickable = true, viewId = "otp-input-stick"),
+        UiElement(8, "ViewGroup", null, Box(242, 1169, 373, 1290), clickable = true, viewId = "otp-input"),
+        UiElement(9, "ViewGroup", null, Box(421, 1169, 552, 1290), clickable = true, viewId = "otp-input"),
+        UiElement(10, "ViewGroup", null, Box(600, 1169, 731, 1290), clickable = true, viewId = "otp-input"),
+        UiElement(13, "Button", "Show MoMo balance", Box(686, 242, 749, 312), clickable = true),
+        UiElement(16, "Button", "Send MoMo", Box(63, 777, 286, 983), clickable = true)), 0L)
+
+    @Test fun myMtnsPinCellsAreAPinScreenAndThePadFillsTheirHiddenBox() {
+        assertEquals(listOf(6, 8, 9, 10), AppPin.pinCellRow(mymtnPinSheet().elements))
+        assertEquals(true, com.tekyerema.policy.TargetSemantics.isCredentialScreen(mymtnPinSheet()))
+        val k = AppPin.find(mymtnPinSheet())
+        assertNotNull(k)
+        assertEquals(6, k!!.hiddenBoxCell)
+        assertNull(k.field)
+    }
+
     @Test fun theLayoutLogNeverHoldsWhatABoxHolds() {
         val els = listOf(UiElement(1, "TextView", "Enter your PIN", Box(0, 0, 10, 10)),
             UiElement(2, "EditText", "4821", Box(0, 20, 10, 30), editable = true, hint = "PIN"),
