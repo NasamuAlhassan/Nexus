@@ -62,7 +62,38 @@ class WakeWordService : Service() {
     @Volatile private var liveRec: AudioRecord? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
-    override fun onCreate() { super.onCreate(); instance = this }
+    override fun onCreate() { super.onCreate(); instance = this; watchScreen() }
+
+    // Screen off → the wake word stops and the microphone closes; screen on → it listens again (owner, 28 Oct 2026: no activation
+    // with the screen off — privacy and battery). `wake.screenOff.listen` = true keeps the old always-listening behaviour.
+    @Volatile private var screenOff = false
+    private var screenReceiver: android.content.BroadcastReceiver? = null
+
+    private fun watchScreen() {
+        if (com.tekyerema.core.config.AppConfig.bool("wake.screenOff.listen", false)) return
+        screenOff = !((getSystemService(POWER_SERVICE) as? android.os.PowerManager)?.isInteractive ?: true)
+        val r = object : android.content.BroadcastReceiver() {
+            override fun onReceive(c: Context?, i: Intent?) {
+                when (i?.action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        screenOff = true; why = "screen off"
+                        loopJob?.cancel(); loopJob = null
+                        Log.i(TAG, "[WAKE] screen off — wake word stopped, microphone closed")
+                    }
+                    Intent.ACTION_SCREEN_ON -> {
+                        screenOff = false
+                        try { com.tekyerema.accessibility.A11yWatch.check(applicationContext, "screen on") } catch (_: Throwable) {}
+                        if (Settings(this@WakeWordService).wakeWordEnabled &&
+                            checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                            Log.i(TAG, "[WAKE] screen on — wake word listening again"); armLoop()
+                        }
+                    }
+                }
+            }
+        }
+        val f = android.content.IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) }
+        try { registerReceiver(r, f); screenReceiver = r } catch (t: Throwable) { Log.w(TAG, "[WAKE] screen watch failed: ${t.message}") }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         ensureChannel(this)
@@ -80,6 +111,7 @@ class WakeWordService : Service() {
      *  a short backoff — the wake word must never stay deaf until the user taps the icon. */
     private fun armLoop() {
         if (loopJob?.isActive == true) return
+        if (screenOff) { why = "screen off"; return }
         loopJob = scope.launch(Dispatchers.IO) {
             var attempt = 0
             var loadFails = 0
@@ -118,7 +150,8 @@ class WakeWordService : Service() {
             while (isActive) {
                 delay(TICK_MS)
                 try {
-                    if (!settings.wakeWordEnabled) continue
+                    try { com.tekyerema.accessibility.A11yWatch.tick(applicationContext) } catch (_: Throwable) {}
+                    if (!settings.wakeWordEnabled || screenOff) continue
                     val job = loopJob
                     if (job == null || !job.isActive) { noteRestart("loop not running"); armLoop() }
                     else if (WakeGuards.stalled(micOpen, android.os.SystemClock.uptimeMillis() - loopBeat)) {
@@ -386,6 +419,7 @@ class WakeWordService : Service() {
     }
 
     override fun onDestroy() {
+        screenReceiver?.let { try { unregisterReceiver(it) } catch (_: Throwable) {} }
         running = false
         tickJob?.cancel()
         loopJob?.cancel()

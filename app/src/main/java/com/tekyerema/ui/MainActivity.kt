@@ -65,6 +65,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         AgentEngine.refreshReadiness()
+        // Back from Settings, or opened again: is our accessibility service on? (accessibility/A11yWatch)
+        try { com.tekyerema.accessibility.A11yWatch.check(applicationContext, "app opened") } catch (_: Throwable) {}
     }
 }
 
