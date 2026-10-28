@@ -74,6 +74,21 @@ class CediDetector private constructor(ctx: Context) {
             return out
         }
 
+        /**
+         * Pieces lying on each other: some pair shares more than [frac] of the smaller one. The detector (Kaggle, synthetic piles)
+         * finds ~80 % of the pieces in an overlapping pile but ~98 % laid apart, and a piece it misses is silently left out of a
+         * total — so a crowded pile is not counted; the user is asked to spread it out.
+         */
+        fun crowded(boxes: List<Box>, frac: Float = 0.3f): Boolean {
+            for (i in boxes.indices) for (j in i + 1 until boxes.size) {
+                val a = boxes[i]; val b = boxes[j]
+                val iw = minOf(a.x1, b.x1) - maxOf(a.x0, b.x0)
+                val ih = minOf(a.y1, b.y1) - maxOf(a.y0, b.y0)
+                if (iw > 0f && ih > 0f && iw * ih > frac * minOf(a.w * a.h, b.w * b.h)) return true
+            }
+            return false
+        }
+
         fun iou(a: Box, b: Box): Float {
             val iw = minOf(a.x1, b.x1) - maxOf(a.x0, b.x0)
             val ih = minOf(a.y1, b.y1) - maxOf(a.y0, b.y0)

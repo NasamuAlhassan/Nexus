@@ -42,4 +42,14 @@ class CediDetectorTest {
         val huge = CediDetector.window(CediDetector.Box(0f, 0f, 1f, 1f, false, 0.9f), 640, 480, 1.7f)
         assertEquals(480, huge.size)
     }
+
+    @Test fun notesLyingOnEachOtherAreCrowdedNotesApartAreNot() {
+        val a = CediDetector.Box(0.1f, 0.1f, 0.5f, 0.3f, false, 0.9f)
+        val fanned = CediDetector.Box(0.2f, 0.12f, 0.6f, 0.32f, false, 0.9f)       // covers most of the first
+        val apart = CediDetector.Box(0.55f, 0.1f, 0.95f, 0.3f, false, 0.9f)
+        val coinOnNote = CediDetector.Box(0.3f, 0.15f, 0.36f, 0.23f, true, 0.9f)   // a coin lying on a note
+        assertTrue(CediDetector.crowded(listOf(a, fanned)))
+        assertTrue(!CediDetector.crowded(listOf(a, apart)))
+        assertTrue(CediDetector.crowded(listOf(a, coinOnNote)))
+    }
 }

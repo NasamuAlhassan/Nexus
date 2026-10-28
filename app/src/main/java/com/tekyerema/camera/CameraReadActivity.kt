@@ -605,6 +605,10 @@ class CameraReadActivity : ComponentActivity() {
                 val boxes = det.detect(RgbSquare.stretched(image, CediDetector.SIDE, detBuf).also { detBuf = it },
                     AppConfig.double("camera.currency.detScore", CediDetector.SCORE_MIN.toDouble()).toFloat())
                     .take(AppConfig.int("camera.currency.maxItems", 6))
+                if (boxes.size >= 2 && CediDetector.crowded(boxes, AppConfig.double("camera.currency.crowdedFrac", 0.3).toFloat())) {
+                    main.post { onCrowded() }
+                    return
+                }
                 if (boxes.isNotEmpty()) {
                     val readings = boxes.map { b ->
                         val w = CediDetector.window(b, image.width, image.height, AppConfig.double("camera.currency.detMargin", 1.25).toFloat())
@@ -670,6 +674,18 @@ class CameraReadActivity : ComponentActivity() {
         if (say == null) { hintCurrency(now); return }
         Log.i(TAG, "[CAMERA] money on the phone: ${say.sure.size} read, ${say.unsure} not read, ${say.ignored} not money")
         (if (isTwi()) MoneyItems.spokenTwi(say) else MoneyItems.spoken(say))?.let { deliver(it) }
+    }
+
+    /** Main thread. The pieces lie on each other: no total (a hidden piece would be left out of it), the user is asked to spread
+     *  them out, on the hint cadence. */
+    private fun onCrowded() {
+        if (closing || mode != MODE_CURRENCY) return
+        val now = SystemClock.elapsedRealtime()
+        moneySeenAt = now
+        if (isSpeaking() || now - lastCurrencyHintAt < AppConfig.long("camera.currency.hintEveryMs", 6_000L)) return
+        lastCurrencyHintAt = now
+        Log.i(TAG, "[CAMERA] money pieces overlap: asked to spread them out")
+        deliver(phrase("currencySpread", VisionPrompts.SPREAD_OUT), reading = false)
     }
 
     /** Silence is ambiguous to someone who can't see the screen — say WHY, on the guidance cadence, and never a number below the
