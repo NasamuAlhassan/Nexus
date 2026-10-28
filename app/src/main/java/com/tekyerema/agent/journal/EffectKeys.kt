@@ -121,7 +121,7 @@ object EffectKeys {
         // same thing is "the same"; messages, calls and payments key on who/what (above/below) and survive a changed screen.
         val screenKey = "screen:" + Checkpoint.sigHash(before?.signature().orEmpty())
         return when {
-            SEND_WORDS.containsMatchIn(label) || (label.isEmpty() && composer != null) -> {
+            (SEND_WORDS.containsMatchIn(label) && !TargetSemantics.mtnAppMenu(before, label)) || (label.isEmpty() && composer != null) -> {
                 val who = Regex("(?i)\\bto\\s+(.{1,40})$").find(label)?.groupValues?.get(1)?.trim() ?: chat ?: app
                 // Nothing typed (a photo, a shared file): key on the exact screen, so two different items sent to the same
                 // person are two consequences, and only a re-tap on the identical screen is the same one.

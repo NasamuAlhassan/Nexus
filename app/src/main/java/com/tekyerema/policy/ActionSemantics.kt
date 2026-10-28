@@ -274,10 +274,32 @@ object ActionSemantics {
                 com.tekyerema.core.Provenance.WHY_SCREEN -> "I read it on the screen"
                 com.tekyerema.core.Provenance.WHY_MESSAGE -> "it came from a message I read"
                 else -> if (screen?.elements.orEmpty().any { it.label?.contains(who, ignoreCase = true) == true })
-                    "I read it on the screen" else "I chose it myself"
+                    "I read it on the screen" else "it isn't from what you said, so check it"
             }
         }
         return "$subject — $from."
+    }
+
+    private val REFERS_BACK = Regex("(?i)\\b(?:him|her|them|back|reply|answer|this number|that number|the same (?:person|number)|who (?:sent|called))\\b")
+
+    /**
+     * The judge's point (finale camp, 28 Oct 2026): the app must not pick the person itself — "You didn't name Ama — I chose it myself"
+     * was a guess dressed as a confirmation. A step that reaches a person the user never named ([said] = the request and their answers),
+     * who is not on the screen and not the person just talked about ("call him back"), becomes a QUESTION instead. Null = fine as it is.
+     */
+    fun unnamedRecipientQuestion(tool: String, args: org.json.JSONObject, said: String, screenText: String,
+                                 relation: (String) -> String? = ::savedRelation): String? {
+        if (tool !in PERSON_TOOLS) return null
+        val (key, who) = recipientOf(tool, args, null, null, null, false) ?: return null
+        if (key == "sender") return null                                           // replying to who wrote: they are the person
+        if (namedInGoal(who, said, relation)) return null
+        if (REFERS_BACK.containsMatchIn(said)) return null                        // "call him back": the person just talked about
+        if (who.length >= 3 && screenText.contains(who, ignoreCase = true)) return null   // on the screen: the read-back says so
+        return when (tool) {
+            "make_call" -> "Who should I call? Say a name or a number."
+            "momo_send", "mobile_money" -> "Who should I send the money to? Say a name or a number."
+            else -> "Who should I send it to? Say a name or a number."
+        }
     }
 
     /** [prompt] with the recipient notice on its own line (unchanged when there is none). */
@@ -292,6 +314,9 @@ object ActionSemantics {
             if (v.isNotEmpty()) return k to v
         }
         if (tool != "tap" && tool != "type") return null
+        // MTN's app at a menu: "Send money" opens a form and reaches nobody (Infinix, 28 Oct 2026: "Send this message to Yo Prince!?" —
+        // the app's greeting taken for a chat). Its final Send / Confirm on a filled form still names the person.
+        if (tool == "tap" && TargetSemantics.mtnAppMenu(screen, (target?.label ?: requestedLabel).orEmpty())) return null
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
         val commsType = tool == "type" && submit && TargetSemantics.communicationField.containsMatchIn(text.lowercase())

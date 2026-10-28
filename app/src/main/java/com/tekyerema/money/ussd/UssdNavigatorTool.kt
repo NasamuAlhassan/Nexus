@@ -74,7 +74,7 @@ object UssdNavigatorTool : Tool {
     internal const val ARG_REPEAT = "_repeat"
     /** Set when a model supplied a number the user's request never said (money/MoneyFlow.fromPlanner). */
     const val ARG_UNSAID = "_unsaid"
-    private const val UNSAID_LINE = "You didn't say this number — I chose it myself, so check it."
+    private const val UNSAID_LINE = "You didn't say this number — check it before you say yes."
     const val ARG_UNSAID_AMOUNT = "_unsaidAmount"
     /** The number was copied from a message (MoneyRequest — demo step 3): read in full, with [FROM_MESSAGE_LINE]. */
     const val ARG_FROM_MESSAGE = "_fromMessage"

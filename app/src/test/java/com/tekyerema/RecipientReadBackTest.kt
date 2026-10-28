@@ -49,7 +49,7 @@ class RecipientReadBackTest {
         assertEquals("You didn't say this number — it came from a message I read.",
             notice("send_sms", JSONObject().put("number", "0209998888").put("message", "ok"), "reply to that",
                 read = listOf("From Kofi: text 0209998888 to confirm")))
-        assertEquals("You didn't name Kwame — I chose it myself.",
+        assertEquals("You didn't name Kwame — it isn't from what you said, so check it.",
             notice("send_sms", JSONObject().put("contact", "Kwame").put("message", "see you"), "tell my friend I'll see him"))
         assertEquals("You didn't name Ama — it's who the message came from.",
             notice("reply_to_notification", JSONObject().put("sender", "Ama").put("message", "ok"), "reply ok to that"))
@@ -79,8 +79,8 @@ class RecipientReadBackTest {
     }
 
     @Test fun the_notice_is_its_own_line_after_the_read_back() {
-        assertEquals("Send this message to Kwame?\n“hi”\nYou didn't name Kwame — I chose it myself.",
-            ActionSemantics.withRecipientNotice("Send this message to Kwame?\n“hi”", "You didn't name Kwame — I chose it myself."))
+        assertEquals("Send this message to Kwame?\n“hi”\nYou didn't name Kwame — it isn't from what you said, so check it.",
+            ActionSemantics.withRecipientNotice("Send this message to Kwame?\n“hi”", "You didn't name Kwame — it isn't from what you said, so check it."))
         assertEquals("Call Ama?", ActionSemantics.withRecipientNotice("Call Ama?", null))
     }
 }

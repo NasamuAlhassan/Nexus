@@ -346,7 +346,7 @@ object TargetSemantics {
             return Classification(RiskTier.TIER2, null, "target '$label' ${effectReason(fx)}")
         }
 
-        if (lower != null && consequential.containsMatchIn(lower) && looksLikeControlCaption(label!!)) {
+        if (lower != null && consequential.containsMatchIn(lower) && looksLikeControlCaption(label!!) && !mtnAppMenu(screen, label)) {
             return Classification(RiskTier.TIER2, null, "target '$label' is a consequential control")
         }
         // Consent: signing in / up, SSO and OAuth ("Continue as Ama Mensah"), installing, granting a permission.

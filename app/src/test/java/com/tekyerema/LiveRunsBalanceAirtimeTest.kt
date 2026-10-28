@@ -113,7 +113,7 @@ class LiveRunsBalanceAirtimeTest {
         assertTrue("a number the user never said is flagged for the read-back", d.args.optBoolean(com.tekyerema.money.ussd.UssdNavigatorTool.ARG_UNSAID))
         d.args.put(com.tekyerema.tools.MoMoSendTool.ARG_SIM, "mtn")
         assertTrue(com.tekyerema.money.ussd.UssdNavigatorTool.confirmationPrompt(d.args)
-            .contains("from your Mobile Money wallet?\nYou didn't say this number — I chose it myself, so check it."))
+            .contains("from your Mobile Money wallet?\nYou didn't say this number — check it before you say yes."))
         // The fixed driver and a plain send go the same way; a number that WAS said is not flagged.
         val send = MoneyFlow.fromPlanner(AgentDecision.CallTool("momo_send", org.json.JSONObject().put("number", "0552093690").put("amount", "5"), "cloud"),
             "please help me send five cedis to 0552093690 thank you") as AgentDecision.CallTool

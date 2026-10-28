@@ -342,8 +342,18 @@ class RoutingBrain(
         // …and no call, text or money action stands on a recipient or an amount this task never stated or found
         // (agent/FinalActionGuard: asked for instead — an example in the instructions or an earlier request's person or
         // amount is never used; end-to-end pass, 6 October 2026).
-        val d = openInsteadOfHunting(ctx, FinalActionGuard.apply(com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal, ctx.history),
-            ctx.goal, ctx.history, ctx.screen.toString(), ctx.screen.optString("app").takeIf { it.isNotBlank() }))
+        val guarded = FinalActionGuard.apply(com.tekyerema.money.MoneyFlow.fromPlanner(untagged, ctx.goal, ctx.history),
+            ctx.goal, ctx.history, ctx.screen.toString(), ctx.screen.optString("app").takeIf { it.isNotBlank() })
+        // …and never a person the planner picked by itself from something it read (the judge, 28 Oct 2026: "it chose it itself"):
+        // not named by the user, not on the screen, not the person being replied to → asked, never guessed (policy/ActionSemantics).
+        val unnamed = (guarded as? AgentDecision.CallTool)?.let { c ->
+            com.tekyerema.policy.ActionSemantics.unnamedRecipientQuestion(c.name, c.args,
+                (listOf(ctx.goal) + com.tekyerema.money.MoneyFlow.answers(ctx.history).map { it.second }).joinToString("\n"), ctx.screen.toString())
+        }?.takeIf { q -> ctx.history.count { it.startsWith("ask_user(\"$q\")") } < 2 }
+        val d = openInsteadOfHunting(ctx, if (unnamed != null) {
+            android.util.Log.i("Tekyerema", "[GUARD] the planner chose a person the user never named — asking instead")
+            AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", unnamed), "the person wasn't named — asked, never chosen")
+        } else guarded)
         if (d is AgentDecision.Done && ctx.simple) answers?.put(ctx.goal, d.summary)
         // Mid-task, the internet drops and all that is left is to READ what the last step opened: reading needs no internet (the
         // screen tree, or OCR on the phone), so it is done here instead of pausing for "carry on" (Infinix, 27 Oct 2026, the

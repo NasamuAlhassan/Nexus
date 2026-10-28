@@ -82,7 +82,7 @@ object OperatorCommands {
         Capability.CAMERA to "(?:(?:the |my )?camera(?: access)?)")
     private fun serviceOff(w: String) = Regex("^(?:please )?(?:(?:turn|switch) off|disable|block|revoke) (?:the |your )?$w(?: for you| for me)?$|" +
         "^(?:please )?(?:(?:turn|switch) (?:the |your )?$w off)$|^$NEG (?:us(?:e|ing)|read(?:ing)?|access(?:ing)?|look(?:ing)? at|touch(?:ing)?) (?:the |my )?$w$")
-    private fun serviceOn(w: String) = Regex("^(?:please )?(?:(?:turn|switch) on|enable|allow|give you) (?:the |your )?$w(?: again)?$|" +
+    private fun serviceOn(w: String) = Regex("^(?:please )?(?:(?:turn|switch) on|enable) (?:the |your )?$w(?: again)?$|" +
         "^(?:please )?(?:(?:turn|switch) (?:the |your )?$w (?:back )?on)$|^you can (?:use|read|access) (?:the |my )?$w again$")
 
     fun normalize(raw: String): String =
