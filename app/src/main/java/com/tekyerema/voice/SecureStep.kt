@@ -15,12 +15,17 @@ object SecureStep {
     /** S-03 (P2-04, 13 October 2026): the hand-off also raises [com.tekyerema.core.Privacy.secureStep], so while it lasts the
      *  log redacts screen content, the screen-describe / vision gate refuses, and the helper treats the step as secret —
      *  the same blindness the agent's own credential-screen wait has. Lowered by [end], by the window change, or by [MAX_MS]. */
-    fun begin(now: Long = System.currentTimeMillis()) {
-        since = now; com.tekyerema.core.Privacy.secureStep = true
-        com.tekyerema.phone.PinCurtain.show()   // the screen is covered while the PIN is entered (demo step 4)
+    /** The app whose own PIN keypad this step is (money/AppPin), or null for the network's dialog. */
+    @Volatile private var appPkg: String? = null
+
+    fun begin(now: Long = System.currentTimeMillis(), appPackage: String? = null) {
+        since = now; appPkg = appPackage; com.tekyerema.core.Privacy.secureStep = true
+        // The screen is covered while a NETWORK PIN is entered (demo step 4); in an app the pad uses the app's own keypad, uncovered
+        // (owner, 28 Oct 2026: "instead of a full coverage, use the buttons directly").
+        if (appPackage == null) com.tekyerema.phone.PinCurtain.show()
     }
     fun end() {
-        since = 0L; com.tekyerema.core.Privacy.secureStep = false
+        since = 0L; appPkg = null; com.tekyerema.core.Privacy.secureStep = false
         com.tekyerema.phone.PinCurtain.hideWhenDialogGone()   // …and until the network's answer (a balance) has left the screen
     }
     fun active(now: Long = System.currentTimeMillis()): Boolean {
@@ -33,6 +38,6 @@ object SecureStep {
      *  hand-off's own window change doesn't end it), the PIN step is over. */
     fun onForeground(pkg: String?, now: Long = System.currentTimeMillis()) {
         if (since == 0L || now - since < 3_000L) return
-        if (!com.tekyerema.accessibility.TelephonyWindows.matches(pkg) && pkg != "com.tekyerema") end()
+        if (!com.tekyerema.accessibility.TelephonyWindows.matches(pkg) && pkg != "com.tekyerema" && (appPkg == null || pkg != appPkg)) end()
     }
 }

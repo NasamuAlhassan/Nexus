@@ -24,6 +24,10 @@ import com.tekyerema.money.PinPad
  * tapped by accident); Back still cancels, and THREE fingers hand the screen back to the dialog's own keys for this PIN step
  * (for someone who would rather use the real keypad). Silent like the keys: no sound, no log of a digit, nothing stored.
  * TalkBack's own touch exploration may take single touches first — a phone test, not a promise.
+ *
+ * In an app (money/AppPin, MyMTN's own keypad) the layer covers ONLY the keypad's area, not the screen (owner, 28 Oct 2026), and a
+ * digit can also be DRAWN on it with one finger, one digit at a time ([com.tekyerema.money.DigitInk]): one firm buzz = it went in,
+ * three short buzzes = draw it again.
  */
 object PinTouchPad {
     private val main = Handler(Looper.getMainLooper())
@@ -50,12 +54,15 @@ object PinTouchPad {
     private fun show() {
         val service = TekyeremaAccessibilityService.live ?: return
         val wm = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val area = com.tekyerema.money.AppPin.keypad?.area
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+            area?.width ?: WindowManager.LayoutParams.MATCH_PARENT, area?.height ?: WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         )
+        if (area != null) { params.gravity = android.view.Gravity.TOP or android.view.Gravity.START; params.x = area.left; params.y = area.top }
         val v = PadView(service)
         try { wm.addView(v, params); view = v } catch (_: Throwable) { view = null }
     }
@@ -79,10 +86,21 @@ object PinTouchPad {
         private val longPress = Runnable {
             if (!fired && pointers == 1 && moved <= slop) { fired = true; deliver(PinPad.Gesture.LONG_PRESS) }
         }
+        /** A digit being drawn: its strokes so far (a "4" or a "5" may be two), read after a short pause with no finger down. */
+        private val strokes = ArrayList<List<Pair<Float, Float>>>()
+        private var current = ArrayList<Pair<Float, Float>>()
+        private val drawPauseMs get() = AppConfig.long("pin.draw.pauseMs", 450L)
+        private val readDrawing = Runnable {
+            val got = if (strokes.isEmpty()) null else com.tekyerema.money.DigitInk.recognize(strokes.toList())
+            strokes.clear()
+            val ctrl = AgentEngine.currentController() ?: return@Runnable
+            PinPad.onDrawn(ctrl, got, SystemClock.uptimeMillis())
+        }
+        private fun drawEnabled() = AppConfig.bool("pin.draw.enabled", true)
 
         init { importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO }
 
-        fun cancelPending() { removeCallbacks(longPress) }
+        fun cancelPending() { removeCallbacks(longPress); removeCallbacks(readDrawing); strokes.clear() }
 
         private fun deliver(g: PinPad.Gesture) {
             val ctrl = AgentEngine.currentController() ?: return
@@ -93,16 +111,24 @@ object PinTouchPad {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     downAt = e.eventTime; downX = e.x; downY = e.y; moved = 0f; pointers = 1; fired = false
+                    removeCallbacks(readDrawing)                 // another stroke of the same digit
+                    current = arrayListOf(e.x to e.y)
                     postDelayed(longPress, longMs)
                 }
                 MotionEvent.ACTION_POINTER_DOWN -> {
                     pointers = maxOf(pointers, e.pointerCount); removeCallbacks(longPress)
                     if (pointers >= 3) { performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS); post { suspend() } }
                 }
-                MotionEvent.ACTION_MOVE -> moved = maxOf(moved, Math.hypot((e.x - downX).toDouble(), (e.y - downY).toDouble()).toFloat())
+                MotionEvent.ACTION_MOVE -> {
+                    moved = maxOf(moved, Math.hypot((e.x - downX).toDouble(), (e.y - downY).toDouble()).toFloat())
+                    if (pointers == 1) current.add(e.x to e.y)
+                }
                 MotionEvent.ACTION_UP -> {
                     removeCallbacks(longPress)
-                    if (!fired) PinPad.classify(e.eventTime - downAt, pointers, moved, slop, longMs)?.let { deliver(it) }
+                    if (!fired && pointers == 1 && moved > slop && drawEnabled()) {
+                        // A one-finger drawing: kept as a stroke; read once no new stroke starts within the pause.
+                        current.add(e.x to e.y); strokes.add(current.toList()); postDelayed(readDrawing, drawPauseMs)
+                    } else if (!fired) PinPad.classify(e.eventTime - downAt, pointers, moved, slop, longMs)?.let { deliver(it) }
                 }
                 MotionEvent.ACTION_CANCEL -> removeCallbacks(longPress)
             }

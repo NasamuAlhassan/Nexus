@@ -2479,7 +2479,12 @@ object AgentEngine {
         com.tekyerema.core.Privacy.secureStep = true
         com.tekyerema.agent.helper.HelperGate.atPin()   // Trust (2026-09-29): no helper at a PIN — until the user says "done"
         _state.update { it.copy(status = AgentStatus.SECURE_INPUT, handoffReason = reason) }
-        val done = try { secureChannel.receive() } finally { com.tekyerema.core.Privacy.secureStep = false }
+        // An app's own PIN keypad (MyMTN): the PIN pad presses its buttons — volume keys, taps, or digits drawn on the keypad (money/AppPin).
+        controller?.let { c -> try { com.tekyerema.money.AppPin.begin(c) } catch (_: Throwable) { false } }
+        val done = try { secureChannel.receive() } finally {
+            com.tekyerema.core.Privacy.secureStep = false
+            try { com.tekyerema.money.AppPin.end() } catch (_: Throwable) {}
+        }
         if (done) com.tekyerema.agent.helper.HelperGate.pinDone()
         _state.update { it.copy(handoffReason = null) }
         if (done) setStatus(AgentStatus.THINKING)

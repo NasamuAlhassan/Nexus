@@ -60,6 +60,14 @@ object PinPad {
             return Event.Digit(size)
         }
 
+        /** A digit drawn on the pad ([DigitInk]): straight in, whatever was being counted is dropped. */
+        fun put(d: Char): Event {
+            if (size >= maxDigits) { count = 0; return Event.Full }
+            digits[size++] = d
+            count = 0
+            return Event.Digit(size)
+        }
+
         fun hold(): Event {
             if (count > 0) { count = 0; return Event.Removed(size) }
             if (size == 0) return Event.Ignored
@@ -165,6 +173,22 @@ object PinPad {
     }
 
     /**
+     * A digit DRAWN on the touch pad ([com.tekyerema.accessibility.PinTouchPad] → [DigitInk]), or null when the drawing was not
+     * read. One firm buzz = it went in; three short buzzes = draw it again, nothing went in (owner, 28 Oct 2026). Silent otherwise.
+     */
+    fun onDrawn(ctrl: AccessibilityController, digit: Char?, eventTime: Long): Boolean {
+        if (!handles() || !touchEnabled()) return false
+        sendJob?.cancel()
+        if (eventTime < hushUntil) return true
+        if (digit == null) { scope.launch { buzz(longArrayOf(0, 40, 70, 40, 70, 40)) }; return true }
+        val c = counter ?: Counter().also { counter = it }
+        lastVia = "drawn digits"
+        val ev = c.put(digit)
+        scope.launch { act(ctrl, c, ev) }
+        return true
+    }
+
+    /**
      * From the accessibility service's key filter. True = the key was the PIN pad's (consumed: the volume doesn't move, and
      * no other gesture — "talk", "say that again" — ever sees it while the PIN screen is open).
      */
@@ -203,6 +227,7 @@ object PinPad {
             Counter.Event.Ignored -> {}
             Counter.Event.TooMany, Counter.Event.Full -> buzz(longArrayOf(0, 40, 70, 40, 70, 40))
             is Counter.Event.Digit, is Counter.Event.Removed -> {
+                if (AppPin.active()) { actOnApp(ctrl, c, ev); return }
                 val box = pinBox(ctrl)
                 if (box == null) { disarm(); say("The PIN screen isn't open any more."); return }
                 ctrl.setText(box.inputId!!, c.text(), submit = false)
@@ -212,6 +237,31 @@ object PinPad {
                 } else buzz(longArrayOf(0, 25, 90, 25))
             }
         }
+    }
+
+    /** An app's own keypad (money/AppPin): the new digit's button, or its delete key for one taken back; the app's confirm after the last. */
+    private suspend fun actOnApp(ctrl: AccessibilityController, c: Counter, ev: Counter.Event) {
+        if (ev is Counter.Event.Digit) {
+            val ok = AppPin.press(ctrl, c.text().last())
+            if (!ok) { buzz(longArrayOf(0, 40, 70, 40, 70, 40)); c.hold(); return }   // not pressed: taken back out, the user tries again
+            buzz(longArrayOf(0, 80))
+            if (ev.digits >= length()) sendJob = scope.launch { kotlinx.coroutines.delay(SEND_PAUSE_MS); sendOnApp(ctrl, c) }
+        } else {
+            if (c.size < AppPin.typed) AppPin.deleteOne(ctrl)
+            buzz(longArrayOf(0, 25, 90, 25))
+        }
+    }
+
+    private suspend fun sendOnApp(ctrl: AccessibilityController, c: Counter) {
+        buzz(longArrayOf(0, 300))
+        val ok = AppPin.confirm(ctrl)
+        c.wipe()
+        lastSentAt = System.currentTimeMillis()
+        android.util.Log.i("Tekyerema", "[PINPAD] sent into the app with $lastVia (${if (ok) "confirmed" else "no confirm button"})")
+        AppPin.end()
+        // The agent was waiting at the PIN screen: it carries on and reads what the app says.
+        kotlinx.coroutines.delay(1_500)
+        try { com.tekyerema.agent.AgentEngine.secureInputDone() } catch (_: Throwable) {}
     }
 
     /** The last digit is in and the pause passed: the dialog's own Send (one long buzz), and the digits are wiped. */
