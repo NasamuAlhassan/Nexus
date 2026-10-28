@@ -47,7 +47,13 @@ enum class Capability(val scope: CapabilityScope?) {
     CALLS(CapabilityScope.COMMS_SEND),
     MONEY(CapabilityScope.FINANCIAL),
     SETTINGS(CapabilityScope.SETTINGS),
-    WEB(CapabilityScope.WEB)
+    WEB(CapabilityScope.WEB),
+    // 28 Oct 2026 (owner: "turn on or off some services like contact access"): what the app may READ or sense, by voice too.
+    CONTACTS(CapabilityScope.COMMS_READ),
+    NOTIFICATIONS(CapabilityScope.COMMS_READ),
+    TEXTS(CapabilityScope.COMMS_READ),
+    LOCATION(CapabilityScope.PERCEIVE),
+    CAMERA(CapabilityScope.PERCEIVE)
 }
 
 /** Where the choices live: the app's preferences on the phone ([PrefsOperatorStore]), a map in unit tests. */

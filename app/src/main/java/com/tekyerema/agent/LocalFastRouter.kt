@@ -177,7 +177,8 @@ class LocalFastRouter(
         if (ScreenReadIntent.isRead(text)) screenReadAt = SystemClock.elapsedRealtime()
 
         // Wi-Fi join with a spoken password, the networks around, and "is Wi-Fi / Bluetooth / mobile data on" (phone/WifiJoin).
-        try { com.tekyerema.phone.WifiJoin.handle(appContext, text) } catch (_: Throwable) { null }?.let { return FastOutcome("WIFI", it) }
+        try { com.tekyerema.phone.WifiJoin.handle(appContext, text) } catch (_: Throwable) { null }?.let {
+            Log.i(TAG, "[LOCAL_FAST_PATH] intent=WIFI llm_called=false result='$it'"); return FastOutcome("WIFI", it) }
         val intent = FastIntentClassifier.classify(text) ?: run {
             // Vision follow-up (camera/VisionQa, the Be My AI pattern): while the camera's last photo is still held,
             // a question nothing above claimed is asked OF THAT PHOTO — "what's in front of me" … "what colour is

@@ -73,6 +73,18 @@ object OperatorCommands {
     private val RESTORE = Regex("^you can (send messages|text people|make calls|call people|handle money|touch my money|move money|" +
         "change (?:my )?settings|search the web|use the web) (?:for me )?again$")
 
+    /** The services by the words people use for them; [SERVICE_OFF] / [SERVICE_ON] wrap them ("turn off contact access"). */
+    private val SERVICE_WORDS = listOf(
+        Capability.CONTACTS to "(?:(?:my )?contacts?(?: access| list)?|access to (?:my )?contacts|contact permission)",
+        Capability.NOTIFICATIONS to "(?:(?:my )?notifications?(?: access| reading)?|notification reading|reading (?:my )?notifications)",
+        Capability.TEXTS to "(?:(?:my )?(?:text messages|texts|sms)(?: access| reading)?|text message reading|reading (?:my )?(?:texts|text messages|sms))",
+        Capability.LOCATION to "(?:(?:my )?location(?: access| sharing)?|gps)",
+        Capability.CAMERA to "(?:(?:the |my )?camera(?: access)?)")
+    private fun serviceOff(w: String) = Regex("^(?:please )?(?:(?:turn|switch) off|disable|block|revoke) (?:the |your )?$w(?: for you| for me)?$|" +
+        "^(?:please )?(?:(?:turn|switch) (?:the |your )?$w off)$|^$NEG (?:us(?:e|ing)|read(?:ing)?|access(?:ing)?|look(?:ing)? at|touch(?:ing)?) (?:the |my )?$w$")
+    private fun serviceOn(w: String) = Regex("^(?:please )?(?:(?:turn|switch) on|enable|allow|give you) (?:the |your )?$w(?: again)?$|" +
+        "^(?:please )?(?:(?:turn|switch) (?:the |your )?$w (?:back )?on)$|^you can (?:use|read|access) (?:the |my )?$w again$")
+
     fun normalize(raw: String): String =
         raw.trim().lowercase().replace('’', '\'').replace(",", " ").replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
 
@@ -93,6 +105,8 @@ object OperatorCommands {
             EXPORT.matches(g) -> OpCommand.Export(includeText = WITH_TEXT.containsMatchIn(g))
             PROVIDERS.matches(g) -> OpCommand.Providers
             else -> REVOKE.firstOrNull { it.second.matches(g) }?.let { OpCommand.Revoke(it.first) }
+                ?: SERVICE_WORDS.firstOrNull { serviceOff(it.second).matches(g) }?.let { OpCommand.Revoke(it.first) }
+                ?: SERVICE_WORDS.firstOrNull { serviceOn(it.second).matches(g) }?.let { OpCommand.Restore(it.first) }
                 ?: RESTORE.matchEntire(g)?.let { m -> restoreOf(m.groupValues[1])?.let { OpCommand.Restore(it) } }
                 // D8, last: "don't touch my phone" (Guide only) and "never touch my money" (Money) are matched above.
                 ?: AppRuleVoice.classify(g)
@@ -232,9 +246,33 @@ object OperatorCommands {
                     else "I've made a file of your history and activity log, with your own words left out. ") +
                     "The share menu is open — choose where to send it."
                 else "Sorry, I couldn't make the file."
+            // A service switched back on that Android itself has not allowed: say so and open the app's own page in Settings.
+            is OpCommand.Restore -> applyControl(cmd, now).orEmpty() + androidPermissionGap(ctx, cmd.capability)
             else -> applyControl(cmd, now) ?: return null
         }
         return say(nameOf(cmd), line)
+    }
+
+    /** " Android also needs to allow …" + Settings opened, when the switched-on service lacks its Android permission; else "". */
+    private fun androidPermissionGap(ctx: Context, c: Capability): String {
+        val perm = when (c) {
+            Capability.CONTACTS -> android.Manifest.permission.READ_CONTACTS
+            Capability.TEXTS -> android.Manifest.permission.READ_SMS
+            Capability.LOCATION -> android.Manifest.permission.ACCESS_FINE_LOCATION
+            Capability.CAMERA -> android.Manifest.permission.CAMERA
+            else -> null
+        }
+        val missing = when {
+            perm != null -> ctx.checkSelfPermission(perm) != android.content.pm.PackageManager.PERMISSION_GRANTED
+            c == Capability.NOTIFICATIONS -> !androidx.core.app.NotificationManagerCompat.getEnabledListenerPackages(ctx).contains(ctx.packageName)
+            else -> false
+        }
+        if (!missing) return ""
+        val intent = if (c == Capability.NOTIFICATIONS) android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+            else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
+        try { ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
+        return if (c == Capability.NOTIFICATIONS) " Android also needs to allow it: I've opened notification access — switch on Tɛkyerɛma."
+            else " Android also needs to allow it: I've opened Tɛkyerɛma's page in Settings — open Permissions and allow ${Capabilities.label(c)}."
     }
 
     /**

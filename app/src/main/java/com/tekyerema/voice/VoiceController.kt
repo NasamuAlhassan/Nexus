@@ -1427,6 +1427,7 @@ class VoiceController(
                 // Tɛkyerɛma's accessibility service (accessibility/A11yWatch): the answer to "would you like me to help you turn it
                 // on?", or "is TalkBack on", "turn on Tɛkyerɛma accessibility".
                 com.tekyerema.accessibility.A11yWatch.answer(app, tr.canonical)?.let { line ->
+                    Log.i("Tekyerema", "[A11Y] said: $line")
                     set(VoiceState.SPEAKING, line)
                     try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
                     _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }

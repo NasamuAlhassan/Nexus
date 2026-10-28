@@ -18,6 +18,11 @@ object Capabilities {
     private val CALL_TOOLS = setOf("make_call")
     private val MESSAGE_TOOLS = setOf("send_sms", "reply_to_notification", "share_text", "share_screenshot")
     private val SETTINGS_TOOLS = setOf("open_setting")
+    private val CONTACT_TOOLS = setOf("search_contacts", "find_contact", "create_contact")
+    private val NOTIFICATION_TOOLS = setOf("read_notifications")
+    private val TEXT_READ_TOOLS = setOf("read_sms", "search_messages")
+    private val LOCATION_TOOLS = setOf("location", "walk_directions")
+    private val CAMERA_TOOLS = setOf("look_with_camera")
     val NEVER_SWITCHED_OFF = setOf("emergency")
     /** Tools that send something to an online service of ours (blocked while the cloud is off). */
     private val CLOUD_TOOLS = setOf("describe_screen")
@@ -60,6 +65,11 @@ object Capabilities {
         if (tool in MESSAGE_TOOLS) return Capability.MESSAGES
         if (scope == CapabilityScope.WEB) return Capability.WEB
         if (tool in SETTINGS_TOOLS || scope == CapabilityScope.SETTINGS) return Capability.SETTINGS
+        if (tool in CONTACT_TOOLS) return Capability.CONTACTS
+        if (tool in NOTIFICATION_TOOLS) return Capability.NOTIFICATIONS
+        if (tool in TEXT_READ_TOOLS) return Capability.TEXTS
+        if (tool in LOCATION_TOOLS) return Capability.LOCATION
+        if (tool in CAMERA_TOOLS) return Capability.CAMERA
         if (!changesPhone) return null
         if (!actionText.isNullOrBlank()) {
             if (CALL_WORD.containsMatchIn(actionText)) return Capability.CALLS
@@ -82,6 +92,11 @@ object Capabilities {
             intent is FastIntent.BrightnessSet -> Capability.SETTINGS
         intent.name in setOf("WIFI_ON", "WIFI_OFF", "BLUETOOTH_ON", "BLUETOOTH_OFF", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN") -> Capability.SETTINGS
         intent is FastIntent.AskApp -> Capability.WEB
+        intent is FastIntent.Notifications || intent is FastIntent.Digest || intent is FastIntent.ReadAlert ||
+            intent is FastIntent.ChatMessages || intent is FastIntent.MoreMessages -> Capability.NOTIFICATIONS
+        intent is FastIntent.LastSms || intent is FastIntent.LastSmsN || intent is FastIntent.ReadMessage -> Capability.TEXTS
+        intent is FastIntent.WhereAmI -> Capability.LOCATION
+        intent is FastIntent.Camera || intent is FastIntent.ReadPhoto -> Capability.CAMERA
         else -> null
     }
 
@@ -96,6 +111,11 @@ object Capabilities {
         Capability.MONEY -> "Money"
         Capability.SETTINGS -> "Change settings"
         Capability.WEB -> "Use the web"
+        Capability.CONTACTS -> "Contact access"
+        Capability.NOTIFICATIONS -> "Read notifications"
+        Capability.TEXTS -> "Read text messages"
+        Capability.LOCATION -> "Location"
+        Capability.CAMERA -> "Camera"
     }
 
     /** "send messages for you" — what the user switched off, as a verb phrase. */
@@ -105,6 +125,11 @@ object Capabilities {
         Capability.MONEY -> "move money for you"
         Capability.SETTINGS -> "change your phone's settings"
         Capability.WEB -> "use the web"
+        Capability.CONTACTS -> "look at your contacts"
+        Capability.NOTIFICATIONS -> "read your notifications"
+        Capability.TEXTS -> "read your text messages"
+        Capability.LOCATION -> "use your location"
+        Capability.CAMERA -> "use the camera"
     }
 
     /** What to say to switch it back on by voice. */
@@ -114,6 +139,11 @@ object Capabilities {
         Capability.MONEY -> "you can handle money again"
         Capability.SETTINGS -> "you can change settings again"
         Capability.WEB -> "you can use the web again"
+        Capability.CONTACTS -> "turn on contact access"
+        Capability.NOTIFICATIONS -> "turn on notification reading"
+        Capability.TEXTS -> "turn on text message reading"
+        Capability.LOCATION -> "turn on location"
+        Capability.CAMERA -> "turn on the camera"
     }
 
     fun revokedLine(c: Capability): String =
