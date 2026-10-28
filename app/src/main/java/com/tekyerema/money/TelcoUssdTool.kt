@@ -299,6 +299,10 @@ object TelcoUssdTool : Tool {
         val what = when {
             flow.what.contains("airtime") -> TxLedger.What.AIRTIME
             flow.what.contains("send money") -> TxLedger.What.SEND
+            // A transfer the navigator handed over mid-walk (at "Enter Reference") carries its own label, but a recipient and an
+            // amount the user approved make it a send all the same (Infinix, 28 Oct 2026: 5 cedis to Zelia reached the PIN and the
+            // ledger never heard of it, so "did my last payment go through?" answered about an older one).
+            flow.intent?.contains("SEND") == true || (flow.number != null && flow.amount != null) -> TxLedger.What.SEND
             else -> return
         }
         val at = TelcoSession.current()?.openedAt ?: return

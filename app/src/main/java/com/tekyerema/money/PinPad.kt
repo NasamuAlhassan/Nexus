@@ -106,13 +106,15 @@ object PinPad {
     private val pressedAt = java.util.concurrent.ConcurrentHashMap<Int, Long>()
     private val silencing: MutableSet<Int> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     @Volatile private var hushUntil = 0L
-    private const val HUSH_GRACE_MS = 700L
+    private const val HUSH_GRACE_MS = 300L
+    /** Presses that only stopped the speech, this PIN (for the log line at Send — a count, never a digit). */
+    @Volatile private var swallowed = 0
     @Volatile private var sendJob: kotlinx.coroutines.Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** The network's PIN screen was just handed to the user. */
     fun arm() {
-        sendJob?.cancel(); counter?.wipe(); counter = Counter(); silencing.clear(); hushUntil = 0L; armed = true
+        sendJob?.cancel(); counter?.wipe(); counter = Counter(); silencing.clear(); hushUntil = 0L; swallowed = 0; armed = true
         com.tekyerema.accessibility.PinTouchPad.watch()   // the touch layer follows [handles] while the pad is armed
     }
 
@@ -160,9 +162,11 @@ object PinPad {
         if (!handles() || !touchEnabled()) return false
         sendJob?.cancel()   // a touch in the pause before Send: the user is still at it
         val talking = try { com.tekyerema.voice.NowSpeaking.active } catch (_: Throwable) { false }
-        if (talking || eventTime < hushUntil) {
-            if (talking) { try { com.tekyerema.voice.VoiceEngine.hush() } catch (_: Throwable) {}; scope.launch { buzz(longArrayOf(0, 10, 60, 10)) } }
+        if (talking) {
+            try { com.tekyerema.voice.VoiceEngine.hush() } catch (_: Throwable) {}
+            scope.launch { buzz(longArrayOf(0, 10, 60, 10)) }
             hushUntil = eventTime + HUSH_GRACE_MS
+            swallowed++
             return true
         }
         val c = counter ?: Counter().also { counter = it }
@@ -201,10 +205,15 @@ object PinPad {
             // A press while the PIN line is still being read only STOPS the reading (a light double-tick) — never counts:
             // the owner double-presses to interrupt, then counts (5 October 2026). Presses just after it, too.
             val talking = try { com.tekyerema.voice.NowSpeaking.active } catch (_: Throwable) { false }
-            if (talking || eventTime < hushUntil) {
-                if (talking) { try { com.tekyerema.voice.VoiceEngine.hush() } catch (_: Throwable) {}; scope.launch { buzz(longArrayOf(0, 10, 60, 10)) } }
+            // 28 Oct 2026 (Infinix, "the PIN wasn't working"): every press inside the grace used to re-extend it, so a quick count
+            // (down-down-down) right after stopping the line lost presses and the wrong digits went in. Now only the press that
+            // stops the speech is swallowed; the grace is for the speech's own tail and is never extended by a press.
+            if (talking) {
+                try { com.tekyerema.voice.VoiceEngine.hush() } catch (_: Throwable) {}
+                scope.launch { buzz(longArrayOf(0, 10, 60, 10)) }
                 hushUntil = eventTime + HUSH_GRACE_MS
                 silencing.add(keyCode)
+                swallowed++
             }
             return true
         }
@@ -257,7 +266,7 @@ object PinPad {
         val ok = AppPin.confirm(ctrl)
         c.wipe()
         lastSentAt = System.currentTimeMillis()
-        android.util.Log.i("Tekyerema", "[PINPAD] sent into the app with $lastVia (${if (ok) "confirmed" else "no confirm button"})")
+        android.util.Log.i("Tekyerema", "[PINPAD] sent into the app with $lastVia (${if (ok) "confirmed" else "no confirm button"}); ${length()} digits; $swallowed press(es) only stopped the speech")
         AppPin.end()
         // The agent was waiting at the PIN screen: it carries on and reads what the app says.
         kotlinx.coroutines.delay(1_500)
@@ -273,7 +282,7 @@ object PinPad {
         val sent = box.sendId?.let { ctrl.clickElement(it) } ?: ctrl.setText(box.inputId!!, c.text(), submit = true)
         c.wipe()
         lastSentAt = System.currentTimeMillis()
-        android.util.Log.i("Tekyerema", "[PINPAD] sent with $lastVia (${if (sent) "Send pressed" else "no Send button"})")
+        android.util.Log.i("Tekyerema", "[PINPAD] sent with $lastVia (${if (sent) "Send pressed" else "no Send button"}); ${length()} digits; $swallowed press(es) only stopped the speech")
         disarm()
     }
 
