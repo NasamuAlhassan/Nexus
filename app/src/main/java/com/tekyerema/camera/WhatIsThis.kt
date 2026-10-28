@@ -109,6 +109,13 @@ class WhatIsThis private constructor(ctx: Context) {
             return if (aside.isEmpty()) art(main) else "${art(main)}, ${art(aside)}"
         }
 
+        private val NAMING = Regex("(?i)^(?:(?:please|hey|ok|okay|so)[, ]+)*(?:can you |could you )?(?:tell me )?(?:what(?:'s| is| are)?|wetin|identify|name|describe)\\b" +
+            "(?!.*\\b(?:time|date|weather|say|said|written|read|colou?r|price|cost|expire|expiry|balance|number|on or off|switched)\\b)")
+
+        /** A question the offline namer can answer: "what is this", "what am I holding", "what's in front of me" — not "what does it
+         *  say" (text), "what colour" (colour mode) or "is the stove on" (needs the cloud). */
+        fun isNamingQuestion(q: String): Boolean = NAMING.containsMatchIn(q.trim())
+
         fun spoken(a: Answer): String? = when (a.kind) {
             Kind.ITEM -> "That looks like ${spokenName(a.label!!)}."
             Kind.FAMILY -> "That looks like ${spokenName(a.label!!)}, but I can't tell exactly which."

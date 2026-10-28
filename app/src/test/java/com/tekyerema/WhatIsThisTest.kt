@@ -48,4 +48,11 @@ class WhatIsThisTest {
         assertEquals("That looks like a laptop, but I can't tell exactly which.",
             WhatIsThis.spoken(WhatIsThis.Answer("laptop", Kind.FAMILY, 0.5)))
     }
+
+    @Test fun onlyNamingQuestionsGoToTheOfflineNamer() {
+        for (q in listOf("What is this?", "what am I holding", "What's in front of me?", "can you tell me what this is", "identify this", "what are these"))
+            org.junit.Assert.assertTrue(q, WhatIsThis.isNamingQuestion(q))
+        for (q in listOf("what does this say", "what colour is this shirt", "is the stove on", "when does this milk expire", "read this label", "what is the price"))
+            org.junit.Assert.assertFalse(q, WhatIsThis.isNamingQuestion(q))
+    }
 }

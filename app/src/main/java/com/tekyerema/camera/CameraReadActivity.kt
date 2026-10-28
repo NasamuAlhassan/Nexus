@@ -388,7 +388,7 @@ class CameraReadActivity : ComponentActivity() {
             when {
                 // 28 Oct 2026 (owner: offline is the main feature): no network, no key or no cloud allowed → the phone names what it
                 // sees by itself (WhatIsThis) instead of "I can't describe it offline". `camera.describe.offlineFirst` = always.
-                question == null && !moneyAsk && WhatIsThis.installed(this) && (AppConfig.bool("camera.describe.offlineFirst", false) ||
+                (question == null || WhatIsThis.isNamingQuestion(question!!)) && !moneyAsk && WhatIsThis.installed(this) && (AppConfig.bool("camera.describe.offlineFirst", false) ||
                     VisionLadder.allowedRungs(settings).isEmpty() || !VisionLadder.canDescribe(settings) || !NetworkMonitor.isOnline()) -> {
                     mode = MODE_IDENTIFY
                     describeStartedAt = SystemClock.elapsedRealtime()
