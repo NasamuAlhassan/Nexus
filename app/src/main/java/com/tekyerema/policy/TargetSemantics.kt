@@ -337,7 +337,7 @@ object TargetSemantics {
 
         // J-03: a control that SPENDS money is TIER3 — its own read-back class, above an ordinary send. A real button
         // whose caption STARTS with a spend verb counts even when long ("Pay GH₵ 50.00 to Kwame Mensah").
-        if (lower != null && isSpendCaption(label!!, target))
+        if (lower != null && isSpendCaption(label!!, target) && !mtnAppMenu(screen, label))
             return Classification(RiskTier.TIER3, null, "target '$label' spends money")
 
         // Audit 2026-10-01: a tap that wipes a list, closes everything, starts a bot / joins a group, shows a balance or
@@ -480,6 +480,21 @@ object TargetSemantics {
         val words = "(?:$SPEND_WORDS$extra)"
         return Regex(if (anchored) "^\\s*$words\\b" else "\\b$words\\b", RegexOption.IGNORE_CASE)
     }
+
+    /**
+     * MTN's own app at a MENU, not a payment step (finale demo, 28 Oct 2026): its home tiles say "Top Up: airtime", "Buy Bundle",
+     * "Send Money" and only OPEN a form — asking "this may charge you money?" there made the user decline before anything was filled.
+     * A screen with a filled field or an amount on it (the summary, the pay step) is not a menu, so its Pay / Confirm is still TIER3,
+     * and the planner reads back name, number and amount before it (money/MtnApp.RULE); the PIN stays the user's.
+     */
+    internal fun mtnAppMenu(screen: UiSnapshot?, label: String): Boolean {
+        val pkg = screen?.appPackage ?: return false
+        if (!(pkg.startsWith("com.mtngh.") || pkg.startsWith("com.mtn."))) return false
+        if (filledFields(screen).isNotEmpty()) return false
+        return !MTN_FINAL.matches(label.trim().lowercase())
+    }
+    /** A payment's last button: still TIER3 everywhere, MTN's app included. */
+    private val MTN_FINAL = Regex("^(?:pay|pay now|buy now|buy|confirm|confirm .*|checkout|check out|complete .*|place order|proceed to pay.*|send|send now|submit|approve)$")
 
     internal fun isSpendCaption(label: String, target: UiElement?): Boolean {
         val t = label.trim()
