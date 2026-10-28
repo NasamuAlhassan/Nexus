@@ -102,3 +102,6 @@ demo-package/phone-run/clips/
 .kotlin/
 # whisper.cpp ggml conversions (730 MB, regenerable with phase2/train/sherpa/convert-pt-to-ggml.py; kept on disk).
 phase2/train/sherpa/ggml*/*.bin
+
+# offline naming model and label vectors (campaign/kaggle/whatis-v1 output, ~372 MB)
+app/src/main/assets/whatis/

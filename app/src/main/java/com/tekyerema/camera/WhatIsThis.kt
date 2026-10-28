@@ -33,8 +33,17 @@ class WhatIsThis private constructor(ctx: Context) {
 
     init {
         val a = ctx.assets
-        session = env.createSession(a.open("$DIR/whatis_img_int8.onnx").use { it.readBytes() },
-            ai.onnxruntime.OrtSession.SessionOptions().apply { setIntraOpNumThreads(4) })
+        // ~372 MB (fp32: int8 moved the vectors too far): copied out of the APK once and opened from the file, never read into the
+        // Java heap whole.
+        val model = java.io.File(ctx.filesDir, "whatis/whatis_img.onnx")
+        val size = try { a.openFd("$DIR/whatis_img_int8.onnx").use { it.length } } catch (_: Throwable) { -1L }
+        if (!model.exists() || (size > 0 && model.length() != size)) {
+            model.parentFile?.mkdirs()
+            val tmp = java.io.File(model.path + ".part")
+            a.open("$DIR/whatis_img_int8.onnx").use { inp -> tmp.outputStream().use { inp.copyTo(it, 1 shl 20) } }
+            tmp.renameTo(model)
+        }
+        session = env.createSession(model.absolutePath, ai.onnxruntime.OrtSession.SessionOptions().apply { setIntraOpNumThreads(4) })
         val arr = JSONArray(a.open("$DIR/whatis_labels.json").use { it.readBytes().decodeToString() })
         labels = (0 until arr.length()).map { i -> arr.getJSONObject(i).let { Label(it.getString("label"), it.getString("family"), it.getBoolean("is_family")) } }
         val meta = JSONObject(a.open("$DIR/whatis_meta.json").use { it.readBytes().decodeToString() })
