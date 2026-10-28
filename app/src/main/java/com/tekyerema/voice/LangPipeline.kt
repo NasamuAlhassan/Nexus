@@ -45,7 +45,7 @@ private val TWI_CURRENCY_VARIANTS = mapOf(
 
 /** Speaker-verified Twi numerals + observed ASR-output variants (w2v-bert + Khaya). */
 private val TWI_NUMBERS: Map<String, Int> = mapOf(
-    "zero" to 0, "baako" to 1, "mmienu" to 2, "mmiɛnsa" to 3, "anan" to 4, "anum" to 5,
+    "zero" to 0, "baako" to 1, "bako" to 1, "bko" to 1, "mmienu" to 2, "mmiɛnsa" to 3, "anan" to 4, "anum" to 5,
     "nsia" to 6, "nson" to 7, "nwɔtwe" to 8, "awɔtwe" to 8, "nkron" to 9, "du" to 10,
     "dubaako" to 11, "dumienu" to 12, "dumiɛnsa" to 13, "duanan" to 14, "duanum" to 15,
     "dunsia" to 16, "dunson" to 17, "dunwɔtwe" to 18, "dunkron" to 19, "aduonu" to 20,

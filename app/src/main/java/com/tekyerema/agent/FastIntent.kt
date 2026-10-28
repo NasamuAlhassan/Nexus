@@ -640,10 +640,10 @@ object FastIntentClassifier {
      *  for a native speaker: "kasa Twi" (speak Twi), "kasa Borɔfo" (speak English). [owner: verify] */
     private val KUS_WORD = "(?:kusaal|kusal|kusasi|kusa al|kusaa?l language)"
     private val RE_PREF_TWI = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? twi|" +
-        "(?:switch|change) (?:to|into) twi|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) twi|use twi|twi (?:please|mode)|(?:kasa|ka) twi|twi kasa)(?: please| now| from now on)?$")
+        "(?:switch|change) (?:to|into) twi|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) twi|use twi|twi (?:please|mode)|(?:kasa|ka) twi|twi kasa|sesa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*twi(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
     private val RE_PREF_ENGLISH = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? english|" +
         "(?:switch|change) (?:to|into) english|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) english|use english|english (?:please|mode)|(?:kasa|ka) (?:borɔfo|borofo|brofo|bro fo)|" +
-        "(?:borɔfo|borofo|brofo) kasa)(?: please| now| from now on)?$")
+        "(?:borɔfo|borofo|brofo) kasa|sesa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*(?:borɔfo|borofo|brofo|brɔfo)(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
 
     /** Kusaal (19 October 2026) as the phone's English recogniser writes it ("kusal", "kusasi", "kusa al"). */
     private val RE_PREF_KUSAAL = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? $KUS_WORD|" +

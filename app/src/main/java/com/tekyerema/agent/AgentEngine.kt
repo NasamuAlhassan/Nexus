@@ -1660,7 +1660,9 @@ object AgentEngine {
                                             setStatus(AgentStatus.THINKING); continue
                                         }
                                         val revised = if (decision.rationale == com.tekyerema.money.MoMoRetry.RATIONALE) null
-                                            else ReviseTurn.patch(decision.name, decision.args, reply.text)
+                                            else (ReviseTurn.patch(decision.name, decision.args, reply.text)
+                                                ?: com.tekyerema.language.TwiReply.toEnglish(reply.text).takeIf { it != reply.text }
+                                                    ?.let { ReviseTurn.patch(decision.name, decision.args, it) })
                                         if (revised != null && revised.unchanged) {
                                             log(LogEntry.Kind.POLICY, "The correction is what is planned already (${revised.what}) — reading it back again.")
                                             history.add("You proposed: \"$prompt\". The user restated ${revised.what}, which it already is; it is being " +

@@ -38,4 +38,19 @@ class TwiMoneyMendTest {
         assertEquals("check my mobile money balance", TwiCommands.gloss("me sika arka sɛn"))
         assertEquals("check my mobile money balance", TwiCommands.gloss("me sika aka sɛn"))
     }
+
+    @Test fun aTwiAmountCorrectionAtTheReadBackApplies() {
+        val args = org.json.JSONObject().put("amount", "5").put("contact", "my wife").put("reference", "aduane")
+        for (said in listOf("e cedi bko", "sidi baako", "yɛ no sidi baako")) {
+            val r = com.tekyerema.agent.ReviseTurn.patch("ussd_navigate", args, said)
+                ?: com.tekyerema.agent.ReviseTurn.patch("ussd_navigate", args, TwiReply.toEnglish(said))
+            assertEquals(said, "1", r?.args?.optString("amount"))
+        }
+    }
+
+    @Test fun changeToEnglishSaidInTwi() {
+        for (said in listOf("sesakɔ borɔfo", "sesa kɔ borɔfo", "sesa kasa no kɔ borɔfo"))
+            assertEquals(said, com.tekyerema.agent.FastIntent.Preference("language", "english"), com.tekyerema.agent.FastIntentClassifier.classify(said))
+        assertEquals(com.tekyerema.agent.FastIntent.Preference("language", "twi"), com.tekyerema.agent.FastIntentClassifier.classify("sesa kɔ twi"))
+    }
 }
