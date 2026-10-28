@@ -201,4 +201,12 @@ class MoneyItemsTest {
         val weak = MoneyItems.Reading("note_50", 0.4)
         assertEquals(weak, MoneyItems.crossChecked(weak, emptyList()))
     }
+
+    @Test fun theOneAndTwoCediCoinsAreSaidOnlyWhenEveryTurnClearlyPicksOne() {
+        assertTrue(MoneyItems.pairSure(true, listOf(0.97, 0.95, 0.93, 0.96), listOf(0.01, 0.02, 0.03, 0.01)))
+        assertEquals(false, MoneyItems.pairSure(false, listOf(0.97, 0.95, 0.93, 0.96), listOf(0.01, 0.02, 0.03, 0.01)))   // the other coin wins
+        assertEquals(false, MoneyItems.pairSure(true, listOf(0.97, 0.6, 0.93, 0.96), listOf(0.01, 0.3, 0.03, 0.01)))       // one turn is torn
+        assertEquals(false, MoneyItems.pairSure(true, listOf(0.9, 0.9, 0.9, 0.9), listOf(0.08, 0.08, 0.08, 0.08)))         // the other still gets 8 %
+        assertEquals(false, MoneyItems.pairSure(true, emptyList(), emptyList()))
+    }
 }

@@ -66,6 +66,18 @@ object MoneyItems {
         return if (sure.any { it != item } || agree < 2) Reading(first.cls, 0.0) else first
     }
 
+    /**
+     * The 1 cedi and 2 cedis coins differ by ~1–6 % in size and share a gold-and-silver look, so the model's top pick alone is not
+     * trusted for the pair (27 Oct 2026: a 1 cedi coin was read as 2). [one] and [two] are each turn's scores for the two classes.
+     * The wanted one ([wantOne]) must win every turn, average at least 0.9, and the other must average at most 0.05.
+     */
+    fun pairSure(wantOne: Boolean, one: List<Double>, two: List<Double>): Boolean {
+        if (one.isEmpty() || one.size != two.size) return false
+        val win = if (wantOne) one else two
+        val lose = if (wantOne) two else one
+        return win.indices.all { win[it] > lose[it] } && win.average() >= 0.9 && lose.average() <= 0.05
+    }
+
     /** Sort the readings of a frame's boxes into read, not read, and not money. */
     fun count(readings: List<Reading>, base: Double = 0.85): Count {
         val sure = ArrayList<Item>()

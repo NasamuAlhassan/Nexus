@@ -31,6 +31,14 @@ class CediClassifier private constructor(ctx: Context) {
 
     /** The best class for one 224×224 RGB frame (row-major, 0–255) and its confidence. */
     fun classify(rgb: FloatArray): Pair<String, Double> {
+        val scores = probs(rgb)
+        var best = 0
+        for (i in scores.indices) if (scores[i] > scores[best]) best = i
+        return labels[best] to scores[best].toDouble()
+    }
+
+    /** All 16 class scores for one frame, in `labels.txt` order. */
+    fun probs(rgb: FloatArray): FloatArray {
         require(rgb.size == SIDE * SIDE * 3) { "cedi frame: expected ${SIDE * SIDE * 3} floats, got ${rgb.size}" }
         val tensor = ai.onnxruntime.OnnxTensor.createTensor(
             env, java.nio.FloatBuffer.wrap(rgb), longArrayOf(1, SIDE.toLong(), SIDE.toLong(), 3)
@@ -38,10 +46,7 @@ class CediClassifier private constructor(ctx: Context) {
         try {
             session.run(mapOf(inputName to tensor)).use { out ->
                 @Suppress("UNCHECKED_CAST")
-                val scores = (out[0].value as Array<FloatArray>)[0]
-                var best = 0
-                for (i in scores.indices) if (scores[i] > scores[best]) best = i
-                return labels[best] to scores[best].toDouble()
+                return (out[0].value as Array<FloatArray>)[0].copyOf()
             }
         } finally { tensor.close() }
     }
@@ -56,6 +61,13 @@ class CediClassifier private constructor(ctx: Context) {
         // A sure reading is checked in the other three quarter-turns of the same pixels; a held note may be any way up.
         if (!com.tekyerema.core.config.AppConfig.bool("camera.currency.turnCheck", true) || MoneyItems.itemOf(cls) == null || conf < base) return cls to conf
         val src = tight ?: full
+        // The 1 and 2 cedi coins are alike in size and colour (28.0 vs 27.6 mm): said only when all four turns clearly pick one of the two.
+        if (cls == "coin_1_cedi" || cls == "coin_2_cedis") {
+            val one = labels.indexOf("coin_1_cedi"); val two = labels.indexOf("coin_2_cedis")
+            val p = (0..3).map { k -> probs(if (k == 0) src else CediCrops.turned(src, SIDE, k)) }
+            val a = p.map { it[one].toDouble() }; val b = p.map { it[two].toDouble() }
+            return if (MoneyItems.pairSure(cls == "coin_1_cedi", a, b)) cls to conf else cls to 0.0
+        }
         val others = (1..3).map { k -> classify(CediCrops.turned(src, SIDE, k)).let { (c, p) -> MoneyItems.Reading(c, p) } }
         val r = MoneyItems.crossChecked(MoneyItems.Reading(cls, conf), others, base)
         return r.cls to r.conf
