@@ -75,8 +75,9 @@ class AndroidVoiceCues(
     /** Needs android.permission.VIBRATE (declared since B-14 — without it every vibrate() threw and was swallowed). */
     private fun haptic(pattern: LongArray) {
         if (!hapticsOn()) return
-        val v = vibrator ?: return
-        try { v.vibrate(VibrationEffect.createWaveform(pattern, -1)) } catch (_: Throwable) {}
+        if (vibrator == null) return
+        // An accessibility vibration, not a touch one (core/Haptics — the Infinix drops touch vibrations).
+        com.tekyerema.core.Haptics.waveform(app, pattern)
     }
 
     /** Sine notes (Hz to ms; 0 Hz = rest) with a soft attack/release, played synchronously. */

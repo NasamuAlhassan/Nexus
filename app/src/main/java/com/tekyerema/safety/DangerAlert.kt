@@ -173,7 +173,8 @@ object DangerAlert {
     private fun buzz(app: Context) {
         try {
             val v = app.getSystemService(Vibrator::class.java) ?: return
-            if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 400, 150, 400, 150, 400), -1))
+            if (Build.VERSION.SDK_INT >= 26) com.tekyerema.core.Haptics.play(app, VibrationEffect.createWaveform(longArrayOf(0, 400, 150, 400, 150, 400), -1),
+                com.tekyerema.core.Haptics.Kind.ALERT)
             else @Suppress("DEPRECATION") v.vibrate(1200)
         } catch (_: Throwable) {}
     }

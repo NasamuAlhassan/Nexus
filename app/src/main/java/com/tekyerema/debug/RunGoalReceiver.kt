@@ -261,6 +261,13 @@ class RunGoalReceiver : BroadcastReceiver() {
                 "ok=$ok cls=${target.className?.toString()?.substringAfterLast('.')} desc='${target.contentDescription}' text='${target.text}'")
             return
         }
+        // One buzz with a chosen usage (core/Haptics):  --es haptic_test accessibility|notification|alarm|touch
+        intent.getStringExtra("haptic_test")?.let { u ->
+            if (android.os.Build.VERSION.SDK_INT >= 26) com.tekyerema.core.Haptics.play(context.applicationContext,
+                android.os.VibrationEffect.createWaveform(longArrayOf(0, 120), -1), usageOverride = u)
+            Log.i("Tekyerema", "[HAPTIC] test buzz usage=$u")
+            return
+        }
         // A PIN screen's shape only (money/AppPin.layout — no box text, safe at the secure step):  --es pin_layout 1
         intent.getStringExtra("pin_layout")?.let {
             val pending = goAsync()

@@ -284,6 +284,8 @@ object PinPad {
         lastSentAt = System.currentTimeMillis()
         android.util.Log.i("Tekyerema", "[PINPAD] sent with $lastVia (${if (sent) "Send pressed" else "no Send button"}); ${length()} digits; $swallowed press(es) only stopped the speech")
         disarm()
+        // The curtain is for the PIN: it lifts as soon as the PIN is in (owner, 28 Oct 2026 — it stayed until MTN's answer was closed).
+        if (!com.tekyerema.core.config.AppConfig.bool("pin.curtain.untilAnswer", false)) com.tekyerema.phone.PinCurtain.hideNow()
     }
 
     /** The network's PIN dialog, only when it IS a PIN screen with an entry box — the pad never types anywhere else. */
@@ -295,13 +297,8 @@ object PinPad {
 
     private fun say(line: String) = try { com.tekyerema.voice.VoiceEngine.announce(line) } catch (_: Throwable) {}
 
+    /** An accessibility vibration (core/Haptics): a phone with touch vibration off dropped every digit buzz (Infinix, 28 Oct 2026). */
     private fun buzz(pattern: LongArray) {
-        try {
-            val app = com.tekyerema.agent.AgentEngine.appContext() ?: return
-            val v = if (android.os.Build.VERSION.SDK_INT >= 31)
-                (app.getSystemService(android.content.Context.VIBRATOR_MANAGER_SERVICE) as android.os.VibratorManager).defaultVibrator
-            else @Suppress("DEPRECATION") app.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
-            v.vibrate(android.os.VibrationEffect.createWaveform(pattern, -1))
-        } catch (_: Throwable) {}
+        try { com.tekyerema.core.Haptics.waveform(com.tekyerema.agent.AgentEngine.appContext(), pattern) } catch (_: Throwable) {}
     }
 }

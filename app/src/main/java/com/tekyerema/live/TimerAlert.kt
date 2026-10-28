@@ -45,7 +45,8 @@ object TimerAlert {
         } catch (_: Throwable) {}
         try {
             vibrator = ctx.getSystemService(Vibrator::class.java)?.also { v ->
-                if (Build.VERSION.SDK_INT >= 26) v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 500, 400, 500, 1200), 0))
+                if (Build.VERSION.SDK_INT >= 26) com.tekyerema.core.Haptics.play(ctx, VibrationEffect.createWaveform(longArrayOf(0, 500, 400, 500, 1200), 0),
+                    com.tekyerema.core.Haptics.Kind.ALERT)
             }
         } catch (_: Throwable) {}
     }
