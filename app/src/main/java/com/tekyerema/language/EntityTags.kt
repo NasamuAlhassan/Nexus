@@ -184,6 +184,11 @@ object EntityTags {
             if (count(s, e.tag) > 0) continue
             val core = Regex.escape(e.tag.removePrefix("[").removeSuffix("]"))
             s = s.replace(Regex("(?<![\\p{L}\\p{N}])\\[?$core\\]?(?![\\p{L}\\p{N}])"), e.tag)
+            // The number dropped from the tag (A20e student translator, 28 Oct 2026: "Your balance is [A1]." → "Wo susudua ne [A].").
+            // Safe only when this is the line's one tag of that letter and the bare form appears once.
+            val letter = e.tag.removePrefix("[").takeWhile { it.isLetter() }
+            if (count(s, e.tag) == 0 && letter.isNotEmpty() && entities.count { it.tag.removePrefix("[").takeWhile { c -> c.isLetter() } == letter } == 1 &&
+                count(s, "[$letter]") == 1) s = s.replace("[$letter]", e.tag)
         }
         return s
     }

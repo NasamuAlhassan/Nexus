@@ -179,6 +179,11 @@ class LiveFeaturesTest {
         assertEquals("say [P2] or [P1].", t.forTranslator("say “[P2]” or “[P1]”."))
         // a tag that is there is left alone; nothing else is touched
         assertEquals("ka [P2] ne A12", t.mend("ka [P2] ne A12", listOf(ents[0])))
+        // the tag's number dropped: mended when it is the line's only amount, left broken (→ English) when two amounts could be meant
+        val amt = com.tekyerema.language.EntityTags.Entity("[A1]", com.tekyerema.language.EntityTags.Kind.AMOUNT, "50 cedis")
+        assertEquals("Wo susudua ne [A1].", t.mend("Wo susudua ne [A].", listOf(amt)))
+        val amt2 = com.tekyerema.language.EntityTags.Entity("[A2]", com.tekyerema.language.EntityTags.Kind.AMOUNT, "20 cedis")
+        assertEquals("[A] ne [A2]", t.mend("[A] ne [A2]", listOf(amt, amt2)))
     }
 
     // ---------------------------------------------------------------- music
