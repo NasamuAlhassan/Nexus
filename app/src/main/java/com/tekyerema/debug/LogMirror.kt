@@ -47,13 +47,14 @@ object LogMirror {
             var n = 0
             var file = File(dir, "tk-$stamp-$n.log")
             var out = file.outputStream().buffered()
+            out.write("--- log mirror: this process since $since (epoch s), pid ${android.os.Process.myPid()}\n".toByteArray()); out.flush()
             var size = 0L
             proc.inputStream.bufferedReader().useLines { lines ->
                 for (line in lines) {
                     val bytes = (line + "\n").toByteArray()
                     out.write(bytes)
                     size += bytes.size
-                    if (line.contains("[INPUT]") || line.contains("FATAL")) out.flush()
+                    out.flush()          // every line on disk at once: the app may be killed the next moment (debug builds only)
                     if (size >= fileBytes) {
                         out.close()
                         prune(dir, keepBytes)
@@ -61,7 +62,7 @@ object LogMirror {
                         file = File(dir, "tk-$stamp-$n.log")
                         out = file.outputStream().buffered()
                         size = 0
-                    } else if (size % 8192 < bytes.size) out.flush()
+                    }
                 }
             }
             out.close()
