@@ -18,6 +18,7 @@ class TekyeremaApp : Application() {
         fun stage(name: String) { val now = android.os.SystemClock.uptimeMillis(); marks.append(name).append('=').append(now - last).append(' '); last = now }
         // X-02: versioned JSON config (assets/config) + local overrides — loaded before anything reads a tunable.
         com.tekyerema.core.config.AppConfig.load(this); stage("config")
+        com.tekyerema.debug.LogMirror.start(this)   // debug builds: the app's log kept in files/logs on the phone (owner, 28 Oct 2026)
         com.tekyerema.core.config.Registrations.registerAll(); stage("registry")   // X-01: capability registry (flags, API gates, checks)
         // P3-02 round 3: the heavy singletons (regex tables), the history store and the app list warm on a background thread
         // from here on, so the stages below find them ready instead of initialising them on the main thread (core/StartupWarm).

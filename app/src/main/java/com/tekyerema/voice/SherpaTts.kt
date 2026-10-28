@@ -381,7 +381,6 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
      */
     private fun play(line: Line, s: OnDeviceVoice.Spec, raw: String): Boolean {
         if (line.cancelled) return true
-        val tts = load(s) ?: return false
         // The pronunciations go in AFTER the text is cut into pieces: a respelling may carry commas ("teh, cheh, reh, mah") that
         // must stay inside one piece, not become breaths.
         val pieces = OnDeviceVoice.plan(raw,
@@ -391,8 +390,13 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
             breathScale = AppConfig.double("speech.tts.onDevice.breathScale", 1.0).coerceIn(0.0, 3.0))
             .map { pc -> pc.text?.let { t -> pc.copy(text = OnDeviceVoice.forModel(s, OnDeviceVoice.say(t, s.say))) } ?: pc }
         if (pieces.none { it.text != null }) return false
-        val hz = tts.sampleRate()
         val speed = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate * s.speed).coerceIn(0.5f, 1.6f)
+        // A line whose every piece was said before plays from the cache without loading the model (A20e, 28 Oct 2026: a warm Twi
+        // piece took ~11 s to make, the cold load 9 s more). Any piece not in the cache needs the model.
+        val cached = pieces.mapNotNull { it.text }.associateWith { PieceCache.get(app, s, speed, it) }
+        var tts: OfflineTts? = null
+        if (cached.values.any { it == null }) tts = load(s) ?: return false
+        val hz = tts?.sampleRate() ?: cached.values.first()!!.first
         val heard = AtomicLong(0)                               // speech frames the speaker actually took
         val token = focus.acquire(AudioFocus.Kind.SPEAK)
         var track: AudioTrack? = null
@@ -440,17 +444,28 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
                     if (line.cancelled || !player.isAlive) break
                     val words = p.text
                     if (words == null) { queue.put(Chunk(ShortArray((hz * p.silenceMs / 1000).toInt()), speech = false)); continue }
+                    val hit = cached[words]?.takeIf { it.first == hz }
+                    if (hit != null) {
+                        if (first) { first = false; lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0 }
+                        queue.put(Chunk(hit.second, speech = true))
+                        continue
+                    }
+                    val made = ArrayList<ShortArray>()
+                    val engineNow = tts ?: load(s).also { tts = it } ?: break
                     // An object, not a lambda: sherpa-onnx's JNI looks up the TYPED method invoke([F)Ljava/lang/Integer;, and
                     // Kotlin 2 compiles a lambda to a class with only the erased invoke(Object) — the native side then aborts
                     // the whole app (SIGABRT, "JNI NewFloatArray called with pending NoSuchMethodError"; emulator, 19 Oct 2026).
-                    tts.generateWithCallback(words, 0, speed, object : (FloatArray) -> Int {
+                    engineNow.generateWithCallback(words, 0, speed, object : (FloatArray) -> Int {
                         override fun invoke(samples: FloatArray): Int {
                             if (line.cancelled || !player.isAlive) return 0
                             if (first) { first = false; lastFirstAudioMs = android.os.SystemClock.uptimeMillis() - t0 }
-                            queue.put(Chunk(OnDeviceVoice.pcm16(samples), speech = true))
+                            val pcm = OnDeviceVoice.pcm16(samples)
+                            made.add(pcm)
+                            queue.put(Chunk(pcm, speech = true))
                             return 1
                         }
                     })
+                    if (!line.cancelled && made.isNotEmpty()) PieceCache.put(app, s, speed, words, engineNow.sampleRate(), made)
                 }
             } catch (t: Throwable) {
                 // out of memory, a native failure: what was already said stays said — see the return value
