@@ -1222,11 +1222,14 @@ class LocalFastRouter(
             caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "mobile data"
             else -> "the network"
         }
-        val line = when {
-            via == null -> "You're offline — no Wi-Fi or mobile data right now."
-            caps!!.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) -> "You're online over $via."
-            else -> "You're connected to $via, but the internet isn't working."
-        }
+        // How the app's own recent internet requests went (core/LinkHealth), not the signal bars; a fresh probe for next time.
+        val now = System.currentTimeMillis()
+        val t = com.tekyerema.core.LinkHealth.tracker
+        val health = com.tekyerema.core.ConnectivityLine.health(t.verdict(now), t.lastProbeMs(),
+            com.tekyerema.core.config.AppConfig.long("router.network.weakProbeMs", 3_000L))
+        try { com.tekyerema.core.LinkProbe.kick() } catch (_: Throwable) {}
+        val line = com.tekyerema.core.ConnectivityLine.describe(via,
+            caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true, health, t.lastProbeMs())
         handled(FastIntent.Connectivity, line)
     } catch (t: Throwable) { null }
 

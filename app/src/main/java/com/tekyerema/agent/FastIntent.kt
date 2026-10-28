@@ -705,7 +705,9 @@ object FastIntentClassifier {
     /** True when [place] names a part of the phone rather than somewhere on the map (the router re-checks an
      *  "take me to X" that turned out not to be an installed app). Pure. */
     internal fun isPhoneThing(place: String): Boolean = RE_PHONE_THING.containsMatchIn(place.lowercase())
-    private val RE_ONLINE = Regex("\\b(?:am i (?:online|connected)|(?:is|do i have) (?:the )?internet|internet connection|am i on (?:wi-?fi|data|mobile data)|what network am i on)\\b")
+    private val RE_ONLINE = Regex("\\b(?:am i (?:online|connected)|(?:is|do i have) (?:the )?internet|internet connection|am i on (?:wi-?fi|data|mobile data)|what network am i on|" +
+        "why is (?:the |my )?(?:internet|network|data|wi-?fi) (?:so )?slow|is (?:the |my )?(?:internet|network|connection|data) (?:slow|working|good)|" +
+        "is my connection good enough)\\b")
     private val RE_NOW_PLAYING = Regex("\\b(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|who (?:sings|is singing) this)\\b")
     private val RE_STOP_TIMER = Regex("^(?:please |can you )?(?:stop|cancel|dismiss|end|turn off|switch off) (?:the |my |that )?timer(?: please| now)?$")
     private val RE_SHOW_ALARMS = Regex("\\b(?:show|open|list|check)\\b.*\\balarms\\b|^(?:my )?alarms$|\\bwhat alarms\\b")
