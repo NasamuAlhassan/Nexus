@@ -38,7 +38,9 @@ class CurrencyAnnouncerTest {
         val g = a()
         assertNull(g.offer("note_5", 0.99, 100))
         assertNull(g.offer("note_50", 0.99, 600))            // changed its mind: run restarts, nothing said
-        assertEquals("Fifty cedis.", g.offer("note_50", 0.99, 1100))
+        assertNull(g.offer("note_50", 0.99, 1100))           // two agree, but the 5 a moment ago is still a rival (28 Oct 2026)
+        assertNull(g.offer("note_50", 0.99, 1600))
+        assertEquals("Fifty cedis.", g.offer("note_50", 0.99, 2100))   // four of five: the model has settled
     }
 
     @Test fun `not_money is silent however confident`() {
@@ -73,6 +75,27 @@ class CurrencyAnnouncerTest {
         assertEquals(16, labels.size)
         for (l in labels.filter { it != CurrencyAnnouncer.NOT_MONEY })
             assertTrue(l, CurrencyAnnouncer.spokenFor(l) != l && CurrencyAnnouncer.spokenFor(l).endsWith("."))
+    }
+
+    /** The owner's 50 cedis note on the Infinix, 28 Oct 2026 — frames as logged (time ms, class, confidence). It said "Two hundred
+     *  cedis." three times; the seconds before each held other fairly-sure readings. */
+    private fun replay(vararg f: Triple<Long, String, Double>): List<String> { val g = a(); return f.mapNotNull { (t, c, p) -> g.offer(c, p, t) } }
+
+    @Test fun `a 50 note the model flickers on is never said as 200`() {
+        assertEquals(emptyList<String>(), replay(Triple(38084, "note_50", 0.36), Triple(39537, "note_100", 0.84), Triple(40058, "note_10", 0.64),
+            Triple(41082, "note_50", 0.37), Triple(41583, "note_200", 0.44), Triple(42243, "note_200", 0.0), Triple(42777, "note_200", 0.97),
+            Triple(43247, "note_200", 0.98)))
+        assertEquals(emptyList<String>(), replay(Triple(39882, "note_10", 0.42), Triple(40464, "note_100", 0.48), Triple(40878, "note_50", 0.61),
+            Triple(41482, "note_200", 0.0), Triple(42048, "note_200", 0.98), Triple(42569, "note_200", 0.95)))
+        assertEquals(emptyList<String>(), replay(Triple(47093, "note_20", 0.52), Triple(47946, "not_money", 0.61), Triple(48201, "note_200", 0.57),
+            Triple(48714, "note_100", 0.81), Triple(49147, "not_money", 0.51), Triple(49684, "note_200", 0.78), Triple(50283, "note_200", 0.93),
+            Triple(50809, "note_200", 0.86)))
+    }
+
+    @Test fun `a note held steady is still said, and a new note once the old readings have passed`() {
+        assertEquals(listOf("Two hundred cedis."), replay(Triple(0, "note_200", 0.96), Triple(500, "note_200", 0.97)))
+        val said = replay(Triple(0, "note_10", 0.96), Triple(500, "note_10", 0.97), Triple(5000, "note_20", 0.95), Triple(5500, "note_20", 0.96))
+        assertEquals(listOf("Ten cedis.", "Twenty cedis."), said)
     }
 }
 

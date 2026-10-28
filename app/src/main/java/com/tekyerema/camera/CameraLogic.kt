@@ -375,15 +375,23 @@ class CurrencyAnnouncer(
     private val repeatMs: Long = 4_000L,
     /** Classes v2 gets wrong with confidence need more: on the real held-out photos (26 Oct 2026) a 10 pesewas coin read as "1 cedi"
      *  came with 0.85–0.96, none above 0.97; the 20 pesewas and note_2 misses sat at 0.91–0.93. Fitted on that one test set. */
-    private val stricter: Map<String, Double> = STRICTER
+    private val stricter: Map<String, Double> = STRICTER,
+    /** How far back the recent readings are weighed ([share]). */
+    private val windowMs: Long = 4_000L,
+    /** The class must be at least this share of the recent fairly-sure readings (≥ [RECENT_FLOOR]) to be said. */
+    private val share: Double = 0.8
 ) {
     private var runClass: String? = null
     private var runLength = 0
     private var spoken: String? = null
     private var spokenAt = 0L
+    /** Recent fairly-sure money readings (time, class), oldest first. */
+    private val recent = ArrayDeque<Pair<Long, String>>()
 
     /** One frame's verdict. Returns the line to speak, or null (sub-gate, unchanged, or still settling). */
     fun offer(topClass: String, confidence: Double, nowMs: Long): String? {
+        while (recent.isNotEmpty() && nowMs - recent.first().first > windowMs) recent.removeFirst()
+        if (topClass != NOT_MONEY && confidence >= RECENT_FLOOR) recent.addLast(nowMs to topClass)
         // Not money, or not sure enough: the run breaks — two AGREEING, CONFIDENT frames are required.
         if (topClass == NOT_MONEY || confidence < maxOf(minConfidence, stricter[topClass] ?: 0.0)) {
             runClass = null; runLength = 0
@@ -391,6 +399,12 @@ class CurrencyAnnouncer(
         }
         if (topClass == runClass) runLength++ else { runClass = topClass; runLength = 1 }
         if (runLength < agreeFrames) return null
+        // 28 Oct 2026 (owner: "it's still seeing 50 cedis as 200"): a 50 note came back as 200 at 0.95–0.98 in some frames and as
+        // 50 / 100 / 10 at 0.6–0.8 in the frames around them. Two sure frames are not enough when the seconds before disagree:
+        // the class must hold most of the recent readings — a held note does, a note the model is torn on never does.
+        // (The note just said is not a rival: counting cash, the 20 after a 10 is said at once.)
+        val rivals = recent.filter { it.second != spoken || it.second == topClass }
+        if (rivals.count { it.second == topClass } < share * rivals.size) return null
         // Stable. Speak when it CHANGED, or when the same note comes back after a while (counting cash).
         if (topClass == spoken && nowMs - spokenAt < repeatMs) return null
         spoken = topClass
@@ -403,6 +417,8 @@ class CurrencyAnnouncer(
 
     companion object {
         const val NOT_MONEY = "not_money"
+        /** A reading this sure counts as the model's view in the recent-readings check, even below the speaking gate. */
+        const val RECENT_FLOOR = 0.5
 
         /** The per-class confidence a class needs beyond the base gate (see the constructor note). */
         val STRICTER: Map<String, Double> = mapOf("coin_1_cedi" to 0.97, "coin_20_pesewas" to 0.95, "note_2" to 0.95)
