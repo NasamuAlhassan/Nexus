@@ -208,10 +208,14 @@ class CameraReadActivity : ComponentActivity() {
         // `camera.currency.vision` off) the on-phone classifier names one note at a time.
         if ((mode == MODE_CURRENCY || (mode == MODE_DESCRIBE && VisionPrompts.isMoneyQuestion(question))) &&
             AppConfig.bool("camera.currency.vision", true) && NetworkMonitor.isOnline() &&
-            VisionLadder.canDescribe(settings)) {
+            VisionLadder.canDescribe(settings) &&
+            // 28 Oct 2026: money is read on the phone whenever the reader is in the build (`camera.currency.offlineFirst`); the cloud
+            // counted a held 50 as 200 and is not there when the network is not.
+            !(AppConfig.bool("camera.currency.offlineFirst", true) && CediClassifier.installed(this))) {
             mode = MODE_DESCRIBE; moneyAsk = true
         } else if (CediClassifier.useOffline(mode == MODE_DESCRIBE, VisionPrompts.isMoneyQuestion(question),
-                NetworkMonitor.isOnline() && VisionLadder.canDescribe(settings), CediClassifier.installed(this))) {
+                NetworkMonitor.isOnline() && VisionLadder.canDescribe(settings) &&
+                    !(AppConfig.bool("camera.currency.offlineFirst", true) && CediClassifier.installed(this)), CediClassifier.installed(this))) {
             // A money question with no online vision (25 Oct 2026, A20e: "How much am I holding?" offline said "I can't describe
             // it offline" and read text): the note classifier is on the phone for exactly this.
             mode = MODE_CURRENCY

@@ -52,7 +52,13 @@ class CediClassifier private constructor(ctx: Context) {
         if (tight == null) return fl to fc
         val (tl, tc) = classify(tight)
         val base = com.tekyerema.core.config.AppConfig.double("camera.currency.gate", 0.85)
-        return ObjectCrop.decide(fl, fc, tl, tc) { cls -> CurrencyAnnouncer.gateFor(cls, base) }
+        val (cls, conf) = ObjectCrop.decide(fl, fc, tl, tc) { c -> CurrencyAnnouncer.gateFor(c, base) }
+        // A sure reading is checked in the other three quarter-turns of the same pixels; a held note may be any way up.
+        if (!com.tekyerema.core.config.AppConfig.bool("camera.currency.turnCheck", true) || MoneyItems.itemOf(cls) == null || conf < base) return cls to conf
+        val src = tight ?: full
+        val others = (1..3).map { k -> classify(CediCrops.turned(src, SIDE, k)).let { (c, p) -> MoneyItems.Reading(c, p) } }
+        val r = MoneyItems.crossChecked(MoneyItems.Reading(cls, conf), others, base)
+        return r.cls to r.conf
     }
 
     fun close() = try { session.close() } catch (_: Throwable) {}

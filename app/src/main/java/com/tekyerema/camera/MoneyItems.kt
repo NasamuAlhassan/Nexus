@@ -53,6 +53,19 @@ object MoneyItems {
         return first.takeIf { items.size >= need && items.all { it == first } }
     }
 
+    /**
+     * The live single-item reading checked in the other three quarter-turns (a note is held any way up; 27 Oct 2026: a held 50 was
+     * said as 200). A reading that is sure keeps its confidence only when at least two of the three other turns give the same item
+     * and none gives a different one; otherwise its confidence drops to 0 and nothing is announced. Readings that were not sure to
+     * begin with are returned unchanged.
+     */
+    fun crossChecked(first: Reading, others: List<Reading>, base: Double = 0.85): Reading {
+        val item = sureItem(first, base) ?: return first
+        val sure = others.mapNotNull { sureItem(it, base) }
+        val agree = sure.count { it == item }
+        return if (sure.any { it != item } || agree < 2) Reading(first.cls, 0.0) else first
+    }
+
     /** Sort the readings of a frame's boxes into read, not read, and not money. */
     fun count(readings: List<Reading>, base: Double = 0.85): Count {
         val sure = ArrayList<Item>()

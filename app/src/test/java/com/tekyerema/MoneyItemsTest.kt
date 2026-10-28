@@ -191,4 +191,14 @@ class MoneyItemsTest {
         val t = com.tekyerema.camera.CediCrops.turned(a, side, 1)
         assertEquals(a[0], t[(0 * side + (side - 1)) * 3], 0f)
     }
+
+    @Test fun aLiveReadingNeedsTwoOfTheOtherThreeTurnsToAgree() {
+        val first = MoneyItems.Reading("note_50", 0.97)
+        fun r(c: String, p: Double) = MoneyItems.Reading(c, p)
+        assertEquals(first, MoneyItems.crossChecked(first, listOf(r("note_50", 0.95), r("note_50", 0.9), r("note_50", 0.4))))
+        assertEquals(0.0, MoneyItems.crossChecked(first, listOf(r("note_50", 0.95), r("note_20", 0.2), r("not_money", 0.3))).conf, 0.0)   // one agrees only
+        assertEquals(0.0, MoneyItems.crossChecked(first, listOf(r("note_50", 0.95), r("note_50", 0.9), r("note_200", 0.93))).conf, 0.0)   // a sure turn disagrees
+        val weak = MoneyItems.Reading("note_50", 0.4)
+        assertEquals(weak, MoneyItems.crossChecked(weak, emptyList()))
+    }
 }
