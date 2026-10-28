@@ -98,6 +98,16 @@ class AppPinTest {
         assertNull(k.field)
     }
 
+    @Test fun theWatchArmsOnAnyAppsPinScreenButNotOnACalculator() {
+        assertNotNull(com.tekyerema.money.PinWatch.appPinScreen(mymtnPinSheet()))
+        assertNotNull(com.tekyerema.money.PinWatch.appPinScreen(keypad()))                      // "Enter your MoMo PIN" + 0–9
+        val calc = UiSnapshot("com.android.calculator2", "Calculator", keypad().elements.filter { it.id != 13 }, 0L)
+        assertNull(com.tekyerema.money.PinWatch.appPinScreen(calc))
+        val form = UiSnapshot("com.mtngh.mymtn", "Send", listOf(
+            UiElement(1, "EditText", "5", Box(0, 400, 1000, 500), editable = true, hint = "Amount", focused = true)), 0L)
+        assertNull(com.tekyerema.money.PinWatch.appPinScreen(form))
+    }
+
     @Test fun theLayoutLogNeverHoldsWhatABoxHolds() {
         val els = listOf(UiElement(1, "TextView", "Enter your PIN", Box(0, 0, 10, 10)),
             UiElement(2, "EditText", "4821", Box(0, 20, 10, 30), editable = true, hint = "PIN"),

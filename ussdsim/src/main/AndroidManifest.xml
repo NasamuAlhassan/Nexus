@@ -20,6 +20,11 @@
             android:label="USSD simulator"
             android:theme="@android:style/Theme.Material.Light.Dialog" />
         <activity
+            android:name=".AppPinActivity"
+            android:exported="true"
+            android:label="MoMo PIN (test)"
+            android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity
             android:name=".SmsSendActivity"
             android:exported="true"
             android:excludeFromRecents="true"

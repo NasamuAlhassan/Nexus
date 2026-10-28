@@ -139,9 +139,13 @@ object AppPin {
         return true
     }
 
+    /** When the pad last let go of an app's PIN screen (the watch waits a moment before arming on it again). */
+    @Volatile var endedAt = 0L; private set
+
     fun end() {
         if (keypad == null) return
-        keypad = null; pkg = null; typed = 0
+        keypad = null; pkg = null; typed = 0; endedAt = System.currentTimeMillis()
+        PinWatch.release()
         PinPad.disarm()
         com.tekyerema.voice.SecureStep.end()
     }

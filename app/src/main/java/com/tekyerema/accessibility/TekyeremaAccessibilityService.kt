@@ -126,6 +126,8 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 "src.click=${src?.isClickable} src.children=${src?.childCount}")
         }
         event?.let { noteAnnouncement(it) }   // F-17: "Message sent", toasts — evidence for verification
+        // Any app's PIN screen: the volume keys become its keypad (money/PinWatch, owner 28 Oct 2026).
+        event?.let { com.tekyerema.money.PinWatch.onEvent(this, it.eventType) }
         // The user pressed Cancel on the network's dialog while the PIN step was open: nothing is sent — say so and drop the
         // open hand-off (council review, 19 Oct 2026: after a cancel the app said "PIN sent" / "no word from the network").
         if (event?.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED && com.tekyerema.voice.SecureStep.active()) {
@@ -869,6 +871,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             } catch (t: Throwable) { /* best-effort — text was still set */ }
         }
         return set
+    }
+
+    override fun screenMentions(words: List<String>): Boolean {
+        val root = try { rootInActiveWindow } catch (_: Throwable) { null } ?: return true
+        return words.any { w -> try { root.findAccessibilityNodeInfosByText(w).isNotEmpty() } catch (_: Throwable) { true } }
     }
 
     override suspend fun setFocusedText(text: String): Boolean {
