@@ -15,6 +15,7 @@ import org.json.JSONObject
  */
 object TelcoGuide {
     const val RATIONALE = "local:guided telco USSD"
+    private val APP_FLOWS = setOf("offers", "mashup", "data")
     const val STOPPED = "Okay — I've stopped. Press Cancel on the network's screen to close it; nothing is paid without your PIN."
     private const val AGAIN = "Again — "
     private const val REASON = "telco"
@@ -25,7 +26,10 @@ object TelcoGuide {
         if (history.isEmpty()) {
             return when (val req = TelcoUssd.parse(goal, network) ?: return null) {
                 is TelcoUssd.Request.Unsupported -> AgentDecision.Done(req.line)
-                is TelcoUssd.Request.Open -> open(req.flow)
+                // Online in app mode (money/MtnApp, the finale demo), MTN bundle and offer PURCHASES are done in MTN's app by the
+                // planner; balance checks stay on USSD (quick, not a purchase).
+                is TelcoUssd.Request.Open -> if (req.flow.key in APP_FLOWS && req.flow.netName.contains("MTN", ignoreCase = true) && MtnApp.useApp()) null
+                    else open(req.flow)
             }
         }
         // Mid-task: only OUR task (a telco step, the navigator's hand-back, or our ask in history) is continued here.
