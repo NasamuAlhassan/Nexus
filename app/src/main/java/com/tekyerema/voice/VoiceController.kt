@@ -1359,6 +1359,8 @@ class VoiceController(
         // (…and "10 pesos" becomes "10 pesewas" in the request that is acted on — money/MoneyAsk.heard; the words as
         // heard are kept for the screen.)
         // Only what a recogniser wrote is repaired: typed words are the user's own (a typed "2 cities" means cities).
+        // A Wi-Fi password said for "connect to Home Wi-Fi, the password is …" is taken out first, into memory only (phone/WifiJoin).
+        try { com.tekyerema.phone.WifiJoin.capture(heard.canonical) } catch (_: Throwable) {}
         val credSafe = com.tekyerema.core.Privacy.maskCredentials(heard.canonical)
         // The recogniser's "eh … eh" at the edges never reaches the phone's own understanding (voice/EdgeFillers).
         val masked = if (source == InputSource.ASR) EdgeFillers.strip(credSafe) else credSafe

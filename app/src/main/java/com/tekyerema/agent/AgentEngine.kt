@@ -262,6 +262,7 @@ object AgentEngine {
         if (!initialized) return
         // A PIN / password / one-time code said inside the request never enters the run: not the log, the trace, the
         // conversation memory or a model prompt (audit SEC02). The voice layer masks it too; this covers every other door.
+        try { com.tekyerema.phone.WifiJoin.capture(goal) } catch (_: Throwable) {}
         @Suppress("NAME_SHADOWING") val goal = com.tekyerema.core.Privacy.maskCredentials(goal)
         // WS-A resume: "carry on" / "continue" with a paused or interrupted task on file resumes THAT task — decided here
         // from the words and the journal (no model call), only on the user's word (never an unattended trigger).

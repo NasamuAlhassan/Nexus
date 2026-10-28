@@ -176,6 +176,8 @@ class LocalFastRouter(
         // so the "continue" that follows a one-part reading reads on down the screen (see above).
         if (ScreenReadIntent.isRead(text)) screenReadAt = SystemClock.elapsedRealtime()
 
+        // Wi-Fi join with a spoken password, the networks around, and "is Wi-Fi / Bluetooth / mobile data on" (phone/WifiJoin).
+        try { com.tekyerema.phone.WifiJoin.handle(appContext, text) } catch (_: Throwable) { null }?.let { return FastOutcome("WIFI", it) }
         val intent = FastIntentClassifier.classify(text) ?: run {
             // Vision follow-up (camera/VisionQa, the Be My AI pattern): while the camera's last photo is still held,
             // a question nothing above claimed is asked OF THAT PHOTO — "what's in front of me" … "what colour is
