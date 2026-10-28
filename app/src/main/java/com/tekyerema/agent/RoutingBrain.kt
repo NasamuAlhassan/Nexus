@@ -350,6 +350,18 @@ class RoutingBrain(
         // judge's demo: "open the most recent PDF and read it" stopped with the PDF open and the answer one step away).
         if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && !nothingDoneYet(ctx.history))
             readWhatIsOpen(ctx)?.let { return it }
+        // The cloud call itself failed mid MTN-app money task: the same alert and offer as the next step would give (money/AppToUssd).
+        if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && !nothingDoneYet(ctx.history)) {
+            val menuCanDoIt = try { com.tekyerema.money.MoneyAsk.parse(ctx.goal)?.kind in com.tekyerema.money.MoneyFlow.APP_KINDS } catch (_: Throwable) { false }
+            when (val o = com.tekyerema.money.AppToUssd.decide(ctx.history, false, menuCanDoIt) { false }) {
+                is com.tekyerema.money.AppToUssd.Outcome.Ask -> {
+                    android.util.Log.i("Tekyerema", "[ROUTE] the cloud call failed mid MTN-app task → asking to finish on the USSD menu")
+                    return AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", com.tekyerema.money.AppToUssd.ASK), "network dropped mid app task")
+                }
+                is com.tekyerema.money.AppToUssd.Outcome.Stop -> { stickyCloud = false; return AgentDecision.Done(o.line) }
+                else -> {}
+            }
+        }
         if (d is AgentDecision.CannotDo && d.reasonClass == FallbackBrain.NETWORK_LOST && nothingDoneYet(ctx.history)) {
             android.util.Log.i("Tekyerema", "[ROUTE] the cloud couldn't be reached — answering the offline way")
             stickyCloud = false
