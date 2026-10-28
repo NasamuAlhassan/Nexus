@@ -68,6 +68,7 @@ object AppResolver {
     private const val CHATGPT = "com.openai.chatgpt|ChatGPT"
     private const val CLAUDE = "com.anthropic.claude|Claude"
     private const val PLAY = "com.android.vending|Play Store|Google Play Store"
+    private const val MTN = "com.mtngh.mymtn|myMTN|MyMTN|MTN MoMo|MoMo"
     private const val MESSAGES = "com.samsung.android.messaging|com.google.android.apps.messaging|Messages"
     private const val WHATSAPP = "com.whatsapp|WhatsApp"
     private const val GEMINI = "com.google.android.apps.bard|Gemini"
@@ -82,6 +83,8 @@ object AppResolver {
         "whatsup" to WHATSAPP, "watsapp" to WHATSAPP, "wassap" to WHATSAPP,
         "googlegemini" to GEMINI, "bard" to GEMINI, "jiji" to "com.olx.ssa.gh|Jiji", "jijighana" to "com.olx.ssa.gh|Jiji",
         "gmail" to "com.google.android.gm|Gmail",
+        "mtnmobilemoney" to MTN, "mobilemoney" to MTN, "momo" to MTN, "mtnmomo" to MTN, "momoapp" to MTN, "mtnapp" to MTN,
+        "mymtn" to MTN, "mtnghana" to MTN,
         // How a recogniser writes "TikTok" (the owner's "open TikTok" was asked "which app?", A20e 2026-09-29).
         "tiktok" to TIKTOK, "ticktock" to TIKTOK, "tictoc" to TIKTOK, "tictok" to TIKTOK, "tiktoc" to TIKTOK,
         "ticktok" to TIKTOK, "tictac" to TIKTOK, "tiktak" to TIKTOK, "tiktalk" to TIKTOK

@@ -78,4 +78,13 @@ class TwiMoneyMendTest {
         for (said in listOf("what language to use", "translate this language to French", "what language is spoken in Ghana"))
             assertEquals(said, false, com.tekyerema.agent.FastIntentClassifier.classify(said) is com.tekyerema.agent.FastIntent.Preference)
     }
+
+    @Test fun airtimeAsTheRecogniserWroteIt() {
+        for (said in listOf("Buy 1 CD8 time for 055 2093 690", "I want you to buy 1 series of airtime to 0552093690")) {
+            val a = com.tekyerema.money.MoneyAsk.parse(said)
+            assertEquals(said, com.tekyerema.money.MoneyAsk.Kind.AIRTIME, a?.kind)
+            assertEquals(said, "1", a?.amount)
+        }
+        assertEquals(true, com.tekyerema.money.MtnApp.GOAL.containsMatchIn("how much money do I have"))
+    }
 }

@@ -69,6 +69,8 @@ object GhanaWords {
      *  in a sentence about airtime / credit / a bundle. */
     private val AIRTIME_TALK = Regex("(?i)\\b(?:airtime|credit|bundle|data)\\b")
     private val BUY_HEARD = Regex("(?i)\\b(?:back|bye|bike)\\b(?=\\s+(?:me\\s+)?(?:once|one|\\d|some|airtime|credit|data|a bundle))")
+    private val CEDI_AIRTIME_HEARD = Regex("(?i)\\b(?:cd|c\\.d\\.|cedi|sedi|seedy)\\s*(?:8|eight|ate)\\s*time\\b")
+    private val SERIES_OF_AIRTIME = Regex("(?i)\\b(\\d+(?:\\.\\d+)?)\\s+series\\b(?=\\s+(?:of\\s+)?(?:airtime|credit))")
     private val ONE_CEDIS_HEARD = Regex("(?i)\\bonce\\s+(?:it\\s+is|it's|this|is|cities|city's|seedies|seedy's|sedis|cedis|cds)\\b")
     private val BUY = Regex("(?i)^(\\s*)by(\\s+$NUM\\s+(?:ghana\\s+)?(?:cedis?|pesewas?)\\b|\\s+(?:me\\s+)?(?:some\\s+)?(?:airtime|credit|data|a bundle|bundles?|mashup)\\b)")
     private val TELECEL = Regex("(?i)\\b(?:telegram|telesales?|tele ?cell|telecel|telly ?(?:cell|sell)|tele ?sel|tell a (?:cell|sell))" +
@@ -101,6 +103,8 @@ object GhanaWords {
             t = repairAmounts(t, CEDIS, "cedis", all)
         }
         t = MOMO_MISHEARD.replace(t) { m -> m.groupValues[1] + "MoMo" }
+        t = CEDI_AIRTIME_HEARD.replace(t, "cedi airtime")
+        t = SERIES_OF_AIRTIME.replace(t) { m -> m.groupValues[1] + " cedis" }
         if (AIRTIME_TALK.containsMatchIn(t)) t = ONE_CEDIS_HEARD.replace(BUY_HEARD.replace(t, "buy"), "1 cedi's")
         t = BUY.replace(t) { m -> m.groupValues[1] + "Buy" + m.groupValues[2] }
         if (aboutMoney || MONEY_SHAPED.containsMatchIn(MOMO_ANY.replace(t, " "))) {

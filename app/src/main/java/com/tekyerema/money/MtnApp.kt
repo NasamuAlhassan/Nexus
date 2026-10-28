@@ -17,7 +17,7 @@ object MtnApp {
 
     /** A MoMo transaction or MoMo balance in words: the requests app mode takes. */
     val GOAL = Regex("(?i)\\b(?:send|transfer|pay|paid|withdraw|cash ?out|momo|mobile money|airtime|credit|bundle|data|balance|recharge|top ?up|" +
-        "just ?(?:4|for) ?(?:u|you)|mashup|offers?|kokrokoo|midnight)\\b")
+        "just ?(?:4|for) ?(?:u|you)|mashup|offers?|kokrokoo|midnight|how much money|money (?:do i have|left|have i got))\\b")
 
     @Volatile private var cached: Pair<Long, String?>? = null
 
@@ -65,7 +65,15 @@ object MtnApp {
     }
 
     /** The planner's guide for a money request in app mode, or null when app mode is off or the request is not about money. */
-    fun ruleFor(goal: String): String? = if (GOAL.containsMatchIn(goal) && useApp()) rule() + (who(goal)?.let { " $it" } ?: "") else null
+    fun ruleFor(goal: String): String? = if (GOAL.containsMatchIn(goal) && useApp()) rule() + appName() + (who(goal)?.let { " $it" } ?: "") else null
+
+    /** The installed app's own name for open_app (the planner guessed "MTN Mobile Money" and found nothing). */
+    private fun appName(): String {
+        val ctx = com.tekyerema.agent.AgentEngine.appContext() ?: return ""
+        val pkg = installed(ctx) ?: return ""
+        val label = try { ctx.packageManager.getApplicationLabel(ctx.packageManager.getApplicationInfo(pkg, 0)).toString() } catch (_: Throwable) { return "" }
+        return " The MTN app on this phone is \"$label\": open it with open_app({\"app\":\"$label\"}) — no other name."
+    }
 
     @Volatile private var whoCache: Pair<String, String?>? = null
 
