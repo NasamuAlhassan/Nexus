@@ -2483,7 +2483,7 @@ object AgentEngine {
         controller?.let { c -> try { com.tekyerema.money.AppPin.begin(c) } catch (_: Throwable) { false } }
         val done = try { secureChannel.receive() } finally {
             com.tekyerema.core.Privacy.secureStep = false
-            try { com.tekyerema.money.AppPin.end() } catch (_: Throwable) {}
+            try { if (!com.tekyerema.money.PinWatch.adopt()) com.tekyerema.money.AppPin.end() } catch (_: Throwable) {}
         }
         if (done) com.tekyerema.agent.helper.HelperGate.pinDone()
         _state.update { it.copy(handoffReason = null) }

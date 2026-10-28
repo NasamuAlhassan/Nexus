@@ -28,6 +28,7 @@ object PinWatch {
     @Volatile private var job: Job? = null
     /** The pad was armed by this watch (not by the agent's hand-off): the watch also ends it. */
     @Volatile private var mine: String? = null
+    @Volatile private var misses = 0
 
     private val PIN_SCREEN = Regex("(?i)\\b(?:pin|passcode|pass code|secret code|otp)\\b")
     private val NEVER = listOf("com.tekyerema", "com.android.systemui", "com.android.keyguard")
@@ -69,14 +70,17 @@ object PinWatch {
         val pkg = s.appPackage.orEmpty()
         if (pkg.isEmpty() || excluded(pkg)) return                      // the keyboard / our own panel over the PIN screen: no change
         if (TelephonyWindows.matches(pkg)) { ussd(ctrl, owned, pkg); return }
-        val k = appPinScreen(s)
         if (owned != null) {
-            if (k == null || owned != pkg) { stop("left $owned"); }
+            val still = owned == pkg && AppPin.find(s) != null
+            misses = if (still) 0 else misses + 1
+            if (misses >= 2) stop(if (owned != pkg) "another app in front" else "PIN screen gone")
+            else if (!still) { job = null; scope.launch { delay(600); try { look(ctrl) } catch (_: Throwable) {} } }   // look again soon
             return
         }
+        val k = appPinScreen(s)
         if (k == null || System.currentTimeMillis() - AppPin.endedAt < QUIET_MS) return
         if (AppPin.begin(ctrl)) {
-            mine = pkg
+            mine = pkg; misses = 0
             android.util.Log.i("Tekyerema", "[PINPAD] watch: PIN screen on $pkg — the volume keys are its keypad")
         }
     }
@@ -107,4 +111,18 @@ object PinWatch {
 
     /** The pad finished (PIN sent) or the agent took over: the watch lets go without ending anything again. */
     fun release() { mine = null }
+
+    /**
+     * The agent's task ended while the user was still at the app's PIN screen (stopped, or the hand-off's wait ended): the pad is
+     * NOT dropped — the watch keeps it and ends it when the screen goes (MyMTN, 28 Oct 2026: the task stopped at 21:46:20 and the
+     * presses that followed went nowhere). True when it was taken over.
+     */
+    fun adopt(): Boolean {
+        val p = AppPin.pkg ?: return false
+        if (!AppPin.active()) return false
+        mine = p; misses = 0
+        com.tekyerema.core.Privacy.secureStep = true
+        android.util.Log.i("Tekyerema", "[PINPAD] watch: kept the pad on $p after the task ended")
+        return true
+    }
 }

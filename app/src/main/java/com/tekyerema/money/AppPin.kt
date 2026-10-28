@@ -119,6 +119,8 @@ object AppPin {
     suspend fun begin(ctrl: AccessibilityController): Boolean {
         if (!PinPad.enabled()) return false
         val s = try { ctrl.buildSnapshot() } catch (_: Throwable) { return false }
+        // Already the pad of this app's PIN screen (the agent looked again, or the watch took over): the PIN so far stays.
+        if (active() && pkg == s.appPackage) { find(s)?.let { keypad = it }; return true }
         val k = find(s) ?: run {
             // Why not: helps tell "no keypad" from "a layout we don't know" — the screen's SHAPE only ([layout]), never what it holds.
             val els = s.elements
