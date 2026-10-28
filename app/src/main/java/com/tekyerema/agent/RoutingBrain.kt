@@ -215,6 +215,24 @@ class RoutingBrain(
         // agent, but a typed request or the debug hook reaches the agent directly, and "limit to 20 cedis per send" was then
         // read back as "Send 20 cedis to per send" (emulator, 13 October 2026). First step only; never a planner matter.
         if (ctx.history.isEmpty()) com.tekyerema.money.MoneyCommands.handle(ctx.goal)?.let { return AgentDecision.Done(it.spoken) }
+        // The network dropped while MTN's app was doing a money task (money/AppToUssd): said at once; the USSD menu offered when
+        // it can do the request, and never after the read-back or the PIN (the money may already have gone). Before MoneyPlan,
+        // which would otherwise start a menu walk on top of the app's steps.
+        val menuCanDoIt = try { com.tekyerema.money.MoneyAsk.parse(ctx.goal)?.kind in com.tekyerema.money.MoneyFlow.APP_KINDS } catch (_: Throwable) { false }
+        when (val o = com.tekyerema.money.AppToUssd.decide(ctx.history, isOnline(), menuCanDoIt) {
+            com.tekyerema.voice.Confirmation.interpret(it) == com.tekyerema.voice.Confirmation.Answer.YES }) {
+            is com.tekyerema.money.AppToUssd.Outcome.Ask -> {
+                android.util.Log.i("Tekyerema", "[ROUTE] the network dropped mid MTN-app task → asking to finish on the USSD menu")
+                return AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", com.tekyerema.money.AppToUssd.ASK), "network dropped mid app task")
+            }
+            is com.tekyerema.money.AppToUssd.Outcome.Stop -> { stickyCloud = false; return AgentDecision.Done(o.line) }
+            is com.tekyerema.money.AppToUssd.Outcome.Switch -> {
+                stickyCloud = false
+                val rest = ctx.copy(history = o.history)
+                return com.tekyerema.money.MoneyPlan.decide(rest.goal, rest.history) ?: local.decide(rest)
+            }
+            null -> {}
+        }
         com.tekyerema.money.MoneyPlan.decide(ctx.goal, ctx.history)?.let { return it }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
 

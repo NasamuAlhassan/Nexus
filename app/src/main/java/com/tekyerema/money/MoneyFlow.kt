@@ -189,7 +189,7 @@ object MoneyFlow {
         return roots.any { code == "$it#" }
     }
 
-    private val APP_KINDS = setOf(MoneyAsk.Kind.SEND, MoneyAsk.Kind.AIRTIME, MoneyAsk.Kind.BALANCE_MOMO, MoneyAsk.Kind.BALANCE_UNCLEAR)
+    internal val APP_KINDS = setOf(MoneyAsk.Kind.SEND, MoneyAsk.Kind.AIRTIME, MoneyAsk.Kind.BALANCE_MOMO, MoneyAsk.Kind.BALANCE_UNCLEAR)
 
     fun decide(goal: String, history: List<String>): AgentDecision? {
         if (!enabled()) return null
