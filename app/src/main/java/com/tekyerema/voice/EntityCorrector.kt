@@ -274,7 +274,12 @@ object SpeechVocabulary {
         val contacts = vocab.entries.filter { it.kind == EntityCorrector.Kind.CONTACT }
         if (contacts.any { it.compact == key }) return true
         if (key.length < 5) return false
-        return contacts.any { it.text.contains(' ') && com.tekyerema.android.ContactMatcher.score(said, it.text) >= 0.6 }
+        if (contacts.any { it.text.contains(' ') && com.tekyerema.android.ContactMatcher.score(said, it.text) >= 0.6 }) return true
+        // One word, a letter or two off a contact's own word (28 Oct 2026, Infinix: "soma sika ma ricmond" lost Richmond — the Twi
+        // recogniser writes names in lower case and "ricmond" matched nothing exactly). Close only: 0.8 of the letters (0.75 for a long name).
+        if (said.trim().contains(' ')) return false
+        return contacts.any { c -> c.text.split(Regex("\\s+")).any { w -> PhoneticKey.compact(w).let { cw -> cw.length >= 5 &&
+            PhoneticKey.similarity(key, cw) >= (if (cw.length >= 7) 0.75 else 0.8) } } }
     }
 
     /** For tests and the debug hook. */

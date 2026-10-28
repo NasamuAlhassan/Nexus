@@ -14,6 +14,7 @@ package com.tekyerema.language
 object TwiReply {
     private val NO_LEAD = Regex("^\\s*(?:daabi|dabi|ɛnyɛ\\s+saa|nnyɛ|mmom)[,!.\\s]+", RegexOption.IGNORE_CASE)
     private val SEND_ONLY = Regex("^send (\\d+(?:\\.\\d+)?\\s+(?:cedis?|pesewas?))$")
+    private val TO_PERSON = Regex("(?i)^(?:\\S*s[ou]\\s?)?(?:ma\\s?)?k[oɔ]\\s?ma\\s+(\\S.*)$")
     private val HAS_AMOUNT = Regex("\\d+(?:\\.\\d+)?\\s+(?:cedis?|pesewas?)")
 
     /** [isContact]: a saved contact's name (TwiCommands' plausibility check). */
@@ -24,6 +25,9 @@ object TwiReply {
         val lead = NO_LEAD.find(norm)
         val rest = (if (lead != null) norm.substring(lead.range.last + 1) else norm).trim()
         if (rest.isEmpty()) return reply                       // "daabi" alone: a no, as it was
+        // "(so) ma kɔma Richmond" / "kɔma Richmond" — the person, with the "(send) to" in front of them (28 Oct 2026, Infinix:
+        // "so makoma ricmund" was looked up as a contact whole and not found).
+        TO_PERSON.matchEntire(rest)?.let { m -> return (if (lead != null) "no, " else "") + TwiCommands.who(m.groupValues[1]) }
         val glossed = TwiCommands.gloss(rest, isContact)
         val english = when {
             glossed != null -> SEND_ONLY.find(glossed)?.groupValues?.get(1) ?: glossed

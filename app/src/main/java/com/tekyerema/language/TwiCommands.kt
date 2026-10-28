@@ -177,7 +177,7 @@ object TwiCommands {
         "nua" to "sibling", "nuabarima" to "brother", "nuabaa" to "sister", "yere" to "wife", "kunu" to "husband",
         "ba" to "child", "nana" to "grandparent")
 
-    private fun who(raw: String): String {
+    internal fun who(raw: String): String {
         // "frɛ Prince ma me" — call Prince FOR ME: "ma me" is not part of the name. The lab recogniser writes it "maai" /
         // "mame" (A20e, 5 October 2026: "frɛ prince maai" became a call to "Prince maai", who doesn't exist).
         val w = raw.trim().trimEnd('.', '!', '?').replace(FOR_ME, "").trim().ifEmpty { raw.trim() }
@@ -214,12 +214,18 @@ object TwiCommands {
 
     /** The English command for a core Twi request, or null when [text] isn't one of them (it then goes to translation).
      *  [isContact]: the word or phrase is one of the phone's saved contacts. */
+    /** "somacedie" / "somasidi" → "soma cedi"; "cedi anu" / "cedie nu" → "cedi anum" (five, its last letter lost) — 28 Oct 2026,
+     *  Infinix: "somacedie nu ma me yere" and "soma cedi anu ma me yere" (send 5 cedis to my wife) matched nothing offline. */
+    internal fun mendMoneyWords(s: String): String = s
+        .replace(Regex("(?i)\\b(\\S*s[ou]\\s?ma)(c[eɛ]d[iɛe]e?|s[ie]di|sed[ie])\\b"), "$1 sidi")
+        .replace(Regex("(?i)\\b(?:c[eɛ]d[iɛe]e?|s[ie]di|sed[ie])\\s+(?:a|e)?nu\\b"), "sidi anum")
+
     fun gloss(text: String, isContact: (String) -> Boolean = { false }): String? {
         // A polite lead-in ("Mesrɛ wo, …" please; "Mepa wo kyɛw, …") is not part of the request — with it in front no
         // pattern matched, and the English bundle parser then took the raw Twi and lost the amount (QA TW05, 3 October 2026).
         // Khaya's recogniser punctuates its pauses — "Soma Sidi anum, Ma Prɛns, Melani." matched nothing (16 Oct 2026): a
         // comma is a space here (one inside a figure, "1,000", is dropped)
-        val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(text).trim(), "")
+        val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(mendMoneyWords(text)).trim(), "")
             .replace(Regex("(?<=\\d),(?=\\d{3})"), "").replace(",", " ").replace(Regex("\\s+"), " "), "")
             .let { KA_KYERE.replace(it, "ka kyerɛ ").replace(Regex("\\s+"), " ").trim() }
         if (t.isEmpty()) return null
