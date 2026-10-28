@@ -65,7 +65,31 @@ object MtnApp {
     }
 
     /** The planner's guide for a money request in app mode, or null when app mode is off or the request is not about money. */
-    fun ruleFor(goal: String): String? = if (GOAL.containsMatchIn(goal) && useApp()) rule() else null
+    fun ruleFor(goal: String): String? = if (GOAL.containsMatchIn(goal) && useApp()) rule() + (who(goal)?.let { " $it" } ?: "") else null
+
+    @Volatile private var whoCache: Pair<String, String?>? = null
+
+    /**
+     * WHO, settled on the phone before the planner asks (28 Oct 2026, Infinix: "send 5 cedis to my wife" was asked "What is your
+     * wife's phone number or contact name?" three times while "call my wife" found the saved "My Wife" at once). The person named
+     * in [goal] looked up in the contacts: one match → its name and number are the facts; several → ask which, by name; none → ask
+     * for the number. Null when no person is named (a number, or nobody).
+     */
+    internal fun who(goal: String, lookup: ((String) -> List<com.tekyerema.android.ContactResolver.Contact>)? = null): String? {
+        whoCache?.let { (g, line) -> if (g == goal && lookup == null) return line }
+        val ask = try { MoneyAsk.parse(goal) } catch (_: Throwable) { null }
+        val name = ask?.name?.trim()?.takeIf { it.isNotEmpty() && ask.number == null } ?: return null
+        val find = lookup ?: { n: String -> com.tekyerema.agent.AgentEngine.appContext()?.let { c ->
+            try { com.tekyerema.android.ContactResolver.resolve(c, n) } catch (_: Throwable) { emptyList() } } ?: emptyList() }
+        val hits = find(name).distinctBy { it.number.filter { c -> c.isDigit() }.takeLast(9) }
+        val line = when (hits.size) {
+            0 -> "WHO: \"$name\" is not in the phone's contacts — ask_user for the phone number."
+            1 -> "WHO is settled: \"$name\" is the saved contact ${hits[0].name}, number ${hits[0].number} — type that number; do not ask who."
+            else -> "WHO: \"$name\" matches several contacts (${hits.take(4).joinToString(", ") { it.name }}) — ask_user which one, by name."
+        }
+        if (lookup == null) whoCache = goal to line
+        return line
+    }
 
     /** `money.app.rule` replaces the built-in guide (so the screen labels can be corrected without a build). */
     fun rule(): String = AppConfig.string("money.app.rule", "").ifBlank { RULE }
