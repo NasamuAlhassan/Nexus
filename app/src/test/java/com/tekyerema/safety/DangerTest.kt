@@ -69,4 +69,43 @@ class DangerTest {
         assertNull(DangerCommands.parse("what is the time"))
         assertNull(DangerCommands.parse("call my wife"))
     }
+
+    @Test fun pauseResumeAgreeAndDelete() {
+        assertEquals(DangerCommands.Cmd.Switch(false, pause = true), DangerCommands.parse("pause the danger code word"))
+        assertEquals(DangerCommands.Cmd.Switch(false, pause = true), DangerCommands.parse("pause danger listening"))
+        assertEquals(DangerCommands.Cmd.Switch(true), DangerCommands.parse("resume the danger code word"))
+        assertEquals(DangerCommands.Cmd.Agree, DangerCommands.parse("I agree to the danger code word."))
+        assertEquals(DangerCommands.Cmd.Delete, DangerCommands.parse("delete my danger data"))
+        assertEquals(DangerCommands.Cmd.Delete, DangerCommands.parse("forget my code word"))
+        assertNull(DangerCommands.parse("pause the music"))
+        assertNull(DangerCommands.parse("delete my messages"))
+    }
+
+    @Test fun sosIsAWholeCallForHelpNotAWordInARequest() {
+        assertTrue(DangerSos.matches("SOS"))
+        assertTrue(DangerSos.matches("S.O.S."))
+        assertTrue(DangerSos.matches("Please, this is an emergency!"))
+        assertTrue(DangerSos.matches("I need help now"))
+        assertFalse(DangerSos.matches("help me write a message to Ama"))
+        assertFalse(DangerSos.matches("what should I do in an emergency"))
+        assertFalse(DangerSos.matches("call the police station number"))
+        assertFalse(DangerSos.matches("help"))
+    }
+
+    @Test fun holdingTheKeyFourSecondsFiresOnceAndReleaseResets() {
+        val up = android.view.KeyEvent.KEYCODE_VOLUME_UP
+        val h = SosHold(up, 4_000L)
+        assertFalse(h.onKey(up, true, 1_000)); assertFalse(h.onKey(up, true, 3_000))
+        assertTrue(h.onKey(up, true, 5_000)); assertFalse(h.onKey(up, true, 6_000))
+        assertFalse(h.onKey(up, false, 6_100))
+        assertFalse(h.onKey(up, true, 7_000)); assertFalse(h.onKey(up, true, 9_000))   // a fresh press starts the count again
+        val short = SosHold(up, 4_000L)
+        short.onKey(up, true, 0); short.onKey(up, false, 500)
+        assertFalse(short.onKey(up, true, 9_000))
+    }
+
+    @Test fun theSosTextSaysSosAndTheCodeWordTextSaysCodeWord() {
+        assertTrue(DangerPlan.message(null, null, "14:20", manual = true).contains("pressed SOS"))
+        assertTrue(DangerPlan.message(null, null, "14:20").contains("danger code word"))
+    }
 }

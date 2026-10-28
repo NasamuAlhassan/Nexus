@@ -59,6 +59,7 @@ object DangerAlert {
     enum class Phase { IDLE, COUNTDOWN, RUNNING }
     @Volatile var phase = Phase.IDLE; private set
     private var job: Job? = null
+    @Volatile private var manualRun = false
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     /** Called with every heard request, before it is routed. True when the words were the alert's (a cancel, or the code word). */
@@ -68,22 +69,25 @@ object DangerAlert {
             if (DangerCodeWord.isCancel(text, s.dangerCancelPin)) { cancel(app, "voice"); return true }
             return false
         }
-        if (phase != Phase.IDLE || !s.dangerEnabled) return false
+        if (phase != Phase.IDLE) return false
+        if (DangerSos.matches(text)) return trigger(app, "SOS spoken", manual = true)
+        if (!s.dangerEnabled) return false
         return if (DangerCodeWord.matches(text, s.dangerCodeWord)) trigger(app, "code word heard in a request") else false
     }
 
-    /** Start the cancel window. False when the feature is off or an alert is already under way. */
+    /** Start the cancel window. False when the feature is off (a [manual] SOS needs no set-up) or an alert is already under way. */
     @Synchronized
-    fun trigger(app: Context, source: String): Boolean {
+    fun trigger(app: Context, source: String, manual: Boolean = false): Boolean {
         val s = Settings(app)
-        if (!s.dangerEnabled || phase != Phase.IDLE) return false
+        if ((!manual && !s.dangerEnabled) || phase != Phase.IDLE) return false
         phase = Phase.COUNTDOWN
+        manualRun = manual
         val seconds = AppConfig.int("safety.danger.cancelSeconds", 5).coerceIn(2, 15)
-        audit("danger code triggered ($source); cancel window $seconds s")
+        audit((if (manual) "SOS" else "danger code") + " triggered ($source); cancel window $seconds s")
         buzz(app)
-        notify(app, "Danger code heard — calling for help in $seconds s", cancelable = true)
+        notify(app, (if (manual) "SOS" else "Danger code heard") + " — calling for help in $seconds s", cancelable = true)
         job = scope.launch {
-            launch { try { VoiceEngine.speakIn(DangerPlan.warning(seconds), VoiceEngine.language()) } catch (_: Throwable) {} }
+            launch { try { VoiceEngine.speakIn(DangerPlan.warning(seconds, manual), VoiceEngine.language()) } catch (_: Throwable) {} }
             var left = seconds * 1000
             while (left > 0) { delay(250); left -= 250 }
             run(app)
@@ -112,7 +116,7 @@ object DangerAlert {
                 val where = async { position(app) }
                 val (link, acc) = where.await()
                 val time = SimpleDateFormat("HH:mm", Locale.US).format(Date())
-                val text = DangerPlan.message(link, acc, time)
+                val text = DangerPlan.message(link, acc, time, manualRun)
                 val who = DangerPlan.recipients(s.emergencyContactNumber.takeIf { it.isNotBlank() }?.let { s.emergencyContactName.ifBlank { it } to it }, s.trustedContacts)
                 val texted = if (dry) 0 else who.count { (_, n) -> textTo(app, n, text) }
                 val told = if (dry) false else tellBackend(link, acc, time)

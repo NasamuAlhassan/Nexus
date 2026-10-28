@@ -312,6 +312,16 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             if (e.action == android.view.KeyEvent.ACTION_UP) com.tekyerema.live.LiveTimer.dismiss(this)
             return true
         }
+        // Manual SOS: volume-up held for four seconds (safety/DangerSos). The volume the hold raised is put back.
+        if ((e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_UP || e.keyCode == android.view.KeyEvent.KEYCODE_VOLUME_DOWN) &&
+            com.tekyerema.core.config.AppConfig.bool("safety.sos.keyHold", true)) {
+            val down = e.action == android.view.KeyEvent.ACTION_DOWN
+            if (down && e.repeatCount == 0) sosVolume = try { (getSystemService(Context.AUDIO_SERVICE) as AudioManager).getStreamVolume(AudioManager.STREAM_MUSIC) } catch (_: Throwable) { -1 }
+            if (sosHold.onKey(e.keyCode, down, e.eventTime)) {
+                try { if (sosVolume >= 0) (getSystemService(Context.AUDIO_SERVICE) as AudioManager).setStreamVolume(AudioManager.STREAM_MUSIC, sosVolume, 0) } catch (_: Throwable) {}
+                com.tekyerema.safety.DangerAlert.trigger(applicationContext, "volume key held", manual = true)
+            }
+        }
         if (e.action != android.view.KeyEvent.ACTION_UP) return false
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("A-01", true) ||
             !com.tekyerema.core.config.AppConfig.bool("activation.keys.enabled", true)) return false
@@ -359,6 +369,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         if (activeWindowPackage() != AccessibilityController.SYSTEM_UI) return true
         return super<AccessibilityController>.closeShade()
     }
+
+    private val sosHold = com.tekyerema.safety.SosHold(android.view.KeyEvent.KEYCODE_VOLUME_UP, com.tekyerema.core.config.AppConfig.long("safety.sos.holdMs", 4_000L))
+    private var sosVolume = -1
 
     private fun restoreVolume(code: Int, steps: Int) {
         val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager ?: return

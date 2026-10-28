@@ -276,6 +276,10 @@ class Settings(context: Context) {
     var dangerEnabled: Boolean
         get() = prefs.getBoolean("danger_enabled", false) && dangerCodeWord.isNotBlank()
         set(v) = put { putBoolean("danger_enabled", v) }
+    /** True once the user has heard what the code word does and said "I agree to the danger code word". Deleting the danger data clears it. */
+    var dangerConsented: Boolean
+        get() = prefs.getBoolean("danger_consented", false)
+        set(v) = put { putBoolean("danger_consented", v) }
     var dangerCodeWord: String
         get() = getSecret("danger_code_word")
         set(v) = putSecret("danger_code_word", v.trim().lowercase())

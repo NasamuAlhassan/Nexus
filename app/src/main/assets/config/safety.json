@@ -9,6 +9,11 @@
       "speaker": true,
       "backendUrl": "",
       "locationWaitMs": 8000
+    },
+    "sos": {
+      "_doc": "Manual SOS: a whole-utterance call for help, or volume-up held for holdMs. Same cancel window as the code word; works without the code word set up.",
+      "keyHold": true,
+      "holdMs": 4000
     }
   }
 }
