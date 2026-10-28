@@ -28,7 +28,8 @@ class WhatIsThis private constructor(ctx: Context) {
     val labels: List<Label>
     private val text: Array<FloatArray>
     private val scale: Double
-    private val bias: Double
+    private val ruleA: Double
+    private val ruleB: Double
 
     init {
         val a = ctx.assets
@@ -37,7 +38,9 @@ class WhatIsThis private constructor(ctx: Context) {
         val arr = JSONArray(a.open("$DIR/whatis_labels.json").use { it.readBytes().decodeToString() })
         labels = (0 until arr.length()).map { i -> arr.getJSONObject(i).let { Label(it.getString("label"), it.getString("family"), it.getBoolean("is_family")) } }
         val meta = JSONObject(a.open("$DIR/whatis_meta.json").use { it.readBytes().decodeToString() })
-        scale = meta.optDouble("logit_scale", 1.0); bias = meta.optDouble("logit_bias", 0.0)
+        scale = meta.optDouble("logit_scale", 100.0)
+        val rule = meta.optJSONObject("rule")
+        ruleA = rule?.optDouble("a", 0.3) ?: 0.3; ruleB = rule?.optDouble("b", 0.5) ?: 0.5
         val dim = meta.getInt("dim")
         val raw = ByteBuffer.wrap(a.open("$DIR/whatis_text.f16").use { it.readBytes() }).order(ByteOrder.LITTLE_ENDIAN)
         require(raw.capacity() == labels.size * dim * 2) { "whatis text matrix: ${raw.capacity()} bytes for ${labels.size}x$dim" }
@@ -51,7 +54,7 @@ class WhatIsThis private constructor(ctx: Context) {
         val e = try { session.run(mapOf(session.inputNames.first() to t)).use { out -> @Suppress("UNCHECKED_CAST") (out[0].value as Array<FloatArray>)[0] } }
             finally { t.close() }
         val cos = DoubleArray(text.size) { i -> var s = 0.0; val row = text[i]; for (k in row.indices) s += row[k] * e[k]; s }
-        return decide(cos, labels, scale, bias)
+        return decide(cos, labels, scale, ruleA, ruleB)
     }
 
     fun close() = try { session.close() } catch (_: Throwable) {}
@@ -67,25 +70,22 @@ class WhatIsThis private constructor(ctx: Context) {
         }
 
         /**
-         * The kernel's rule: the best label is said when it is a member (not a family), its sigmoid score ≥ [pMin], and it leads its
-         * nearest sibling by [margin] and any other family's best by [margin]/2. Otherwise its family, when that is ≥ [famMin] and still
-         * ahead of the other families. Otherwise nothing.
+         * The kernel's rule (tuned on COCO object crops so that at most ~8 % of answers are wrong; whatis_meta.json `rule`): a softmax
+         * over every label at the model's own logit scale. The best label is said when it is a member (a brand or kind) with ≥ [a]
+         * of the mass; else its family when the family's labels hold ≥ [b]; else nothing.
          */
-        fun decide(cos: DoubleArray, labels: List<Label>, scale: Double, bias: Double, pMin: Double = 0.06, margin: Double = 0.04, famMin: Double = 0.04): Answer {
+        fun decide(cos: DoubleArray, labels: List<Label>, scale: Double, a: Double = 0.3, b: Double = 0.5): Answer {
             if (cos.isEmpty()) return Answer(null, Kind.UNSURE, 0.0)
-            fun p(i: Int) = 1.0 / (1.0 + Math.exp(-(scale * cos[i] + bias)))
-            val order = cos.indices.sortedByDescending { cos[it] }
-            val best = order[0]
+            val top = cos.max()
+            val e = DoubleArray(cos.size) { Math.exp(scale * (cos[it] - top)) }
+            val sum = e.sum()
+            val best = cos.indices.maxByOrNull { cos[it] }!!
+            val pBest = e[best] / sum
+            if (!labels[best].isFamily && pBest >= a) return Answer(labels[best].label, Kind.ITEM, pBest)
             val fam = labels[best].family
-            val sib = order.drop(1).take(30).firstOrNull { labels[it].family == fam && !labels[it].isFamily }
-            val other = order.drop(1).take(30).firstOrNull { labels[it].family != fam }
-            val leadSib = cos[best] - (sib?.let { cos[it] } ?: -1.0)
-            val leadOther = cos[best] - (other?.let { cos[it] } ?: -1.0)
-            if (p(best) >= pMin && !labels[best].isFamily && leadSib >= margin && leadOther >= margin / 2) return Answer(labels[best].label, Kind.ITEM, p(best))
-            val fi = labels.indexOfFirst { it.isFamily && it.family == fam }
-            val pf = maxOf(p(best), if (fi >= 0) p(fi) else 0.0)
-            if (pf >= famMin && leadOther >= margin / 2) return Answer(fam, Kind.FAMILY, pf)
-            return Answer(null, Kind.UNSURE, p(best))
+            val pFam = labels.indices.filter { labels[it].family == fam }.sumOf { e[it] } / sum
+            if (pFam >= b) return Answer(fam, Kind.FAMILY, pFam)
+            return Answer(null, Kind.UNSURE, pBest)
         }
 
         /** "okada (motorbike taxi)" → "an okada, a motorbike taxi"; "MacBook" → "a MacBook"; "keys on a key ring" → "keys on a key ring". */
@@ -100,7 +100,7 @@ class WhatIsThis private constructor(ctx: Context) {
                         "wired", "wireless", "over-ear", "playing", "reading", "steps", "rain", "sand", "soil", "grass", "rice", "gari",
                         "shito", "bread", "salt", "chicken", "beef", "fried", "boiled", "light", "groundnut", "palm", "kontomire", "red",
                         "jollof", "waakye", "banku", "kenkey", "fufu", "kelewele", "popcorn", "cake", "pizza", "spaghetti", "underwear",
-                        "african", "kente", "sobolo", "palm", "liquid", "toothpaste", "shea", "body", "hand", "money", "food", "fruit",
+                        "african", "kente", "sobolo", "palm", "liquid", "toothpaste", "shea", "body", "money", "food", "fruit",
                         "medicine", "clothing", "footwear", "furniture", "groceries", "stationery", "tools", "nature", "music", "sport") -> s
                     (w.firstOrNull() in setOf('a', 'e', 'i', 'o', 'u') && w !in setOf("usb", "uniform", "one")) || w == "hour" -> "an $s"
                     else -> "a $s"

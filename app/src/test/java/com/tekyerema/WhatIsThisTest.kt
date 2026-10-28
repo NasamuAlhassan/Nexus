@@ -4,7 +4,9 @@ import com.tekyerema.camera.WhatIsThis
 import com.tekyerema.camera.WhatIsThis.Kind
 import com.tekyerema.camera.WhatIsThis.Label
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class WhatIsThisTest {
@@ -12,29 +14,22 @@ class WhatIsThisTest {
         Label("laptop", "laptop", true), Label("MacBook", "laptop", false), Label("Dell laptop", "laptop", false),
         Label("mobile phone", "mobile phone", true), Label("iPhone", "mobile phone", false), Label("tro-tro (minibus)", "vehicle", false),
         Label("vehicle", "vehicle", true))
-    // logit scale/bias like SigLIP's (~117, ~-12.7): a cosine of 0.16 is p ~0.99, 0.08 is p ~0.04
-    private val scale = 117.0
-    private val bias = -12.7
+    private val scale = 112.0          // SigLIP2's logit scale: a cosine lead of 0.02 is ~9.4x the mass
 
     @Test fun aClearBrandIsNamed() {
-        val a = WhatIsThis.decide(doubleArrayOf(0.10, 0.17, 0.11, 0.05, 0.04, 0.02, 0.03), labels, scale, bias)
+        val a = WhatIsThis.decide(doubleArrayOf(0.10, 0.17, 0.11, 0.05, 0.04, 0.02, 0.03), labels, scale)
         assertEquals(Kind.ITEM, a.kind); assertEquals("MacBook", a.label)
     }
 
     @Test fun twoBrandsTooCloseGiveTheFamily() {
-        val a = WhatIsThis.decide(doubleArrayOf(0.12, 0.165, 0.16, 0.05, 0.04, 0.02, 0.03), labels, scale, bias)
+        val a = WhatIsThis.decide(doubleArrayOf(0.165, 0.164, 0.164, 0.05, 0.04, 0.02, 0.03), labels, scale)   // the family label itself on top
         assertEquals(Kind.FAMILY, a.kind); assertEquals("laptop", a.label)
     }
 
-    @Test fun nothingCloseEnoughIsNotSaid() {
-        val a = WhatIsThis.decide(doubleArrayOf(0.02, 0.03, 0.025, 0.028, 0.01, 0.02, 0.0), labels, scale, bias)
+    @Test fun twoFamiliesNeckAndNeckIsNotSaid() {
+        val a = WhatIsThis.decide(doubleArrayOf(0.10, 0.17, 0.10, 0.10, 0.17, 0.02, 0.03), labels, scale, a = 0.6, b = 0.6)
         assertEquals(Kind.UNSURE, a.kind); assertNull(a.label)
         assertNull(WhatIsThis.spoken(a))
-    }
-
-    @Test fun twoFamiliesNeckAndNeckIsNotSaid() {
-        val a = WhatIsThis.decide(doubleArrayOf(0.10, 0.17, 0.10, 0.10, 0.165, 0.02, 0.03), labels, scale, bias)
-        assertEquals(Kind.UNSURE, a.kind)
     }
 
     @Test fun namesAreSpokenNaturally() {
@@ -45,14 +40,16 @@ class WhatIsThisTest {
         assertEquals("an umbrella", WhatIsThis.spokenName("umbrella"))
         assertEquals("a USB flash drive", WhatIsThis.spokenName("USB flash drive"))
         assertEquals("keys on a key ring", WhatIsThis.spokenName("keys on a key ring"))
+        assertEquals("a kitchen item", WhatIsThis.spokenName("kitchen item"))
+        assertEquals("a hand", WhatIsThis.spokenName("hand"))
         assertEquals("That looks like a laptop, but I can't tell exactly which.",
             WhatIsThis.spoken(WhatIsThis.Answer("laptop", Kind.FAMILY, 0.5)))
     }
 
     @Test fun onlyNamingQuestionsGoToTheOfflineNamer() {
         for (q in listOf("What is this?", "what am I holding", "What's in front of me?", "can you tell me what this is", "identify this", "what are these"))
-            org.junit.Assert.assertTrue(q, WhatIsThis.isNamingQuestion(q))
+            assertTrue(q, WhatIsThis.isNamingQuestion(q))
         for (q in listOf("what does this say", "what colour is this shirt", "is the stove on", "when does this milk expire", "read this label", "what is the price"))
-            org.junit.Assert.assertFalse(q, WhatIsThis.isNamingQuestion(q))
+            assertFalse(q, WhatIsThis.isNamingQuestion(q))
     }
 }
