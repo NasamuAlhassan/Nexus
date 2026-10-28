@@ -132,7 +132,10 @@ object EffectKeys {
                 Spec(EffectKind.CALL, who, who, "")
             }
             PHONE_LABEL.matches(label) -> Spec(EffectKind.CALL, label, label, "")
-            TargetSemantics.isSpendCaption(label, element) -> Spec(EffectKind.PAYMENT, "$label@$app", app.ifBlank { label }, label)
+            // A menu tile in MTN's own app ("Top Up: airtime") only opens a form: not a payment, so re-opening it after a correction is
+            // not "I may already have started this payment" (Infinix, 28 Oct 2026). Its Pay / Confirm still is (TargetSemantics.mtnAppMenu).
+            TargetSemantics.isSpendCaption(label, element) && !TargetSemantics.mtnAppMenu(before, label) ->
+                Spec(EffectKind.PAYMENT, "$label@$app", app.ifBlank { label }, label)
             DELETE_WORDS.containsMatchIn(label) -> Spec(EffectKind.DELETE, "$label@$app@${chat.orEmpty()}", chat ?: app, "$label|$screenKey")
             label.isEmpty() -> null
             else -> when (TargetSemantics.consentKind(label, element)) {
