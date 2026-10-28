@@ -645,9 +645,29 @@ object FastIntentClassifier {
         "(?:switch|change) (?:to|into) english|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) english|use english|english (?:please|mode)|(?:kasa|ka) (?:borɔfo|borofo|brofo|bro fo)|" +
         "(?:borɔfo|borofo|brofo) kasa|sesa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*(?:borɔfo|borofo|brofo|brɔfo)(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
 
+    /**
+     * "Change the language to …" with a word the phone's English recogniser made of "Twi" (owner, 28 Oct 2026: "when I want to switch
+     * to Twi I keep getting errors — it doesn't hear it well offline"; the phone wrote "switch the language to tree", "10 the language
+     * to cheat", "Change the language to the truth"). The voice speaks two languages: a language named that is not English (nor
+     * Kusaal) is Twi. The first word may be misheard too ("10" for "change").
+     */
+    private val RE_LANG_TO = Regex("^(?!(?:what|which|how|why|translate|is|does|do|say)\\b)(?:please\\s+)?(?:(?:can|could|would) you\\s+)?" +
+        "(?:\\S+\\s+){0,2}?(?:the\\s+|your\\s+|my\\s+)?language\\s+(?:to|into)\\s+(.{1,25}?)(?:\\s+please)?$")
+    private val ENGLISH_LIKE = Regex("^(?:the\\s+)?(?:english|inglish|engish|england|british|borɔfo|borofo|brofo)$")
+    /** "Twi" as the English recogniser hears it — used only after "switch / change to" and "speak". */
+    private val TWI_LIKE = "(?:tree|tui|tweet|twee|tweak|twix|chewy|chwee|tv|t\\.? ?v\\.?)"
+    private val RE_PREF_TWI_HEARD = Regex("^(?:please\\s+)?(?:(?:switch|change) (?:to|into)|speak(?: to me)?(?: in)?|talk(?: to me)?(?: in)?) $TWI_LIKE(?: please| now)?$")
+
     /** Kusaal (19 October 2026) as the phone's English recogniser writes it ("kusal", "kusasi", "kusa al"). */
     private val RE_PREF_KUSAAL = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? $KUS_WORD|" +
         "(?:switch|change) (?:to|into) $KUS_WORD|use $KUS_WORD|$KUS_WORD (?:please|mode))(?: please| now| from now on)?$")
+
+    /** "… language to X": "english" when X is English, else "twi" ([RE_LANG_TO]); null when it isn't that request or X is Kusaal. */
+    private fun languageNamed(g: String): String? {
+        val x = RE_LANG_TO.matchEntire(g)?.groupValues?.get(1)?.trim()?.trimEnd('.', '!', '?') ?: return null
+        if (Regex(KUS_WORD).containsMatchIn(x)) return null
+        return if (ENGLISH_LIKE.matches(x)) "english" else "twi"
+    }
 
     private fun preference(g: String): FastIntent.Preference? = when {
         RE_PREF_SLOWER.matches(g) -> FastIntent.Preference("rate", "slower")
@@ -658,6 +678,8 @@ object FastIntentClassifier {
         RE_PREF_PATIENT.matches(g) -> FastIntent.Preference("patience", "patient")
         RE_PREF_TWI.matches(g) -> FastIntent.Preference("language", "twi")
         RE_PREF_ENGLISH.matches(g) -> FastIntent.Preference("language", "english")
+        RE_PREF_TWI_HEARD.matches(g) -> FastIntent.Preference("language", "twi")
+        languageNamed(g) != null -> FastIntent.Preference("language", languageNamed(g)!!)
         // Kusaal removed from the build (owner, 20 Oct 2026): "speak Kusaal" is no longer a language switch.
         false && RE_PREF_KUSAAL.matches(g) -> FastIntent.Preference("language", "kus")
         else -> null

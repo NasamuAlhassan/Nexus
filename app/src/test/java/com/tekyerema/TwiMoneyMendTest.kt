@@ -53,4 +53,29 @@ class TwiMoneyMendTest {
             assertEquals(said, com.tekyerema.agent.FastIntent.Preference("language", "english"), com.tekyerema.agent.FastIntentClassifier.classify(said))
         assertEquals(com.tekyerema.agent.FastIntent.Preference("language", "twi"), com.tekyerema.agent.FastIntentClassifier.classify("sesa kɔ twi"))
     }
+
+    /** The phone's English recogniser on the Infinix, 28 Oct 2026, offline. */
+    @Test fun misheardMoneyWordsInEnglish() {
+        assertEquals(com.tekyerema.money.MoneyAsk.Kind.BALANCE_MOMO, com.tekyerema.money.MoneyAsk.parse("Where's my normal balance?")?.kind)
+        assertEquals(com.tekyerema.money.MoneyAsk.Kind.BALANCE_MOMO, com.tekyerema.money.MoneyAsk.parse("what's my mom balance")?.kind)
+        val a = com.tekyerema.money.MoneyAsk.parse("I want you to back once this airtime for 0552093690")
+        assertEquals(com.tekyerema.money.MoneyAsk.Kind.AIRTIME, a?.kind)
+        assertEquals("1", a?.amount); assertEquals("0552093690", a?.number)
+        // not about airtime: "once" and "back" stay as said
+        assertEquals("call me back once this is done", com.tekyerema.voice.GhanaWords.fix("call me back once this is done"))
+        assertEquals("my mom called", com.tekyerema.voice.GhanaWords.fix("my mom called"))
+    }
+
+    /** "Twi" as the phone's English recogniser wrote it on the Infinix, 28 Oct 2026. */
+    @Test fun switchingToTwiWhenTwiIsMisheard() {
+        val twi = com.tekyerema.agent.FastIntent.Preference("language", "twi")
+        val eng = com.tekyerema.agent.FastIntent.Preference("language", "english")
+        for (said in listOf("switch the language to tree", "10 the language to cheat", "Change the language to the truth.", "change the language to Twi",
+                "switch to tree", "speak tree"))
+            assertEquals(said, twi, com.tekyerema.agent.FastIntentClassifier.classify(said))
+        assertEquals(eng, com.tekyerema.agent.FastIntentClassifier.classify("change the language to English"))
+        // not a switch
+        for (said in listOf("what language to use", "translate this language to French", "what language is spoken in Ghana"))
+            assertEquals(said, false, com.tekyerema.agent.FastIntentClassifier.classify(said) is com.tekyerema.agent.FastIntent.Preference)
+    }
 }

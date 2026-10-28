@@ -62,6 +62,14 @@ object GhanaWords {
     private val MOMO_AFTER = Regex("(?i)\\b(go to|open|my|on|via|with|from|use|using|check|into|through)(\\s+)$MOMO_WORD\\b")
     private val MOMO_BEFORE = Regex("(?i)\\b$MOMO_WORD(?=\\s+(?:balance|wallet|pin|account|agent)\\b)")
     private val MOMO_ANY = Regex("(?i)\\b$MOMO_WORD\\b")
+    /** "my normal / mom / mama balance": "MoMo", as the phone's English recogniser hears it before "balance" (Infinix, 28 Oct 2026:
+     *  "Where's my normal balance?", "what's my mom balance"). Only after "my" and before balance / wallet / account. */
+    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma)(?=\\s+(?:balance|wallet|account)\\b)")
+    /** Airtime said fast: "back once this airtime" / "buy once it is airtime" = "buy one cedi's airtime" (Infinix, 28 Oct 2026). Only
+     *  in a sentence about airtime / credit / a bundle. */
+    private val AIRTIME_TALK = Regex("(?i)\\b(?:airtime|credit|bundle|data)\\b")
+    private val BUY_HEARD = Regex("(?i)\\b(?:back|bye|bike)\\b(?=\\s+(?:me\\s+)?(?:once|one|\\d|some|airtime|credit|data|a bundle))")
+    private val ONE_CEDIS_HEARD = Regex("(?i)\\bonce\\s+(?:it\\s+is|it's|this|is|cities|city's|seedies|seedy's|sedis|cedis|cds)\\b")
     private val BUY = Regex("(?i)^(\\s*)by(\\s+$NUM\\s+(?:ghana\\s+)?(?:cedis?|pesewas?)\\b|\\s+(?:me\\s+)?(?:some\\s+)?(?:airtime|credit|data|a bundle|bundles?|mashup)\\b)")
     private val TELECEL = Regex("(?i)\\b(?:telegram|telesales?|tele ?cell|telecel|telly ?(?:cell|sell)|tele ?sel|tell a (?:cell|sell))" +
         "(\\s+(?:number|line|sim|bundles?|data|airtime|credit|cash|network|mashup)\\b)")
@@ -92,6 +100,8 @@ object GhanaWords {
             t = repairAmounts(t, PESEWAS_PS, "pesewas", all)
             t = repairAmounts(t, CEDIS, "cedis", all)
         }
+        t = MOMO_MISHEARD.replace(t) { m -> m.groupValues[1] + "MoMo" }
+        if (AIRTIME_TALK.containsMatchIn(t)) t = ONE_CEDIS_HEARD.replace(BUY_HEARD.replace(t, "buy"), "1 cedi's")
         t = BUY.replace(t) { m -> m.groupValues[1] + "Buy" + m.groupValues[2] }
         if (aboutMoney || MONEY_SHAPED.containsMatchIn(MOMO_ANY.replace(t, " "))) {
             t = MOMO_AFTER.replace(t) { m -> m.groupValues[1] + m.groupValues[2] + "MoMo" }

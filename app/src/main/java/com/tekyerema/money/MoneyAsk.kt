@@ -689,7 +689,7 @@ object MoneyAsk {
     private val OTHER_PRON = setOf("him", "her", "them", "someone", "somebody")
 
     private val BAL_VOCAB = setOf("please", "can", "could", "you", "kindly", "i", "i'd", "want", "to", "would", "like", "need", "let",
-        "me", "help", "check", "tell", "what", "what's", "whats", "is", "are", "read", "show", "give", "say", "know", "see", "get",
+        "me", "help", "check", "tell", "what", "what's", "whats", "where", "where's", "wheres", "is", "are", "read", "show", "give", "say", "know", "see", "get",
         "hear", "find", "out", "my", "the", "current", "available", "remaining", "balance", "on", "in", "of", "for", "how", "much",
         "left", "do", "have", "got", "now", "there", "a", "quick", "again", "just", "momo", "mobile", "money", "mtn", "wallet",
         "account", "cash", "airtime", "credit", "call", "units", "phone", "sim", "line")
