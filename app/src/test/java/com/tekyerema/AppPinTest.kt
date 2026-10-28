@@ -45,4 +45,25 @@ class AppPinTest {
         assertEquals(0, c.count)
         assertEquals(1, c.size)
     }
+
+    @Test fun aPinBoxWithThePhonesKeyboardIsFoundToo() {
+        val els = listOf(UiElement(1, "TextView", "Enter your PIN to confirm", Box(100, 600, 900, 660)),
+            UiElement(2, "EditText", null, Box(100, 700, 900, 800), editable = true, password = true),
+            key(3, "Confirm", 100, 900))
+        val k = AppPin.find(UiSnapshot("com.mtngh.mymtn", "PIN", els, 0L))
+        assertNotNull(k)
+        assertEquals(2, k!!.field); assertEquals(3, k.confirm)
+        assertEquals(true, k.digits.isEmpty())
+    }
+
+    @Test fun theReferenceIsTheUsersWordsOnly() {
+        val screen = org.json.JSONObject().put("app", "com.mtngh.mymtn").put("elements", org.json.JSONArray()
+            .put(org.json.JSONObject().put("id", 15).put("label", "Reference")).put(org.json.JSONObject().put("id", 13).put("label", "Amount")))
+        fun q(text: String, said: String, id: Int = 15) = com.tekyerema.money.MtnApp.referenceQuestion("type",
+            org.json.JSONObject().put("element_id", id).put("text", text), screen, said)
+        assertEquals("What should the reference say? You can say none.", q("Transfer", "send 5 cedis to 0552093690"))
+        assertNull(q("laptop", "send 5 cedis to 0552093690\nlaptop"))       // the user's answer
+        assertNull(q("Transfer", "send 5 cedis to 0552093690\nnone"))        // they said none: the planner's blank/default is not theirs to argue
+        assertNull(q("5", "send 5 cedis", id = 13))                           // not a reference field
+    }
 }

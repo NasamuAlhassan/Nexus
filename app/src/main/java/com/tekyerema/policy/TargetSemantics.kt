@@ -337,6 +337,9 @@ object TargetSemantics {
 
         // J-03: a control that SPENDS money is TIER3 — its own read-back class, above an ordinary send. A real button
         // whose caption STARTS with a spend verb counts even when long ("Pay GH₵ 50.00 to Kwame Mensah").
+        // MTN's app (28 Oct 2026): "Continue" after the number, amount and reference went straight to the PIN with nothing read back.
+        if (lower != null && mtnCommit(screen, label!!))
+            return Classification(RiskTier.TIER3, null, "target '$label' commits a filled money form in MTN's app — the PIN comes next")
         if (lower != null && isSpendCaption(label!!, target) && !mtnAppMenu(screen, label))
             return Classification(RiskTier.TIER3, null, "target '$label' spends money")
 
@@ -493,6 +496,14 @@ object TargetSemantics {
         if (filledFields(screen).isNotEmpty()) return false
         return !MTN_FINAL.matches(label.trim().lowercase())
     }
+    /** MTN's app, a form with something filled in, and its going-on button: the step before the PIN. */
+    internal fun mtnCommit(screen: UiSnapshot?, label: String): Boolean {
+        val pkg = screen?.appPackage ?: return false
+        if (!(pkg.startsWith("com.mtngh.") || pkg.startsWith("com.mtn."))) return false
+        if (filledFields(screen).isEmpty()) return false
+        return Regex("^(?:continue|next|proceed|send|send now|confirm|pay|pay now|submit|done)$").matches(label.trim().lowercase())
+    }
+
     /** A payment's last button: still TIER3 everywhere, MTN's app included. */
     private val MTN_FINAL = Regex("^(?:pay|pay now|buy now|buy|confirm|confirm .*|checkout|check out|complete .*|place order|proceed to pay.*|send|send now|submit|approve)$")
 

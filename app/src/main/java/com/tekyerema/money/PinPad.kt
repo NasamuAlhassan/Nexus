@@ -251,12 +251,12 @@ object PinPad {
     /** An app's own keypad (money/AppPin): the new digit's button, or its delete key for one taken back; the app's confirm after the last. */
     private suspend fun actOnApp(ctrl: AccessibilityController, c: Counter, ev: Counter.Event) {
         if (ev is Counter.Event.Digit) {
-            val ok = AppPin.press(ctrl, c.text().last())
+            val ok = AppPin.enter(ctrl, c.text(), added = true)
             if (!ok) { buzz(longArrayOf(0, 40, 70, 40, 70, 40)); c.hold(); return }   // not pressed: taken back out, the user tries again
             buzz(longArrayOf(0, 80))
             if (ev.digits >= length()) sendJob = scope.launch { kotlinx.coroutines.delay(SEND_PAUSE_MS); sendOnApp(ctrl, c) }
         } else {
-            if (c.size < AppPin.typed) AppPin.deleteOne(ctrl)
+            if (c.size < AppPin.typed) AppPin.enter(ctrl, c.text(), added = false)
             buzz(longArrayOf(0, 25, 90, 25))
         }
     }

@@ -45,7 +45,10 @@ object PinTouchPad {
 
     private fun tick() {
         val armed = PinPad.isArmed()
-        val want = armed && !suspended && PinPad.touchEnabled() && PinPad.handles()
+        // In an app (MyMTN) the PIN is the volume keys' or the app's own buttons' — no drawing layer over them (owner, 28 Oct 2026:
+        // "stop the drawing, let's use the keys"). `pin.app.touchPad` true brings the layer back.
+        val inApp = com.tekyerema.money.AppPin.active() && !AppConfig.bool("pin.app.touchPad", false)
+        val want = armed && !suspended && !inApp && PinPad.touchEnabled() && PinPad.handles()
         if (want && view == null) show()
         if (!want && view != null) hide()
         if (armed || view != null) main.postDelayed({ tick() }, POLL_MS) else watching = false

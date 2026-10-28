@@ -350,6 +350,9 @@ class RoutingBrain(
             com.tekyerema.policy.ActionSemantics.unnamedRecipientQuestion(c.name, c.args,
                 (listOf(ctx.goal) + com.tekyerema.money.MoneyFlow.answers(ctx.history).map { it.second }).joinToString("\n"), ctx.screen.toString())
         }?.takeIf { q -> ctx.history.count { it.startsWith("ask_user(\"$q\")") } < 2 }
+            ?: (guarded as? AgentDecision.CallTool)?.let { c -> com.tekyerema.money.MtnApp.referenceQuestion(c.name, c.args, ctx.screen,
+                (listOf(ctx.goal) + com.tekyerema.money.MoneyFlow.answers(ctx.history).map { it.second }).joinToString("\n")) }
+                ?.takeIf { q -> ctx.history.count { it.startsWith("ask_user(\"$q\")") } < 2 }
         val d = openInsteadOfHunting(ctx, if (unnamed != null) {
             android.util.Log.i("Tekyerema", "[GUARD] the planner chose a person the user never named — asking instead")
             AgentDecision.CallTool("ask_user", org.json.JSONObject().put("question", unnamed), "the person wasn't named — asked, never chosen")

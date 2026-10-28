@@ -44,6 +44,26 @@ object MtnApp {
         return ctx != null && installed(ctx) != null
     }
 
+    private val REF_FIELD = Regex("(?i)\\b(?:reference|ref|note|narration|description|purpose|remark|message)\\b")
+    private val NO_REF = Regex("(?i)\\b(?:no reference|none|nothing|leave it (?:empty|blank)|no note|skip it)\\b")
+
+    /**
+     * The planner typing into a reference / note field of MTN's app something the user never said → the question to ask instead
+     * (owner, 28 Oct 2026: "the reference" — it typed "Transfer" by itself). Null when it's fine (said, or not a reference field).
+     */
+    fun referenceQuestion(tool: String, args: org.json.JSONObject, screen: org.json.JSONObject, said: String): String? {
+        if (tool != "type") return null
+        val app = screen.optString("app")
+        if (!(app.startsWith("com.mtngh.") || app.startsWith("com.mtn."))) return null
+        val id = args.optInt("element_id", -1)
+        val els = screen.optJSONArray("elements") ?: return null
+        val label = (0 until els.length()).map { els.getJSONObject(it) }.firstOrNull { it.optInt("id", -2) == id }?.optString("label").orEmpty()
+        if (!REF_FIELD.containsMatchIn(label)) return null
+        val text = args.optString("text").trim()
+        if (text.isEmpty() || said.contains(text, ignoreCase = true) || NO_REF.containsMatchIn(said)) return null
+        return "What should the reference say? You can say none."
+    }
+
     /** The planner's guide for a money request in app mode, or null when app mode is off or the request is not about money. */
     fun ruleFor(goal: String): String? = if (GOAL.containsMatchIn(goal) && useApp()) rule() else null
 
@@ -55,7 +75,10 @@ object MtnApp {
         "missing; for airtime or a bundle, how much and for whom (self by default). Open the app with open_app, wait for its home " +
         "screen, and go straight to the task's own button (Send money / Transfer, Airtime & Bundles, Balance) — never browse offers, " +
         "banners, ads or 'Explore'. Dismiss a pop-up or promo with its close / Skip / Not now control, never its main button. " +
-        "Fill each field from the facts, choosing the network/wallet the app offers for MTN. When the app shows the recipient's " +
+        "Fill each field from the facts, choosing the network/wallet the app offers for MTN. A REFERENCE / note / description field is " +
+        "the user's words only: if they gave none, ask_user what it should say (they may say none) — never invent one. Before the " +
+        "Continue / Send / Next that follows the filled form (the PIN comes right after it), ask_user to confirm with the number or " +
+        "name, the amount and the reference read back. When the app shows the recipient's " +
         "NAME and the amount on a summary screen, ask_user to confirm with the name, number and amount read back, before the final " +
         "Send/Confirm; a different name than expected → tell the user and stop. The PIN is the user's: when the app asks for it, " +
         "say so and stop — never type, read or guess it. Balance: the app may hide it behind an eye / 'tap to view' control that " +

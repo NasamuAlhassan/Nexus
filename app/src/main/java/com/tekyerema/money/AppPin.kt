@@ -15,7 +15,10 @@ import com.tekyerema.accessibility.UiSnapshot
  * own labels ("1", "2", "Delete") are read to find them.
  */
 object AppPin {
-    data class Keypad(val digits: Map<Char, Int>, val delete: Int?, val confirm: Int?, val area: Box)
+    /** The app's own 0–9 buttons ([digits]), or — when it shows a PIN BOX with the phone's keyboard instead — that box ([field]). */
+    data class Keypad(val digits: Map<Char, Int>, val delete: Int?, val confirm: Int?, val area: Box, val field: Int? = null)
+
+    private val PIN_WORDS = Regex("(?i)\\b(?:pin|passcode|password|pass code|secret code)\\b")
 
     private val DELETE = Regex("(?i)^(?:delete|del|backspace|back ?space|clear|remove|erase|⌫|←)$")
     private val CONFIRM = Regex("(?i)^(?:ok|okay|confirm|submit|continue|done|proceed|next|enter|pay|send|approve|✓)$")
@@ -32,9 +35,17 @@ object AppPin {
                 area = area?.let { Box(minOf(it.left, e.bounds.left), minOf(it.top, e.bounds.top), maxOf(it.right, e.bounds.right), maxOf(it.bottom, e.bounds.bottom)) } ?: e.bounds
             }
         }
-        if (digits.size < 10 || area == null) return null
-        val del = els.firstOrNull { e -> e.clickable && DELETE.matches(e.label?.trim().orEmpty()) }
         val ok = els.firstOrNull { e -> e.clickable && CONFIRM.matches(e.label?.trim().orEmpty()) }
+        if (digits.size < 10 || area == null) {
+            // 28 Oct 2026 (MyMTN, "the PIN isn't working"): no 0–9 buttons — a PIN box typed with the phone's keyboard. The pad fills
+            // the box; its touch area is the screen's lower half, where that keyboard sits.
+            val box = els.firstOrNull { e -> e.editable && (e.password || PIN_WORDS.containsMatchIn(e.hint.orEmpty()) || PIN_WORDS.containsMatchIn(e.label.orEmpty())) }
+                ?: return null
+            val w = els.maxOf { it.bounds.right }.coerceAtLeast(box.bounds.right)
+            val h = els.maxOf { it.bounds.bottom }.coerceAtLeast(box.bounds.bottom)
+            return Keypad(emptyMap(), null, ok?.id, Box(0, h / 2, w, h), field = box.id)
+        }
+        val del = els.firstOrNull { e -> e.clickable && DELETE.matches(e.label?.trim().orEmpty()) }
         var a: Box = area
         for (x in listOfNotNull(del, ok)) a = Box(minOf(a.left, x.bounds.left), minOf(a.top, x.bounds.top), maxOf(a.right, x.bounds.right), maxOf(a.bottom, x.bounds.bottom))
         return Keypad(digits, del?.id, ok?.id, a)
@@ -51,14 +62,20 @@ object AppPin {
     suspend fun begin(ctrl: AccessibilityController): Boolean {
         if (!PinPad.enabled()) return false
         val s = try { ctrl.buildSnapshot() } catch (_: Throwable) { return false }
-        val k = find(s) ?: return false
+        val k = find(s) ?: run {
+            // Why not (counts only, no screen text): helps tell "no keypad" from "a layout we don't know".
+            val els = s.elements
+            android.util.Log.i("Tekyerema", "[PINPAD] no keypad on ${s.appPackage}: digitKeys=${els.count { e -> e.label?.trim()?.let { it.length == 1 && it[0].isDigit() } == true }} " +
+                "editable=${els.count { it.editable }} password=${els.count { it.password }}")
+            return false
+        }
         keypad = k; pkg = s.appPackage; typed = 0
         com.tekyerema.voice.SecureStep.begin(appPackage = s.appPackage)
         PinPad.arm()
-        android.util.Log.i("Tekyerema", "[PINPAD] armed on ${s.appPackage}'s own keypad (confirm=${k.confirm != null}, delete=${k.delete != null})")
-        if (com.tekyerema.core.Taught.teach("pin.app.tip")) try {
-            com.tekyerema.voice.VoiceEngine.announce("You can draw each number of your PIN on the keypad, one at a time. One buzz means it went in; " +
-                "three short buzzes, draw it again. Two fingers take one back. The volume keys work too.")
+        android.util.Log.i("Tekyerema", "[PINPAD] armed on ${s.appPackage}'s ${if (k.field != null) "PIN box" else "own keypad"} (confirm=${k.confirm != null}, delete=${k.delete != null})")
+        if (com.tekyerema.core.Taught.teach("pin.app.keys.tip")) try {
+            com.tekyerema.voice.VoiceEngine.announce("Use the volume keys for your PIN: press volume down once for each number, then volume up " +
+                "to put it in — volume up on its own is a zero. One buzz means it went in. Hold either key to take one back.")
         } catch (_: Throwable) {}
         return true
     }
@@ -75,6 +92,13 @@ object AppPin {
         val k = try { find(ctrl.buildSnapshot()) } catch (_: Throwable) { null } ?: return null
         keypad = k
         return k
+    }
+
+    /** The PIN so far into the app: its box filled with [soFar] (box layout), or the button of its newest digit ([added], keypad layout). */
+    suspend fun enter(ctrl: AccessibilityController, soFar: String, added: Boolean): Boolean {
+        val k = keypad ?: return false
+        if (k.field != null) return ctrl.setText(k.field, soFar, submit = false).also { if (it) typed = soFar.length }
+        return if (added) press(ctrl, soFar.last()) else deleteOne(ctrl)
     }
 
     suspend fun press(ctrl: AccessibilityController, digit: Char): Boolean {
