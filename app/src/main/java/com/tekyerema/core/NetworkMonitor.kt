@@ -96,7 +96,13 @@ object NetworkMonitor {
      * usable-ish) AND whose traffic isn't known to be stalling. While stalled, each check nudges a background probe
      * (rate-limited) so the circuit closes soon after the link recovers.
      */
+    /** Debug builds: `debug.forceOffline` makes the app behave as if there were no network (28 Oct 2026), so the offline paths can be
+     *  tested on the demo phone without anyone switching its airplane mode. Release builds ignore it. */
+    private fun forcedOffline(): Boolean =
+        com.tekyerema.BuildConfig.DEV_HOOKS && com.tekyerema.core.config.AppConfig.bool("debug.forceOffline", false)
+
     fun isOnline(): Boolean {
+        if (forcedOffline()) return false
         if (state() == Connectivity.OFFLINE) return false
         if (LinkHealth.stalled()) { LinkProbe.kick(); return false }
         return true
@@ -104,7 +110,7 @@ object NetworkMonitor {
 
     /** Why [isOnline] is false (or [OfflineReason.NONE] when it isn't). */
     fun offlineReason(): OfflineReason = when {
-        state() == Connectivity.OFFLINE -> OfflineReason.NO_NETWORK
+        forcedOffline() || state() == Connectivity.OFFLINE -> OfflineReason.NO_NETWORK
         LinkHealth.stalled() ->
             if (LinkHealth.tracker.openKind(System.currentTimeMillis()) == LinkHealthTracker.OpenKind.SHORT) OfflineReason.SLOW
             else OfflineReason.STALLED
