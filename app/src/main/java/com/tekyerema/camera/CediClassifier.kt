@@ -58,9 +58,13 @@ class CediClassifier private constructor(ctx: Context) {
         val (tl, tc) = classify(tight)
         val base = com.tekyerema.core.config.AppConfig.double("camera.currency.gate", 0.85)
         val (cls, conf) = ObjectCrop.decide(fl, fc, tl, tc) { c -> CurrencyAnnouncer.gateFor(c, base) }
-        // A sure reading is checked in the other three quarter-turns of the same pixels; a held note may be any way up.
+        return checked(cls, conf, tight ?: full)
+    }
+
+    /** A sure money reading of [src] checked in its other three quarter-turns (a held note may be any way up); unsure ones pass as they are. */
+    fun checked(cls: String, conf: Double, src: FloatArray): Pair<String, Double> {
+        val base = com.tekyerema.core.config.AppConfig.double("camera.currency.gate", 0.85)
         if (!com.tekyerema.core.config.AppConfig.bool("camera.currency.turnCheck", true) || MoneyItems.itemOf(cls) == null || conf < base) return cls to conf
-        val src = tight ?: full
         // The 1 and 2 cedi coins are alike in size and colour (28.0 vs 27.6 mm): said only when all four turns clearly pick one of the two.
         if (cls == "coin_1_cedi" || cls == "coin_2_cedis") {
             val one = labels.indexOf("coin_1_cedi"); val two = labels.indexOf("coin_2_cedis")

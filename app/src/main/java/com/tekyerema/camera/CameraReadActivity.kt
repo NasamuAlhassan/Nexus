@@ -170,6 +170,9 @@ class CameraReadActivity : ComponentActivity() {
     private var rgbBuf: FloatArray? = null
     private var smallBuf: FloatArray? = null     // the 96 px grid the object is found on
     private var tightBuf: FloatArray? = null     // the object crop the model reads
+    private var detector: CediDetector? = null   // finds every note and coin in the frame (cedi_det.onnx), when in the build
+    private var detTried = false
+    private var detBuf: FloatArray? = null       // the whole frame squeezed to 320 px for the detector
     /** When money was last SEEN but not readable — drives the honest "I can see money but…" coaching. */
     private var moneySeenAt = 0L
     private var lastCurrencyHintAt = 0L
@@ -573,6 +576,35 @@ class CameraReadActivity : ComponentActivity() {
         val luma = FrameStats.mean(FrameConvert.planeBytes(yP, yBuf).also { yBuf = it },
             yP.rowStride, yP.pixelStride, 0, 0, image.width, image.height, step = 16)
         if (luma < AppConfig.double("camera.quality.darkBelow", QualityGate.DARK_BELOW)) main.post { turnTorchOn() }
+
+        // The detector (28 Oct 2026): every note and coin in the whole frame, each then named from the camera's own pixels and
+        // checked in its other quarter-turns. A coin box named as a note (or the reverse) is not trusted. Nothing found → the
+        // older path below (a note filling the frame is still read from the centre square).
+        if (AppConfig.bool("camera.currency.detector", true)) {
+            if (!detTried) { detTried = true; detector = if (CediDetector.installed(this)) CediDetector.create(this) else null }
+            detector?.let { det ->
+                val boxes = det.detect(RgbSquare.stretched(image, CediDetector.SIDE, detBuf).also { detBuf = it },
+                    AppConfig.double("camera.currency.detScore", CediDetector.SCORE_MIN.toDouble()).toFloat())
+                    .take(AppConfig.int("camera.currency.maxItems", 6))
+                if (boxes.isNotEmpty()) {
+                    val readings = boxes.map { b ->
+                        val w = CediDetector.window(b, image.width, image.height, AppConfig.double("camera.currency.detMargin", 1.25).toFloat())
+                        val px = RgbSquare.window(image, CediClassifier.SIDE, tightBuf, w.x, w.y, w.size).also { tightBuf = it }
+                        val (c0, p0) = model.classify(px)
+                        val (c, p) = model.checked(c0, p0, px)
+                        val sameKind = MoneyItems.itemOf(c)?.let { it.note == !b.coin } ?: true
+                        MoneyItems.Reading(c, if (sameKind) p else 0.0)
+                    }
+                    if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[CEDI] detector ${boxes.size} box(es): " +
+                        boxes.zip(readings).joinToString(" ") { (b, r) -> "${if (b.coin) "coin" else "note"}@${"%.2f".format(b.score)}=${r.cls}:${"%.2f".format(r.conf)}" })
+                    if (boxes.size >= 2) {
+                        val count = MoneyItems.count(readings, AppConfig.double("camera.currency.gate", 0.85))
+                        main.post { onItems(count) }
+                    } else main.post { onCurrency(readings[0].cls, readings[0].conf) }
+                    return
+                }
+            }
+        }
 
         val rgb = RgbSquare.from(image, CediClassifier.SIDE, rgbBuf).also { rgbBuf = it }
         // The object, cropped (ObjectCrop): a coin is ~15 % of the centre square and was misread at that size. Off: camera.currency.tightCrop.

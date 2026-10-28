@@ -152,6 +152,14 @@
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:theme="@style/Theme.Tekyerema.Voice" />
 
+        <!-- Debug builds only (it finishes at once otherwise): labelled money photos for training and testing. -->
+        <activity
+            android:name=".camera.MoneyCollectActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.Tekyerema.Voice" />
+
         <activity
             android:name=".camera.CameraReadActivity"
             android:exported="false"

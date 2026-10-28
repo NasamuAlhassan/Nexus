@@ -124,7 +124,16 @@ object RgbSquare {
 
     /** A [crop]-pixel square window of the frame starting at ([x0], [y0]), sampled to [side]×[side] — the object crop reads the
      *  camera's own pixels at full detail, not an already-shrunk copy (ObjectCrop). */
-    fun window(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?, x0: Int, y0: Int, crop: Int): FloatArray {
+    fun window(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?, x0: Int, y0: Int, crop: Int): FloatArray =
+        rect(image, side, reuse, x0, y0, crop, crop)
+
+    /** The WHOLE frame stretched to [side]×[side] — what the cedi detector eats (it was trained on frames squeezed the same way). */
+    fun stretched(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?): FloatArray =
+        rect(image, side, reuse, 0, 0, image.width, image.height)
+
+    /** A [cw]×[ch] rectangle of the frame from ([x0], [y0]) sampled to [side]×[side]. */
+    fun rect(image: androidx.camera.core.ImageProxy, side: Int, reuse: FloatArray?, x0: Int, y0: Int, cw: Int, ch: Int): FloatArray {
+        val crop = cw
         val out = if (reuse != null && reuse.size == side * side * 3) reuse else FloatArray(side * side * 3)
         val yP = image.planes[0]
         val uP = image.planes[1]
@@ -137,7 +146,7 @@ object RgbSquare {
         val uPix = uP.pixelStride
         var o = 0
         for (j in 0 until side) {
-            val sy = y0 + j * crop / side
+            val sy = y0 + j * ch / side
             val uvRow = (sy / 2) * uRow
             for (i in 0 until side) {
                 val sx = x0 + i * crop / side

@@ -184,6 +184,12 @@ class RunGoalReceiver : BroadcastReceiver() {
             } catch (t: Throwable) { Log.w("Tekyerema", "[IMPORT] debug read_image failed: ${t.javaClass.simpleName}") }
             return
         }
+        // Money training/test photos (camera/MoneyCollectActivity):  --es money_collect note_50 [--ei count 30] [--el every 600]
+        intent.getStringExtra("money_collect")?.let { label ->
+            context.startActivity(com.tekyerema.camera.MoneyCollectActivity.intent(context, label,
+                intent.getIntExtra("count", 30), intent.getLongExtra("every", 600L)))
+            return
+        }
         // P5-03 test harness: open the document reader on a PDF in the app's own sandbox (the reader is not exported).
         intent.getStringExtra("read_document")?.let { path ->
             val f = java.io.File(path)
