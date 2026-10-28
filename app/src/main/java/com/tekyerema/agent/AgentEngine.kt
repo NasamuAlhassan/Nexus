@@ -2481,9 +2481,12 @@ object AgentEngine {
         _state.update { it.copy(status = AgentStatus.SECURE_INPUT, handoffReason = reason) }
         // An app's own PIN keypad (MyMTN): the PIN pad presses its buttons — volume keys, taps, or digits drawn on the keypad (money/AppPin).
         controller?.let { c -> try { com.tekyerema.money.AppPin.begin(c) } catch (_: Throwable) { false } }
-        val done = try { secureChannel.receive() } finally {
+        var done = false
+        try { done = secureChannel.receive() } finally {
             com.tekyerema.core.Privacy.secureStep = false
-            try { if (!com.tekyerema.money.PinWatch.adopt()) com.tekyerema.money.AppPin.end() } catch (_: Throwable) {}
+            // The task ENDING at an app's PIN screen (stopped): the watch keeps the pad for the user. The task going ON ("done"):
+            // the pad ends here — the agent reads what follows, so the step must not stay blind.
+            try { if (done || !com.tekyerema.money.PinWatch.adopt()) com.tekyerema.money.AppPin.end() } catch (_: Throwable) {}
         }
         if (done) com.tekyerema.agent.helper.HelperGate.pinDone()
         _state.update { it.copy(handoffReason = null) }

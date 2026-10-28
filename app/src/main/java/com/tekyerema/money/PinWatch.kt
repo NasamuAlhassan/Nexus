@@ -120,6 +120,8 @@ object PinWatch {
     fun adopt(): Boolean {
         val p = AppPin.pkg ?: return false
         if (!AppPin.active()) return false
+        // Only the live service's events can end it later (the watch's own looks): without one, nothing would.
+        if (com.tekyerema.accessibility.TekyeremaAccessibilityService.live == null) return false
         mine = p; misses = 0
         com.tekyerema.core.Privacy.secureStep = true
         android.util.Log.i("Tekyerema", "[PINPAD] watch: kept the pad on $p after the task ended")
