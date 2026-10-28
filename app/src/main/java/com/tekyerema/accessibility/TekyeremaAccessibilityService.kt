@@ -879,11 +879,24 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     }
 
     override suspend fun setFocusedText(text: String): Boolean {
-        val node = try { findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Throwable) { null } ?: return false
-        if (!node.isEditable) return false
+        fun focusedBox(): AccessibilityNodeInfo? = try { findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Throwable) { null }?.takeIf { it.isEditable }
+        // A PIN box an app hides behind drawn cells (MyMTN) is not in the accessibility tree at all, although the keyboard types
+        // into it (emulator, 28 Oct 2026: input focus on it, findFocus null, not even in a full layout dump). Android 13+ gives an
+        // accessibility service the focused box's input connection — the keyboard's own way in: the box is emptied and refilled.
+        val node = focusedBox() ?: return if (Build.VERSION.SDK_INT >= 33) imeSetText(text) else false
         return try {
             node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
                 Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) })
+        } catch (_: Throwable) { false }
+    }
+
+    @androidx.annotation.RequiresApi(33)
+    private fun imeSetText(text: String): Boolean {
+        val ic = try { inputMethod?.currentInputConnection } catch (_: Throwable) { null } ?: return false
+        return try {
+            ic.deleteSurroundingText(64, 64)
+            if (text.isNotEmpty()) ic.commitText(text, 1, null)
+            true
         } catch (_: Throwable) { false }
     }
 

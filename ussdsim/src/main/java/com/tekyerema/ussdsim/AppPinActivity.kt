@@ -54,7 +54,8 @@ class AppPinActivity : Activity() {
         hidden = EditText(this).apply {
             inputType = InputType.TYPE_CLASS_NUMBER
             alpha = 0f
-            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            // `--ez a11yHidden true`: hidden from accessibility too (harsher than React Native, whose boxes stay accessible)
+            if (intent.getBooleanExtra("a11yHidden", false)) importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
                 override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}

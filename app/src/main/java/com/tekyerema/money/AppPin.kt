@@ -165,6 +165,7 @@ object AppPin {
             // The box behind the cells: filled whole each time; if it lost focus, a tap on the first cell gives it back once.
             var ok = ctrl.setFocusedText(soFar)
             if (!ok) { fresh(ctrl)?.hiddenBoxCell?.let { ctrl.clickElement(it) }; kotlinx.coroutines.delay(250); ok = ctrl.setFocusedText(soFar) }
+            if (!ok) android.util.Log.i("Tekyerema", "[PINPAD] the hidden PIN box took nothing (no box with input focus)")
             return ok.also { if (it) typed = soFar.length }
         }
         if (k.cells.isNotEmpty()) {

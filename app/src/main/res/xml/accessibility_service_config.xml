@@ -6,7 +6,7 @@
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged|typeViewClicked|typeViewTextChanged|typeNotificationStateChanged|typeAnnouncement"
     android:accessibilityFeedbackType="feedbackSpoken|feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagRequestAccessibilityButton|flagRequestFilterKeyEvents|flagRequestFingerprintGestures"
+    android:accessibilityFlags="flagDefault|flagRetrieveInteractiveWindows|flagReportViewIds|flagRequestAccessibilityButton|flagRequestFilterKeyEvents|flagRequestFingerprintGestures|flagInputMethodEditor"
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRequestFingerprintGestures="true"
