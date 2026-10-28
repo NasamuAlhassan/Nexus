@@ -13,7 +13,7 @@ import com.tekyerema.core.config.AppConfig
  * (a trailing `*` is a prefix). Airtime-balance checks stay on USSD (quick, not a transaction).
  */
 object MtnApp {
-    private val DEFAULT_PACKAGES = listOf("com.mtn.momo*", "com.mtn.mobilemoney*", "com.mtn.mymtn*", "com.mtn.*")
+    private val DEFAULT_PACKAGES = listOf("com.mtngh.mymtn", "com.mtngh.*", "com.mtn.momo*", "com.mtn.mobilemoney*", "com.mtn.mymtn*", "com.mtn.*")
 
     /** A MoMo transaction or MoMo balance in words: the requests app mode takes. */
     val GOAL = Regex("(?i)\\b(?:send|transfer|pay|paid|withdraw|cash ?out|momo|mobile money|airtime|credit|bundle|data|balance|recharge|top ?up)\\b")

@@ -26,7 +26,7 @@ object AppToUssd {
         data class Switch(val history: List<String>) : Outcome()
     }
 
-    private val APP_STEP = Regex("(?i)^open_app\\(.*(?:mtn|momo)|com\\.mtn\\.")
+    private val APP_STEP = Regex("(?i)^open_app\\(.*(?:mtn|momo)|com\\.mtn(?:gh)?\\.")
     private val PIN_STEP = Regex("(?i)\\bPIN\\b|secure[_ ](?:step|input|done)")
     private val MONEY_CONFIRM = Regex("(?i)\\b(?:send|pay|buy|transfer|confirm|withdraw)\\b")
 
