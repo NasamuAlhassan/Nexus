@@ -46,8 +46,10 @@ object MoneyTally {
         }
     }
 
-    /** The phone's count of [pieces]. */
-    fun reconcile(pieces: List<Piece>): Tally {
+    /** The phone's count of [pieces]. [fanned]: the model said the pieces lie over each other (notes fanned in a hand) — their
+     *  boxes overlap because the NOTES do, so only two practically identical boxes are one piece (owner, 29 Oct 2026: "I might
+     *  hold 10 cedis 2, and 5 cedis" — two fanned 10s were merged into one, and a 10 over a 5 was "spread them out"). */
+    fun reconcile(pieces: List<Piece>, fanned: Boolean = false): Tally {
         val keep = BooleanArray(pieces.size) { true }
         val doubt = HashSet<Pair<Double, Boolean>>()
         var merged = 0
@@ -57,6 +59,11 @@ object MoneyTally {
             val a = pieces[i]; val b = pieces[j]
             val ba = a.box ?: continue; val bb = b.box ?: continue
             val same = a.value == b.value && a.note == b.note
+            if (fanned) {
+                val i2 = inter(ba, bb); val u = area(ba) + area(bb) - i2
+                if (u > 0f && i2 / u >= 0.85f) { if (same) { keep[j] = false; merged++ } else unstable = true }
+                continue
+            }
             when {
                 samePiece(ba, bb) -> if (same) { keep[j] = false; merged++ } else unstable = true
                 same && a.note && numeralsOfOneNote(ba, bb) -> { keep[j] = false; merged++; doubt += a.value to a.note }
@@ -79,7 +86,14 @@ object MoneyTally {
     fun sameCounts(a: String, b: String): Boolean = sameCounts(of(a), of(b))
 
     /** The tally of a model's answer, or null when it is not a money answer. */
-    fun of(json: String): Tally? = parse(json)?.let { reconcile(it) }
+    fun of(json: String): Tally? {
+        val pieces = parse(json) ?: return null
+        val o = obj(json)
+        val fanned = o?.optBoolean("overlapping", false) == true
+        // notes lying on each other are counted only from a photo the model was sure of; else no count (spread them out)
+        if (fanned && o?.optString("confidence", "") == "low") return Tally(emptyMap(), emptySet(), 0, unstable = true)
+        return reconcile(pieces, fanned)
+    }
 
     /** [json] with each boxed piece re-read by the phone ([Checked.json]); [read] pieces had a sure on-phone reading, [changed] of
      *  them differed from the model's (value or note/coin) and now carry the phone's; [boxed] pieces had a usable box. */

@@ -82,4 +82,20 @@ class MoneyTallyTest {
         assertFalse(MoneyTally.sameCounts(overlap, overlap))
         assertFalse(MoneyTally.sameCounts(ok, "not json"))
     }
+
+    /** Owner, 29 Oct 2026: "I might hold 10 cedis 2, and 5 cedis" — notes fanned in the hand, their boxes overlapping. */
+    @Test fun notesFannedInTheHandAreEachCounted() {
+        val fanned = """{"notes":[${note(10, "[200,100,800,600]")},${note(10, "[220,250,820,750]")},${note(5, "[240,400,840,900]")}],"overlapping":true,"unreadable":0,"confidence":"high","fix":""}"""
+        val t = MoneyTally.of(fanned)!!
+        assertFalse(t.unstable)
+        assertEquals(2, t.counts[10.0 to true]); assertEquals(1, t.counts[5.0 to true]); assertEquals(25.0, t.total, 1e-9)
+        // the same note listed twice still merges, overlapping or not
+        val twice = """{"notes":[${note(10, "[200,100,800,600]")},${note(10, "[205,105,800,600]")}],"overlapping":true,"confidence":"high"}"""
+        assertEquals(1, MoneyTally.of(twice)!!.counts[10.0 to true])
+        // a photo of a pile the model wasn't sure of: no count
+        val low = fanned.replace("\"confidence\":\"high\"", "\"confidence\":\"low\"")
+        assertTrue(MoneyTally.of(low)!!.unstable)
+        // without the flag, the old rule: two values on one place can't be told apart
+        assertTrue(MoneyTally.of(ans(note(10, "[200,100,800,600]"), note(5, "[220,150,820,650]")))!!.unstable)
+    }
 }

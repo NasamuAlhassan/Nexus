@@ -68,5 +68,9 @@ class MoneyBurst(
 
         /** The phone's sure reading and the cloud's count of the same frame say the same money. */
         fun agrees(phone: List<MoneyItems.Item>, cloud: Map<Pair<Double, Boolean>, Int>?): Boolean = cloud != null && counts(phone) == cloud
+
+        /** Every piece the phone read is among the cloud's, and the cloud saw more (notes held together: the phone reads the top one). */
+        fun within(phone: List<MoneyItems.Item>, cloud: Map<Pair<Double, Boolean>, Int>?): Boolean =
+            cloud != null && cloud.values.sum() > phone.size && counts(phone).all { (k, n) -> (cloud[k] ?: 0) >= n }
     }
 }

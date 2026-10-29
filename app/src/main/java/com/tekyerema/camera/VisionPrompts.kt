@@ -37,8 +37,11 @@ Never say a road is safe to cross. Keep Ghanaian names and Twi letters (ɛ, ɔ) 
     // "count each paper once" a single 10 was still counted as two on 24 Oct. A count the phone cannot check is gone.
     const val MONEY = """
 Count the Ghana cedi money in this photo for a blind person. JSON only, no other text:
-{"notes":[{"kind":"note","value_ghs":20,"box":[310,120,690,880],"sure":true}],"unreadable":0,"other_currency":"","confidence":"high","fix":""}
+{"notes":[{"kind":"note","value_ghs":20,"box":[310,120,690,880],"sure":true}],"overlapping":false,"unreadable":0,"other_currency":"","confidence":"high","fix":""}
 "notes" has ONE entry per PHYSICAL piece of paper or coin: three 10 cedi notes are three entries, one note is one entry.
+Notes held together — fanned out in a hand, or lying partly over each other — are still SEPARATE pieces: count every note whose
+own edge or numeral you can see, one entry each (two 10 cedi notes fanned together are TWO entries), box only the part of each
+that shows, and set "overlapping":true.
 box is that piece's WHOLE outline — its edges, not a numeral — as [ymin, xmin, ymax, xmax] on a 0 to 1000 scale.
 A note prints its value SEVERAL times (in the corners, the middle and on the back): that is still one note, one entry, one
 box around the whole paper. Notes: GH₵1, 2, 5, 10, 20, 50, 100, 200. Coins: 1, 5, 10, 20, 50 pesewas (0.01 to 0.5) and

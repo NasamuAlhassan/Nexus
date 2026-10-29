@@ -47,4 +47,13 @@ class MoneyBurstTest {
         assertEquals(false, MoneyBurst.agrees(items, mapOf((10.0 to true) to 1, (2.0 to false) to 1)))
         assertEquals(false, MoneyBurst.agrees(items, null))
     }
+
+    @Test fun `the phone read the top note of a fan, the cloud every note`() {
+        val top = listOf(MoneyItems.Item(10.0, true))
+        val fan = mapOf((10.0 to true) to 2, (5.0 to true) to 1)
+        assertEquals(true, MoneyBurst.within(top, fan))
+        assertEquals(false, MoneyBurst.within(listOf(MoneyItems.Item(20.0, true)), fan))   // a piece the cloud didn't see
+        assertEquals(false, MoneyBurst.within(top, mapOf((10.0 to true) to 1)))           // not more: that is agreeing
+        assertEquals(false, MoneyBurst.within(top, null))
+    }
 }

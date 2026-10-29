@@ -707,6 +707,14 @@ class CameraReadActivity : ComponentActivity() {
         if (closing || mode != MODE_CURRENCY) return
         val now = SystemClock.elapsedRealtime()
         moneySeenAt = now
+        // Online, notes held together are counted by the online check (owner, 29 Oct 2026: "two 10s and a 5" fanned in the hand):
+        // the pile is an unsure frame of the brief capture, whose sharp frame then goes to the cloud. Offline the phone can't count
+        // a pile, so it asks for the notes spread out.
+        if (burstOn && cloudConfirms()) {
+            if (resting(now, money = true)) return
+            burst.offerItems(MoneyItems.Count(emptyList(), 1, 0), now)?.let { onBurstVerdict(it) }
+            return
+        }
         if (isSpeaking() || now - lastCurrencyHintAt < AppConfig.long("camera.currency.hintEveryMs", 6_000L)) return
         lastCurrencyHintAt = now
         Log.i(TAG, "[CAMERA] money pieces overlap: asked to spread them out")
@@ -828,18 +836,23 @@ class CameraReadActivity : ComponentActivity() {
             val tally = (r as? VisionResult.Described)?.let { MoneyTally.of(it.text) }?.takeIf { !it.unstable && !it.isEmpty }
             Log.i(TAG, "[CEDI] cloud answered in ${SystemClock.elapsedRealtime() - t0} ms: " +
                 (tally?.let { "${it.counts.values.sum()} piece(s), ${it.doubtful.size} doubtful" } ?: "no count"))
+            // the cloud's count said as a line — only when it read every piece clearly
+            val cloudLine = tally?.takeIf { it.doubtful.isEmpty() }?.counts
+                ?.flatMap { (k, n) -> List(n) { MoneyItems.Item(k.first, k.second) } }
+                ?.let { MoneyItems.Count(it, 0, 0) }?.let { c -> if (isTwi()) MoneyItems.spokenTwi(c) else MoneyItems.spoken(c) }
             when {
                 // The phone wasn't sure (owner, 29 Oct 2026: "take a quick capture… send it to the online brain… it should scan the
-                // numbers and tell me the amount"): the cloud's reading of the printed numerals is said alone — only when it read every
-                // piece clearly; otherwise "not sure", once.
+                // numbers and tell me the amount"): the cloud's reading of the printed numerals is said alone; otherwise "not sure", once.
                 v !is MoneyBurst.Verdict.Sure -> {
-                    val items = tally?.takeIf { it.doubtful.isEmpty() }?.counts?.flatMap { (k, n) -> List(n) { MoneyItems.Item(k.first, k.second) } }
-                    val line = items?.let { MoneyItems.Count(it, 0, 0) }?.let { c -> if (isTwi()) MoneyItems.spokenTwi(c) else MoneyItems.spoken(c) }
-                    if (line != null) { Log.i(TAG, "[CEDI] phone not sure — the cloud read the numerals"); lastUnsureAt = 0L; deliver(line) }
+                    if (cloudLine != null) { Log.i(TAG, "[CEDI] phone not sure — the cloud read the numerals"); lastUnsureAt = 0L; deliver(cloudLine) }
                     else sayUnsure(unsure)
                 }
                 tally == null -> { Log.i(TAG, "[CEDI] cloud gave no count — the phone's reading stands"); deliver(phoneLine) }
                 MoneyBurst.agrees(v.items, tally.counts) -> { Log.i(TAG, "[CEDI] phone and cloud agree"); deliver(phoneLine) }
+                // Notes fanned in the hand: the phone read the top one, the cloud every note — the phone's are among the cloud's.
+                cloudLine != null && MoneyBurst.within(v.items, tally.counts) -> {
+                    Log.i(TAG, "[CEDI] the cloud saw more pieces than the phone (held together) — its count"); deliver(cloudLine)
+                }
                 else -> {
                     Log.i(TAG, "[CEDI] phone and cloud disagree — not said")
                     deliver(if (isTwi()) MoneyItems.UNSURE_TW else phrase("currencyDisagree",
