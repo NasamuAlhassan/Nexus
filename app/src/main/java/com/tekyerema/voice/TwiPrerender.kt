@@ -13,6 +13,7 @@ object TwiPrerender {
         com.tekyerema.camera.MoneyItems.UNSURE_TW,
         Closers.TWI_NOT_HEARD,
         TWI_NEEDS_INTERNET_TWI,
+        OFFLINE_TWI_LIMIT_TWI,
         "Mia bio na magyae.",
         "Yoo.",
         "Ka aane anaa daabi."

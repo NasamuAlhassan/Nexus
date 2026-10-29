@@ -44,6 +44,8 @@ class TwiWifeFlowTest {
         assertEquals("read the message my wife sent", gloss("nkraa no a me yere so ma me no"))      // "kenkan" lost
         assertEquals("read the message my wife sent", gloss("kenkan nkrataa no a me yere soma me no"))
         assertEquals("read the message my wife sent", gloss("kenkan nkra a meyere somaa me"))
+        assertEquals("read the message my wife sent", gloss("kenkran nkran no a me yere so ma me no"))
+        assertEquals("read my messages", gloss("thinkan me nkra"))
         // the new demo's person (a woman records it): "me kunu" — my husband
         assertEquals("read the message my husband sent", gloss("kenkan nkra a me kunu somaa me no"))
         assertEquals("read the message my husband sent", gloss("kenkan nkoraa no a me kunu so ma me no"))

@@ -62,6 +62,12 @@ object AgentEngineBridge : AgentBridge {
     override fun statusLine(): String = AgentEngine.statusLine()
 }
 
+/** Offline, a Twi request the phone's Twi commands didn't take — in Twi, for the phone's own Twi voice (20 Oct 2026). "No internet.
+ *  I can do small things like calling, sending money, the time and music. Say it again, or wait for the internet." [owner: a native
+ *  speaker to verify]. Pre-rendered (TwiPrerender): it took 2.7 s to start (Infinix, 29 Oct 2026). */
+const val OFFLINE_TWI_LIMIT_TWI = "Intanɛt nni hɔ seesei. Metumi ayɛ nneɛma nketenkete te sɛ frɛ, sika soma, bere ne nnwom. " +
+    "San ka bio, anaa twɛn ma intanɛt mmra."
+
 /**
  * The Phase-2 voice lifecycle (§26). Orchestrates: mic → VAD (in [MicCapture]) → ASR+LID+normalize
  * ([AsrProvider]) → the SAME general [AgentEngine] (both languages, one agent) → verify (the agent's
@@ -904,10 +910,6 @@ class VoiceController(
     /** Offline in Twi: what the phone CAN do, said in English (there is no Twi voice offline). */
     private val OFFLINE_TWI_LIMIT = "Offline, I understand simple Twi requests — sending money, airtime, calls, your " +
         "balance, the time, volume and music. For anything else, say it in English, or connect to the internet."
-    /** The same, in Twi, for the phone's own Twi voice (20 Oct 2026). "No internet. I can do small things like calling,
-     *  sending money, the time and music. Say it again, or wait for the internet." [owner: a native speaker to verify] */
-    private val OFFLINE_TWI_LIMIT_TWI = "Intanɛt nni hɔ seesei. Metumi ayɛ nneɛma nketenkete te sɛ frɛ, sika soma, bere ne nnwom. " +
-        "San ka bio, anaa twɛn ma intanɛt mmra."
     private val SECURE_TAP_DONE = "When you've finished, tap Done, or type done."
     /** A Kusaal request with no trustworthy English (the translator is the only way in). Said in English: the line that
      *  would carry it into Kusaal is the very service that just failed. */
@@ -1382,7 +1384,12 @@ class VoiceController(
             SpeechVocabulary.isContactPhrase(said)
         }?.also {
             Log.i("Tekyerema", "[TWI] understood on the phone → '${com.tekyerema.core.Privacy.content(it)}'")
-        } else null
+        } ?: (if (com.tekyerema.core.NetworkMonitor.isOnline() || !com.tekyerema.core.config.AppConfig.bool("speech.twi.offlineKeywords", true)) null
+            // Offline, no exact pattern: a guess from its key words (language/TwiKeywords) — what can't do harm unasked, and money
+            // that is still read back for a yes.
+            else com.tekyerema.language.TwiKeywords.guess(repaired) { said -> SpeechVocabulary.isContactPhrase(said) }?.also {
+                Log.i("Tekyerema", "[TWI] guessed from its key words offline → '${com.tekyerema.core.Privacy.content(it)}'")
+            }) else null
         // Kusaal (owner, 19 October 2026): understood through our Space's translator — the phone's fast path and the planner
         // get the ENGLISH, while the conversation stays Kusaal so the answer is put back into Kusaal (RoutingTts). The words go
         // as heard (the English/Twi repairs above don't know Kusaal); with no trustworthy English nothing is acted on.

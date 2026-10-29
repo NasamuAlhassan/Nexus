@@ -75,6 +75,9 @@ object TwiCommands {
     /** "Kenkan nkra a me yere somaa me no" — the message one person sent, as the phone's own recogniser writes it (Infinix, 29 Oct
      *  2026, offline: "kenkan nkoraa no a me yere so ma me no", and once with the "kenkan" lost — both answered "needs the
      *  internet"): nkra / nkraa / nkoraa / nkrataa, a "no" after it, "so ma" in two words. Anyone: "me kunu" is my husband. */
+    /** "kenkan" (read) at the start, as the phone's recogniser also writes it: "kenkran", "kɛnkan", "thinkan", "kankan" (Infinix, 29 Oct
+     *  2026: "kenkran nkran no a me yere so ma me no" was "needs the internet"). */
+    private val READ_VERB = Regex("(?i)^(?:k|th)[eɛai]nkr?a[nm]?(?=\\s|$)")
     private val SENT_BY = Regex("^(?:kenkan\\s+)?(?:me\\s+)?n?k[oɔ]?r(?:a{1,2}|ata{1,2})n?(?:\\s+no)?\\s+(?:a|na)\\s+(.+?)\\s+(?:de\\s+)?s[oɔu]\\s?maa?\\s+me(?:\\s+no)?$")
     /** English verb, Twi object — code-mixed money: "Send pesewa du ma Prince" / "send sika ma Ama" (QA TR11: neither parser
      *  took it and the cloud asked for a payment reference). */
@@ -232,6 +235,7 @@ object TwiCommands {
         val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(mendMoneyWords(text)).trim(), "")
             .replace(Regex("(?<=\\d),(?=\\d{3})"), "").replace(",", " ").replace(Regex("\\s+"), " "), "")
             .let { KA_KYERE.replace(it, "ka kyerɛ ").replace(Regex("\\s+"), " ").trim() }
+            .replace(READ_VERB, "kenkan")
         if (t.isEmpty()) return null
         // Matched in lower case (Ɛ/ɛ and Ɔ/ɔ fold — a regex case flag alone doesn't, and the Unicode-case flag isn't
         // safe on Android's regex engine); a name is taken from the user's own spelling at the same place.
