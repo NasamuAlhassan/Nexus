@@ -891,12 +891,20 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         return words.any { w -> try { root.findAccessibilityNodeInfosByText(w).isNotEmpty() } catch (_: Throwable) { true } }
     }
 
-    override suspend fun setFocusedText(text: String): Boolean {
+    override suspend fun setFocusedText(text: String, maxExisting: Int, refuse: Regex?): Boolean {
         fun focusedBox(): AccessibilityNodeInfo? = try { findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Throwable) { null }?.takeIf { it.isEditable }
+        // A PIN goes only into the PIN's own box: a focused box that already holds more than the PIN so far (a phone number), or is
+        // named for something else, is refused (29 Oct 2026 — MyMTN's PIN sheet sits over a form with a number box).
+        fun wrong(n: AccessibilityNodeInfo): Boolean {
+            val held = n.text?.toString().orEmpty()
+            val named = (n.hintText?.toString().orEmpty() + " " + n.viewIdResourceName.orEmpty().substringAfter(":id/"))
+            return held.length > maxExisting || (refuse != null && refuse.containsMatchIn(named))
+        }
         // A PIN box an app hides behind drawn cells (MyMTN) is not in the accessibility tree at all, although the keyboard types
         // into it (emulator, 28 Oct 2026: input focus on it, findFocus null, not even in a full layout dump). Android 13+ gives an
         // accessibility service the focused box's input connection — the keyboard's own way in: the box is emptied and refilled.
-        val node = focusedBox() ?: return if (Build.VERSION.SDK_INT >= 33) imeSetText(text) else false
+        val node = focusedBox() ?: return if (Build.VERSION.SDK_INT >= 33) imeSetText(text, maxExisting) else false
+        if (wrong(node)) { Log.i("Tekyerema", "[PINPAD] the focused box is not the PIN's — nothing typed"); return false }
         return try {
             node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT,
                 Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) })
@@ -904,8 +912,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     }
 
     @androidx.annotation.RequiresApi(33)
-    private fun imeSetText(text: String): Boolean {
+    private fun imeSetText(text: String, maxExisting: Int = Int.MAX_VALUE): Boolean {
         val ic = try { inputMethod?.currentInputConnection } catch (_: Throwable) { null } ?: return false
+        // The same rule through the keyboard's way in: a box already holding more than the PIN so far is not the PIN's.
+        val held = try { ic.getSurroundingText(64, 64, 0)?.text?.length } catch (_: Throwable) { null }
+        if (held != null && held > maxExisting) { Log.i("Tekyerema", "[PINPAD] the focused box is not the PIN's — nothing typed"); return false }
         return try {
             ic.deleteSurroundingText(64, 64)
             if (text.isNotEmpty()) ic.commitText(text, 1, null)

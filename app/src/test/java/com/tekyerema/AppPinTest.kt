@@ -98,6 +98,18 @@ class AppPinTest {
         assertNull(k.field)
     }
 
+    /** MyMTN's PIN sheet over the Send MoMo form, as logged on the Infinix, 29 Oct 2026: the form's number box stays in the tree. */
+    @Test fun thePinCellsWinOverTheFormBehindTheSheet() {
+        val s = UiSnapshot("com.mtngh.mymtn", "Send MoMo", mymtnPinSheet().elements + listOf(
+            UiElement(30, "EditText", "0552093690", Box(107, 1348, 889, 1491), editable = true, hint = "Enter Phone Number"),
+            UiElement(33, "Button", "Continue, busy", Box(63, 1349, 1017, 1496), clickable = true, enabled = false)), 0L)
+        val k = AppPin.find(s)
+        assertNotNull(k)
+        assertEquals(6, k!!.hiddenBoxCell)
+        assertNull(k.field)
+        assertEquals(true, AppPin.NOT_PIN.containsMatchIn("Enter Phone Number"))
+    }
+
     @Test fun theWatchArmsOnAnyAppsPinScreenButNotOnACalculator() {
         assertNotNull(com.tekyerema.money.PinWatch.appPinScreen(mymtnPinSheet()))
         assertNotNull(com.tekyerema.money.PinWatch.appPinScreen(keypad()))                      // "Enter your MoMo PIN" + 0–9

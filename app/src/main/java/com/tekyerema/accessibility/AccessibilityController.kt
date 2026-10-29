@@ -27,7 +27,7 @@ interface AccessibilityController {
     suspend fun setText(id: Int, text: String, submit: Boolean = false): Boolean
     /** Set the text of the box that has INPUT focus — the one the keyboard types into — even when the app hides it behind
      *  drawn cells (a PIN row). False when nothing has input focus or it takes no text. */
-    suspend fun setFocusedText(text: String): Boolean = false
+    suspend fun setFocusedText(text: String, maxExisting: Int = Int.MAX_VALUE, refuse: Regex? = null): Boolean = false
     /** Cheap: does the screen in front show any of [words] (case-insensitive, in text or description)? True when it can't tell. */
     fun screenMentions(words: List<String>): Boolean = true
     suspend fun scrollElement(id: Int, direction: String): Boolean

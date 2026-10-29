@@ -33,11 +33,25 @@ class AppPinActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val keypad = intent.getStringExtra("mode") == "keypad"
+        val mode = intent.getStringExtra("mode").orEmpty()
+        val keypad = mode == "keypad"
+        // `send` / `badfocus`: the Send MoMo form left BEHIND the sheet, its number box filled (MyMTN, 29 Oct 2026). `badfocus`: a tap on a
+        // cell leaves the focus in that number box — the PIN pad must then type nothing at all.
+        val form = mode == "send" || mode == "badfocus"
+        badFocus = mode == "badfocus"
         val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(48, 96, 48, 48); setBackgroundColor(Color.WHITE) }
         root.addView(text("MoMo Balance", 22f))
         status = text("Show MoMo balance", 16f)
         root.addView(status)
+        if (form) {
+            number = EditText(this).apply { hint = "Enter Phone Number"; setText("0552093690"); inputType = InputType.TYPE_CLASS_PHONE
+                addTextChangedListener(object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+                    override fun afterTextChanged(e: Editable?) { Log.i("PinSim", "number box now ${e?.length ?: 0} chars, changed=${e?.toString() != "0552093690"}") }
+                }) }
+            root.addView(number)
+        }
         root.addView(text("Enter your MoMo pin", 20f))
         val row = FrameLayout(this)
         val cellRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -82,7 +96,11 @@ class AppPinActivity : Activity() {
 
     private fun text(s: String, size: Float) = TextView(this).apply { text = s; textSize = size; setPadding(0, 16, 0, 16) }
 
+    private var badFocus = false
+    private var number: EditText? = null
+
     private fun focusHidden() {
+        if (badFocus) { number?.requestFocus(); Log.i("PinSim", "cell tapped: focus left in the number box"); return }
         hidden.requestFocus()
         (getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager).showSoftInput(hidden, 0)
     }

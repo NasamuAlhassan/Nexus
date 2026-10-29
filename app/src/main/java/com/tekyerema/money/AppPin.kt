@@ -50,7 +50,11 @@ object AppPin {
             val area = Box(0, h / 2, w, h)
             // MyMTN (28 Oct 2026, its PIN sheet's layout): four tap cells "otp-input" and no box at all — the real box is hidden; a
             // tap on a cell gives it input focus and the keyboard. The volume keys fill that focused box.
-            pinCellRow(els)?.let { row -> if (els.none { it.editable && it.enabled }) return Keypad(emptyMap(), null, ok?.id, area, hiddenBoxCell = row.first()) }
+            pinCellRow(els)?.let { row ->
+                val pinBox = els.any { e -> e.editable && e.enabled && (e.password || PIN_WORDS.containsMatchIn(e.hint.orEmpty()) ||
+                    PIN_VIEW_ID.containsMatchIn(e.viewId?.substringAfter(":id/").orEmpty())) }
+                if (!pinBox) return Keypad(emptyMap(), null, ok?.id, area, hiddenBoxCell = row.first())
+            }
             val edits = els.filter { it.editable && it.enabled }
             if (edits.isEmpty()) return null
             pinCells(edits, w)?.let { return Keypad(emptyMap(), null, ok?.id, area, cells = it) }
@@ -70,7 +74,7 @@ object AppPin {
     /** A box that says it is for something else (the form's number, amount, reference...): never where a PIN goes. */
     private fun namedOther(e: com.tekyerema.accessibility.UiElement): Boolean =
         NOT_PIN.containsMatchIn(e.hint.orEmpty()) || NOT_PIN.containsMatchIn(e.viewId?.substringAfter(":id/").orEmpty())
-    private val NOT_PIN = Regex("(?i)(?:amount|reference|ref|note|narration|description|purpose|phone|number|msisdn|recipient|wallet|search|name|email|message)")
+    internal val NOT_PIN = Regex("(?i)(?:amount|reference|ref|note|narration|description|purpose|phone|number|msisdn|recipient|wallet|search|name|email|message)")
 
     /** Four to eight cells named PIN / OTP by their view id, side by side (not boxes — drawn cells), left to right; null otherwise. Pure. */
     fun pinCellRow(els: List<com.tekyerema.accessibility.UiElement>): List<Int>? {
@@ -165,8 +169,9 @@ object AppPin {
         if (k.field != null) return ctrl.setText(k.field, soFar, submit = false).also { if (it) typed = soFar.length }
         if (k.hiddenBoxCell != null) {
             // The box behind the cells: filled whole each time; if it lost focus, a tap on the first cell gives it back once.
-            var ok = ctrl.setFocusedText(soFar)
-            if (!ok) { fresh(ctrl)?.hiddenBoxCell?.let { ctrl.clickElement(it) }; kotlinx.coroutines.delay(250); ok = ctrl.setFocusedText(soFar) }
+            val before = if (added) soFar.length - 1 else soFar.length + 1
+            var ok = ctrl.setFocusedText(soFar, maxExisting = before, refuse = NOT_PIN)
+            if (!ok) { fresh(ctrl)?.hiddenBoxCell?.let { ctrl.clickElement(it) }; kotlinx.coroutines.delay(250); ok = ctrl.setFocusedText(soFar, maxExisting = before, refuse = NOT_PIN) }
             if (!ok) android.util.Log.i("Tekyerema", "[PINPAD] the hidden PIN box took nothing (no box with input focus)")
             return ok.also { if (it) typed = soFar.length }
         }
