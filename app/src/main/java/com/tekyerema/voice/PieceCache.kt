@@ -69,6 +69,15 @@ object PieceCache {
         } catch (_: Throwable) {}
     }
 
+    /** An app line made ahead of time (SherpaTts.prerender): kept on disk at once — it is the app's own words, never a message. */
+    @Synchronized
+    fun putFixed(ctx: Context, s: OnDeviceVoice.Spec, speed: Float, words: String, hz: Int, pcm: ShortArray) {
+        if (!enabled() || pcm.isEmpty() || secure()) return
+        val k = key(s, speed, words)
+        seen[k] = 2
+        put(ctx, s, speed, words, hz, listOf(pcm))
+    }
+
     /** Everything the cache holds, gone (memory and disk). */
     @Synchronized
     fun clear(ctx: Context) {

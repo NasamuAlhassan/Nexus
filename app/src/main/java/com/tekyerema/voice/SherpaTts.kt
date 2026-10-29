@@ -379,18 +379,57 @@ class SherpaTts(context: Context, private val dir: String = OnDeviceVoice.dirFor
      * True once any of the line was heard — or it was stopped (the next voice must not say it again). False only when
      * this voice could not make a sound, so the next voice in the chain says the line. Worker thread.
      */
+    /** The pieces [raw] is said in — one cut for speaking and pre-rendering, so a pre-rendered piece is the one played. */
+    private fun piecesOf(s: OnDeviceVoice.Spec, raw: String) = OnDeviceVoice.plan(raw,
+        AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
+        AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60),
+        breaths = s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.breaths", true),
+        breathScale = AppConfig.double("speech.tts.onDevice.breathScale", 1.0).coerceIn(0.0, 3.0))
+        .map { pc -> pc.text?.let { t -> pc.copy(text = OnDeviceVoice.forModel(s, OnDeviceVoice.say(t, s.say))) } ?: pc }
+
+    private fun speedOf(s: OnDeviceVoice.Spec) = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate * s.speed).coerceIn(0.5f, 1.6f)
+
+    /**
+     * The app's fixed lines made into the piece cache ahead of time, not played (owner, 29 Oct 2026: "we're doing it offline so ours
+     * should be fast" — a Twi line the phone hasn't said before takes 1–5 s to start). One piece at a time, and only while nothing is
+     * being said, so a real reply never waits behind it. Pieces already cached are skipped; made ones go straight to disk.
+     */
+    fun prerender(texts: List<String>, language: String) {
+        val s = spec ?: return
+        if (!present || !enabled() || loadError != null || !OnDeviceVoice.speaks(s, language) || texts.isEmpty()) return
+        Thread({
+            var made = 0; var had = 0
+            val t0 = android.os.SystemClock.uptimeMillis()
+            try {
+                for (t in texts) for (p in piecesOf(s, t)) {
+                    val words = p.text ?: continue
+                    val speed = speedOf(s)
+                    if (PieceCache.get(app, s, speed, words) != null) { had++; continue }
+                    var waited = 0
+                    while ((current.get() != null || NowSpeaking.active) && waited < 120_000) { Thread.sleep(400); waited += 400 }
+                    val ok = try {
+                        worker.submit<Boolean> {
+                            if (current.get() != null) return@submit false
+                            val tts = load(s) ?: return@submit false
+                            val audio = tts.generate(words, 0, speed)
+                            PieceCache.putFixed(app, s, speed, words, tts.sampleRate(), OnDeviceVoice.pcm16(audio.samples))
+                            true
+                        }.get()
+                    } catch (_: Throwable) { false }
+                    if (ok) made++
+                }
+            } catch (_: InterruptedException) {}
+            Log.i("Tekyerema", "[TTS] pre-rendered $made piece(s), $had already cached, ${texts.size} line(s), ${android.os.SystemClock.uptimeMillis() - t0} ms")
+        }, "tts-prerender").apply { isDaemon = true; priority = Thread.MIN_PRIORITY }.start()
+    }
+
     private fun play(line: Line, s: OnDeviceVoice.Spec, raw: String): Boolean {
         if (line.cancelled) return true
         // The pronunciations go in AFTER the text is cut into pieces: a respelling may carry commas ("teh, cheh, reh, mah") that
         // must stay inside one piece, not become breaths.
-        val pieces = OnDeviceVoice.plan(raw,
-            AppConfig.long("speech.tts.pauseMs", 450L), AppConfig.long("speech.tts.breakMs", 900L),
-            AppConfig.int("speech.tts.onDevice.chunkChars", 140), AppConfig.int("speech.tts.onDevice.firstChars", 60),
-            breaths = s.type == OnDeviceVoice.VITS_PIPER && AppConfig.bool("speech.tts.onDevice.breaths", true),
-            breathScale = AppConfig.double("speech.tts.onDevice.breathScale", 1.0).coerceIn(0.0, 3.0))
-            .map { pc -> pc.text?.let { t -> pc.copy(text = OnDeviceVoice.forModel(s, OnDeviceVoice.say(t, s.say))) } ?: pc }
+        val pieces = piecesOf(s, raw)
         if (pieces.none { it.text != null }) return false
-        val speed = (AppConfig.double("speech.tts.rate", 1.0).toFloat() * rate * s.speed).coerceIn(0.5f, 1.6f)
+        val speed = speedOf(s)
         // A line whose every piece was said before plays from the cache without loading the model (A20e, 28 Oct 2026: a warm Twi
         // piece took ~11 s to make, the cold load 9 s more). Any piece not in the cache needs the model.
         val cached = pieces.mapNotNull { it.text }.associateWith { PieceCache.get(app, s, speed, it) }

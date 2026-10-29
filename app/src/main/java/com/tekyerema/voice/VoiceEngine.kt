@@ -179,6 +179,13 @@ object VoiceEngine {
     /** The user is speaking Twi right now. */
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
     /** DEBUG: say [text] with the phone's OWN voice for [language] (Twi or English), to time it ("first audio" in the log). */
+    /** The fixed Twi lines (and `speech.tts.prerender.twi` / [extra]) into the phone Twi voice's cache. */
+    fun prerenderTwi(extra: List<String> = emptyList()) {
+        if (!com.tekyerema.core.config.AppConfig.bool("speech.tts.prerender", true)) return
+        val lines = TwiPrerender.LINES + com.tekyerema.core.config.AppConfig.stringList("speech.tts.prerender.twi", emptyList()) + extra
+        try { twiLocal?.prerender(lines.distinct(), Lang.TWI) } catch (_: Throwable) {}
+    }
+
     suspend fun speakOnDevice(text: String, language: String): Boolean =
         (if (language == Lang.TWI) twiLocal?.let { RespellTts(it) } else ownVoice)?.speak(Verbalize.apply(text), language) ?: false
 
@@ -366,6 +373,8 @@ object VoiceEngine {
             Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
             Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
         }
+        // The app's fixed Twi lines, made into the voice's cache in the background (SherpaTts.prerender) — offline, no quota.
+        scope.launch { kotlinx.coroutines.delay(com.tekyerema.core.config.AppConfig.long("speech.tts.prerender.afterMs", 20_000L)); prerenderTwi() }
         // Short of memory for the offline recogniser: the phone voices let go first (they reload for the reply) — see SherpaTts.releaseNow.
         AsrMemory.onRelease(this) { ownVoice?.releaseNow(); twiLocal?.releaseNow() }
         langVoices = ON_DEVICE_LANGS.mapNotNull { l -> SherpaTts(app, OnDeviceVoice.dirFor(l)).takeIf { it.present }?.let { l to it } }.toMap()

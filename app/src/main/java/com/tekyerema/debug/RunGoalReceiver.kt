@@ -261,6 +261,13 @@ class RunGoalReceiver : BroadcastReceiver() {
                 "ok=$ok cls=${target.className?.toString()?.substringAfterLast('.')} desc='${target.contentDescription}' text='${target.text}'")
             return
         }
+        // Twi lines into the phone voice's cache ahead of time:  --es tts_prerender "line one|line two"  (or "default")
+        intent.getStringExtra("tts_prerender")?.let { v ->
+            val lines = if (v == "default") emptyList() else v.split('|').map { it.trim() }.filter { it.isNotEmpty() }
+            com.tekyerema.voice.VoiceEngine.prerenderTwi(lines)
+            Log.i("Tekyerema", "[TTS] pre-render asked for ${lines.size} extra line(s)")
+            return
+        }
         // One buzz with a chosen usage (core/Haptics):  --es haptic_test accessibility|notification|alarm|touch
         intent.getStringExtra("haptic_test")?.let { u ->
             if (android.os.Build.VERSION.SDK_INT >= 26) com.tekyerema.core.Haptics.play(context.applicationContext,
