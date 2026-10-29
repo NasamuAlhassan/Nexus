@@ -300,6 +300,9 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // dialog is on screen at the key-up (this filter sees the key before the dialog does) and gone 1.2 s later.
         // Back while the volume-key pad still waits for the PIN, with no keyboard up (a Back then only hides it): cancel the dialog
         // with its own Cancel — this phone's MTN dialog ignores Back (29 Oct 2026).
+        if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK && e.action == android.view.KeyEvent.ACTION_UP && com.tekyerema.voice.SecureStep.active())
+            Log.i("Tekyerema", "[PIN] Back at the secure step: padArmed=${com.tekyerema.money.PinPad.isArmed()} appPin=${com.tekyerema.money.AppPin.active()} " +
+                "phoneWindow=${phoneWindowPresent()} keyboard=${keyboardUp()}")
         if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK && e.action == android.view.KeyEvent.ACTION_UP &&
             com.tekyerema.voice.SecureStep.active() && com.tekyerema.money.PinPad.isArmed() && !com.tekyerema.money.AppPin.active() &&
             phoneWindowPresent() && !keyboardUp()) {
