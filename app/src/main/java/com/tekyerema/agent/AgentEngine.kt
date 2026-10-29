@@ -1027,6 +1027,16 @@ object AgentEngine {
                         // (because an earlier step didn't verify) both spoke a wrong "…but I couldn't confirm it"
                         // tail AND stopped the voice layer's ask-card/mic-reopen (which keys off a trailing "?").
                         val isQuestion = decision.summary.trim().endsWith("?")
+                        // A money figure nobody saw is never said (29 Oct 2026: "Your MoMo balance is 57 cedis" with the balance hidden).
+                        val moneyUnseen = if (isQuestion) null else MoneyGround.unseen(decision.summary,
+                            before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" }, history, runCtx.goal)
+                        if (moneyUnseen != null) {
+                            log(LogEntry.Kind.INFO, "completion gate: the answer names $moneyUnseen cedis, which nothing in this task showed — not said")
+                            val line = MoneyGround.honest(runCtx.goal)
+                            log(LogEntry.Kind.RESULT, line)
+                            pushConvo("Tɛkyerɛma: $line")
+                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
+                        }
                         if (isQuestion || (planOpen == null && !ungroundedRead && !webUnseen && notThere == null && (mutatingCount == 0 || substantiveOk))) {
                             log(LogEntry.Kind.RESULT, spokenSummary)
                             pushConvo("Tɛkyerɛma: ${decision.summary}")
@@ -1044,6 +1054,15 @@ object AgentEngine {
                         // spoken) stays a PLAIN sentence. VoiceController appends the honest "— but I couldn't
                         // confirm it" for COMPLETED_UNVERIFIED, so the user never hears the jargon prefix.
                         log(LogEntry.Kind.INFO, "unverified completion: $why (outcome not backed by observation)")
+                        // Unconfirmed AND naming specifics nobody saw: the specifics are not said (owner, 29 Oct 2026: "remove those
+                        // hallucinations") — never a made-up detail followed by "but I could not confirm it".
+                        MoneyGround.unseenDetail(decision.summary, before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" },
+                            history, runCtx.goal)?.let {
+                            log(LogEntry.Kind.INFO, "completion gate: an unconfirmed answer names details nothing showed — not said")
+                            log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
+                            pushConvo("Tɛkyerɛma: ${MoneyGround.NOT_SEEN}")
+                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
+                        }
                         log(LogEntry.Kind.RESULT, spokenSummary)
                         pushConvo("Tɛkyerɛma: ${decision.summary}")
                         finish(AgentStatus.COMPLETED_UNVERIFIED, stats, run = runCtx); return
