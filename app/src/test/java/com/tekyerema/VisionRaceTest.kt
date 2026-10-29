@@ -67,4 +67,26 @@ class VisionRaceTest {
         val r = VisionLadder.race(failure("HTTP 429", 100), failure("HTTP 503", 200), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500)
         assertTrue(r is VisionResult.Failed)
     }
+
+    /** The money check (29 Oct 2026): once Groq has answered, Gemini gets a short grace, not the whole wait. */
+    @Test fun withAGraceTheFastAnswerIsNotHeldForALateSmartRung() = runTest {
+        val r = VisionLadder.race(answer("groq", 1_200), answer("gemini", 9_000), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500,
+            fastGraceMs = 700)
+        assertEquals(VisionResult.Described("groq"), r)
+        assertEquals(1_900, currentTime)
+    }
+
+    @Test fun withAGraceASmartAnswerInsideItStillWins() = runTest {
+        val r = VisionLadder.race(answer("groq", 1_200), answer("gemini", 1_600), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500,
+            fastGraceMs = 700)
+        assertEquals(VisionResult.Described("gemini"), r)
+        assertEquals(1_600, currentTime)
+    }
+
+    @Test fun withAGraceAFailedFastRungStillWaitsForTheSmartOne() = runTest {
+        val r = VisionLadder.race(failure("HTTP 500", 300), answer("gemini", 3_000), smart = true, hedgeMs = 2_000, smartWaitMs = 4_500,
+            fastGraceMs = 700)
+        assertEquals(VisionResult.Described("gemini"), r)
+        assertEquals(3_000, currentTime)
+    }
 }

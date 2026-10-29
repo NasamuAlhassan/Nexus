@@ -830,9 +830,13 @@ class CameraReadActivity : ComponentActivity() {
                 FrameConvert.nv21ToJpeg(frame!!.first, frame.second[0], frame.second[1], frame.second[2], VisionPrompts.maxSide(null, true), 80)
             }
             val r = if (jpeg == null) null else kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.currency.cloudWaitMs", 9_000L)) {
-                VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true)
+                VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true,
+                    fastGraceMs = AppConfig.long("camera.currency.smartGraceMs", 700L))
             }
             if (closing) return@launch
+            // what the cloud said about the money (debug builds): why a pile came back with no count
+            if (com.tekyerema.BuildConfig.DEV_HOOKS) Log.i(TAG, "[CEDI] cloud said: " +
+                ((r as? VisionResult.Described)?.text?.replace(Regex("\\s+"), " ")?.take(600) ?: (r as? VisionResult.Failed)?.reason ?: "nothing"))
             val tally = (r as? VisionResult.Described)?.let { MoneyTally.of(it.text) }?.takeIf { !it.unstable && !it.isEmpty }
             Log.i(TAG, "[CEDI] cloud answered in ${SystemClock.elapsedRealtime() - t0} ms: " +
                 (tally?.let { "${it.counts.values.sum()} piece(s), ${it.doubtful.size} doubtful" } ?: "no count"))

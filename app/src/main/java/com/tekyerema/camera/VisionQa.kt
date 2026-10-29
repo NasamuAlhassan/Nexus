@@ -79,7 +79,7 @@ object VisionLadder {
      *  on, where the second rung (Gemini) is the better eye (counting and identification well ahead of Qwen's; research,
      *  23 Oct 2026), so its answer is preferred when it comes in time. */
     suspend fun describe(jpeg: ByteArray, prompt: String, settings: Settings, structured: Boolean = false, smart: Boolean = false,
-                         agree: ((String, String) -> String?)? = null): VisionResult {
+                         agree: ((String, String) -> String?)? = null, fastGraceMs: Long? = null): VisionResult {
         // Gemini resting after a 429 (its free key is shared with the brain's backup, web search and screen reading): the photo
         // goes to Groq alone until the rest is over (models session's review, 23 Oct 2026).
         val allowed = allowedRungs(settings)
@@ -105,7 +105,8 @@ object VisionLadder {
                 race(call(Rung.GROQ), call(Rung.GEMINI), smart,
                     hedgeMs = AppConfig.long("camera.vision.hedgeMs", 2_000L),
                     smartWaitMs = AppConfig.long("camera.vision.smartWaitMs", 4_500L),
-                    onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") }, agree = agree)
+                    onLoss = { r -> Log.w(TAG, "[CAMERA] a vision rung couldn't describe (${r.reason})") }, agree = agree,
+                    fastGraceMs = fastGraceMs)
             } ?: VisionResult.Failed("no answer within the camera's deadline")
         // One rung (Gemini resting, one key, ladder mode) keeps the same deadline: never 30 s of silence after "one moment".
         return kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.vision.totalMs", 15_000L)) { ladder(rungs.map(call), rungs) }
@@ -143,9 +144,11 @@ object VisionLadder {
      */
     /** [agree] (money): when BOTH rungs have answered a smart question, the two answers are compared — a non-null result
      *  replaces the smart answer (two different totals for the same photo → "I can't be sure"; third review, 23 Oct 2026). */
+    /** [fastGraceMs]: once the fast rung has described, the smart one gets only this much longer (the money check, 29 Oct 2026:
+     *  Groq answered in 0.6–1.6 s and Gemini never inside the 4.5 s wait — every answer came 3 s late). Null = the whole wait. */
     suspend fun race(fast: suspend () -> VisionResult, smartCall: suspend () -> VisionResult, smart: Boolean,
                      hedgeMs: Long, smartWaitMs: Long, onLoss: (VisionResult.Failed) -> Unit = {},
-                     agree: ((String, String) -> String?)? = null): VisionResult =
+                     agree: ((String, String) -> String?)? = null, fastGraceMs: Long? = null): VisionResult =
         kotlinx.coroutines.coroutineScope {
             val a = async { fast() }
             val b = async {
@@ -153,7 +156,13 @@ object VisionLadder {
                 else smartCall()
             }
             if (smart) {
-                val early = kotlinx.coroutines.withTimeoutOrNull(smartWaitMs) { b.await() }
+                val early = kotlinx.coroutines.withTimeoutOrNull(smartWaitMs) {
+                    if (fastGraceMs == null) b.await()
+                    else kotlinx.coroutines.selects.select<VisionResult?> {
+                        b.onAwait { it }
+                        a.onAwait { fr -> if (fr is VisionResult.Described) kotlinx.coroutines.withTimeoutOrNull(fastGraceMs) { b.await() } else b.await() }
+                    }
+                }
                 if (early is VisionResult.Described) {
                     val heldFast = if (a.isCompleted) a.await() else null   // already in hand: no extra wait, no extra request
                     a.cancel()
