@@ -149,6 +149,17 @@ class RoutingTts(
         class Partly(val rest: String) : GhResult()
     }
 
+    /**
+     * A network English voice's own waits (`speech.ghEnglish.waitMs.<client id>`: `first`, `next`), else the shared
+     * [ghFirstWaitMs] / [ghNextWaitMs]. Gemini's Kore MAKES each line (29 Oct 2026), where the Kafui Space only plays lines it
+     * already holds (150 ms): with the shared 150 ms Kore was cancelled before Google could answer, every time.
+     */
+    private fun ghWaits(gh: TtsProvider): Pair<Long, Long> {
+        val o = (gh as? com.tekyerema.language.HttpTtsProvider)?.spec?.id
+            ?.let { com.tekyerema.core.config.AppConfig.obj("speech.ghEnglish.waitMs.$it") }
+        return (o?.optLong("first", 0L)?.takeIf { it > 0 } ?: ghFirstWaitMs()) to (o?.optLong("next", 0L)?.takeIf { it > 0 } ?: ghNextWaitMs())
+    }
+
     @Volatile private var ghRestUntil = 0L
     @Volatile private var ghSlowTrips = 0
 
@@ -178,7 +189,8 @@ class RoutingTts(
             fun fetchAsync(i: Int, waitMs: Long) = async {
                 kotlinx.coroutines.withTimeoutOrNull(waitMs) { gh.fetch(pieces[i], Lang.GH_EN) }
             }
-            var next = fetchAsync(0, if (resting) 250L else ghFirstWaitMs())
+            val (firstMs, nextMs) = ghWaits(gh)
+            var next = fetchAsync(0, if (resting) 250L else firstMs)
             for (i in pieces.indices) {
                 val clips = next.await()
                 if (clips == null) {
@@ -196,7 +208,7 @@ class RoutingTts(
                     ghSlowTrips = 0
                     Log.i("Tekyerema", "[TTS] Gh-English voice ${gh.name}: first sentence ready in ${clock() - t0} ms (${pieces.size} sentence(s))")
                 }
-                if (i + 1 < pieces.size) next = fetchAsync(i + 1, ghNextWaitMs())
+                if (i + 1 < pieces.size) next = fetchAsync(i + 1, nextMs)
                 if (!gh.play(clips)) {
                     next.cancel()
                     Log.i("Tekyerema", "[TTS] Gh-English playback ended early (stopped)")

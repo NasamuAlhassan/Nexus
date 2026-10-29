@@ -65,6 +65,9 @@ class GeminiTtsTest {
         // Twi is untouched: the lab's voice alone online, no race
         assertEquals(listOf("hcilab_tts", "space_tts", "system"), AppConfig.stringList("providers.speech.tts.twi", emptyList()))
         assertEquals(0L, AppConfig.long("providers.speech.ttsHedgeMs", -1L))
+        // Kore makes each line (~4.5 s for a short sentence): its own waits, not the Kafui Space's 150 ms that cancelled it
+        assertTrue(AppConfig.long("speech.ghEnglish.waitMs.gemini_tts.first", 0L) >= 5_000L)
+        assertEquals(150L, AppConfig.long("speech.ghEnglish.firstWaitMs", 0L))
     }
 
     @Test fun request_carries_kore_the_style_and_the_text_verbatim() = runTest {

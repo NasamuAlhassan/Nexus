@@ -35,7 +35,11 @@
    "_enabledNote": "20 Oct 2026: the cached F5 Kafui lines play first; a line not cached waits only firstWaitMs, then the phone's own Kafui voice (models/ondevice/eng/tts, chain 'ghvoice') speaks it. false = on-device Kafui only.",
    "_note": "19 Oct 2026: the Kafui Dey English voice from the language Space is the default English voice. A CPU line takes ~24 s when the Space GPU is busy, so a first sentence gets 12 s (then the phone voice speaks), and the app's fixed lines are kept on disk (HttpProviders.TtsDiskCache.keepsEnglish) so they play at once after one slow fetch.",
    "firstWaitMs": 150,
-   "nextWaitMs": 150
+   "nextWaitMs": 150,
+   "_waitMsNote": "29 Oct 2026: a network English voice can have its own waits (first sentence / each next one). Gemini's Kore MAKES every line: one short sentence took 4.3-4.8 s from the laptop at the camp (the shared 150 ms cancelled it every time on the Infinix). Kafui on the Space keeps 150 ms (cached lines only). With Kore the reply starts ~4.5 s later than the phone's own Kafui voice; lines the app says every time are kept on the phone after the first fetch and play at once.",
+   "waitMs": {
+    "gemini_tts": {"first": 5500, "next": 8000}
+   }
   },
   "voiceLayer": {
    "profile": "gh_mixed",
