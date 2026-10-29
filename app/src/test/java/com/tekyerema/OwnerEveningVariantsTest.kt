@@ -32,7 +32,7 @@ class OwnerEveningVariantsTest {
     }
 
     @Test fun `momma and mono balance are MoMo`() {
-        for (s in listOf("What's my momma balance?", "What's my Mono balance?"))
+        for (s in listOf("What's my momma balance?", "What's my Mono balance?", "What's my mum who belongs?", "What is my mumo balance?"))
             assertEquals(s, MoneyAsk.Kind.BALANCE_MOMO, MoneyAsk.parse(s)?.kind)
     }
 

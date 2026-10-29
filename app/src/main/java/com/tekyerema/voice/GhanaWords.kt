@@ -64,7 +64,7 @@ object GhanaWords {
     private val MOMO_ANY = Regex("(?i)\\b$MOMO_WORD\\b")
     /** "my normal / mom / mama balance": "MoMo", as the phone's English recogniser hears it before "balance" (Infinix, 28 Oct 2026:
      *  "Where's my normal balance?", "what's my mom balance"). Only after "my" and before balance / wallet / account. */
-    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma|momma|mamma|mommy|mono|moono)(?=\\s+(?:balance|wallet|account)\\b)")
+    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma|momma|mamma|mommy|mono|moono|mumo|mum who|mom who|mamu)(?=\\s+(?:balance|belongs?|wallet|account)\\b)")
     /** Airtime said fast: "back once this airtime" / "buy once it is airtime" = "buy one cedi's airtime" (Infinix, 28 Oct 2026). Only
      *  in a sentence about airtime / credit / a bundle. */
     private val AIRTIME_TALK = Regex("(?i)\\b(?:airtime|credit|bundle|data)\\b")
@@ -103,6 +103,8 @@ object GhanaWords {
             t = repairAmounts(t, CEDIS, "cedis", all)
         }
         t = MOMO_MISHEARD.replace(t) { m -> m.groupValues[1] + "MoMo" }
+        // "What's my mum who belongs?" (the offline English recogniser, Infinix, 29 Oct 2026): after MoMo, "belongs" is balance
+        t = Regex("(?i)\\b(my\\s+MoMo)\\s+belongs?\\b").replace(t, "$1 balance")
         t = CEDI_AIRTIME_HEARD.replace(t, "cedi airtime")
         t = SERIES_OF_AIRTIME.replace(t) { m -> m.groupValues[1] + " cedis" }
         if (AIRTIME_TALK.containsMatchIn(t)) t = ONE_CEDIS_HEARD.replace(BUY_HEARD.replace(t, "buy"), "1 cedi's")
