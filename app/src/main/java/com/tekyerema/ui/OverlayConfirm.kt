@@ -221,7 +221,7 @@ object OverlayConfirm {
                     onAnswerByVoice = { VoiceEngine.respond() },
                     onType = { setTyping(true) },
                     onSecureDone = { AgentEngine.secureInputDone(); hideSoon() },
-                    onStopTask = { VoiceEngine.cancel(); hideSoon() },
+                    onStopTask = { com.tekyerema.ui.assistant.StopGuard.press { VoiceEngine.cancel(); hideSoon() } },
                     onSubmitTyped = { submitTyped(it) },
                     onCloseTyping = { setTyping(false) }
                 )

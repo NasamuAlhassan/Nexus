@@ -271,7 +271,7 @@ fun AssistantSurfaceHost(
             SurfaceStore.update { l -> if (state.key.startsWith("reply:")) l.copy(dismissedReplyKey = state.key, dismissedAt = t)
                 else l.copy(dismissedRun = state.runSeq, dismissedAt = t) }
         },
-        onStopTask = { VoiceEngine.cancel(); AgentEngine.stop() },
+        onStopTask = { StopGuard.press { VoiceEngine.cancel(); AgentEngine.stop() } },
         onStopSpeaking = { VoiceEngine.hush() },
         onConfirm = { approved, seq -> AgentEngine.confirm(approved, seq) },
         // A choice is that answer only while the agent is still asking (ChoiceGate).

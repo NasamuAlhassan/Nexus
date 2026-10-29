@@ -70,3 +70,15 @@ class Oct29LogFixesTest {
         assertTrue(line.toString(), line == null || "Call menu" !in line)
     }
 }
+
+class StopGuardTest {
+    @Test fun oneStrayTapDoesNotStopTwoTapsDo() {
+        val g = com.tekyerema.ui.assistant.StopGuard
+        assertEquals(false, g.shouldStop(10_000, true))     // first tap: armed only
+        assertEquals(true, g.shouldStop(11_500, true))      // second within 3 s: stop
+        assertEquals(false, g.shouldStop(20_000, true))     // a later lone tap arms again
+        assertEquals(false, g.shouldStop(24_000, true))     // too late: arms again, no stop
+        assertEquals(true, g.shouldStop(25_000, true))
+        assertEquals(true, g.shouldStop(30_000, false))     // switched off: one tap stops
+    }
+}

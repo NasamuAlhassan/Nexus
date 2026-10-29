@@ -1030,6 +1030,15 @@ object AgentEngine {
                         // tail AND stopped the voice layer's ask-card/mic-reopen (which keys off a trailing "?").
                         val isQuestion = decision.summary.trim().endsWith("?")
                         // A money figure nobody saw is never said (29 Oct 2026: "Your MoMo balance is 57 cedis" with the balance hidden).
+                        val screenTask = usedRead || mutatingCount > 0
+                        val detailUnseen = if (isQuestion || !screenTask) null else MoneyGround.unseenDetail(decision.summary,
+                            before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" }, history, runCtx.goal)
+                        if (detailUnseen != null && MoneyGround.unseen(decision.summary, "", emptyList(), "") == null) {
+                            log(LogEntry.Kind.INFO, "completion gate: the answer names details nothing in this task showed — not said")
+                            log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
+                            pushConvo("Tɛkyerɛma: ${MoneyGround.NOT_SEEN}")
+                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
+                        }
                         val moneyUnseen = if (isQuestion) null else MoneyGround.unseen(decision.summary,
                             before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" }, history, runCtx.goal)
                         if (moneyUnseen != null) {
