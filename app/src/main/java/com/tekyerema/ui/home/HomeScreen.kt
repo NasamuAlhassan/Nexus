@@ -133,7 +133,7 @@ fun HomeContent(
         focusManager.clearFocus()   // tapping the orb while the keyboard is up: keyboard down, mic up
         if (Perms.mic(context)) VoiceEngine.start() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
-    val stopEverything = { VoiceEngine.cancel(); AgentEngine.stop() }
+    val stopEverything = { com.tekyerema.ui.assistant.StopGuard.press { VoiceEngine.cancel(); AgentEngine.stop() } }   // two taps (StopGuard)
     // The task is waiting on the USER (a question, a yes/no, the PIN step): a tap on the orb is how a person answers, so
     // it opens the mic for that answer — it used to be the kill switch here. A judge on the A20e (2026-09-29) was asked
     // for the MoMo number, tapped the orb to answer, and the tap stopped the task; the answer then arrived as a brand-new
