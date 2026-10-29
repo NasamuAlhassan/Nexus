@@ -42,8 +42,12 @@ val defaultAsrOnlineModel: String = localProps.getProperty("ASR_ONLINE_MODEL", "
 // Lab or any REST speech/translation API) reaches the app as ONE JSON map; `${SPEECH_…}` placeholders in
 // assets/config/language.json resolve against it. Nothing is committed — no SPEECH_ entries ⇒ every client stays off.
 fun jsonString(v: String) = "\"" + v.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n") + "\""
-val speechSecretsJson: String = localProps.stringPropertyNames().filter { it.startsWith("SPEECH_") }.sorted()
-    .joinToString(",", "{", "}") { jsonString(it) + ":" + jsonString(localProps.getProperty(it).trim()) }
+// The existing Gemini keys reach it too, as SPEECH_GEMINI_KEY_1..3: the Kore English voice rotates through them (free tier:
+// 10 voice requests a key a day — 29 Oct 2026). An explicit SPEECH_ entry of the same name wins.
+val speechSecrets: Map<String, String> = (listOf("GEMINI_API_KEY", "GEMINI_API_KEY_2", "GEMINI_API_KEY_3")
+    .mapIndexedNotNull { i, k -> localProps.getProperty(k, "").trim().takeIf { it.isNotBlank() }?.let { "SPEECH_GEMINI_KEY_${i + 1}" to it } }.toMap() +
+    localProps.stringPropertyNames().filter { it.startsWith("SPEECH_") }.associateWith { localProps.getProperty(it).trim() }).toSortedMap()
+val speechSecretsJson: String = speechSecrets.entries.joinToString(",", "{", "}") { jsonString(it.key) + ":" + jsonString(it.value) }
 
 // API KEYS go into DEBUG builds only (the owner's sideloaded test phones). Anything in BuildConfig can be read back out of
 // the APK by decompiling it (OWASP MASVS-STORAGE; Android "hardcoded secrets" guidance), so a RELEASE build never carries

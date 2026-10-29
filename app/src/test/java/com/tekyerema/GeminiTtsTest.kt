@@ -90,6 +90,34 @@ class GeminiTtsTest {
         assertEquals(1, t.requests.size)
     }
 
+    private fun spentReply() = HttpReply(429, ("""{"error":{"code":429,"message":"Rate limit exceeded for model gemini-3.8-flash-tts (limit: 10 requests per day on Free Tier). """ +
+        """Please retry in 15h57m19s or upgrade your tier.","status":"RESOURCE_EXHAUSTED"}}""").toByteArray(), "application/json", null)
+
+    @Test fun the_app_s_existing_gemini_keys_are_enough_and_a_spent_one_hands_over_to_the_next() = runTest {
+        AppConfig.loadFrom(shippedConfig())
+        val keys = mapOf("SPEECH_GEMINI_KEY_1" to "k1", "SPEECH_GEMINI_KEY_2" to "k2", "SPEECH_GEMINI_KEY_3" to "k3")
+        val t = FakeTransport { r -> if (r.header("x-goog-api-key") == "k1") spentReply() else answer() }
+        val sink = FakeSink()
+        val tts = LanguageLayer.build(AppConfig.obj("providers.speech.clients"), keys, t, { sink }, health = { ProviderHealth(it) })
+            .tts["gemini_tts"] as HttpTtsProvider
+        assertTrue("key 1 spent → key 3 says it", tts.speak("First line.", Lang.GH_EN))
+        assertEquals(listOf("k1", "k3"), t.requests.map { it.header("x-goog-api-key") })
+        assertTrue(tts.speak("Second line.", Lang.GH_EN))
+        assertEquals("the spent key is not asked again today", "k3", t.requests.last().header("x-goog-api-key"))
+        assertEquals(3, t.requests.size)
+        // every key spent → false: the voice rests and the phone's Kafui voice speaks
+        t.reply = { spentReply() }
+        assertFalse(tts.speak("Third line.", Lang.GH_EN))
+        assertEquals(listOf(400, 400), sink.played)
+    }
+
+    @Test fun a_spent_key_waits_as_long_as_google_says() {
+        assertEquals((15 * 3600 + 57 * 60 + 19) * 1000L, com.tekyerema.language.HttpSpeech.geminiRetryMs(spentReply()))
+        val info = HttpReply(429, """{"error":{"details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"42s"}]}}""".toByteArray(), "application/json", null)
+        assertEquals(42_000L, com.tekyerema.language.HttpSpeech.geminiRetryMs(info))
+        assertEquals(null, com.tekyerema.language.HttpSpeech.geminiRetryMs(HttpReply(429, "{}".toByteArray(), "application/json", null)))
+    }
+
     @Test fun errors_and_empty_answers_never_play_and_never_throw() = runTest {
         val t = FakeTransport { HttpReply(429, """{"error":{"code":429}}""".toByteArray(), "application/json", null) }
         val sink = FakeSink()

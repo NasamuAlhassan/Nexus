@@ -170,6 +170,8 @@ class HttpTtsProvider(
     override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available() &&   // WS-C
         ledger.refusal(spec.id, spec.limits, QuotaLedger.Units(chars = 1)) == null
     private val cache: MutableMap<String, ByteArray> = lru(spec.cacheEntries.coerceIn(0, 256))
+    /** Gemini (dialect "gemini"): key index → when its day's quota is back. */
+    private val geminiSpentUntil = java.util.concurrent.ConcurrentHashMap<Int, Long>()
 
     /** Why this voice can't be used right now, in words for the user and the phone check; null when it can. */
     override fun whyUnavailable(): String? = unavailableReason(
@@ -251,10 +253,20 @@ class HttpTtsProvider(
                         if (spec.dialect == "gemini") {
                             // Google's Kore voice for English (29 Oct 2026): the real spelling ("Tɛkyerɛma", "cedis") — it
                             // says our own words without KafuiSay's respellings.
-                            val r = transport.send(HttpSpeech.geminiTtsRequest(spec, secrets(), p), spec.connectMs, spec.callMs)
-                            if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
-                            HttpSpeech.failureOf(spec, r)?.let { throw it }
-                            return@run HttpSpeech.parseGeminiAudio(spec, r)
+                            // Several keys (the free tier gives each 10 voice requests a day): a spent one is skipped until Google
+                            // says it resets, and the line goes to the next; with every key spent the voice rests and Kafui speaks.
+                            for ((i, key) in HttpSpeech.keys(spec, secrets()).withIndex()) {
+                                if ((geminiSpentUntil[i] ?: 0L) > System.currentTimeMillis()) continue
+                                val r = transport.send(HttpSpeech.geminiTtsRequest(spec, secrets(), p, key), spec.connectMs, spec.callMs)
+                                val failure = HttpSpeech.failureOf(spec, r)
+                                if (failure == null) { ledger.record(spec.id, spec.limits, units); return@run HttpSpeech.parseGeminiAudio(spec, r) }
+                                if (r.code != 429) throw failure
+                                val waitMs = HttpSpeech.geminiRetryMs(r) ?: 60 * 60_000L
+                                geminiSpentUntil[i] = System.currentTimeMillis() + waitMs
+                                Log.i("Tekyerema", "[TTS] $name: key ${i + 1} spent for ${waitMs / 60_000} min — next key")
+                            }
+                            throw ProviderFailure(FailureKind.QUOTA, "${spec.id}: every key spent",
+                                geminiSpentUntil.values.minOrNull()?.let { (it - System.currentTimeMillis()).coerceAtLeast(60_000L) })
                         }
                         val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.tts", 10_000L)) {
                             transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs) }

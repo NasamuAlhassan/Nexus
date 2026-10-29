@@ -330,7 +330,7 @@
           "cacheEntries": 256
         },
         "gemini_tts": {
-          "_note": "29 Oct 2026 (owner: 'kore'): ENGLISH replies in Google's Gemini TTS voice Kore with the owner's Ghanaian-English style prompt (his Kaggle comparison of 6 voices x 6 lines). Unary REST /v1beta/interactions, one sentence a request (RoutingTts fetches the next while one plays). Off unless local.properties has SPEECH_GEMINI_TTS_KEY. Offline the phone's own Kafui voice speaks with no wait. Privacy: a free-tier key lets Google's reviewers read the text (Gemini API terms) — use a paid-tier key for messages and amounts.",
+          "_note": "29 Oct 2026 (owner: 'kore'): ENGLISH replies in Google's Gemini TTS voice Kore with the owner's Ghanaian-English style prompt (his Kaggle comparison of 6 voices x 6 lines). Unary REST /v1beta/interactions, one sentence a request (RoutingTts fetches the next while one plays). Keys, tried in order, a spent one skipped until it resets: SPEECH_GEMINI_TTS_KEY (a paid key, when there is one) then the app's existing GEMINI_API_KEY, _3, _2 (the build passes them as SPEECH_GEMINI_KEY_1..3; free tier = 10 voice requests a key a day; _2 last because it is the one used for tests). Offline the phone's own Kafui voice speaks with no wait. Privacy: a free-tier key lets Google's reviewers read the text (Gemini API terms) — use a paid-tier key for messages and amounts.",
           "kind": "tts",
           "dialect": "gemini",
           "enabled": true,
@@ -339,7 +339,7 @@
           "auth": {
             "header": "x-goog-api-key",
             "prefix": "",
-            "key": "${SPEECH_GEMINI_TTS_KEY}"
+            "keys": ["${SPEECH_GEMINI_TTS_KEY}", "${SPEECH_GEMINI_KEY_1}", "${SPEECH_GEMINI_KEY_3}", "${SPEECH_GEMINI_KEY_2}"]
           },
           "languages": {
             "gh_en": "en"

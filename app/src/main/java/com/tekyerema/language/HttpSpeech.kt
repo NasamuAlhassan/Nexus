@@ -79,7 +79,10 @@ data class HttpSpeechSpec(
     val api: String = "translate",
     /** One timeout rests this client's account at once (the HCI Lab, 16 Oct 2026) — for a client with a backup after it
      *  whose account isn't shared with other roles; others rest after two failures in a row ([ProviderHealth]). */
-    val restOnTimeout: Boolean = false
+    val restOnTimeout: Boolean = false,
+    /** `auth.keys`: several key placeholders for one account kind, tried in order when one is spent (Gemini's free tier:
+     *  10 voice requests a key a day). The client is usable when at least one resolves. */
+    val authKeys: List<String> = emptyList()
 ) {
     enum class Kind { ASR, TTS, MT }
 
@@ -130,7 +133,8 @@ data class HttpSpeechSpec(
                 maxParts = req.optInt("maxParts", 1).coerceAtLeast(1),
                 dialect = o.optString("dialect", "rest").trim().lowercase().ifBlank { "rest" },
                 api = req.optString("api", "translate").trim().ifBlank { "translate" },
-                restOnTimeout = o.optBoolean("restOnTimeout", false)
+                restOnTimeout = o.optBoolean("restOnTimeout", false),
+                authKeys = auth.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.optString(it).trim() }.filter { it.isNotBlank() } }.orEmpty()
             )
         }
 
@@ -184,6 +188,7 @@ object HttpSpeech {
         val parsed = url.toHttpUrlOrNull() ?: return "endpoint is not a URL"
         if (!parsed.isHttps && !spec.allowHttp) return "endpoint must be https (set allowHttp for a LAN test server)"
         if (spec.authHeader != null && spec.authKey != null && resolve(spec.authKey, secrets) == null) return "auth key placeholder not set"
+        if (spec.authKeys.isNotEmpty() && keys(spec, secrets).isEmpty()) return "no auth key placeholder set"
         for ((k, v) in spec.headers) if (resolve(v, secrets) == null) return "header $k placeholder not set"
         for ((k, v) in spec.fields) if (v is String && resolve(v, secrets) == null) return "field $k placeholder not set"
         if (spec.kind == HttpSpeechSpec.Kind.ASR && spec.body !in setOf("multipart", "json", "raw")) return "unknown request body '${spec.body}'"
@@ -256,7 +261,25 @@ object HttpSpeech {
      * style annotation and the prebuilt voice in `speech_config`: fields `model`, `voice`, `style` (config). Unary: the
      * answer is one WAV (24 kHz mono 16-bit) — fetched sentence by sentence by [com.tekyerema.voice.RoutingTts].
      */
-    fun geminiTtsRequest(spec: HttpSpeechSpec, secrets: Map<String, String>, text: String): Request {
+    /** The usable keys of [HttpSpeechSpec.authKeys] (or its single key), in order, without repeats. */
+    fun keys(spec: HttpSpeechSpec, secrets: Map<String, String>): List<String> =
+        (spec.authKeys.ifEmpty { listOfNotNull(spec.authKey) }).mapNotNull { resolve(it, secrets)?.trim()?.ifBlank { null } }.distinct()
+
+    /**
+     * How long a spent Gemini key waits, from its 429: `RetryInfo.retryDelay` ("57439s") or "retry in 15h57m19s" in the
+     * message; null when the reply names neither.
+     */
+    fun geminiRetryMs(reply: HttpReply): Long? {
+        val t = reply.text()
+        Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"").find(t)?.let { return (it.groupValues[1].toDouble() * 1000).toLong() }
+        val m = Regex("retry in (?:(\\d+)h)?(?:(\\d+)m)?(?:(\\d+(?:\\.\\d+)?)s)?", RegexOption.IGNORE_CASE).find(t) ?: return null
+        val (h, mi, s) = m.destructured
+        if (h.isEmpty() && mi.isEmpty() && s.isEmpty()) return null
+        return ((h.toLongOrNull() ?: 0) * 3_600_000) + ((mi.toLongOrNull() ?: 0) * 60_000) + ((s.toDoubleOrNull() ?: 0.0) * 1000).toLong()
+    }
+
+    fun geminiTtsRequest(spec: HttpSpeechSpec, secrets: Map<String, String>, text: String,
+                         key: String = keys(spec, secrets).firstOrNull() ?: error("${spec.id}: key not configured")): Request {
         val field = { k: String -> spec.fields[k]?.let { fieldValue(it, secrets) }.orEmpty() }
         val part = JSONObject().put("type", "text").put("text", text)
         field("style").takeIf { it.isNotBlank() }?.let { part.put("annotations", JSONArray().put(JSONObject().put("type", "speech_metadata").put("style", it))) }
@@ -267,7 +290,9 @@ object HttpSpeech {
             .put("generation_config", JSONObject().put("speech_config", JSONArray().put(JSONObject().put("voice", field("voice")))))
         val url = (resolve(spec.endpoint, secrets) ?: error("${spec.id}: endpoint not configured")).toHttpUrlOrNull()
             ?: error("${spec.id}: endpoint is not a URL")
-        return authorised(spec, secrets, Request.Builder().url(url).post(body.toString().toRequestBody(JSON)))
+        val rb = Request.Builder().url(url).post(body.toString().toRequestBody(JSON)).header(spec.authHeader ?: "x-goog-api-key", spec.authPrefix + key)
+        for ((k, v) in spec.headers) rb.header(k, resolve(v, secrets) ?: error("${spec.id}: header $k not configured"))
+        return rb.build()
     }
 
     /** The audio of a Gemini TTS answer: the first `{"type": "audio", "data": <base64>}` anywhere in the reply
