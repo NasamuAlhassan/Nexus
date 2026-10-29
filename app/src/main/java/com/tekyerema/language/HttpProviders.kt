@@ -248,6 +248,14 @@ class HttpTtsProvider(
                             if (file.body.size < 64) throw ProviderFailure(FailureKind.BAD_RESPONSE, "${spec.id}: audio file too short")
                             return@run file.body
                         }
+                        if (spec.dialect == "gemini") {
+                            // Google's Kore voice for English (29 Oct 2026): the real spelling ("Tɛkyerɛma", "cedis") — it
+                            // says our own words without KafuiSay's respellings.
+                            val r = transport.send(HttpSpeech.geminiTtsRequest(spec, secrets(), p), spec.connectMs, spec.callMs)
+                            if (r.code !in 500..599 && r.code != 401) ledger.record(spec.id, spec.limits, units)
+                            HttpSpeech.failureOf(spec, r)?.let { throw it }
+                            return@run HttpSpeech.parseGeminiAudio(spec, r)
+                        }
                         val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.tts", 10_000L)) {
                             transport.send(HttpSpeech.ttsRequest(spec, secrets(), p, code), spec.connectMs, spec.callMs) }
                         // A rejected key (401) never reached the plan's counter: don't spend the small day on it.

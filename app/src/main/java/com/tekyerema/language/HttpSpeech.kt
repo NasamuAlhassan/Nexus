@@ -249,6 +249,43 @@ object HttpSpeech {
         return rb.build()
     }
 
+    // ---- Google Gemini TTS (dialect "gemini"): the owner's Kore voice for English replies (29 Oct 2026)
+
+    /**
+     * `POST <endpoint>` (…/v1beta/interactions) with the text as a verbatim transcript, the delivery in a `speech_metadata`
+     * style annotation and the prebuilt voice in `speech_config`: fields `model`, `voice`, `style` (config). Unary: the
+     * answer is one WAV (24 kHz mono 16-bit) — fetched sentence by sentence by [com.tekyerema.voice.RoutingTts].
+     */
+    fun geminiTtsRequest(spec: HttpSpeechSpec, secrets: Map<String, String>, text: String): Request {
+        val field = { k: String -> spec.fields[k]?.let { fieldValue(it, secrets) }.orEmpty() }
+        val part = JSONObject().put("type", "text").put("text", text)
+        field("style").takeIf { it.isNotBlank() }?.let { part.put("annotations", JSONArray().put(JSONObject().put("type", "speech_metadata").put("style", it))) }
+        val body = JSONObject()
+            .put("model", field("model"))
+            .put("input", JSONArray().put(JSONObject().put("type", "user_input").put("content", JSONArray().put(part))))
+            .put("response_format", JSONObject().put("type", "audio"))
+            .put("generation_config", JSONObject().put("speech_config", JSONArray().put(JSONObject().put("voice", field("voice")))))
+        val url = (resolve(spec.endpoint, secrets) ?: error("${spec.id}: endpoint not configured")).toHttpUrlOrNull()
+            ?: error("${spec.id}: endpoint is not a URL")
+        return authorised(spec, secrets, Request.Builder().url(url).post(body.toString().toRequestBody(JSON)))
+    }
+
+    /** The audio of a Gemini TTS answer: the first `{"type": "audio", "data": <base64>}` anywhere in the reply
+     *  (`steps[] → model_output → content[]`; searched rather than pathed, so a reshuffled envelope still plays). */
+    fun parseGeminiAudio(spec: HttpSpeechSpec, reply: HttpReply): ByteArray {
+        val root = try { JSONTokener(reply.text().trim()).nextValue() } catch (e: Exception) { throw bad(spec, "reply is not JSON") }
+        fun find(o: Any?): String? = when (o) {
+            is JSONObject -> if (o.optString("type") == "audio" && o.optString("data").isNotBlank()) o.optString("data")
+                else o.keys().asSequence().firstNotNullOfOrNull { find(o.opt(it)) }
+            is JSONArray -> (0 until o.length()).firstNotNullOfOrNull { find(o.opt(it)) }
+            else -> null
+        }
+        val b64 = find(root) ?: throw bad(spec, "no audio in the reply")
+        val audio = try { java.util.Base64.getMimeDecoder().decode(b64) } catch (e: IllegalArgumentException) { throw bad(spec, "audio is not base64") }
+        if (audio.size < 64) throw bad(spec, "audio reply too short (${audio.size} bytes)")
+        return audio
+    }
+
     // ---- Gradio Spaces (dialect "gradio"): our own language Space, PrinceAlhassanNasamu/tekyerema-lang (2 October 2026)
 
     /** Step 1: `POST <endpoint>/gradio_api/call/<api>` with `{"data": [text, from, to]}` → `{"event_id": …}`. */

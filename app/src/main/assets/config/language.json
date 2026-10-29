@@ -329,6 +329,39 @@
           "timeouts": {"connectMs": 6000, "callMs": 25000},
           "cacheEntries": 256
         },
+        "gemini_tts": {
+          "_note": "29 Oct 2026 (owner: 'kore'): ENGLISH replies in Google's Gemini TTS voice Kore with the owner's Ghanaian-English style prompt (his Kaggle comparison of 6 voices x 6 lines). Unary REST /v1beta/interactions, one sentence a request (RoutingTts fetches the next while one plays). Off unless local.properties has SPEECH_GEMINI_TTS_KEY. Offline the phone's own Kafui voice speaks with no wait. Privacy: a free-tier key lets Google's reviewers read the text (Gemini API terms) — use a paid-tier key for messages and amounts.",
+          "kind": "tts",
+          "dialect": "gemini",
+          "enabled": true,
+          "quotaGroup": "gemini_tts",
+          "endpoint": "https://generativelanguage.googleapis.com/v1beta/interactions",
+          "auth": {
+            "header": "x-goog-api-key",
+            "prefix": "",
+            "key": "${SPEECH_GEMINI_TTS_KEY}"
+          },
+          "languages": {
+            "gh_en": "en"
+          },
+          "request": {
+            "fields": {
+              "model": "gemini-3.8-flash-tts",
+              "voice": "Kore",
+              "style": "Speak in a natural, contemporary Ghanaian English accent. Use natural Ghanaian English rhythm, intonation, stress, and phrasing without exaggerating the accent or sounding stereotypical. Sound warm, clear, respectful, and conversational. Prioritize intelligibility for blind and low-vision users. Speak at a moderate pace with clear articulation and natural pauses between sentences. Pronounce Ghanaian names, place names, phone numbers, Ghana cedis, and pesewas carefully. Maintain consistent pronunciation. Do not paraphrase, omit, or add words. Read the supplied text exactly as written."
+            },
+            "maxChars": 400,
+            "maxParts": 1
+          },
+          "response": {
+            "kind": "json"
+          },
+          "timeouts": {
+            "connectMs": 5000,
+            "callMs": 12000
+          },
+          "cacheEntries": 64
+        },
         "space_tts_eng": {
           "_note": "19 Oct 2026 (owner: 'Is it possible you add his voice?'): ENGLISH replies in Kafui Dey's voice — the language Space's English is ONLY the F5 Kafui voice (an error, never another voice, when its ZeroGPU fails). Used through providers.speech.tts.ghEnglish: RoutingTts fetches sentence by sentence, the first within speech.ghEnglish.firstWaitMs (6 s), and the English chain (own on-device voice, the phone's engine) speaks when it is off, resting, slow or failing. speech.ghEnglish.enabled=false turns it off at once.",
           "kind": "tts",

@@ -482,8 +482,9 @@ object VoiceEngine {
                     },
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
                     enToTwAll = { localizer.toTwiAll(it) },
-                    ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry)
-                        .takeIf { it.isNotEmpty() }?.let { if (it.size == 1) it[0] else FallbackTts(it) },
+                    // The FIRST configured network English voice (Gemini's Kore when its key is set, else Kafui on our Space): kept
+                    // alone, not in a FallbackTts, so RoutingTts's first-sentence wait and rest apply to it (29 Oct 2026).
+                    ghEnglish = SpeechProviders.resolve(SpeechProviders.ttsIds("ghEnglish", emptyList()), ttsRegistry).firstOrNull(),
                     isOnline = isOnline,
                     others = others,
                     toOthers = mapOf<String, suspend (String) -> String?>(Lang.KUS to { s -> kusLocalizer.toTwi(s) })
