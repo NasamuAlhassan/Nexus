@@ -211,7 +211,7 @@ class HttpTtsProvider(
             cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)
         }
         if (ready.isNotEmpty() && ready.all { it != null }) { Log.i("Tekyerema", "[TTS] $name: from the phone's cache"); return ready.map { it!! } }
-        if (!available()) return null
+        if (!available()) { Log.i("Tekyerema", "[TTS] $name not asked — ${whyUnavailable() ?: "unavailable"}"); return null }
         // The gateway takes at most spec.maxChars a request (HCI Lab: 250) — split, and leave a long reply to the phone's
         // own voice rather than spend several of a small day's requests on one answer.
         val parts = HttpSpeech.parts(say, spec.maxChars)
@@ -260,6 +260,9 @@ class HttpTtsProvider(
                                 val r = transport.send(HttpSpeech.geminiTtsRequest(spec, secrets(), p, key), spec.connectMs, spec.callMs)
                                 val failure = HttpSpeech.failureOf(spec, r)
                                 if (failure == null) { ledger.record(spec.id, spec.limits, units); return@run HttpSpeech.parseGeminiAudio(spec, r) }
+                                // The status and the start of Google's error, for the phone log (never the key).
+                                Log.w("Tekyerema", "[TTS] $name: HTTP ${r.code} on key ${i + 1} — " +
+                                    (com.tekyerema.core.Redact.secrets(r.text().take(200).replace('\n', ' ')) ?: ""))
                                 if (r.code != 429) throw failure
                                 val waitMs = HttpSpeech.geminiRetryMs(r) ?: 60 * 60_000L
                                 geminiSpentUntil[i] = System.currentTimeMillis() + waitMs

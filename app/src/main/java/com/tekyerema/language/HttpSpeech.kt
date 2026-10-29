@@ -305,7 +305,8 @@ object HttpSpeech {
             is JSONArray -> (0 until o.length()).firstNotNullOfOrNull { find(o.opt(it)) }
             else -> null
         }
-        val b64 = find(root) ?: throw bad(spec, "no audio in the reply")
+        val b64 = find(root) ?: throw bad(spec, "no audio in the reply (${reply.body.size} bytes: " +
+            "${reply.text().take(120).replace('\n', ' ')})")
         val audio = try { java.util.Base64.getMimeDecoder().decode(b64) } catch (e: IllegalArgumentException) { throw bad(spec, "audio is not base64") }
         if (audio.size < 64) throw bad(spec, "audio reply too short (${audio.size} bytes)")
         return audio
