@@ -54,3 +54,19 @@ class ReadingFixesTest {
         assertEquals(false, com.tekyerema.agent.ScreenReadIntent.isGoOnWhileOpen("read my messages"))
     }
 }
+
+class Oct29LogFixesTest {
+    @Test fun oneWordPmIsATime() {
+        val s = com.tekyerema.agent.triggers.ScheduleParser.parse("Remind me at 1pm to search for a visually impaired person")
+        assertEquals(13, s?.hour); assertEquals(0, s?.minute)
+        assertEquals(9, com.tekyerema.agent.triggers.ScheduleParser.parse("remind me at 9a.m. to call Ama")?.hour)
+    }
+
+    @Test fun aChatBarControlIsNotThePerson() {
+        val chat = com.tekyerema.accessibility.UiSnapshot("com.whatsapp", "Call menu", listOf(
+            com.tekyerema.accessibility.UiElement(45, "EditText", "Please do not forget", com.tekyerema.accessibility.Box(0, 2200, 900, 2300), editable = true, hint = "Message"),
+            com.tekyerema.accessibility.UiElement(46, "Button", "Send", com.tekyerema.accessibility.Box(900, 2200, 1000, 2300), clickable = true)), 0L, appName = "WhatsApp")
+        val line = ActionSemantics.confirmation("tap", chat.elements[1], "Send", chat)
+        assertTrue(line.toString(), line == null || "Call menu" !in line)
+    }
+}

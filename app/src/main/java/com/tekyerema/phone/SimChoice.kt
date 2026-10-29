@@ -92,6 +92,7 @@ object SimChoice {
      * remembered; a SIM already settled (chosen, or the only one on the task's network) is remembered and nothing is asked.
      */
     fun preflight(ctx: Context, tool: String, args: JSONObject): ToolResult? {
+        if (args.optString("via").contains("whatsapp", ignoreCase = true)) return null
         val sims = active(ctx)
         // "call 0552093690 using SIM two": the planner leaves the words in the contact; take them out and use them.
         for (key in listOf("contact", "number")) {

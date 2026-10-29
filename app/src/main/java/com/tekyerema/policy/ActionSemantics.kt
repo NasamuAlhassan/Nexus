@@ -65,7 +65,8 @@ object ActionSemantics {
      *  Messages?"). */
     private fun screenRecipient(text: String, before: UiSnapshot?): String? {
         val appName = before?.appName?.trim().orEmpty()
-        fun notApp(t: String) = t.isNotBlank() && !(appName.isNotEmpty() && (t.equals(appName, true) || appName.contains(t, true)))
+        fun notApp(t: String) = t.isNotBlank() && !(appName.isNotEmpty() && (t.equals(appName, true) || appName.contains(t, true))) &&
+            !CONTROL_WORDS.containsMatchIn(t)
         labelRecipient(text)?.let { return it }
         // A share picker's title is not a person (Infinix, 29 Oct 2026: "Send this photo to Select Chat on Telegram?"): the chat
         // ticked on it is, or nobody the screen can name.
@@ -74,6 +75,10 @@ object ActionSemantics {
         return before?.screenTitle?.trim()?.takeIf { notApp(it) }
             ?: screenHeading(before)?.takeIf { notApp(it) }
     }
+
+    /** A heading that is a control's own name, not a chat's ("Call menu", "Video call", "More options", "Attach"). */
+    private val CONTROL_WORDS = Regex("(?i)^(?:(?:voice |video )?call(?: menu)?|video call|more options|menu|options|attach|camera|search|" +
+        "navigate up|back|emoji|send|voice message|new chat|status|communities|updates|calls|chats)$")
 
     private val PICKER = Regex("(?i)^(?:select|choose|pick)(?:\\s+an?)?\\s+(?:chats?|contacts?|recipients?|conversations?)$|" +
         "^(?:share|send|forward)(?:\\s+(?:to|with|via))?$|^share in \\d+ chats?$")

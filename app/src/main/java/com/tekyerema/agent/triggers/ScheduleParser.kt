@@ -47,7 +47,7 @@ object ScheduleParser {
     private val TRAILING_JUNK = Regex("\\s*(?:[,;:\\-–—]+|\\b(?:and|then|please))$", I)
 
     fun parse(text: String): Schedule? {
-        val t = TriggerSafety.clean(text)
+        val t = TriggerSafety.clean(text).replace(Regex("(?i)(\\d)\\s*([ap])\\.?\\s?m\\.?(?![a-z])"), "$1 $2m")
         if (t.isBlank() || NEEDS_DATE.containsMatchIn(t)) return null
         val removed = BooleanArray(t.length)
         fun cut(r: IntRange) { for (i in r) if (i in removed.indices) removed[i] = true }

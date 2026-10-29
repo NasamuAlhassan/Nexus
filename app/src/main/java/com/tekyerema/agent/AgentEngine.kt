@@ -479,6 +479,8 @@ object AgentEngine {
     fun secureInputDone() { if (_state.value.status == AgentStatus.SECURE_INPUT) secureChannel.trySend(true) }
 
     fun stop() {
+        if (com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.i("Tekyerema", "[STOP] by " + Throwable().stackTrace.drop(1).take(4)
+            .joinToString(" < ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" })
         paused.value = false
         answerChannel.trySend(null)
         currentJob?.cancel()
