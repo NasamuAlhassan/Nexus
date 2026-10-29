@@ -166,6 +166,17 @@ class CameraReadActivity : ComponentActivity() {
         )
     }
     private val itemsAnnouncer by lazy { ItemsAnnouncer(AppConfig.int("camera.currency.agreeFrames", 2)) }
+
+    // Money from a brief capture, decided once (MoneyBurst — owner, 29 Oct 2026). Off: camera.currency.burst = false (the old
+    // speak-whenever-two-frames-agree watching).
+    private val burstOn by lazy { AppConfig.bool("camera.currency.burst", true) }
+    private val burst by lazy {
+        MoneyBurst(windowMs = AppConfig.long("camera.currency.burstMs", 2_000L), minFrames = AppConfig.int("camera.currency.burstFrames", 4),
+            base = AppConfig.double("camera.currency.gate", 0.85))
+    }
+    @Volatile private var burstFrame: Triple<ByteArray, IntArray, Boolean>? = null   // one sharp frame of the window, for the cloud
+    private var verdictAt = 0L
+    private var emptySinceVerdict = false
     /** Loaded on the first currency frame (~0.2 s); null when the model isn't bundled (said honestly, once). */
     private var cedi: CediClassifier? = null
     private var cediTried = false
@@ -584,6 +595,7 @@ class CameraReadActivity : ComponentActivity() {
     /** Analyser thread: the centre square → the on-phone cedi model. Never speaks a denomination itself. */
     private fun checkCurrency(image: ImageProxy) {
         if (closing || mode != MODE_CURRENCY) return
+        if (burstOn && burst.started && !burst.done && burstFrame == null && cloudConfirms()) grabBurstFrame(image)
         if (!cediTried) { cediTried = true; cedi = CediClassifier.create(this) }
         val model = cedi ?: run {
             // The file is there but wouldn't load (corrupt, out of memory): the same honest line, then leave.
@@ -659,6 +671,13 @@ class CameraReadActivity : ComponentActivity() {
     private fun onCurrency(cls: String, confidence: Double) {
         if (closing || mode != MODE_CURRENCY) return
         val now = SystemClock.elapsedRealtime()
+        if (burstOn) {
+            if (CurrencyAnnouncer.isMoney(cls)) moneySeenAt = now
+            if (resting(now, money = CurrencyAnnouncer.isMoney(cls))) return
+            burst.offerSingle(cls, confidence, now)?.let { onBurstVerdict(it); return }
+            if (!burst.started) hintCurrency(now)
+            return
+        }
         if (CurrencyAnnouncer.isMoney(cls)) moneySeenAt = now
         currencyAnnouncer.offer(cls, confidence, now)?.let { deliver(if (isTwi()) MoneyItems.spokenTwiOf(cls) ?: it else it); return }
         hintCurrency(now)
@@ -669,6 +688,12 @@ class CameraReadActivity : ComponentActivity() {
     private fun onItems(count: MoneyItems.Count) {
         if (closing || mode != MODE_CURRENCY) return
         val now = SystemClock.elapsedRealtime()
+        if (burstOn) {
+            moneySeenAt = now
+            if (resting(now, money = true)) return
+            burst.offerItems(count, now)?.let { onBurstVerdict(it) }
+            return
+        }
         moneySeenAt = now
         val say = itemsAnnouncer.offer(count, now)
         if (say == null) { hintCurrency(now); return }
@@ -742,6 +767,72 @@ class CameraReadActivity : ComponentActivity() {
     }
 
     /** The conversation is in Twi: money and reading lines that have a Twi form are said in it, with no translator. */
+    /** Online and allowed: the brief capture's sharp frame also goes to the cloud, and the money is said only when both agree. */
+    private fun cloudConfirms(): Boolean = AppConfig.bool("camera.currency.cloudConfirm", true) && NetworkMonitor.isOnline() &&
+        VisionLadder.canDescribe(settings)
+
+    /** Analyser thread: one well-lit, sharp frame of the open window. */
+    private fun grabBurstFrame(image: ImageProxy) {
+        val yP = image.planes[0]
+        val luma = FrameConvert.planeBytes(yP, yBuf).also { yBuf = it }
+        val q = QualityGate.assess(luma, image.width, image.height, yP.rowStride,
+            darkBelow = AppConfig.double("camera.quality.darkBelow", QualityGate.DARK_BELOW),
+            brightAbove = AppConfig.double("camera.quality.brightAbove", QualityGate.BRIGHT_ABOVE),
+            blurMin = AppConfig.double("camera.quality.blurMin", QualityGate.BLUR_MIN))
+        if (q.verdict == Verdict.TOO_DARK || q.verdict == Verdict.TOO_BRIGHT || q.verdict == Verdict.BLURRY) return
+        burstFrame = Triple(FrameConvert.toNv21(image), intArrayOf(image.width, image.height, image.imageInfo.rotationDegrees), true)
+    }
+
+    /**
+     * After a verdict the camera is quiet: a new brief capture starts only once the money has left the view and something comes back
+     * (counting cash note by note), or after `camera.currency.restMs` (8 s) with the same money still there.
+     */
+    private fun resting(now: Long, money: Boolean): Boolean {
+        if (!burst.done) return false
+        if (!money) emptySinceVerdict = true
+        val rest = now - verdictAt
+        if (rest < AppConfig.long("camera.currency.minRestMs", 1_500L)) return true
+        if ((money && emptySinceVerdict) || rest >= AppConfig.long("camera.currency.restMs", 8_000L)) {
+            burst.reset(); burstFrame = null; emptySinceVerdict = false
+            return false
+        }
+        return true
+    }
+
+    /** The brief capture's one decision: the phone's reading, confirmed by the cloud when online; said once. */
+    private fun onBurstVerdict(v: MoneyBurst.Verdict) {
+        verdictAt = SystemClock.elapsedRealtime(); emptySinceVerdict = false
+        val unsure = if (isTwi()) MoneyItems.UNSURE_TW else phrase("currencyUnsure", MoneyItems.UNSURE_EN)
+        val phoneLine = (v as? MoneyBurst.Verdict.Sure)?.let { s ->
+            val c = MoneyItems.Count(s.items, 0, 0)
+            if (isTwi()) MoneyItems.spokenTwi(c) else MoneyItems.spoken(c)
+        } ?: unsure
+        val frame = burstFrame
+        Log.i(TAG, "[CEDI] brief capture: ${if (v is MoneyBurst.Verdict.Sure) "${v.items.size} piece(s) read" else "not sure"}; cloud check=${frame != null && cloudConfirms()}")
+        if (v !is MoneyBurst.Verdict.Sure || frame == null || !cloudConfirms()) { deliver(phoneLine); return }
+        showCaption(phrase("describing", "Got it, one moment."), CameraPhase.WORKING)
+        lifecycleScope.launch {
+            val jpeg = withContext(Dispatchers.Default) {
+                FrameConvert.nv21ToJpeg(frame.first, frame.second[0], frame.second[1], frame.second[2], VisionPrompts.maxSide(null, true), 80)
+            }
+            val r = if (jpeg == null) null else kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.currency.cloudWaitMs", 9_000L)) {
+                VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true)
+            }
+            if (closing) return@launch
+            val tally = (r as? VisionResult.Described)?.let { MoneyTally.of(it.text) }?.takeIf { !it.unstable && !it.isEmpty }
+            when {
+                tally == null -> { Log.i(TAG, "[CEDI] cloud gave no count — the phone's reading stands"); deliver(phoneLine) }
+                MoneyBurst.agrees(v.items, tally.counts) -> { Log.i(TAG, "[CEDI] phone and cloud agree"); deliver(phoneLine) }
+                else -> {
+                    Log.i(TAG, "[CEDI] phone and cloud disagree — not said")
+                    deliver(if (isTwi()) MoneyItems.UNSURE_TW else phrase("currencyDisagree",
+                        "I'm not sure of this money — this phone and the online check read it differently. Hold it flat, a hand away, " +
+                            "with all of it in view, and I'll look again."))
+                }
+            }
+        }
+    }
+
     private fun isTwi(): Boolean = try { com.tekyerema.voice.VoiceEngine.language() == com.tekyerema.voice.Lang.TWI } catch (_: Throwable) { false }
 
     // ------------------------------------------------------------------------------------------------ P-01 / P-09 describe
