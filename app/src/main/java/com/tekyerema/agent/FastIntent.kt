@@ -611,7 +611,7 @@ object FastIntentClassifier {
      *  screen ("what's on my screen" is the screen reader's). */
     private val RE_CAMERA_ASK = Regex("(?i)\\b(?:in my hands?|i(?:'m| am) holding|am i holding|i(?:'m| am) (?:looking at|pointing at|seeing)|" +
         "am i (?:looking at|seeing|pointing at)|in front of (?:me|the camera|my camera)|(?:with|using|through) (?:the |my )?camera|" +
-        "can you see|do you see|look at (?:this|that|it|my)|have a look|take a look|use (?:the |my )?camera|" +
+        "can you see|do you see|what (?:you can|you|can you) see(?! on (?:the |my )?screen)|look at (?:this|that|it|my)|have a look|take a look|use (?:the |my )?camera|" +
         "(?:expiry|expiration|sell[- ]by|best[- ]before|use[- ]by) date|is (?:this|it) (?:expired|clean|dirty|ripe|cooked|burnt|broken|switched on|on or off))\\b")
 
     private val RE_WHAT_CHANGED = Regex("^(?:what(?:'s| has)? changed|what(?:'s| is) new on (?:the |my )?screen|anything new on (?:the |my )?screen)$")
@@ -640,10 +640,10 @@ object FastIntentClassifier {
      *  for a native speaker: "kasa Twi" (speak Twi), "kasa Borɔfo" (speak English). [owner: verify] */
     private val KUS_WORD = "(?:kusaal|kusal|kusasi|kusa al|kusaa?l language)"
     private val RE_PREF_TWI = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? twi|" +
-        "(?:switch|change) (?:to|into) twi|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) twi|use twi|twi (?:please|mode)|(?:kasa|ka) twi|twi kasa|sesa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*twi(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
+        "(?:switch|change) (?:to|into) twi|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) twi|use twi|twi (?:please|mode)|(?:kasa|ka) twi|twi kasa|[st]esa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*twi(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
     private val RE_PREF_ENGLISH = Regex("^(?:please\\s+)?(?:(?:speak|talk|reply|answer|listen)(?: to me)?(?: in)? english|" +
         "(?:switch|change) (?:to|into) english|(?:switch|change|set) (?:the |your |tekyerema'?s? )?language (?:to|into) english|use english|english (?:please|mode)|(?:kasa|ka) (?:borɔfo|borofo|brofo|bro fo)|" +
-        "(?:borɔfo|borofo|brofo) kasa|sesa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*(?:borɔfo|borofo|brofo|brɔfo)(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
+        "(?:borɔfo|borofo|brofo) kasa|[st]esa\\s*(?:kasa(?:\\s+no)?\\s*)?(?:kɔ|ko)?\\s*(?:borɔfo|borofo|brofo|brɔfo)(?:\\s+(?:kasa|mu))?)(?: please| now| from now on)?$")
 
     /**
      * "Change the language to …" with a word the phone's English recogniser made of "Twi" (owner, 28 Oct 2026: "when I want to switch

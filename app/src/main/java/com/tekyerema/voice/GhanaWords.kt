@@ -64,7 +64,7 @@ object GhanaWords {
     private val MOMO_ANY = Regex("(?i)\\b$MOMO_WORD\\b")
     /** "my normal / mom / mama balance": "MoMo", as the phone's English recogniser hears it before "balance" (Infinix, 28 Oct 2026:
      *  "Where's my normal balance?", "what's my mom balance"). Only after "my" and before balance / wallet / account. */
-    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma)(?=\\s+(?:balance|wallet|account)\\b)")
+    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma|momma|mamma|mommy|mono|moono)(?=\\s+(?:balance|wallet|account)\\b)")
     /** Airtime said fast: "back once this airtime" / "buy once it is airtime" = "buy one cedi's airtime" (Infinix, 28 Oct 2026). Only
      *  in a sentence about airtime / credit / a bundle. */
     private val AIRTIME_TALK = Regex("(?i)\\b(?:airtime|credit|bundle|data)\\b")

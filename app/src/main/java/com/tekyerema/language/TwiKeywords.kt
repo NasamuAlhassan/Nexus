@@ -26,7 +26,8 @@ object TwiKeywords {
     /** "me yere" / "meyere" / "ne kunu" — a family word after "my" (as [TwiCommands.who] knows them). */
     private val KIN = setOf("yere", "kunu", "maame", "ena", "papa", "agya", "nua", "nuabarima", "nuabaa", "ba", "nana")
 
-    fun guess(text: String, isContact: (String) -> Boolean = { false }): String? {
+    fun guess(said: String, isContact: (String) -> Boolean = { false }): String? {
+        val text = TwiCommands.mendKin(said)
         val words = TwiText.fold(text).replace(Regex("[^\\p{L}\\p{N}\\s]"), " ").split(Regex("\\s+")).filter { it.isNotEmpty() }
         if (words.isEmpty() || words.size > 14) return null
         val person = personIn(text, words, isContact)

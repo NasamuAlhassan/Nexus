@@ -48,7 +48,7 @@ object TwiCommands {
     /** "Twerɛ nkra kɔ ma Prince sɛ meba" / "Ka kyerɛ Kwame sɛ meba anɔpa" — a message WITH its words. The words after "sɛ"
      *  are sent as the user said them, in Twi: the translator turned "sɛ meba" (that I'm coming) into "when I arrive"
      *  (3 October 2026), and a message dictated in Twi should reach the other person in Twi anyway. */
-    private val MESSAGE_SAY = Regex("^(?:(?:twerɛ|twɛrɛ|soma)\\s+(?:nkra|message|mɛsege)\\s+(?:kɔ\\s?ma|ma)|ka\\s+kyerɛ)\\s+(.+?)\\s+sɛ\\s+(.+)$")
+    private val MESSAGE_SAY = Regex("^(?:(?:twerɛ|twɛrɛ|soma)\\s+(?:nkra|message|mɛsege)\\s+(?:kɔ\\s?ma|ma)|ka\\s+kyerɛ)\\s+(.+?)\\s+s[ɛe]\\s+(.+)$")
     /** "Soma message ma Kwame" — a message with no words yet: the flow asks what to say. */
     private val MESSAGE_TO = Regex("^soma\\s+(?:message|mɛsege|nkra)\\s+(?:kɔ\\s?ma|ma|ama(?=\\s+(?:me|wo|ne|ɔno|no)\\b))\\s+(.+)$")
     private val VOLUME_UP = Regex("^ma\\s+(?:volume|nne)(?:\\s+no)?\\s+so$")
@@ -77,6 +77,10 @@ object TwiCommands {
      *  internet"): nkra / nkraa / nkoraa / nkrataa, a "no" after it, "so ma" in two words. Anyone: "me kunu" is my husband. */
     /** "kenkan" (read) at the start, as the phone's recogniser also writes it: "kenkran", "kɛnkan", "thinkan", "kankan" (Infinix, 29 Oct
      *  2026: "kenkran nkran no a me yere so ma me no" was "needs the internet"). */
+    /** "me kunu" (my husband) as the phone's Twi recogniser writes it: "meko no", "me kono", "mekuno" (Infinix, 29 Oct 2026: "ka kyerɛ
+     *  meko no se ɔmfrɛ me" went to the cloud, which flailed in Messages). */
+    private val KUNU_HEARD = Regex("(?i)(?<![\\p{L}])(m[eɛ]|n[eɛ])\\s?(?:ko\\s?no|kono|kuno|kunu)(?![\\p{L}])")
+    internal fun mendKin(s: String): String = KUNU_HEARD.replace(s, "$1 kunu")
     private val READ_VERB = Regex("(?i)^(?:k|th)[eɛai]nkr?a[nm]?(?=\\s|$)")
     private val SENT_BY = Regex("^(?:kenkan\\s+)?(?:me\\s+)?n?k[oɔ]?r(?:a{1,2}|ata{1,2})n?(?:\\s+no)?\\s+(?:a|na)\\s+(.+?)\\s+(?:de\\s+)?s[oɔu]\\s?maa?\\s+me(?:\\s+no)?$")
     /** English verb, Twi object — code-mixed money: "Send pesewa du ma Prince" / "send sika ma Ama" (QA TR11: neither parser
@@ -235,7 +239,7 @@ object TwiCommands {
         val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(mendMoneyWords(text)).trim(), "")
             .replace(Regex("(?<=\\d),(?=\\d{3})"), "").replace(",", " ").replace(Regex("\\s+"), " "), "")
             .let { KA_KYERE.replace(it, "ka kyerɛ ").replace(Regex("\\s+"), " ").trim() }
-            .replace(READ_VERB, "kenkan")
+            .replace(READ_VERB, "kenkan").let(::mendKin)
         if (t.isEmpty()) return null
         // Matched in lower case (Ɛ/ɛ and Ɔ/ɔ fold — a regex case flag alone doesn't, and the Unicode-case flag isn't
         // safe on Android's regex engine); a name is taken from the user's own spelling at the same place.
