@@ -862,7 +862,13 @@ class LocalFastRouter(
      * number IN THE CHAT, the name — is remembered for "send money to him" (money/MoneyRequest) and said in one sentence.
      * Nothing is sent or opened here.
      */
-    private fun readMessage(intent: FastIntent.ReadMessage): FastOutcome {
+    private fun readMessage(intent: FastIntent.ReadMessage): FastOutcome? {
+        // "the recent message from Ama on WhatsApp": open the chat and read it (agent → read_chat), not the notifications (a judge's
+        // request, 29 Oct 2026). `chat.openToRead` false keeps the old notification reading.
+        if (com.tekyerema.core.config.AppConfig.bool("chat.openToRead", true)) {
+            val (who, app) = MessageWho.split(intent.from)
+            if (who != null && app == "WhatsApp") { Log.i(TAG, "[MSG] a WhatsApp message from a named person → the chat itself"); return null }
+        }
         if (!com.tekyerema.ui.Perms.notifications(appContext)) return handled(intent,
             "I can't see your messages yet — turn on notification access for Tɛkyerɛma in Settings.")
         val extra = com.tekyerema.core.config.AppConfig.stringList("notifications.digest.messagingPackages", emptyList()).toSet()
@@ -900,7 +906,11 @@ class LocalFastRouter(
      * (H-09 index), newest first — never opens the app. On the loudspeaker with private reading on, who and when only;
      * "read them" reads the words (PrivateReading), exactly as the catch-up does.
      */
-    private fun chatMessages(intent: FastIntent.ChatMessages): FastOutcome {
+    private fun chatMessages(intent: FastIntent.ChatMessages): FastOutcome? {
+        // A named person on WhatsApp: the chat itself (agent → read_chat), as in [readMessage].
+        if (intent.app == "WhatsApp" && !intent.from.isNullOrBlank() && com.tekyerema.core.config.AppConfig.bool("chat.openToRead", true)) {
+            Log.i(TAG, "[MSG] WhatsApp messages from a named person → the chat itself"); return null
+        }
         if (!com.tekyerema.ui.Perms.notifications(appContext)) return handled(intent,
             "I can't see your ${intent.app} messages yet — turn on notification access for Tɛkyerɛma in Settings.")
         val digest = com.tekyerema.notifications.NotificationDigest

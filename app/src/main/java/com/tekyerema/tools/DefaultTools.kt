@@ -52,6 +52,7 @@ fun defaultTools(): List<Tool> = listOf(
     CallControlTool,      // E-02 answer / end
     CallLogTool,          // E-28
     ReadSmsTool,          // E-29
+    ReadChatTool,         // 29 Oct 2026: open a WhatsApp chat and read their latest message
     CalendarTool,         // E-06
     CreateContactTool,    // E-07
     LocationTool,         // E-13

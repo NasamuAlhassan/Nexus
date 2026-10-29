@@ -87,4 +87,14 @@ class TwiMoneyMendTest {
         }
         assertEquals(true, com.tekyerema.money.MtnApp.GOAL.containsMatchIn("how much money do I have"))
     }
+
+    /** Reading the message a person sent — Infinix, 29 Oct 2026. */
+    @Test fun theMessageMyWifeSentMe() {
+        assertEquals(true, TwiCommands.gloss("kenkan nkoraa na meyere soma me no") in setOf("what did my wife say", "read the message my wife sent"))
+        assertEquals(true, TwiCommands.gloss("kenkan nkra a me yere somaa me") in setOf("what did my wife say", "read the message my wife sent"))
+        val d = kotlinx.coroutines.runBlocking { com.tekyerema.agent.LocalBrain().decide(com.tekyerema.agent.BrainContext(
+            "I want you to read a message my wife sent me", org.json.JSONObject(), emptyList(), org.json.JSONArray(), org.json.JSONArray())) }
+        val c = d as com.tekyerema.agent.AgentDecision.CallTool
+        assertEquals("read_sms", c.name); assertEquals("my wife", c.args.optString("sender"))
+    }
 }

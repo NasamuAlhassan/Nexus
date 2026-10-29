@@ -452,6 +452,12 @@
       "play_music"
      ],
      "keywords": "\\b(install|reinstall|download|play ?store|google play|app store|selfie|photo|picture|pic|camera|chat ?gpt|gemini|claude|copilot|perplexity|assistant|sign ?in|sign ?up|log ?in|login|continue with google|google account|youtube music|yt music|spotify|boomplay|audiomack|song|songs|music|artist|album|playlist|track|skip|next song|pause|resume)\\b"
+    },
+    "chat": {
+     "tools": [
+      "read_chat"
+     ],
+     "keywords": "\b(whats ?app|chat|chats|conversation)\b"
     }
    }
   },
@@ -482,6 +488,14 @@
    ],
    "callers": [
     "planner"
+   ],
+   "idempotent": true,
+   "untrusted_output": true
+  },
+  "read_chat": {
+   "feature": "E-29b",
+   "permissions": [
+    "android.permission.READ_CONTACTS"
    ],
    "idempotent": true,
    "untrusted_output": true

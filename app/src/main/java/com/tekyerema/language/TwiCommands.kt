@@ -70,7 +70,7 @@ object TwiCommands {
         "(?:ɛdeɛn|deɛn|dɛn)\\s+na\\s+ɛwɔ\\s+me\\s+screen\\s+(?:so|mu))$")
     /** "Me nkra a Prince de somaa me" / "nkra a Kofi somaa me" / "kenkan Kofi nkra" / "Kofi kaa sɛn" — the messages from ONE
      *  person, answered from the phone's notifications (QA TR04: the translator was cold and the planner then lost the name). */
-    private val FROM_WHO = Regex("^(?:(?:${WANT}(?:hu|hwɛ|kyerɛ\\s+me|kenkan)\\s+)?(?:me\\s+)?nkra\\s+a\\s+(.+?)\\s+(?:de\\s+)?somaa\\s+me|" +
+    private val FROM_WHO = Regex("^(?:(?:${WANT}(?:hu|hwɛ|kyerɛ\\s+me|kenkan)\\s+)?(?:me\\s+)?n?k[oɔ]?ra{1,2}\\s+(?:a|na)\\s+(.+?)\\s+(?:de\\s+)?s[ou]maa?\\s+me(?:\\s+no)?|" +
         "kenkan\\s+(.+?)\\s+nkra|(.+?)\\s+kaa\\s+sɛn)$")
     /** English verb, Twi object — code-mixed money: "Send pesewa du ma Prince" / "send sika ma Ama" (QA TR11: neither parser
      *  took it and the cloud asked for a payment reference). */
@@ -185,7 +185,7 @@ object TwiCommands {
         // "me nua barima" (my brother) is said in two words as often as one
         // "ne yere" (his wife) is how the recognisers often hear "me yere": the owner's "Frɛ me yere" came back "call ne yere" and
         // was a contact search for "ne yere" (A20e, 21 Oct 2026). A user asking the phone to call means their own.
-        Regex("^(?:[Mm]e\\s+|[Nn]e\\s+|[MmNn]['’]\\s*)(\\S+(?:\\s+(?:barima|baa))?)$").find(w)?.let { m ->
+        Regex("^(?:[Mm]e\\s*|[Nn]e\\s+|[MmNn]['’]\\s*)(\\S+(?:\\s+(?:barima|baa))?)$").find(w)?.let { m ->
             KIN[m.groupValues[1].lowercase().replace(" ", "")]?.let { return "my $it" }
         }
         // The recogniser writes names in lower case: a common name gets its capital back ("ama" → "Ama").

@@ -267,6 +267,9 @@ object PinPad {
         c.wipe()
         lastSentAt = System.currentTimeMillis()
         android.util.Log.i("Tekyerema", "[PINPAD] sent into the app with $lastVia (${if (ok) "confirmed" else "no confirm button"}); ${length()} digits; $swallowed press(es) only stopped the speech")
+        // This runs IN sendJob: ending the pad cancels sendJob, and the wait below died with it — the agent never heard the PIN was
+        // in and sat at MyMTN's PIN screen until stopped (Infinix, 29 Oct 2026, the balance never read). Let go of the job first.
+        sendJob = null
         AppPin.end()
         // The agent was waiting at the PIN screen: it carries on and reads what the app says.
         kotlinx.coroutines.delay(1_500)

@@ -100,13 +100,18 @@ class LocalBrain : AgentBrain {
         if (RE_REPLY_UNNAMED.containsMatchIn(g)) return defer("a reply that names nobody — the planner finds the message first")
         smsDecision(raw)?.let { return it }
 
+        // --- "read the recent message from Ama on WhatsApp": OPEN the chat and read it (owner/judge, 29 Oct 2026) ---
+        chatPerson(raw)?.let { who -> pendingResultSpeak = true; return call("read_chat", JSONObject().put("contact", who), "open the chat and read") }
+
         // --- N-09 "what did Kwame say?", "any messages from Ama?" — answered from the notifications on the phone
         //     (question-shaped, so it used to be sent to the cloud and refused offline). A pronoun ("what did he say")
         //     needs the conversation, so it stays with the planner. ---
         RE_FROM_WHO.find(raw.trim().trimEnd('.', '!', '?'))?.let { m ->
-            val who = (m.groupValues[1].ifBlank { m.groupValues[2] }).trim()
+            val who = (m.groupValues[1].ifBlank { m.groupValues[2] }.ifBlank { m.groupValues[3] }).trim()
             if (who.isNotEmpty() && !RE_PRONOUN.matches(who) && who.split(Regex("\\s+")).size <= 3) {
                 pendingResultSpeak = true
+                if (m.groupValues[3].isNotBlank() && !RE_MSG_APP.containsMatchIn(raw))
+                    return call("read_sms", JSONObject().put("sender", who).put("limit", 2), "the texts a person sent")
                 return call("read_notifications", JSONObject().put("filter", who), "messages from a sender")
             }
         }
@@ -1203,9 +1208,31 @@ class LocalBrain : AgentBrain {
             "what\\s+are\\s+you\\s+able\\s+to\\s+do|what\\s+can\\s+i\\s+(?:ask|say\\s+to|tell)\\s+you|what\\s+can\\s+i\\s+(?:ask|say)|" +
             "how\\s+(?:can|do)\\s+you\\s+help(?:\\s+me)?|what\\s+are\\s+your\\s+(?:abilities|capabilities|features|skills)|" +
             "what\\s+do\\s+you\\s+do|tell\\s+me\\s+what\\s+you\\s+can\\s+do)$", RegexOption.IGNORE_CASE)
+        private val WHATSAPP_WORD = Regex("(?i)\\bwhats\\s?app\\b")
+        private val CHAT_WHO = listOf(
+            Regex("(?i)\\b(?:messages?|texts?|chats?)\\s+(?:from|by|of)\\s+(.+)$"),
+            Regex("(?i)\\bwhat\\s+(?:did|has)\\s+(.+?)\\s+(?:say|send|sent|write|text)\\b"),
+            Regex("(?i)\\b(?:messages?|texts?)\\s+(?:that\\s+)?(.+?)\\s+(?:sent|wrote)\\b"),
+            Regex("(?i)\\b(?:open|read)\\s+(?:my\\s+)?(?:chat|conversation)\\s+with\\s+(.+)$"))
+        private val WHATSAPP_TAIL = Regex("(?i)\\s*(?:\\b(?:on|in|via|from)\\s+)?(?:my\\s+|the\\s+)?whats\\s?app(?:\\s+(?:chat|messages?))?\\b.*$")
+
+        /** The person in a WhatsApp read request ("the recent message from my wife on WhatsApp"), or null. Pure. */
+        internal fun chatPerson(raw: String): String? {
+            if (!WHATSAPP_WORD.containsMatchIn(raw)) return null
+            val s = raw.trim().trimEnd('.', '!', '?')
+            for (re in CHAT_WHO) {
+                val who = re.find(s)?.groupValues?.get(1)?.replace(WHATSAPP_TAIL, "")?.trim()?.trimEnd(',', '.') ?: continue
+                if (who.isEmpty() || RE_PRONOUN.matches(who) || who.split(Regex("\\s+")).size > 3) continue
+                return who
+            }
+            return null
+        }
         // N-09 a sender's messages: 1 = "what did <who> say/send", 2 = "(any|read|check) messages from <who>".
-        private val RE_FROM_WHO = Regex("^(?:please\\s+)?(?:what\\s+(?:did|has)\\s+(.+?)\\s+(?:say|send|write|text|message)(?:\\s+me)?|" +
-            "(?:any|read|check)\\s+(?:(?:new|my|the)\\s+)?(?:messages?|texts?)\\s+from\\s+(.+))$", RegexOption.IGNORE_CASE)
+        private val RE_FROM_WHO = Regex("^(?:please\\s+)?(?:(?:i\\s+want\\s+you\\s+to|can\\s+you|could\\s+you|i\\s+want\\s+to\\s+hear)\\s+)?" +
+            "(?:what\\s+(?:did|has)\\s+(.+?)\\s+(?:say|send|write|text|message)(?:\\s+me)?|" +
+            "(?:any|read|check)\\s+(?:(?:new|my|the|a)\\s+)?(?:messages?|texts?)\\s+from\\s+(.+)|" +
+            "(?:read|check)(?:\\s+me)?\\s+(?:(?:the|a|my|new|last)\\s+)?(?:messages?|texts?)\\s+(?:that\\s+)?(.+?)\\s+(?:sent|wrote|texted)(?:\\s+(?:me|to\\s+me))?)$",
+            RegexOption.IGNORE_CASE)
         private val RE_PRONOUN = Regex("(?i)(?:he|she|they|him|her|them|it|you|someone|anyone|anybody|somebody)")
         // A messaging app named in "read my WhatsApp messages" → read_notifications' filter.
         private val RE_MSG_APP = Regex("\\b(whatsapp|telegram|messenger|signal|instagram|facebook|gmail|email|imo)\\b", RegexOption.IGNORE_CASE)
