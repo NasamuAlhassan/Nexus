@@ -37,4 +37,18 @@ class TwiWifeFlowTest {
         assertEquals("aduane", com.tekyerema.money.MoneyFlow.referenceOf("aduane"))
         assertEquals(Confirmation.Answer.NO, Confirmation.interpret("daabi se di du"))
     }
+
+    /** The phone's own Twi model, offline (Infinix, 29 Oct 2026): both were "that needs the internet". */
+    @Test fun `the message she sent, as the phone hears it offline`() {
+        assertEquals("read the message my wife sent", gloss("kenkan nkoraa no a me yere so ma me no"))
+        assertEquals("read the message my wife sent", gloss("nkraa no a me yere so ma me no"))      // "kenkan" lost
+        assertEquals("read the message my wife sent", gloss("kenkan nkrataa no a me yere soma me no"))
+        assertEquals("read the message my wife sent", gloss("kenkan nkra a meyere somaa me"))
+        // the new demo's person (a woman records it): "me kunu" — my husband
+        assertEquals("read the message my husband sent", gloss("kenkan nkra a me kunu somaa me no"))
+        assertEquals("read the message my husband sent", gloss("kenkan nkoraa no a me kunu so ma me no"))
+        assertEquals("read the message my husband sent", gloss("Kenkan me kunu nkra no."))
+        assertEquals("send 5 cedis to my husband", gloss("Soma sidi anum ma me kunu."))
+        assertEquals("call my husband", gloss("Frɛ me kunu."))
+    }
 }

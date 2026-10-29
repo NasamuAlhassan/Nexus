@@ -182,7 +182,11 @@ object VoiceEngine {
     /** The fixed Twi lines (and `speech.tts.prerender.twi` / [extra]) into the phone Twi voice's cache. */
     fun prerenderTwi(extra: List<String> = emptyList()) {
         if (!com.tekyerema.core.config.AppConfig.bool("speech.tts.prerender", true)) return
-        val lines = TwiPrerender.LINES + com.tekyerema.core.config.AppConfig.stringList("speech.tts.prerender.twi", emptyList()) + extra
+        // + the app's other word-for-word Twi lines (locales.twFixed): the reference question took 2.8 s to start, "Yoo, merenyɛ" 1.9 s
+        // (Infinix, 29 Oct 2026). Made once — the cache keeps them on disk across restarts and installs.
+        val fixed = com.tekyerema.core.config.AppConfig.obj("locales.twFixed")?.let { o ->
+            o.keys().asSequence().filterNot { it.startsWith("_") }.map { o.optString(it) }.filter { it.isNotBlank() }.toList() }.orEmpty()
+        val lines = TwiPrerender.LINES + fixed + com.tekyerema.core.config.AppConfig.stringList("speech.tts.prerender.twi", emptyList()) + extra
         try { twiLocal?.prerender(lines.distinct(), Lang.TWI) } catch (_: Throwable) {}
     }
 

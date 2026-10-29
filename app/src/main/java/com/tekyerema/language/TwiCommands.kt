@@ -72,6 +72,10 @@ object TwiCommands {
      *  person, answered from the phone's notifications (QA TR04: the translator was cold and the planner then lost the name). */
     private val FROM_WHO = Regex("^(?:(?:${WANT}(?:hu|hwɛ|kyerɛ\\s+me|kenkan)\\s+)?(?:me\\s+)?n?k[oɔ]?ra{1,2}\\s+(?:a|na)\\s+(.+?)\\s+(?:de\\s+)?s[ou]maa?\\s+me(?:\\s+no)?|" +
         "kenkan\\s+(.+?)\\s+nkra|(.+?)\\s+kaa\\s+sɛn)$")
+    /** "Kenkan nkra a me yere somaa me no" — the message one person sent, as the phone's own recogniser writes it (Infinix, 29 Oct
+     *  2026, offline: "kenkan nkoraa no a me yere so ma me no", and once with the "kenkan" lost — both answered "needs the
+     *  internet"): nkra / nkraa / nkoraa / nkrataa, a "no" after it, "so ma" in two words. Anyone: "me kunu" is my husband. */
+    private val SENT_BY = Regex("^(?:kenkan\\s+)?(?:me\\s+)?n?k[oɔ]?r(?:a{1,2}|ata{1,2})n?(?:\\s+no)?\\s+(?:a|na)\\s+(.+?)\\s+(?:de\\s+)?s[oɔu]\\s?maa?\\s+me(?:\\s+no)?$")
     /** English verb, Twi object — code-mixed money: "Send pesewa du ma Prince" / "send sika ma Ama" (QA TR11: neither parser
      *  took it and the cloud asked for a payment reference). */
     private val SEND_MIXED = Regex("^send\\s+(?:$AMOUNT|sika(?:\\s+$AMOUNT)?)\\s+(?:kɔ\\s?ma|ma|to)\\s+(.+)$")
@@ -82,9 +86,9 @@ object TwiCommands {
     private val DEMO_HIM = listOf(
         Regex("^kenkan\\s+(?:me\\s+)?nkran?\\s+no$") to "read my message",
         Regex("^kenkan\\s+(?:ne|ɔno)\\s+nkra(?:\\s+no)?$") to "read his message",
-        // the wife's message, said both ways [owner: verify the Twi]: "the message my wife sent" / "my wife's message"
-        Regex("^kenkan\\s+nkran?\\s+a\\s+me\\s+yere\\s+(?:so\\s?)?maa?\\s+me(?:\\s+no)?$") to "read the message my wife sent",
+        // the wife's message [owner: verify the Twi]: "my wife's message" ("the message my wife sent" is SENT_BY, for anyone)
         Regex("^kenkan\\s+me\\s+yere\\s+nkran?(?:\\s+no)?$") to "read the message my wife sent",
+        Regex("^kenkan\\s+me\\s+kunu\\s+nkran?(?:\\s+no)?$") to "read the message my husband sent",
         Regex("^soma\\s+(?:no|ɔno)\\s+sika(?:\\s+no)?$") to "send money to him",
         Regex("^fa\\s+sika\\s+no\\s+(?:kɔ\\s?ma|ma)\\s+(?:no|ɔno)$") to "send money to him",
         Regex("^ka\\s+kyerɛ\\s+(?:no|ɔno)\\s+sɛ\\s+(?:ma|me)?soma(?:\\s+no)?(?:\\s+(?:dedaw|seesei))?$") to "tell him I've sent it",
@@ -259,6 +263,7 @@ object TwiCommands {
             }
         }
         DEMO_HIM.firstOrNull { (re, _) -> re.matches(low) }?.let { return it.second }
+        SENT_BY.matchEntire(low)?.let { m -> person(m.g(1))?.let { p -> who(p).takeIf { it != "me" }?.let { return "read the message $it sent" } } }
         WALK_TO.matchEntire(low)?.let { m ->
             val where = (m.groups[1] ?: m.groups[2])?.let { g -> t.substring(g.range.first, g.range.last + 1) }?.trim() ?: return@let
             val near = NEAREST_TWI.matchEntire(where.lowercase())?.groupValues?.get(1)
