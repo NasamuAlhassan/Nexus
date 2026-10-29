@@ -23,9 +23,9 @@
     ],
     "_twiNote": "29 Oct 2026: the HCI Lab first and alone online (ttsHedgeMs 0); our Space voice only when it fails; the phone's own Twi voice offline (OfflineFirstTts). Before — 21 Oct 2026 (owner: 'I'll use the online side … keep the space warm because I feel like it's faster'): our Space's Twi voice first, the HCI Lab's second (ttsHedgeMs), the phone's own Twi voice when offline (OfflineFirstTts).",
     "ghEnglish": [
-     "gemini_tts",
      "space_tts_eng"
     ],
+    "_ghEnglishSpeed": "29 Oct 2026, owner: speed first — Kore (gemini_tts) took ~4.5 s to a first sentence vs Kafui's ~0.4 s, so it is out of this list; put \"gemini_tts\" back first to bring Kore back.",
     "_ghEnglishNote": "29 Oct 2026 (owner chose Gemini's Kore voice): the FIRST network voice here that is configured speaks English replies — gemini_tts when local.properties has SPEECH_GEMINI_TTS_KEY, else Kafui Dey on our Space. RoutingTts: sentence by sentence, the first within speech.ghEnglish.firstWaitMs, else the english chain (the phone's own Kafui voice, the system engine) says it and the network voice rests; offline it is never asked. Before — 19 Oct 2026: 19 Oct 2026: English replies in Kafui Dey's voice from the language Space first (RoutingTts: sentence by sentence, the first within speech.ghEnglish.firstWaitMs); the english chain above when it is off (speech.ghEnglish.enabled=false), offline, resting or slow. Twi lines keep their English pieces on the english chain unless speech.ghEnglish.inTwiLines=true.",
     "kus": [
      "space_tts_kus",

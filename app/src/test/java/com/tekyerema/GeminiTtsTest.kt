@@ -56,7 +56,7 @@ class GeminiTtsTest {
 
     @Test fun shipped_config_puts_kore_first_for_english_only_with_its_key() {
         AppConfig.loadFrom(shippedConfig())
-        assertEquals(listOf("gemini_tts", "space_tts_eng"), AppConfig.stringList("providers.speech.tts.ghEnglish", emptyList()))
+        assertEquals(listOf("space_tts_eng"), AppConfig.stringList("providers.speech.tts.ghEnglish", emptyList()))
         val clients = AppConfig.obj("providers.speech.clients")
         val none = LanguageLayer.build(clients, emptyMap(), FakeTransport { answer() }, { FakeSink() })
         assertFalse("no key → no Gemini client (Kafui stays the English voice)", none.tts.containsKey("gemini_tts"))
