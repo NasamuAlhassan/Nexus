@@ -75,9 +75,10 @@ class LocalBrain : AgentBrain {
         // --- read the screen word for word: no internet needed (the tree, or on-device OCR). "continue" goes on. ---
         //     Before the network gate — "what does it say" is question-shaped — and before notifications, so
         //     "read this message" reads the message that is open. ---
-        if (ScreenReadIntent.isRead(raw) || (ScreenReadIntent.isContinue(raw) && ScreenReadCursor.pending)) {
+        val goOn = ScreenReadCursor.pending && (ScreenReadIntent.isContinue(raw) || ScreenReadIntent.isGoOnWhileOpen(raw))
+        if (goOn || ScreenReadIntent.isRead(raw) || (ScreenReadIntent.isContinue(raw) && ScreenReadCursor.pending)) {
             pendingResultSpeak = true
-            return call("read_screen", JSONObject().put("continue", ScreenReadIntent.isContinue(raw)), "read the screen")
+            return call("read_screen", JSONObject().put("continue", goOn || ScreenReadIntent.isContinue(raw)), "read the screen")
         }
 
         // --- N-09 "what can you do?" — a fixed answer, given on the phone (question-shaped, so before the network gate). ---

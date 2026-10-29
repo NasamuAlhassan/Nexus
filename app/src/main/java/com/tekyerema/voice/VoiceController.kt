@@ -142,7 +142,14 @@ class VoiceController(
     }
 
     private suspend fun listen(purpose: com.tekyerema.voice.io.ListenPurpose, events: com.tekyerema.voice.io.ListenEvents, patient: Boolean? = null) =
-        voiceIn.listen(com.tekyerema.voice.io.ListenSpec(purpose).let { if (patient != null) it.copy(patient = patient) else it }, events)
+        try {
+            voiceIn.listen(com.tekyerema.voice.io.ListenSpec(purpose).let { if (patient != null) it.copy(patient = patient) else it }, events)
+        } catch (c: CancellationException) {
+            // A listen that ends without hearing anything said why — before this it just vanished from the log (owner, 29 Oct 2026:
+            // "I couldn't even say read for it to continue": three listens each gone in ~3 s, no end line).
+            Log.i("Tekyerema", "[VOICE] listen ($purpose) cancelled before any words: ${c.message ?: "a new turn, a tap or a close"}")
+            throw c
+        }
 
     private val _state = MutableStateFlow(VoiceUiState(language = sessionLanguage()))
     val state: StateFlow<VoiceUiState> = _state.asStateFlow()

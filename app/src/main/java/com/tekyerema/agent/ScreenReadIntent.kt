@@ -31,6 +31,11 @@ object ScreenReadIntent {
     /** Read what is on the screen, word for word. */
     fun isRead(goal: String): Boolean = norm(goal).let { g -> g.isNotEmpty() && READ.any { it.matches(g) } }
 
+    /** While a reading has parts left, these go ON with it (owner, 29 Oct 2026: "I couldn't even say read for it to continue" —
+     *  a bare "read" started the reading again from the top). */
+    private val GO_ON_WHILE_OPEN = Regex("^(?:read|read it|read on|yes|yeah|okay|ok|go ahead|kenkan|aane)(?: please)?$")
+    fun isGoOnWhileOpen(goal: String): Boolean = GO_ON_WHILE_OPEN.matches(norm(goal))
+
     /** Go on with a reading that was cut into parts ("continue", "go on", "read more", "kɔ so"). */
     fun isContinue(goal: String): Boolean = CONTINUE.matches(norm(goal))
 }

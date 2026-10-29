@@ -23,7 +23,7 @@ object ScreenReadout {
     private val HINT = Regex("(?i)[,.;:]\\s*(?:double[- ]?tap|tap twice|tap|long[- ]?press|press and hold|touch and hold)\\s+(?:to|and hold)\\b.{0,50}$")
     /** A picture described as a picture, and controls that are chrome rather than content, are not part of "what it says". */
     private val DECORATIVE = Regex("(?i)^illustration(?: of\\b.*)?$|^(?:icon|image|graphic|photo|picture)$|^(?:navigate up|more options|back|close|"
-        + "profile picture|menu|overflow menu|show navigation drawer|open navigation drawer)$")
+        + "profile picture|menu|overflow menu|show navigation drawer|open navigation drawer|pdf view|web view|document view)$")
 
     fun clean(raw: String?): String {
         val one = raw?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
@@ -71,7 +71,17 @@ object ScreenReadout {
         if (sentences.isEmpty()) return listOf(listOfNotNull(where, NOTHING).joinToString(" "))
         val parts = ArrayList<String>()
         var cur = StringBuilder(where.orEmpty())
-        for (s in sentences) {
+        for (s0 in sentences) {
+            var s = s0
+            if (parts.isEmpty() && cur.length < maxChars / 2 && cur.length + 1 + s.length > maxChars) {
+                // Fill the first part with the start of this sentence, at a word; the rest begins the next part.
+                val room = maxChars - cur.length - 1
+                val cut = s.lastIndexOf(' ', room).takeIf { it > 0 } ?: room.coerceAtMost(s.length)
+                if (cur.isNotEmpty()) cur.append(' ')
+                cur.append(s.substring(0, cut).trim())
+                s = s.substring(cut).trim()
+                if (s.isEmpty()) continue
+            }
             if (cur.isNotEmpty() && cur.length + 1 + s.length > maxChars) { parts += cur.toString(); cur = StringBuilder() }
             if (cur.isNotEmpty()) cur.append(' ')
             cur.append(s)

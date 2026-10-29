@@ -148,7 +148,8 @@ class LocalFastRouter(
         if (com.tekyerema.notifications.MessageCursor.pending && ScreenReadIntent.isContinue(text))
             com.tekyerema.notifications.MessageCursor.next()?.let { return handled(FastIntent.MoreMessages, it) }
         // "continue" in the middle of a screen reading goes on reading (the agent's reader), not "play music".
-        if (ScreenReadCursor.pending && ScreenReadIntent.isContinue(text)) { screenReadAt = SystemClock.elapsedRealtime(); return null }
+        if (ScreenReadCursor.pending && (ScreenReadIntent.isContinue(text) ||
+                Regex("(?i)^\\s*(?:read|read it|read on|kenkan)[.!?]?\\s*$").matches(text))) { screenReadAt = SystemClock.elapsedRealtime(); return null }
         // WS-A: "carry on" / "continue" / "resume" with a paused or interrupted task on file → the engine resumes THAT task
         // (AgentEngine.submitGoal decides it from the words and the journal — no model call). With nothing resumable,
         // "continue" stays media play as before.

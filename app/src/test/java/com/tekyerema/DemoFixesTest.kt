@@ -35,3 +35,22 @@ class DemoFixesTest {
         assertEquals("Kofi", ActionSemantics.goalRecipient("send the picture to Kofi"))
     }
 }
+
+class ReadingFixesTest {
+    private fun el(id: Int, t: String) = com.tekyerema.accessibility.UiElement(id, "TextView", t, com.tekyerema.accessibility.Box(0, id * 50, 1000, id * 50 + 40))
+
+    /** "read what's on my screen" on a PDF, Infinix 29 Oct 2026. */
+    @Test fun theFirstPartReadsThePageNotOnlyWhereYouAre() {
+        val page = "Page 1: UNIVERSITY OF GHANA Registered Courses STUDENT NAME " + "COURSE TITLE CREDITS ".repeat(40)
+        val snap = com.tekyerema.accessibility.UiSnapshot("com.google.android.apps.nbu.files", null, listOf(el(1, "PDF view"), el(2, page)), 0L,
+            appName = "Files by Google")
+        val first = com.tekyerema.agent.ScreenReadout.compose(snap).first()
+        assertTrue(first, first.startsWith("You're in Files by Google.") && "UNIVERSITY OF GHANA" in first && "PDF view" !in first)
+    }
+
+    @Test fun readWhileAReadingIsOpenGoesOn() {
+        assertTrue(com.tekyerema.agent.ScreenReadIntent.isGoOnWhileOpen("read"))
+        assertTrue(com.tekyerema.agent.ScreenReadIntent.isGoOnWhileOpen("Okay."))
+        assertEquals(false, com.tekyerema.agent.ScreenReadIntent.isGoOnWhileOpen("read my messages"))
+    }
+}
