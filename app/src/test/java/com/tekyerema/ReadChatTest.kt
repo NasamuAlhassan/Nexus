@@ -34,3 +34,20 @@ class ReadChatTest {
         assertEquals(listOf("Are you coming?", "Buy bread please"), ReadChatTool.theirLatest(s, 2))
     }
 }
+
+class ReadChatMediaTest {
+    private fun e(id: Int, l: String?, b: com.tekyerema.accessibility.Box, vid: String? = null) =
+        com.tekyerema.accessibility.UiElement(id, "View", l, b, viewId = vid?.let { "com.whatsapp:id/$it" })
+
+    /** The owner's chat on the Infinix, 29 Oct 2026 (structure only): two forwarded messages of his, then a sticker from her. */
+    @Test fun aStickerFromThemIsTheirLatest() {
+        val s = com.tekyerema.accessibility.UiSnapshot("com.whatsapp", "My Wife", listOf(
+            e(16, "ATTENTION students", com.tekyerema.accessibility.Box(263, 555, 1025, 1044), "message_text"),
+            e(28, "Registration closes Friday", com.tekyerema.accessibility.Box(339, 1389, 1025, 1611), "message_text"),
+            e(34, null, com.tekyerema.accessibility.Box(0, 1791, 1080, 2211), "conversation_row_sticker"),
+            e(36, "10:41 AM", com.tekyerema.accessibility.Box(238, 2147, 356, 2190), "date"),
+            e(37, null, com.tekyerema.accessibility.Box(40, 1820, 488, 2140)),
+            e(40, "Message", com.tekyerema.accessibility.Box(147, 2240, 654, 2325), "entry")), 0L)
+        assertEquals(listOf("a sticker"), ReadChatTool.theirLatest(s, 1))
+    }
+}

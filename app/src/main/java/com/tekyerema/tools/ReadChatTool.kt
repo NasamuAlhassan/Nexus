@@ -71,7 +71,9 @@ object ReadChatTool : Tool {
             return ToolResult(true, "I opened your chat with $who, but I can't see a message from them on the screen.",
                 data = JSONObject().put("count", 0), channel = "intent")
         val words = theirs.map { Redact.secrets(it).orEmpty() }
-        val line = if (words.size == 1) "The last message from $who on WhatsApp says: “${words[0]}”."
+        val media = words.size == 1 && MEDIA.values.contains(words[0])
+        val line = if (media) "The last message from $who on WhatsApp is ${words[0]}."
+            else if (words.size == 1) "The last message from $who on WhatsApp says: “${words[0]}”."
             else "The last messages from $who on WhatsApp: " + words.joinToString(" Then: ") { "“$it”" } + "."
         return ToolResult(true, line, data = JSONObject().put("count", words.size).put("thirdParty", true), channel = "intent")
     }
@@ -88,11 +90,24 @@ object ReadChatTool : Tool {
      */
     internal fun theirLatest(s: UiSnapshot, limit: Int): List<String> {
         val width = s.elements.maxOfOrNull { it.bounds.right } ?: return emptyList()
-        return s.elements
-            .filter { e -> e.viewId?.substringAfter(":id/") == "message_text" && !e.label.isNullOrBlank() }
-            .sortedBy { it.bounds.top }
+        val items = ArrayList<Pair<Int, String>>()   // (top, what)
+        s.elements.filter { e -> e.viewId?.substringAfter(":id/") == "message_text" && !e.label.isNullOrBlank() }
             .filter { e -> (e.bounds.left + e.bounds.right) / 2 < width / 2 }
-            .map { it.label!!.trim() }
-            .takeLast(limit)
+            .forEach { items.add(it.bounds.top to it.label!!.trim()) }
+        // A media row (29 Oct 2026, the owner's chat: the newest message from his wife was a sticker and nothing was read): theirs when its
+        // contents sit on the left.
+        for (row in s.elements) {
+            val kind = MEDIA[row.viewId?.substringAfter(":id/").orEmpty()] ?: continue
+            val inside = s.elements.filter { it !== row && it.bounds.top >= row.bounds.top && it.bounds.bottom <= row.bounds.bottom &&
+                it.bounds.width < width * 0.9 }
+            val left = inside.minOfOrNull { it.bounds.left } ?: continue
+            if (left < width / 4) items.add(row.bounds.top to kind)
+        }
+        return items.sortedBy { it.first }.map { it.second }.takeLast(limit)
     }
+
+    private val MEDIA = mapOf("conversation_row_sticker" to "a sticker", "conversation_row_image" to "a photo",
+        "conversation_row_video" to "a video", "conversation_row_audio" to "a voice note", "conversation_row_voice_note" to "a voice note",
+        "conversation_row_document" to "a document", "conversation_row_location" to "a location", "conversation_row_contact" to "a contact card",
+        "conversation_row_gif" to "a GIF")
 }

@@ -85,7 +85,11 @@ object ActionSemantics {
 
     /** The chat ticked on a share picker: its row's name ("My Wife, last seen recently" → "My Wife"). */
     private fun pickedChat(s: UiSnapshot?): String? = s?.elements.orEmpty()
-        .firstOrNull { (it.checked || it.selected) && !it.label.isNullOrBlank() }?.label?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+        .firstOrNull { (it.checked || it.selected) && !it.label.isNullOrBlank() }?.label?.let(::rowName)
+
+    /** A chat row's name, without the last message, the time or "last seen" after it. */
+    internal fun rowName(label: String): String? =
+        label.split(Regex(",|\\.\\s|\\n")).first().trim().take(40).takeIf { it.isNotEmpty() }
 
     /** "… send it to my wife on Telegram" → "my wife": who the request names, for a hand-over whose screen can't say. Pure. */
     internal fun goalRecipient(goal: String?): String? = goal?.let { g ->
@@ -99,6 +103,9 @@ object ActionSemantics {
      * name for the number), the reference; and when the amount is not the one first asked for, that is said first. Null when the
      * form can't be read (the plain "Tap “Continue”?" stays). Pure.
      */
+    /** The last MTN read-back: (number digits, amount, when). */
+    @Volatile internal var lastReadBack: Triple<String?, String, Long>? = null
+
     internal fun mtnReadBack(s: UiSnapshot?, goal: String?, nameOfNumber: ((String) -> String?)?): String? {
         val fields = TargetSemantics.filledFields(s)
         if (fields.isEmpty()) return null
@@ -110,7 +117,12 @@ object ActionSemantics {
         val who = number?.let { n -> nameOfNumber?.invoke(n)?.let { "$it, ${com.tekyerema.agent.NumberSpeech.ending(n)}" }
             ?: com.tekyerema.agent.NumberSpeech.ending(n) }
         val cedis = amount + if (amount == "1") " cedi" else " cedis"
-        val first = goal?.let { try { com.tekyerema.money.MoneyAsk.parse(it)?.amount } catch (_: Throwable) { null } }
+        val said = goal?.let { try { com.tekyerema.money.MoneyAsk.parse(it)?.amount } catch (_: Throwable) { null } }
+        val now = System.currentTimeMillis()
+        val earlier = lastReadBack?.takeIf { (n, _, at) -> n == number?.filter { it.isDigit() } && now - at < 180_000L }?.second
+        lastReadBack = Triple(number?.filter { it.isDigit() }, amount, now)
+        // The amount first asked for, or the one read back a moment ago for the same person (a correction said as a new request).
+        val first = earlier?.takeIf { it.toBigDecimalOrNull()?.compareTo(amount.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO) != 0 } ?: said
         val changed = if (first != null && first.toBigDecimalOrNull()?.compareTo(amount.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO) != 0)
             "The amount is now $cedis, not $first. " else ""
         return changed + "Send $cedis" + (who?.let { " to $it" } ?: "") + (ref?.let { ", reference “$it”" } ?: "") + "? The PIN comes next."
@@ -162,7 +174,7 @@ object ActionSemantics {
         // picked up the heading "Send message").
         val to = before?.elements.orEmpty().mapNotNull { it.label?.trim() }
             .firstNotNullOfOrNull { TO_WHOM.find(it)?.groupValues?.get(1)?.trim()?.trimEnd('?', ' ')?.takeIf { w -> w.isNotEmpty() } }
-            ?: recipient ?: return null
+            ?: recipient?.let { rowName(it) ?: it } ?: return null
         val app = before?.appName?.takeIf { it.isNotBlank() }?.let { " on $it" }.orEmpty()
         return "Send this $what to $to$app?"
     }

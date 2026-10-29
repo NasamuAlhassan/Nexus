@@ -436,7 +436,8 @@ class RunGoalReceiver : BroadcastReceiver() {
         intent.getStringExtra("volume_key")?.let { k ->
             val svc = com.tekyerema.accessibility.TekyeremaAccessibilityService.live
             if (svc == null) { android.util.Log.w("Tekyerema", "[KEYS] debug volume_$k: no accessibility service"); return@let }
-            svc.debugKey(if (k == "up") android.view.KeyEvent.KEYCODE_VOLUME_UP else android.view.KeyEvent.KEYCODE_VOLUME_DOWN)
+            svc.debugKey(when (k) { "up" -> android.view.KeyEvent.KEYCODE_VOLUME_UP; "back" -> android.view.KeyEvent.KEYCODE_BACK
+                else -> android.view.KeyEvent.KEYCODE_VOLUME_DOWN })
             android.util.Log.i("Tekyerema", "[KEYS] debug volume_$k delivered to the key filter")
         }
         intent.getStringExtra("overlay_test")?.let { v ->

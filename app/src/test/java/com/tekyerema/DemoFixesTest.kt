@@ -82,3 +82,21 @@ class StopGuardTest {
         assertEquals(true, g.shouldStop(30_000, false))     // switched off: one tap stops
     }
 }
+
+class PracticeRunFixesTest {
+    @Test fun aChatRowIsItsNameOnly() {
+        assertEquals("My Wife", ActionSemantics.rowName("My Wife. Sent at 10:27 AM. https://chatgpt.com/s/t_6ae31f8e"))
+        assertEquals("My Wife", ActionSemantics.rowName("My Wife, last seen recently"))
+    }
+
+    @Test fun aCorrectionSaidAsANewRequestStillSaysTheAmountChanged() {
+        fun f(id: Int, text: String, hint: String) = com.tekyerema.accessibility.UiElement(id, "EditText", text, com.tekyerema.accessibility.Box(0, id * 100, 1000, id * 100 + 80), editable = true, hint = hint)
+        fun form(amount: String) = com.tekyerema.accessibility.UiSnapshot("com.mtngh.mymtn", "Send MoMo", listOf(
+            f(9, "0552093690", "Recipient number"), f(13, amount, "Enter Amount to Pay"), f(15, "food", "Reference")), 0L)
+        ActionSemantics.lastReadBack = null
+        val first = ActionSemantics.mtnReadBack(form("5"), "send 5 cedis to my wife", null)!!
+        assertTrue(first, first.startsWith("Send 5 cedis"))
+        val second = ActionSemantics.mtnReadBack(form("10"), "no, make it 10 cedis", null)!!
+        assertTrue(second, second.startsWith("The amount is now 10 cedis, not 5."))
+    }
+}
