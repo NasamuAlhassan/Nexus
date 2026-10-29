@@ -97,4 +97,8 @@ class TwiMoneyMendTest {
         val c = d as com.tekyerema.agent.AgentDecision.CallTool
         assertEquals("read_sms", c.name); assertEquals("my wife", c.args.optString("sender"))
     }
+
+    @Test fun moreMoreIsMoMo() {
+        assertEquals(com.tekyerema.money.MoneyAsk.Kind.BALANCE_MOMO, com.tekyerema.money.MoneyAsk.parse("What's my more more balance?")?.kind)
+    }
 }

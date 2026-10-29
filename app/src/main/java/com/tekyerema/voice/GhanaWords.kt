@@ -58,7 +58,7 @@ object GhanaWords {
     private val BOUGHT = setOf("airtime", "credit", "data", "mashup", "bundle", "bundles", "momo", "pesewas", "pesewa")
     private val WORD = Regex("[\\p{L}\\p{N}']+")
 
-    private const val MOMO_WORD = "(?:mumu|moomoo|mu mu|mo mo|mow mow)"
+    private const val MOMO_WORD = "(?:mumu|moomoo|mu mu|mo mo|mow mow|more more|mo more|more mo)"   // "more more": Infinix, 29 Oct 2026
     private val MOMO_AFTER = Regex("(?i)\\b(go to|open|my|on|via|with|from|use|using|check|into|through)(\\s+)$MOMO_WORD\\b")
     private val MOMO_BEFORE = Regex("(?i)\\b$MOMO_WORD(?=\\s+(?:balance|wallet|pin|account|agent)\\b)")
     private val MOMO_ANY = Regex("(?i)\\b$MOMO_WORD\\b")
