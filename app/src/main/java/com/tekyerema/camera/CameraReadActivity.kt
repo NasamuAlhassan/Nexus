@@ -789,6 +789,7 @@ class CameraReadActivity : ComponentActivity() {
      */
     private fun resting(now: Long, money: Boolean): Boolean {
         if (!burst.done) return false
+        if (cloudPending) return true                     // the online check of this capture is still out: one answer at a time
         if (!money) emptySinceVerdict = true
         val rest = now - verdictAt
         if (rest < AppConfig.long("camera.currency.minRestMs", 1_500L)) return true
@@ -808,19 +809,35 @@ class CameraReadActivity : ComponentActivity() {
             if (isTwi()) MoneyItems.spokenTwi(c) else MoneyItems.spoken(c)
         } ?: unsure
         val frame = burstFrame
-        Log.i(TAG, "[CEDI] brief capture: ${if (v is MoneyBurst.Verdict.Sure) "${v.items.size} piece(s) read" else "not sure"}; cloud check=${frame != null && cloudConfirms()}")
-        if (v !is MoneyBurst.Verdict.Sure || frame == null || !cloudConfirms()) { deliver(phoneLine); return }
+        val cloud = frame != null && cloudConfirms()
+        Log.i(TAG, "[CEDI] brief capture: ${if (v is MoneyBurst.Verdict.Sure) "${v.items.size} piece(s) read" else "not sure"}; cloud check=$cloud")
+        if (v is MoneyBurst.Verdict.Sure) lastUnsureAt = 0L
+        if (!cloud) { if (v is MoneyBurst.Verdict.Sure) deliver(phoneLine) else sayUnsure(unsure); return }
         showCaption(phrase("describing", "Got it, one moment."), CameraPhase.WORKING)
+        cloudPending = true
         lifecycleScope.launch {
+          try {
+            val t0 = SystemClock.elapsedRealtime()
             val jpeg = withContext(Dispatchers.Default) {
-                FrameConvert.nv21ToJpeg(frame.first, frame.second[0], frame.second[1], frame.second[2], VisionPrompts.maxSide(null, true), 80)
+                FrameConvert.nv21ToJpeg(frame!!.first, frame.second[0], frame.second[1], frame.second[2], VisionPrompts.maxSide(null, true), 80)
             }
             val r = if (jpeg == null) null else kotlinx.coroutines.withTimeoutOrNull(AppConfig.long("camera.currency.cloudWaitMs", 9_000L)) {
                 VisionLadder.describe(jpeg, VisionPrompts.MONEY, settings, structured = false, smart = true)
             }
             if (closing) return@launch
             val tally = (r as? VisionResult.Described)?.let { MoneyTally.of(it.text) }?.takeIf { !it.unstable && !it.isEmpty }
+            Log.i(TAG, "[CEDI] cloud answered in ${SystemClock.elapsedRealtime() - t0} ms: " +
+                (tally?.let { "${it.counts.values.sum()} piece(s), ${it.doubtful.size} doubtful" } ?: "no count"))
             when {
+                // The phone wasn't sure (owner, 29 Oct 2026: "take a quick capture… send it to the online brain… it should scan the
+                // numbers and tell me the amount"): the cloud's reading of the printed numerals is said alone — only when it read every
+                // piece clearly; otherwise "not sure", once.
+                v !is MoneyBurst.Verdict.Sure -> {
+                    val items = tally?.takeIf { it.doubtful.isEmpty() }?.counts?.flatMap { (k, n) -> List(n) { MoneyItems.Item(k.first, k.second) } }
+                    val line = items?.let { MoneyItems.Count(it, 0, 0) }?.let { c -> if (isTwi()) MoneyItems.spokenTwi(c) else MoneyItems.spoken(c) }
+                    if (line != null) { Log.i(TAG, "[CEDI] phone not sure — the cloud read the numerals"); lastUnsureAt = 0L; deliver(line) }
+                    else sayUnsure(unsure)
+                }
                 tally == null -> { Log.i(TAG, "[CEDI] cloud gave no count — the phone's reading stands"); deliver(phoneLine) }
                 MoneyBurst.agrees(v.items, tally.counts) -> { Log.i(TAG, "[CEDI] phone and cloud agree"); deliver(phoneLine) }
                 else -> {
@@ -830,7 +847,25 @@ class CameraReadActivity : ComponentActivity() {
                             "with all of it in view, and I'll look again."))
                 }
             }
+          } finally {
+            // the rest after a verdict counts from the answer, not from when the picture went out
+            verdictAt = SystemClock.elapsedRealtime(); cloudPending = false
+          }
         }
+    }
+
+    @Volatile private var cloudPending = false
+
+    /** "Not sure" said once, not on every new capture (owner, 29 Oct 2026: the same long line seven times in 45 s). Quiet for
+     *  `camera.currency.unsureQuietMs` after it, unless a reading is said in between. */
+    private var lastUnsureAt = 0L
+    private fun sayUnsure(line: String) {
+        val now = SystemClock.elapsedRealtime()
+        if (lastUnsureAt != 0L && now - lastUnsureAt < AppConfig.long("camera.currency.unsureQuietMs", 20_000L)) {
+            Log.i(TAG, "[CEDI] not sure again — kept quiet"); return
+        }
+        lastUnsureAt = now
+        deliver(line)
     }
 
     private fun isTwi(): Boolean = try { com.tekyerema.voice.VoiceEngine.language() == com.tekyerema.voice.Lang.TWI } catch (_: Throwable) { false }
