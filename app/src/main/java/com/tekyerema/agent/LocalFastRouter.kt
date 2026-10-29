@@ -882,7 +882,12 @@ class LocalFastRouter(
         val pool = msgs.filter { !MessageWho.isSummary(whoOf(it), it.text) && (appSaid == null || CHAT_APPS[appSaid].orEmpty().any { p -> it.pkg.startsWith(p) }) }
         val m = want?.let { w -> pool.firstOrNull { MessageWho.matches(whoOf(it), w) } }
             ?: (if (intent.from != null) null else pool.firstOrNull())
-            ?: return handled(intent, if (intent.from != null) "I can't find a message from ${want ?: intent.from}${appSaid?.let { " on $it" } ?: ""}." else "You have no new messages.")
+        if (m == null) {
+            // A named person with nothing from them in the notifications: their TEXTS may still hold it (the inbox keeps what the shade
+            // forgot — Infinix, 29 Oct 2026: "read the message my wife sent me" said "I can't find a message from wife"). The agent reads them.
+            if (intent.from != null && appSaid == null) { Log.i(TAG, "[MSG] nothing from them in the notifications → their texts"); return null }
+            return handled(intent, if (intent.from != null) "I can't find a message from ${want ?: intent.from}${appSaid?.let { " on $it" } ?: ""}." else "You have no new messages.")
+        }
         val who = whoOf(m).ifEmpty { "someone" }
         References.noteRead(who, channelOf(m.pkg))
         val text = m.text!!.trim()

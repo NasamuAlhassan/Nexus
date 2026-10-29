@@ -66,9 +66,49 @@ object ActionSemantics {
     private fun screenRecipient(text: String, before: UiSnapshot?): String? {
         val appName = before?.appName?.trim().orEmpty()
         fun notApp(t: String) = t.isNotBlank() && !(appName.isNotEmpty() && (t.equals(appName, true) || appName.contains(t, true)))
-        return labelRecipient(text)
-            ?: before?.screenTitle?.trim()?.takeIf { notApp(it) }
+        labelRecipient(text)?.let { return it }
+        // A share picker's title is not a person (Infinix, 29 Oct 2026: "Send this photo to Select Chat on Telegram?"): the chat
+        // ticked on it is, or nobody the screen can name.
+        val title = before?.screenTitle?.trim() ?: screenHeading(before)
+        if (title != null && PICKER.matches(title)) return pickedChat(before)
+        return before?.screenTitle?.trim()?.takeIf { notApp(it) }
             ?: screenHeading(before)?.takeIf { notApp(it) }
+    }
+
+    private val PICKER = Regex("(?i)^(?:select|choose|pick)(?:\\s+an?)?\\s+(?:chats?|contacts?|recipients?|conversations?)$|" +
+        "^(?:share|send|forward)(?:\\s+(?:to|with|via))?$|^share in \\d+ chats?$")
+
+    /** The chat ticked on a share picker: its row's name ("My Wife, last seen recently" → "My Wife"). */
+    private fun pickedChat(s: UiSnapshot?): String? = s?.elements.orEmpty()
+        .firstOrNull { (it.checked || it.selected) && !it.label.isNullOrBlank() }?.label?.substringBefore(',')?.trim()?.takeIf { it.isNotEmpty() }
+
+    /** "… send it to my wife on Telegram" → "my wife": who the request names, for a hand-over whose screen can't say. Pure. */
+    internal fun goalRecipient(goal: String?): String? = goal?.let { g ->
+        Regex("(?i)\\b(?:send|share|forward)\\b.*?\\bto\\s+(.{1,30}?)(?:\\s+(?:on|via|in|through|using)\\s+\\S+(?:\\s+\\S+)?)?\\s*[.!?]?$")
+            .find(g.trim())?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() && !it.equals("it", true) }
+    }
+
+    /**
+     * The read-back before MTN's app goes to the PIN (owner, 29 Oct 2026: "make it 10 cedis" retyped the amount and the next question
+     * was a bare "Tap Continue?" — nothing said the amount had changed). From the FORM on screen: the amount, who (the address book's
+     * name for the number), the reference; and when the amount is not the one first asked for, that is said first. Null when the
+     * form can't be read (the plain "Tap “Continue”?" stays). Pure.
+     */
+    internal fun mtnReadBack(s: UiSnapshot?, goal: String?, nameOfNumber: ((String) -> String?)?): String? {
+        val fields = TargetSemantics.filledFields(s)
+        if (fields.isEmpty()) return null
+        fun hinted(re: Regex) = fields.firstOrNull { f -> re.containsMatchIn(f.hint.orEmpty()) || re.containsMatchIn(f.viewId.orEmpty()) }?.label?.trim()
+        val number = fields.map { it.label!!.trim() }.firstOrNull { v -> v.count { it.isDigit() } >= 9 && v.all { it.isDigit() || it in " +-" } }
+        val amount = hinted(Regex("(?i)amount|cedi|ghs")) ?: fields.map { it.label!!.trim() }.firstOrNull { Regex("^\\d{1,5}(?:\\.\\d{1,2})?$").matches(it) }
+            ?: return null
+        val ref = hinted(Regex("(?i)reference|ref\\b|note|narration|description|purpose"))
+        val who = number?.let { n -> nameOfNumber?.invoke(n)?.let { "$it, ${com.tekyerema.agent.NumberSpeech.ending(n)}" }
+            ?: com.tekyerema.agent.NumberSpeech.ending(n) }
+        val cedis = amount + if (amount == "1") " cedi" else " cedis"
+        val first = goal?.let { try { com.tekyerema.money.MoneyAsk.parse(it)?.amount } catch (_: Throwable) { null } }
+        val changed = if (first != null && first.toBigDecimalOrNull()?.compareTo(amount.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO) != 0)
+            "The amount is now $cedis, not $first. " else ""
+        return changed + "Send $cedis" + (who?.let { " to $it" } ?: "") + (ref?.let { ", reference “$it”" } ?: "") + "? The PIN comes next."
     }
 
     /** What a bare verb button does, said once after "Tap “Delete” in Clock?". */
@@ -132,9 +172,11 @@ object ActionSemantics {
         handedOver: String? = null
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
+        if (primitive == "tap" && TargetSemantics.mtnCommit(before, text)) mtnReadBack(before, goal, nameOfNumber)?.let { return it }
         val verb = TargetSemantics.consequential.find(text.lowercase())?.value?.lowercase()
         val labelRecipient = labelRecipient(text)
         val recipient = namedRecipient(screenRecipient(text, before), nameOfNumber)
+            ?: (if (handedOver != null) goalRecipient(goal) else null)
 
         // Sending a message: tapping a Send control (message = composer's current text) OR
         // submitting into a communication field (message = the text being typed).

@@ -298,6 +298,14 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // the PIN box and the dialog STAYS; after the PIN the secure step outlives the dialog (AfterPin waits ~22 s for MTN's
         // text). Both said "Cancelled. Nothing was sent.", dropped the hand-off and disarmed the volume-key PIN pad. So: the
         // dialog is on screen at the key-up (this filter sees the key before the dialog does) and gone 1.2 s later.
+        // Back while the volume-key pad still waits for the PIN, with no keyboard up (a Back then only hides it): cancel the dialog
+        // with its own Cancel — this phone's MTN dialog ignores Back (29 Oct 2026).
+        if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK && e.action == android.view.KeyEvent.ACTION_UP &&
+            com.tekyerema.voice.SecureStep.active() && com.tekyerema.money.PinPad.isArmed() && !com.tekyerema.money.AppPin.active() &&
+            phoneWindowPresent() && !keyboardUp()) {
+            com.tekyerema.phone.PinCurtain.cancelByBack(this)
+            return true
+        }
         if (e.keyCode == android.view.KeyEvent.KEYCODE_BACK && e.action == android.view.KeyEvent.ACTION_UP &&
             com.tekyerema.voice.SecureStep.active() && phoneWindowPresent())
             mainHandler.postDelayed({ if (!phoneWindowPresent()) com.tekyerema.phone.PinCurtain.onUserCancelled() }, 1_200L)
@@ -872,6 +880,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         }
         return set
     }
+
+    /** A keyboard window is on screen. */
+    private fun keyboardUp(): Boolean = try {
+        windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+    } catch (_: Throwable) { false }
 
     override fun screenMentions(words: List<String>): Boolean {
         val root = try { rootInActiveWindow } catch (_: Throwable) { null } ?: return true

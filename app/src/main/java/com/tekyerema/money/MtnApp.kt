@@ -105,7 +105,9 @@ object MtnApp {
     const val RULE = "MTN APP (online money — the demo's way): do Mobile Money in MTN's own app, not USSD and not run_ussd. " +
         "BEFORE opening it, have every fact: for a send, WHO (a saved contact or a number) and HOW MUCH — ask_user once for what is " +
         "missing; for airtime or a bundle, how much and for whom (self by default). Open the app with open_app, wait for its home " +
-        "screen, and go straight to the task's own button (Send money / Transfer, Airtime & Bundles, Balance) — never browse offers, " +
+        "screen, and go straight to the task's own button — in myMTN: the 'MoMo' tab, then 'Send MoMo' for a send (recipient number, " +
+        "amount, reference, then Continue), 'Show MoMo balance' for the balance; elsewhere Send money / Transfer, Airtime & " +
+        "Bundles, Balance — never browse offers, " +
         "banners, ads or 'Explore'. Dismiss a pop-up or promo with its close / Skip / Not now control, never its main button. " +
         "Fill each field from the facts, choosing the network/wallet the app offers for MTN. A REFERENCE / note / description field is " +
         "the user's words only: if they gave none, ask_user what it should say (they may say none) — never invent one. Before the " +

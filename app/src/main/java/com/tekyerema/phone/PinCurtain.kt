@@ -122,6 +122,16 @@ object PinCurtain {
         try { com.tekyerema.voice.VoiceEngine.announce("Cancelled. Nothing was sent.") } catch (_: Throwable) {}
     }
 
+    /**
+     * Back at the network's PIN dialog, before any PIN went in (owner's demo test, 29 Oct 2026: on the Infinix MTN's dialog ignores
+     * Back — it and the curtain stayed a minute until MTN timed out). The same ending as the power button: the dialog's own Cancel.
+     */
+    fun cancelByBack(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
+        if (System.currentTimeMillis() - lastCancelAt < 3_000) return
+        Log.i(TAG, "[PIN] Back pressed at the PIN — cancelling; nothing is sent")
+        cancelByPower(svc)
+    }
+
     private fun cancelByPower(svc: com.tekyerema.accessibility.TekyeremaAccessibilityService) {
         lastCancelAt = System.currentTimeMillis()   // the dialog's Cancel it clicks next is not a second cancel
         Log.i(TAG, "[PIN] power button pressed at the PIN — cancelling; nothing is sent")
