@@ -183,7 +183,11 @@ class OpenAiCompatBrain(
             val effort = settings.reasoningEffortOverride?.takeIf { it.isNotBlank() } ?: ctx.effort ?: settings.groqReasoningEffort
             val body = requestBody(model, messages, ctx.openAiTools, AppConfig.double("models.planner.temperature", 0.2), effort, completionCap, provider)
 
-            val payload = body.toString()
+            // The privacy gate (core/PrivacyGate): phone numbers, emails and account numbers leave the phone as tags only.
+            val gate = com.tekyerema.core.PrivacyGate.seal(body.toString()).takeIf { com.tekyerema.core.PrivacyGate.enabled() }
+                ?: com.tekyerema.core.PrivacyGate.Sealed(body.toString(), emptyMap())
+            if (gate.count > 0) android.util.Log.i("Tekyerema", "[PRIVACY] gate: ${gate.count} detail(s) sent to the cloud as tags (${gate.kinds()})")
+            val payload = gate.text
             fun requestFor(key: String) = Request.Builder()
                 .url(url)
                 .header("Authorization", "Bearer $key")
@@ -304,7 +308,7 @@ class OpenAiCompatBrain(
                         if (cool > 0) coolUntil[coolKey] = System.currentTimeMillis() + cool else coolUntil.remove(coolKey)
                     } else coolUntil.remove(coolKey)
                     if (com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.d("Tekyerema", "[LLM-RESP] ${text.take(4000)}")   // SEC-P1-4: debug-only
-                    val d = parseResponse(text)
+                    val d = parseResponse(gate.open(text))   // the privacy gate's tags back to the real details, on the phone
                     // gpt-oss (seen with the 20b) sometimes ends a turn with reasoning only — no tool call, no text.
                     // One nudged retry; otherwise the chain fell through to Gemini's 429 and the user heard
                     // "too many requests" for what was really an empty reply.

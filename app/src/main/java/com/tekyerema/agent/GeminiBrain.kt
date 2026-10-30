@@ -27,10 +27,15 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
         val base = AppConfig.string("providers.gemini.baseUrl", "https://generativelanguage.googleapis.com/v1beta").trimEnd('/')
         val url = "$base/models/${settings.model}:generateContent"
 
+        // The privacy gate (core/PrivacyGate): phone numbers, emails and account numbers leave the phone as tags only.
+        val raw = buildRequest(ctx).toString()
+        val gate = if (com.tekyerema.core.PrivacyGate.enabled()) com.tekyerema.core.PrivacyGate.seal(raw)
+            else com.tekyerema.core.PrivacyGate.Sealed(raw, emptyMap())
+        if (gate.count > 0) android.util.Log.i("Tekyerema", "[PRIVACY] gate: ${gate.count} detail(s) sent to the cloud as tags (${gate.kinds()})")
         val request = Request.Builder()
             .url(url)
             .header("x-goog-api-key", apiKey)
-            .post(buildRequest(ctx).toString().toRequestBody("application/json".toMediaType()))
+            .post(gate.text.toRequestBody("application/json".toMediaType()))
             .build()
 
         // Bounded 429 retry, mirroring OpenAiCompatBrain — a rate-limited PLANNING call is retried;
@@ -69,7 +74,7 @@ class GeminiBrain(private val settings: Settings) : AgentBrain {
                     delay(waitMs)
                 }
                 !(code in 200..299) -> return@withContext AgentDecision.Fail("Gemini HTTP $code: ${text.take(200)}")
-                else -> return@withContext parseResponse(text)
+                else -> return@withContext parseResponse(gate.open(text))
             }
         }
         @Suppress("UNREACHABLE_CODE")
