@@ -38,8 +38,15 @@ object SimChoice {
         data class Ask(val question: String, val sims: List<Sim>) : Decision()
     }
 
+    /** A slot whose carrier name says it can't connect: "No service", "Emergency calls only", "Searching…". */
+    private val NO_SERVICE = Regex("(?i)\\b(?:no service|emergency(?: calls)? only|emergency|no sim|searching)\\b")
+    fun noService(s: Sim): Boolean = s.carrier?.let { NO_SERVICE.containsMatchIn(it) } == true
+
     fun decide(sims: List<Sim>, preferNetwork: String?, chosen: Sim?): Decision {
         if (sims.size < 2) return Decision.Default
+        // "Which SIM: MTN GH in slot 1, or No service in slot 2?" (Infinix, 29 Oct 2026): a slot that can't connect is no choice
+        val working = sims.filterNot(::noService)
+        if (working.size == 1) return Decision.Use(working[0])
         chosen?.let { c -> sims.firstOrNull { it.subId == c.subId }?.let { return Decision.Use(it) } }
         if (!preferNetwork.isNullOrBlank()) {
             val onIt = sims.filter { it.network.equals(preferNetwork, ignoreCase = true) }

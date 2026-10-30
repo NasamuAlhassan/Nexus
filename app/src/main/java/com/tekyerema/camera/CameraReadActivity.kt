@@ -172,7 +172,7 @@ class CameraReadActivity : ComponentActivity() {
     private val burstOn by lazy { AppConfig.bool("camera.currency.burst", true) }
     private val burst by lazy {
         MoneyBurst(windowMs = AppConfig.long("camera.currency.burstMs", 2_000L), minFrames = AppConfig.int("camera.currency.burstFrames", 4),
-            base = AppConfig.double("camera.currency.gate", 0.85))
+            base = AppConfig.double("camera.currency.gate", 0.85), likelyFloor = AppConfig.double("camera.currency.likelyFloor", 0.6))
     }
     @Volatile private var burstFrame: Triple<ByteArray, IntArray, Boolean>? = null   // one sharp frame of the window, for the cloud
     private var verdictAt = 0L
@@ -812,10 +812,14 @@ class CameraReadActivity : ComponentActivity() {
     private fun onBurstVerdict(v: MoneyBurst.Verdict) {
         verdictAt = SystemClock.elapsedRealtime(); emptySinceVerdict = false
         val unsure = if (isTwi()) MoneyItems.UNSURE_TW else phrase("currencyUnsure", MoneyItems.UNSURE_EN)
-        val phoneLine = (v as? MoneyBurst.Verdict.Sure)?.let { s ->
+        val plainLine = (v as? MoneyBurst.Verdict.Sure)?.let { s ->
             val c = MoneyItems.Count(s.items, 0, 0)
             if (isTwi()) MoneyItems.spokenTwi(c) else MoneyItems.spoken(c)
-        } ?: unsure
+        }
+        // the second rule's reading is said as likely: "I think this is a ten cedis note"
+        val phoneLine = plainLine?.let { l -> if ((v as? MoneyBurst.Verdict.Sure)?.likely != true) l
+            else if (isTwi()) "Ebia, $l" else l.replaceFirst("I read ", "I think this is ") } ?: unsure
+        if ((v as? MoneyBurst.Verdict.Sure)?.likely == true) Log.i(TAG, "[CEDI] read by the second rule (one value, over the floor, nothing else)")
         val frame = burstFrame
         val cloud = frame != null && cloudConfirms()
         Log.i(TAG, "[CEDI] brief capture: ${if (v is MoneyBurst.Verdict.Sure) "${v.items.size} piece(s) read" else "not sure"}; cloud check=$cloud")
@@ -852,7 +856,7 @@ class CameraReadActivity : ComponentActivity() {
                     else sayUnsure(unsure)
                 }
                 tally == null -> { Log.i(TAG, "[CEDI] cloud gave no count — the phone's reading stands"); deliver(phoneLine) }
-                MoneyBurst.agrees(v.items, tally.counts) -> { Log.i(TAG, "[CEDI] phone and cloud agree"); deliver(phoneLine) }
+                MoneyBurst.agrees(v.items, tally.counts) -> { Log.i(TAG, "[CEDI] phone and cloud agree"); deliver(plainLine ?: phoneLine) }
                 // Notes fanned in the hand: the phone read the top one, the cloud every note — the phone's are among the cloud's.
                 cloudLine != null && MoneyBurst.within(v.items, tally.counts) -> {
                     Log.i(TAG, "[CEDI] the cloud saw more pieces than the phone (held together) — its count"); deliver(cloudLine)

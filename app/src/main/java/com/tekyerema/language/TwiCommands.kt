@@ -79,7 +79,10 @@ object TwiCommands {
      *  2026: "kenkran nkran no a me yere so ma me no" was "needs the internet"). */
     /** "me kunu" (my husband) as the phone's Twi recogniser writes it: "meko no", "me kono", "mekuno" (Infinix, 29 Oct 2026: "ka kyerɛ
      *  meko no se ɔmfrɛ me" went to the cloud, which flailed in Messages). */
-    private val KUNU_HEARD = Regex("(?i)(?<![\\p{L}])(m[eɛ]|n[eɛ])\\s?(?:ko\\s?no|kono|kuno|kunu)(?![\\p{L}])")
+    private val KUNU_HEARD = Regex("(?i)(?<![\\p{L}])(m[eɛ]|n[eɛ])\\s?(?:ko\\s?no|kono|kuno|kunu|kro|kuro|kru)(?![\\p{L}])")   // "mekro" too (29 Oct, 22:19)
+    /** "frɛ" (call) as the recogniser also writes it at the start: "fr", "frɛe", "frɛɛ", "free" (Infinix, 29 Oct 2026, 22:04: "fr me kunu
+     *  ma me" and "frɛe me kunu ma me" were "needs the internet"). */
+    private val CALL_VERB = Regex("(?i)^fr(?:[ɛe]{1,2})?(?=\\s)")
     internal fun mendKin(s: String): String = KUNU_HEARD.replace(s, "$1 kunu")
     private val READ_VERB = Regex("(?i)^(?:k|th)[eɛai]nkr?a[nm]?(?=\\s|$)")
     private val SENT_BY = Regex("^(?:kenkan\\s+)?(?:me\\s+)?n?k[oɔ]?r(?:a{1,2}|ata{1,2})n?(?:\\s+no)?\\s+(?:a|na)\\s+(.+?)\\s+(?:de\\s+)?s[oɔu]\\s?maa?\\s+me(?:\\s+no)?$")
@@ -239,7 +242,7 @@ object TwiCommands {
         val t = POLITE.replace(END.replace(com.tekyerema.voice.Normalizer.forTranslation(mendMoneyWords(text)).trim(), "")
             .replace(Regex("(?<=\\d),(?=\\d{3})"), "").replace(",", " ").replace(Regex("\\s+"), " "), "")
             .let { KA_KYERE.replace(it, "ka kyerɛ ").replace(Regex("\\s+"), " ").trim() }
-            .replace(READ_VERB, "kenkan").let(::mendKin)
+            .replace(READ_VERB, "kenkan").replace(CALL_VERB, "frɛ").let(::mendKin)
         if (t.isEmpty()) return null
         // Matched in lower case (Ɛ/ɛ and Ɔ/ɔ fold — a regex case flag alone doesn't, and the Unicode-case flag isn't
         // safe on Android's regex engine); a name is taken from the user's own spelling at the same place.

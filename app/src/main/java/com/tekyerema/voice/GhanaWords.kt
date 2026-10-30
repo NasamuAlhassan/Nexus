@@ -64,7 +64,7 @@ object GhanaWords {
     private val MOMO_ANY = Regex("(?i)\\b$MOMO_WORD\\b")
     /** "my normal / mom / mama balance": "MoMo", as the phone's English recogniser hears it before "balance" (Infinix, 28 Oct 2026:
      *  "Where's my normal balance?", "what's my mom balance"). Only after "my" and before balance / wallet / account. */
-    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma|momma|mamma|mommy|mono|moono|mumo|mum who|mom who|mamu)(?=\\s+(?:balance|belongs?|wallet|account)\\b)")
+    private val MOMO_MISHEARD = Regex("(?i)\\b(my\\s+)(?:normal|mom|mama|mummy|mum|mamo|moma|momma|mamma|mommy|mono|moono|mumo|mum who|mom who|mamu|move|moves)(?=\\s+(?:balance|belongs?|wallet|account)\\b)")
     /** Airtime said fast: "back once this airtime" / "buy once it is airtime" = "buy one cedi's airtime" (Infinix, 28 Oct 2026). Only
      *  in a sentence about airtime / credit / a bundle. */
     private val AIRTIME_TALK = Regex("(?i)\\b(?:airtime|credit|bundle|data)\\b")
@@ -85,8 +85,15 @@ object GhanaWords {
      * [aboutMoney]: the caller already knows the words are about money — the answer to "How much?", a correction to a
      * payment being confirmed — so "no, 20 cities" needs no money word of its own to be read as cedis.
      */
+    /** "Send once it is to my husband" — "send one cedi's" as the offline English recogniser writes it (Infinix, 29 Oct 2026, 22:32: it
+     *  became a TEXT saying "once it is"). Only right after "send", so a message's own words are never touched. */
+    private val SEND_ONE_HEARD = Regex("(?i)^(\\s*sen[dt])\\s+once\\s+(?:it\\s+is|it's|this|is|cities|city's|seedies|sedis|cedis|cds)\\b")
+    /** "Sent 1 cedis to my husband" — the same recogniser's "send" before an amount (22:36: "I can't do that"). */
+    private val SENT_AMOUNT = Regex("(?i)^(\\s*)sent(?=\\s+(?:\\d+(?:\\.\\d+)?|one|two|five|ten|twenty|fifty)\\s+(?:ghana\\s+)?(?:cedis?|pesewas?)\\b)")
+
     fun fix(text: String, aboutMoney: Boolean = false): String {
         if (text.isBlank()) return text
+        @Suppress("NAME_SHADOWING") val text = SENT_AMOUNT.replace(SEND_ONE_HEARD.replace(text) { m -> m.groupValues[1] + " 1 cedi" }) { m -> m.groupValues[1] + "Send" }
         // A MESSAGE keeps its words: no money or network repair in it, the app's name only, and only before the message
         // itself begins ("let Kofi know that I sent 10 pesos" is what the user said — safety audit 2026-10-05).
         if (!aboutMoney && com.tekyerema.voice.understand.MessageBody.isMessaging(text)) {
