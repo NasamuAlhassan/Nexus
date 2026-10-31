@@ -128,6 +128,9 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // LiteRT-LM is built with a newer Kotlin than ours; its classes are plain JVM code, only the version label is newer.
+        // Kotlin 2.2 would read it, but grows AgentEngine.runTask past the JVM's 64 KB method limit (31 Oct 2026).
+        freeCompilerArgs += listOf("-Xskip-metadata-version-check")
     }
     buildFeatures {
         compose = true
@@ -189,6 +192,9 @@ dependencies {
     // Wake word ("Hey Tɛkyerɛma"): openWakeWord mel + embedding features and our trained heads, run with
     // ONNX Runtime. Same pairing with the sherpa AAR as the V2 app (the x86 pickFirst above covers the dup).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.17.1")
+    // The offline planner (31 Oct 2026): Google's LiteRT-LM runs an open-weight LLM on the phone (arm64) and the emulator
+    // (x86_64); the model file lives outside the APK. 0.16.1 is the newest release built with Kotlin 2.2 (0.17+ need 2.4).
+    implementation("com.google.ai.edge.litertlm:litertlm-android:0.16.1")
     // Debug only: Android Studio's Compose Layout Inspector. (Cleanup 24 Oct 2026 removed datastore-preferences,
     // lifecycle-viewmodel-compose and ui-tooling-preview: nothing imported them.)
     debugImplementation("androidx.compose.ui:ui-tooling")
