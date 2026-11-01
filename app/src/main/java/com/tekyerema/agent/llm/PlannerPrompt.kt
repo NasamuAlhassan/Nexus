@@ -106,8 +106,11 @@ Rules:
      * The CONVERSATION format's opening user turn (bench.py first_turn): earlier conversation, What I know, the goal, the
      * screen. The system prompt and tools are read once per task; each later step is only [nextTurn].
      */
-    fun firstTurn(goal: String, screen: JSONObject?, conversation: List<String> = emptyList(), memory: List<String> = emptyList()): String {
+    fun firstTurn(goal: String, screen: JSONObject?, conversation: List<String> = emptyList(), memory: List<String> = emptyList(),
+                  voiceMood: String? = null): String {
         val parts = ArrayList<String>()
+        // How the user sounded ("(Voice: sounds tired and low)"), from the speech-emotion model: a hint, never a claim.
+        if (!voiceMood.isNullOrBlank()) parts.add(voiceMood)
         if (conversation.isNotEmpty()) parts.add("Earlier in this conversation:\n" + conversation.joinToString("\n"))
         if (memory.isNotEmpty()) parts.add("What I know (the user's own saved memory: use it; actions still get the usual confirmation):\n" +
             memory.joinToString("\n") { "- $it" })
