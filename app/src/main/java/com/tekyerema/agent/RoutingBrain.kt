@@ -235,6 +235,16 @@ class RoutingBrain(
         }
         com.tekyerema.money.MoneyPlan.decide(ctx.goal, ctx.history)?.let { return it }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
+        // Offline-first (31 Oct 2026): with router.localModel.first the on-device planner takes every new task the money flow
+        // didn't, online or not — the cloud only when it can't answer. Default off: nothing changes until it is switched on.
+        if (localModel != null && ctx.history.isEmpty() && com.tekyerema.core.config.AppConfig.bool("router.localModel.first", false)) {
+            val m = localModel.decide(ctx)
+            if (m !is AgentDecision.CannotDo && m !is AgentDecision.Malformed && m !is AgentDecision.Fail) {
+                android.util.Log.i("Tekyerema", "[ROUTE] local-first → on-device planner")
+                stickyLocalModel = true
+                return m
+            }
+        }
 
         // Cloud-first: hand EVERYTHING to the cloud brain (the relay = Claude), skipping LocalBrain. Sticky so
         // multi-step planning stays coherent; the (optional) Twi→English rewrite still runs once.

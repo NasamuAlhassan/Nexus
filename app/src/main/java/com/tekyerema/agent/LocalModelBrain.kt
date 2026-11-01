@@ -4,59 +4,138 @@ import com.tekyerema.core.config.AppConfig
 import org.json.JSONObject
 
 /**
- * C-04 — the seam for an OPTIONAL on-device model that turns an utterance the rules didn't match into ONE tool call,
- * offline. Design + interface + stub only: no model and no runtime are bundled (the APK is already ~335 MB), and the
- * router only consults it when `router.localModel.enabled` is true, a runtime has registered itself in
- * [LocalModelRuntime], the model file has been downloaded, and the phone has the RAM.
+ * The on-device PLANNER (31 Oct 2026; was the C-04 one-tool stub): an open-weight model on the phone takes the cloud
+ * planner's seat when the router hands it a task — offline, or always with `router.localModel.first`. Each step it gets
+ * the agent benchmark's prompt ([com.tekyerema.agent.llm.PlannerPrompt]: the step's tools, the goal, the steps so far, the
+ * screen) and answers with ONE tool call, decoding constrained to a tool of this step ([PlannerPrompt.replySchema]).
  *
- * Why this narrow job and not the planner (docs/agent/research/overnight_hybrid.md): on the A20e (Exynos 7884 — two
- * Cortex-A73 cores, ARMv8.0 with no dot-product instructions, 3 GB RAM) a 270M model is estimated at 6–12 tokens/s decode
- * and 2–5 s to first token on a ~150-token prompt; 0.5–1B models need 15–30 s or more. A full planning prompt (~3–5k tokens
- * with the screen) is out of reach, but a short "which tool, which arguments" prompt over a fixed tool list is not —
- * FunctionGemma-270M, fine-tuned on Mobile Actions, went from 58% to 85% on exactly this task.
- *
- * Safety is unchanged: the model can only name a tool from [allowedTools] (no money, USSD, emergency or install
- * tools), its arguments are checked here, and every call still goes through the engine's policy gates and
- * confirmations like a cloud decision. A reply that doesn't parse is a CannotDo — never a guess.
+ * Off unless `router.localModel.enabled`, a runtime has registered ([LocalModelRuntime], the app registers LiteRT-LM), the
+ * model file exists and the phone has the RAM. Safety is unchanged: the model only proposes; every call goes through the
+ * engine's policy gates, confirmations, the money flow and the verifier like a cloud decision, a call outside this step's
+ * tools is Malformed (never run), and USSD is never the model's to dial. A reply that doesn't parse is never a guess.
  */
 interface OnDeviceLlm {
-    /** Model id for logs, e.g. "functiongemma-270m-it-q8". */
+    /** Model id for logs, e.g. "qwen3.5-0.8b-int8". */
     val id: String
     /** Complete [prompt] with at most [maxTokens] new tokens within [timeoutMs]; null when not ready or too slow.
      *  Must be cancellable (a "stop" aborts it) and must never run on the main thread. */
     suspend fun complete(prompt: String, maxTokens: Int, timeoutMs: Long): String?
+    /** One chat turn: [system] + [user] → the reply, decoding constrained to [jsonSchema] when the runtime can. */
+    suspend fun chat(system: String, user: String, jsonSchema: String?, maxTokens: Int, timeoutMs: Long): String? =
+        complete("$system\n\n$user", maxTokens, timeoutMs)
+    /** A conversation for one task: [system] is read once, each [LlmSession.send] adds a user turn and keeps what was read.
+     *  Null when the runtime can't hold one (the brain then sends single turns). */
+    fun openSession(system: String, maxTokens: Int): LlmSession? = null
 }
 
-/** Where a runtime module (llama.cpp / LiteRT-LM, shipped separately) registers its loader. Empty in this build. */
+/** One task's conversation with the on-device model (the CONVERSATION prompt format, 1 Nov 2026). */
+interface LlmSession {
+    suspend fun send(user: String, jsonSchema: String?, timeoutMs: Long): String?
+    /** Tokens held so far (prompt + replies); the brain starts a fresh session past its budget. */
+    val tokens: Int
+    fun close()
+}
+
+/** Where a runtime registers its loader (the app: LiteRT-LM, agent/llm/LiteRtLlm). [defaultPath]: the model's usual home. */
 object LocalModelRuntime {
-    /** Given the downloaded model file's absolute path, load it (or return null). */
+    /** Given the model file's absolute path, load it (or return null). */
     @Volatile var loader: ((modelPath: String) -> OnDeviceLlm?)? = null
+    /** files/ondevice/llm/model.litertlm, set at start-up; used when `router.localModel.path` is blank. */
+    @Volatile var defaultPath: String = ""
+    private var cached: Pair<String, OnDeviceLlm>? = null
+
+    /** One loaded model per path for the whole process: a router is made per task, a model load takes seconds. */
+    @Synchronized fun get(path: String, load: (String) -> OnDeviceLlm?): OnDeviceLlm? {
+        cached?.let { if (it.first == path) return it.second }
+        return load(path)?.also { cached = path to it }
+    }
 }
 
 class LocalModelBrain(
     private val llm: OnDeviceLlm,
-    private val allowedTools: Set<String> = DEFAULT_TOOLS
+    /** Tools the model may never call, whatever the step offers. */
+    private val denied: Set<String> = DENIED
 ) : AgentBrain {
-    private var step = 0
+
+    // The task's conversation: its tool list is fixed when it opens (the KV the runtime reuses depends on an unchanged
+    // prefix), and only history lines newer than the last step go into the next turn.
+    private var session: LlmSession? = null
+    private var sessionTools: List<JSONObject> = emptyList()
+    private var sentHistory = 0
+    private var turns = 0   // user turns sent in the open conversation (its token count may include the system prompt)
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
-        step++
-        if (step > 1) {
-            // Speak the tool's own outcome (its verified message, or the honest failure).
-            val last = LocalBrain.lastStep(ctx.history)
-            val msg = LocalBrain.resultMessage(last).ifEmpty { "Done." }
-            return if (last.contains("→ fail")) AgentDecision.CannotDo(LocalBrain.ACTION_FAILED, msg) else AgentDecision.Done(msg)
+        val stepTools = (0 until ctx.openAiTools.length()).mapNotNull { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function") }
+            .filter { it.optString("name") !in denied }
+        val registry = stepTools.associateBy { it.optString("name") } + REGISTRY_ALWAYS
+        // A step offering a tool the open conversation doesn't list reopens it with both lists (the prefix changes anyway).
+        val known = sessionTools.map { it.optString("name") }.toSet()
+        val fresh = stepTools.filter { it.optString("name") !in known }
+        if (session != null && fresh.isNotEmpty()) closeSession()
+        val offered = if (session != null) sessionTools
+            else com.tekyerema.agent.llm.PlannerPrompt.offered(sessionTools.filter { it.optString("name") != "done" && it.optString("name") !in com.tekyerema.agent.llm.PlannerPrompt.ALWAYS } + stepTools, registry)
+        val names = offered.map { it.optString("name") }.toSet()
+        val system = com.tekyerema.agent.llm.PlannerPrompt.system(offered)
+        val schema = com.tekyerema.agent.llm.PlannerPrompt.replySchema(offered)
+        val maxTokens = AppConfig.int("router.localModel.maxTokens", 200)
+        val timeout = AppConfig.long("router.localModel.timeoutMs", 60_000L)
+        val t0 = System.currentTimeMillis()
+        var user: String
+        val out: String?
+        val s = session ?: llm.openSession(system, maxTokens)?.also { session = it; sessionTools = offered; turns = 0 }
+        if (s != null) {
+            user = when {
+                // A conversation that opens mid-task (after a rollover or a new tool) starts from the full list of steps.
+                turns == 0 && ctx.history.isNotEmpty() ->
+                    com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation)
+                turns == 0 -> com.tekyerema.agent.llm.PlannerPrompt.firstTurn(ctx.goal, ctx.screen, ctx.conversation)
+                else -> com.tekyerema.agent.llm.PlannerPrompt.nextTurn(
+                    ctx.history.drop(sentHistory).joinToString("\n").ifBlank { "done" }, ctx.screen)
+            }
+            out = s.send(user, schema, timeout)
+            turns++
+            sentHistory = ctx.history.size
+            if (out == null || s.tokens > AppConfig.int("router.localModel.maxContextTokens", 3_000)) closeSession()
+        } else {
+            user = com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation)
+            out = llm.chat(system, user, schema, maxTokens, timeout)
         }
-        val out = llm.complete(prompt(ctx.goal, allowedTools),
-            AppConfig.int("router.localModel.maxTokens", 48), AppConfig.long("router.localModel.timeoutMs", 6_000L))
-            ?: return AgentDecision.CannotDo(LocalBrain.DEFER, "on-device model gave no answer")
-        return parse(out, allowedTools) ?: AgentDecision.CannotDo(LocalBrain.DEFER, "on-device model reply not usable")
+        val ms = System.currentTimeMillis() - t0
+        if (out == null) {
+            log("[LLM] ${llm.id} no answer after $ms ms")
+            return AgentDecision.CannotDo(LocalBrain.DEFER, "on-device model gave no answer")
+        }
+        val call = com.tekyerema.agent.llm.ToolReply.parse(out)
+        log("[LLM] ${llm.id} ${ms} ms, turn ${user.length} chars, held ${session?.tokens ?: 0} tokens → ${call?.tool ?: "unparsed"}")
+        if (call == null || call.tool !in names) return AgentDecision.Malformed(out.take(300))
+        return when (call.tool) {
+            "done" -> { closeSession(); AgentDecision.Done(call.args.optString("summary").ifBlank { "Done." }) }
+            else -> AgentDecision.fromToolCall(call.tool, call.args, "local-model:${llm.id}")
+        }
     }
+
+    private fun closeSession() {
+        try { session?.close() } catch (_: Throwable) {}
+        session = null
+    }
+
+    private fun log(s: String) = try { android.util.Log.i("Tekyerema", s) } catch (_: Throwable) {}
 
     companion object {
         /** Single-step tools whose arguments are easy to check. Deliberately excludes money, USSD, emergency, installs. */
         val DEFAULT_TOOLS = setOf("open_app", "make_call", "send_sms", "set_alarm", "set_timer", "read_notifications",
             "read_screen", "set_volume", "open_setting", "play_music", "search_contacts")
+
+        /** Never the planner model's: raw USSD (money and network menus go through the on-phone money flow only). */
+        val DENIED = setOf("run_ussd")
+
+        /** ask_user and cannot_do as the registry describes them, offered every step even when the step's subset left them out. */
+        private val REGISTRY_ALWAYS: Map<String, JSONObject> by lazy {
+            try {
+                val arr = com.tekyerema.tools.ToolRegistry(com.tekyerema.tools.defaultTools()).openAiTools(listOf("ask_user", "cannot_do"))
+                (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optJSONObject("function") }.associateBy { it.optString("name") }
+            } catch (_: Throwable) { emptyMap() }
+        }
 
         /** Argument names each tool needs (one of them, for the call tools). */
         private val REQUIRED = mapOf(
@@ -111,9 +190,9 @@ class LocalModelBrain(
             if (!AppConfig.bool("router.localModel.enabled", false)) return null
             val loader = LocalModelRuntime.loader ?: return null
             if (com.tekyerema.core.DeviceProfile.totalRamMb in 1 until AppConfig.long("router.localModel.minRamMb", 2_500L)) return null
-            val path = AppConfig.string("router.localModel.path", "")
+            val path = AppConfig.string("router.localModel.path", "").ifBlank { LocalModelRuntime.defaultPath }
             if (path.isBlank() || !java.io.File(path).isFile) return null
-            return try { loader(path)?.let { LocalModelBrain(it) } } catch (_: Throwable) { null }
+            return try { LocalModelRuntime.get(path, loader)?.let { LocalModelBrain(it) } } catch (_: Throwable) { null }
         }
     }
 }

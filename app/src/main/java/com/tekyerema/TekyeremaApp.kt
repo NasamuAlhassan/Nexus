@@ -43,6 +43,9 @@ class TekyeremaApp : Application() {
         // Coaching tails ("You can say cancel to stop.") shrink after enough hearings — the count survives restarts.
         com.tekyerema.voice.Coaching.store = getSharedPreferences("tekyerema_coaching", MODE_PRIVATE)
         ModelManager.init(this); stage("models")     // §Part D — single model store; first-run download is the delivery path
+        // The on-device planner (31 Oct 2026): LiteRT-LM loads files/ondevice/llm/model.litertlm on its first request, never here.
+        com.tekyerema.agent.LocalModelRuntime.defaultPath = java.io.File(filesDir, "ondevice/llm/model.litertlm").absolutePath
+        com.tekyerema.agent.LocalModelRuntime.loader = { path -> com.tekyerema.agent.llm.LiteRtLlm(this, path) }
         AgentEngine.init(this); stage("agent")
         VoiceEngine.init(this); stage("voice")
         // D: the computer connection (MCP over adb) — idle until the user turns it on (OperatorPolicy.remoteControlEnabled) —
