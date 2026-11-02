@@ -238,6 +238,21 @@ class TeachSessionTest {
         assertNotNull(notice); assertTrue(notice!!.contains("phone's own dialog"))
     }
 
+    @Test fun naming_after_an_empty_self_stop_is_never_a_phone_call() {
+        // Emulator, 2 Nov 2026: "watch me", the dialer (the phone's own dialog stops it, nothing kept), then "stop, call it open the
+        // phone" went to the agent as make_call. It must stay teach mode's words.
+        assertTrue(session.handle("watch me")!!.spoken.contains("watching"))
+        val notice = session.onEvent(click("Phone").copy(pkg = "com.android.phone", timeMs = clock + 1), false)
+        assertNotNull(notice); assertTrue(notice!!, notice.contains("nothing to keep"))
+        assertEquals(TeachSession.Phase.IDLE, session.phase)
+        val r = session.handle("stop, call it open the phone")
+        assertNotNull("handled by teach mode, not the agent", r); assertTrue(r!!.spoken, r.spoken.contains("no recording to name"))
+        assertNotNull(session.handle("call it open the phone"))
+        clock += 6 * 60_000L
+        assertNull("long after, a bare 'call it …' is ordinary speech again", session.handle("call it a day"))
+        assertNotNull("'stop, call it …' is always teach mode's", session.handle("stop, call it open the phone"))
+    }
+
     @Test fun a_credential_screen_found_afterwards_drops_what_was_done_on_it() {
         teachDataBundle()
         val before = clock

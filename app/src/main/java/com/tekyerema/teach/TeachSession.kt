@@ -60,6 +60,7 @@ class TeachSession(
     }
 
     private fun stoppedBySystem(reason: StopReason): String {
+        endedAt = now()
         drafts = recorder.stop()
         privateEnd = reason == StopReason.PRIVATE || reason == StopReason.PHONE_DIALOG
         touched = now()
@@ -89,6 +90,9 @@ class TeachSession(
         if (phase in listOf(Phase.NEED_NAME, Phase.ASK_TEXT, Phase.CONFIRM_SAVE) && now() - touched > 5 * 60_000L) reset()
     }
 
+    /** When a recording last ended by itself (a private screen, the phone's dialog, time); 0 = never. */
+    private var endedAt = 0L
+
     private fun reset() {
         recorder.discard(); drafts = emptyList(); name = null; offered = null; privateEnd = false
         textQueue = ArrayDeque(); tries = 0; phase = Phase.IDLE
@@ -114,6 +118,12 @@ class TeachSession(
             val s = store.get(n) ?: return null
             return Reply("“$n”: ${StepWords.spoken(s.steps)}" + if (s.endsAtPrivate) " It stops before the private part, which you do yourself." else "")
         }
+        // "stop, call it X" with nothing to name — the recording ended by itself and kept nothing, or never started — is still
+        // teach mode's: on the emulator (2 Nov 2026) it fell through to the agent, which tried make_call("it open the phone").
+        // A bare "call it X" counts only within 5 minutes of a recording ending, so "call it a day" stays ordinary speech.
+        if (TeachParse.parseStop(text) is TeachParse.Stop.Named ||
+            (endedAt > 0 && now() - endedAt < 5 * 60_000L && TeachParse.parseName(text, bareOk = false) != null))
+            return Reply("There's no recording to name, so nothing was saved. Say “watch me” to start again.")
         return null
     }
 
