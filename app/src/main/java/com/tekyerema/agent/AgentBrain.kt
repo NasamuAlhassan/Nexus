@@ -10,7 +10,7 @@ data class BrainContext(
     val history: List<String>,
     val geminiTools: JSONArray,   // Gemini functionDeclarations format
     val openAiTools: JSONArray,   // OpenAI/Groq tools format
-    /** Prior CONVERSATION turns (older→newer), each "User: …" / "Tɛkyerɛma: …". Lets the brain resolve
+    /** Prior CONVERSATION turns (older→newer), each "User: …" / "Nexus: …". Lets the brain resolve
      *  references ("him", "it"), corrections ("actually…"), and follow-ups ("what did Kwame send?") across
      *  utterances. Additive + optional: brains that ignore it (LocalBrain) behave exactly as before. */
     val conversation: List<String> = emptyList(),

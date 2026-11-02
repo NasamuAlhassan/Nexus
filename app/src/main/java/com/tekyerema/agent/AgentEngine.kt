@@ -651,7 +651,7 @@ object AgentEngine {
                 run { kotlinx.coroutines.delay(600); com.tekyerema.core.DeviceLock.blocks(ctxApp) }) {
             log(LogEntry.Kind.INFO, "The phone is locked — nothing was run.")
             log(LogEntry.Kind.RESULT, com.tekyerema.core.DeviceLock.LOCKED_LINE)
-            pushConvo("Tɛkyerɛma: ${com.tekyerema.core.DeviceLock.LOCKED_LINE}")
+            pushConvo("Nexus:${com.tekyerema.core.DeviceLock.LOCKED_LINE}")
             finish(AgentStatus.CANNOT_DO, stats, run = runCtx)
             return
         }
@@ -717,7 +717,7 @@ object AgentEngine {
             log(LogEntry.Kind.INFO, "PAUSED [${reason.name}] — checkpoint kept; resumes only when the user says \"carry on\"")
             log(LogEntry.Kind.RESULT, line)
             // Like a dropped connection (A20e 2026-09-29), a pause is about THAT moment — not remembered as "the internet is down".
-            pushConvo("Tɛkyerɛma: (paused “$goal” — ${com.tekyerema.agent.journal.PauseRules.because(reason)}; this says nothing " +
+            pushConvo("Nexus:(paused “$goal” — ${com.tekyerema.agent.journal.PauseRules.because(reason)}; this says nothing " +
                 "about the connection now. \"carry on\" resumes it.)")
             finish(AgentStatus.CANNOT_DO, s, paused = reason, run = runCtx)
         }
@@ -751,7 +751,7 @@ object AgentEngine {
             research?.note?.let { history.add(it) }
             research?.open?.let { planned.add(it) }
             research?.end?.let { e ->
-                log(LogEntry.Kind.RESULT, e.line); pushConvo("Tɛkyerɛma: ${e.line}")
+                log(LogEntry.Kind.RESULT, e.line); pushConvo("Nexus:${e.line}")
                 finish(if (e.stopped) AgentStatus.STOPPED else AgentStatus.CANNOT_DO, stats, run = runCtx); return
             }
             // G-15; WS-C: the user's "steps per task" (Settings › Control) replaces the configured limit once they pick one
@@ -986,7 +986,7 @@ object AgentEngine {
                         }
                         if (unsupported != null) {
                             log(LogEntry.Kind.INFO, "CANNOT DO [unsupported_claim] the reply claimed '${unsupported.said}' twice with no step that did it")
-                            log(LogEntry.Kind.RESULT, unsupported.honestLine); pushConvo("Tɛkyerɛma: ${unsupported.honestLine}")
+                            log(LogEntry.Kind.RESULT, unsupported.honestLine); pushConvo("Nexus:${unsupported.honestLine}")
                             finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         // P1-14 (D-017): a request that names a page ends ON that page. The last step may have verified only
@@ -1036,7 +1036,7 @@ object AgentEngine {
                         if (detailUnseen != null && MoneyGround.unseen(decision.summary, "", emptyList(), "") == null) {
                             log(LogEntry.Kind.INFO, "completion gate: the answer names details nothing in this task showed — not said")
                             log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
-                            pushConvo("Tɛkyerɛma: ${MoneyGround.NOT_SEEN}")
+                            pushConvo("Nexus:${MoneyGround.NOT_SEEN}")
                             finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         val moneyUnseen = if (isQuestion) null else MoneyGround.unseen(decision.summary,
@@ -1045,12 +1045,12 @@ object AgentEngine {
                             log(LogEntry.Kind.INFO, "completion gate: the answer names $moneyUnseen cedis, which nothing in this task showed — not said")
                             val line = MoneyGround.honest(runCtx.goal)
                             log(LogEntry.Kind.RESULT, line)
-                            pushConvo("Tɛkyerɛma: $line")
+                            pushConvo("Nexus:$line")
                             finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         if (isQuestion || (planOpen == null && !ungroundedRead && !webUnseen && notThere == null && (mutatingCount == 0 || substantiveOk))) {
                             log(LogEntry.Kind.RESULT, spokenSummary)
-                            pushConvo("Tɛkyerɛma: ${decision.summary}")
+                            pushConvo("Nexus:${decision.summary}")
                             finish(AgentStatus.COMPLETED, stats, run = runCtx); return
                         }
                         val why = when {
@@ -1071,17 +1071,17 @@ object AgentEngine {
                             history, runCtx.goal)?.let {
                             log(LogEntry.Kind.INFO, "completion gate: an unconfirmed answer names details nothing showed — not said")
                             log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
-                            pushConvo("Tɛkyerɛma: ${MoneyGround.NOT_SEEN}")
+                            pushConvo("Nexus:${MoneyGround.NOT_SEEN}")
                             finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         log(LogEntry.Kind.RESULT, spokenSummary)
-                        pushConvo("Tɛkyerɛma: ${decision.summary}")
+                        pushConvo("Nexus:${decision.summary}")
                         finish(AgentStatus.COMPLETED_UNVERIFIED, stats, run = runCtx); return
                     }
                     is AgentDecision.CannotDo -> {
                         // The task itself cut the connection ("turn on airplane mode", verified) — done, not "paused" (ConnectivityGoal).
                         if (lastMutatingVerified == true && (decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST))
-                            ConnectivityGoal.doneLine(goal, ctxApp)?.let { line -> log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.COMPLETED, stats, run = runCtx); return }
+                            ConnectivityGoal.doneLine(goal, ctxApp)?.let { line -> log(LogEntry.Kind.RESULT, line); pushConvo("Nexus:$line"); finish(AgentStatus.COMPLETED, stats, run = runCtx); return }
                         // WS-A: the network dropped, or no capable model / quota / budget is left (Workstream B's reason
                         // classes) — that is not "can't do it": the task PAUSES with a checkpoint (journaled tasks only).
                         val pauseFor = if (taskRun != null) com.tekyerema.agent.journal.PauseRules.forCannotDo(decision.reasonClass) else null
@@ -1099,8 +1099,8 @@ object AgentEngine {
                         // A dropped connection is about THAT moment. Remembered word for word ("the internet isn't
                         // working"), the model refused the next request on a working link (A20e, 2026-09-29).
                         val netDrop = decision.reasonClass == LocalBrain.NETWORK || decision.reasonClass == FallbackBrain.NETWORK_LOST
-                        pushConvo(if (netDrop) "Tɛkyerɛma: (that request didn't run — the connection dropped for a moment; " +
-                            "this says nothing about the connection now)" else "Tɛkyerɛma: $detail")
+                        pushConvo(if (netDrop) "Nexus: (that request didn't run — the connection dropped for a moment; " +
+                            "this says nothing about the connection now)" else "Nexus: $detail")
                         finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                     }
                     is AgentDecision.Fail -> {
@@ -1120,7 +1120,7 @@ object AgentEngine {
                         log(LogEntry.Kind.RESULT, if (busy) "I'm getting too many requests right now. Please try again in a minute — " +
                             "phone commands like the time, calls or opening an app still work now."
                             else "Something went wrong on my side, so I stopped. You can try again, or say it another way.")
-                        pushConvo("Tɛkyerɛma: I couldn't do that.")
+                        pushConvo("Nexus:I couldn't do that.")
                         finish(AgentStatus.FAILED, stats, run = runCtx); return
                     }
                     is AgentDecision.Malformed -> {
@@ -1165,7 +1165,7 @@ object AgentEngine {
                             // (2026-09-29) saw the model ask the same question again. A plain "no" may be a real answer.
                             if (com.tekyerema.voice.ControlVerbs.classify(ans) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
                                 log(LogEntry.Kind.RESULT, "Okay, I've left it.")
-                                pushConvo("Tɛkyerɛma: stopped — the user said \"$ans\".")
+                                pushConvo("Nexus:stopped — the user said \"$ans\".")
                                 finish(AgentStatus.STOPPED, stats, run = runCtx); return
                             }
                             val picked = (com.tekyerema.agent.research.OptionAnswer.parse(ans, options) as?
@@ -1188,7 +1188,7 @@ object AgentEngine {
                                     "I'm having trouble with this — the last few tries didn't work. Should I keep trying another way, or stop?")
                             if (ans == null || LoopGuard.wantsStop(ans)) {
                                 log(LogEntry.Kind.RESULT, "Okay, I stopped.")
-                                pushConvo("Tɛkyerɛma: I stopped because it wasn't working.")
+                                pushConvo("Nexus:I stopped because it wasn't working.")
                                 finish(AgentStatus.STOPPED, stats, run = runCtx); return
                             }
                             history.add(if (missing != null) "open_app found no app called '$missing'. The user was asked which app they " +
@@ -1350,7 +1350,7 @@ object AgentEngine {
                                     }
                                     if (com.tekyerema.voice.ControlVerbs.classify(a) == com.tekyerema.voice.ControlVerbs.Verb.STOP) {
                                         log(LogEntry.Kind.RESULT, "Okay, I've left it.")
-                                        pushConvo("Tɛkyerɛma: stopped — the user said \"$a\".")
+                                        pushConvo("Nexus:stopped — the user said \"$a\".")
                                         finish(AgentStatus.STOPPED, stats, run = runCtx); return
                                     }
                                     ans = a
@@ -1447,7 +1447,7 @@ object AgentEngine {
                             stepAudit?.blocked("injection stop: $src contained instructions")   // WS-C
                             log(LogEntry.Kind.POLICY, "INJECTION_STOP: ${decision.name} with a payload from untrusted content that contained instructions (${payloadInjection ?: injectionSource})")
                             log(LogEntry.Kind.RESULT, "I stopped: $src contained instructions trying to direct me, so I didn't act on it. Nothing was sent.")
-                            pushConvo("Tɛkyerɛma: I stopped because $src tried to give me instructions.")
+                            pushConvo("Nexus:I stopped because $src tried to give me instructions.")
                             finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                         }
                         // ---- WS-A effect ledger (replaces D-09 / G-21): the CONSEQUENCE of this step — a tap on Send, type +
@@ -1487,7 +1487,7 @@ object AgentEngine {
                                 // WS-C: a capability the user switched off ends the task with their reason (spoken as is);
                                 // Guide only lets the model explain first (operator/OperatorStops).
                                 com.tekyerema.operator.OperatorStops.afterBlock(runCtx.auditTask, pd.operatorRule)?.let { line ->
-                                    log(LogEntry.Kind.RESULT, line); pushConvo("Tɛkyerɛma: $line"); finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return }
+                                    log(LogEntry.Kind.RESULT, line); pushConvo("Nexus:$line"); finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return }
                                 history.add("${decision.name}(${shortArgs(decision.args)}) → BLOCKED by policy: ${pd.reason}. Do not retry it; if the goal needs it, call cannot_do.")
                                 // A blocked substantive action did not happen: a Done right after must not read as verified.
                                 // (WS-C: not when the user's own mode blocked it — a guide-only explanation is a complete answer.)
@@ -1828,7 +1828,7 @@ object AgentEngine {
                             if (noProgressStreak >= 5) {
                                 log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled steps) — stopping honestly.")
                                 log(LogEntry.Kind.RESULT, "I kept trying but the screen wasn't changing, so I stopped.")
-                                pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
+                                pushConvo("Nexus:I couldn't make progress on that.")
                                 finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                             }
                             continue
@@ -1949,7 +1949,7 @@ object AgentEngine {
                                 Futility.Signal.STOP -> {
                                     log(LogEntry.Kind.INFO, "futility: '$lookedFor' never appeared after repeated attempts — stopping honestly.")
                                     log(LogEntry.Kind.RESULT, "I looked, but I couldn't find “${lookedFor.take(50)}” on this phone.")
-                                    pushConvo("Tɛkyerɛma: I couldn't find ${lookedFor.take(50)}.")
+                                    pushConvo("Nexus:I couldn't find ${lookedFor.take(50)}.")
                                     finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                 }
                                 Futility.Signal.NONE -> {}
@@ -1973,7 +1973,7 @@ object AgentEngine {
                                 LoopGuard.Cycle.STOP -> {
                                     log(LogEntry.Kind.INFO, "loop guard: the same screen cycle repeated — stopping honestly.")
                                     log(LogEntry.Kind.RESULT, "I kept going round in circles, so I stopped.")
-                                    pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
+                                    pushConvo("Nexus:I couldn't make progress on that.")
                                     finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                                 }
                                 LoopGuard.Cycle.NONE -> {}
@@ -1984,7 +1984,7 @@ object AgentEngine {
                             if (noProgressStreak >= 5) {
                                 log(LogEntry.Kind.INFO, "no-progress soft budget hit ($noProgressStreak stalled mutating steps) — stopping honestly.")
                                 log(LogEntry.Kind.RESULT, "I kept trying but the screen wasn't changing, so I stopped.")
-                                pushConvo("Tɛkyerɛma: I couldn't make progress on that.")
+                                pushConvo("Nexus:I couldn't make progress on that.")
                                 finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
                             }
                         }
@@ -2644,7 +2644,7 @@ object AgentEngine {
     private fun endAtMoneyStep(history: List<String>, stats: RunStats): Boolean {
         val (status, line) = RoutingBrain.moneyEnd(history) ?: return false
         log(LogEntry.Kind.RESULT, line)
-        pushConvo("Tɛkyerɛma: $line")
+        pushConvo("Nexus:$line")
         finish(status, stats)
         return true
     }

@@ -162,7 +162,14 @@ tasks.withType<com.android.build.gradle.tasks.MergeSourceSetFolders>().configure
         inputs.property("slimApk", slimApk)
         // Only the recogniser: models/ondevice/eng/tts is the offline Kafui voice (63 MB), which the slim build used to drop
         // along with it although nothing pushes that voice to the phone (cleanup, 24 Oct 2026).
-        if (slimApk) doLast { outputDir.get().asFile.resolve("models/ondevice/eng/asr").deleteRecursively() }
+        // Nexus (2 Nov 2026): the Twi voice and MT models (models/ondevice/twi, 315 MB) leave the slim build too — local languages
+        // were dropped on 31 Oct (REUSE_AUDIT) and the slim APK had grown back to 1.2 GB, more than the A20e can free to update.
+        // whatis (the offline object identifier), eng-lite (the low-memory recogniser) and the small mt/ dictionaries stay.
+        if (slimApk) doLast {
+            val out = outputDir.get().asFile
+            out.resolve("models/ondevice/eng/asr").deleteRecursively()
+            out.resolve("models/ondevice/twi").deleteRecursively()
+        }
     }
 }
 

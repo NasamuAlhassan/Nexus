@@ -13,7 +13,7 @@ import org.junit.Test
 class ReadingNoteTest {
     @Test fun a_reading_is_one_marked_turn() {
         val line = ReadingNote.line("camera", "MTN MoMo\n  Payment received\nGHS 50.00 from KOFI MENSAH", 1_200)!!
-        assertEquals("Tɛkyerɛma read aloud from the camera: ${AgentEngine.UNTRUSTED_MARK} MTN MoMo Payment received GHS 50.00 from KOFI MENSAH", line)
+        assertEquals("Nexus read aloud from the camera: ${AgentEngine.UNTRUSTED_MARK} MTN MoMo Payment received GHS 50.00 from KOFI MENSAH", line)
     }
 
     @Test fun nothing_read_is_no_turn() {

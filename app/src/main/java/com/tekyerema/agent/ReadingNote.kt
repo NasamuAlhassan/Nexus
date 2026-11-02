@@ -12,7 +12,7 @@ package com.tekyerema.agent
  * Pure → ReadingNoteTest.
  */
 object ReadingNote {
-    private fun head(source: String) = "Tɛkyerɛma read aloud from the $source:"
+    private fun head(source: String) = "Nexus read aloud from the $source:"
 
     /** The conversation turn for [text] read from [source] ("camera", "document"), or null when there is nothing. A long
      *  reading keeps its first [maxChars] characters. */
