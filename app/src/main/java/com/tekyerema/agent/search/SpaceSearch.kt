@@ -39,6 +39,11 @@ object SpaceSearchProvider : SearchProvider {
         { url, headers, body -> WebSearch.post(url, headers, body) }
     internal var online: () -> Boolean = { try { com.tekyerema.core.NetworkMonitor.isOnline() } catch (_: Throwable) { true } }
     internal var clock: () -> Long = { System.currentTimeMillis() }
+    /** The app's own key for the Space (owner, 2 Nov 2026: "secret key for the app"): the Space gives a keyed caller its own,
+     *  higher limit. It names the APP, never the user — no account, id or cookie is ever sent. Debug builds only (BuildConfig,
+     *  from local.properties SPACE_APP_KEY); a release build sends none and gets the public limits. Tests swap it. */
+    internal var appKey: () -> String = { try { com.tekyerema.BuildConfig.SPACE_APP_KEY } catch (_: Throwable) { "" } }
+    const val KEY_HEADER = "X-Nexus-Key"
 
     internal var timeoutOverrideMs: Long? = null
 
@@ -67,7 +72,8 @@ object SpaceSearchProvider : SearchProvider {
 
     /** One call to the Space. Null on any failure; never throws except cancellation. */
     internal suspend fun ask(query: String, url: String, mode: String = "answer"): SearchResult? = withContext(Dispatchers.IO) {
-        val reply = withTimeoutOrNull(timeoutMs()) { transport(url, emptyMap(), requestBody(query, mode)) }
+        val headers = appKey().trim().takeIf { it.isNotEmpty() }?.let { mapOf(KEY_HEADER to it) } ?: emptyMap()
+        val reply = withTimeoutOrNull(timeoutMs()) { transport(url, headers, requestBody(query, mode)) }
         if (reply == null) {
             cool(DEFAULT_COOL_MS)
             WebSearch.warn("space: no reply (offline, asleep or slow) — trying the next provider")

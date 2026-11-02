@@ -72,7 +72,8 @@ val secretBuildFields = linkedMapOf(
     "DEFAULT_GROQ_KEY_5" to defaultGroqKey5,
     "DEFAULT_GROQ_KEY_6" to defaultGroqKey6,
     "DEFAULT_ASR_ONLINE_KEY" to defaultAsrOnlineKey,
-    "DEFAULT_PLANNER_KEYS" to defaultPlannerKeys
+    "DEFAULT_PLANNER_KEYS" to defaultPlannerKeys,
+    "SPACE_APP_KEY" to localProps.getProperty("SPACE_APP_KEY", "")   // the app's key for our Space (owner, 2 Nov 2026)
 )
 
 android {

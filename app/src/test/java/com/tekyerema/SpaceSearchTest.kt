@@ -75,8 +75,22 @@ class SpaceSearchTest {
         assertEquals("answer", b.getString("mode"))
     }
 
+    @Test fun with_an_app_key_the_only_header_is_that_key() = runBlocking {
+        fake(200, goodBody)
+        val saved = SpaceSearchProvider.appKey
+        try {
+            SpaceSearchProvider.appKey = { "test-key" }
+            SpaceSearchProvider.ask("cedi rate today", url, "results")
+            assertEquals(mapOf(SpaceSearchProvider.KEY_HEADER to "test-key"), sent.last().second)
+            assertEquals(setOf("q", "mode"), sent.last().third.keys().asSequence().toSet())
+        } finally { SpaceSearchProvider.appKey = saved }
+    }
+
     @Test fun the_call_sends_exactly_that_body_to_the_url_with_no_headers() = runBlocking {
         fake(200, goodBody)
+        val saved = SpaceSearchProvider.appKey
+        SpaceSearchProvider.appKey = { "" }   // no key configured: nothing at all in the headers
+        try {
         assertNotNull(SpaceSearchProvider.ask("cedi rate today", url, "results"))
         assertEquals(1, sent.size)
         assertEquals(url, sent[0].first)
@@ -85,6 +99,7 @@ class SpaceSearchTest {
         assertEquals(setOf("q", "mode"), body.keys().asSequence().toSet())
         assertEquals("cedi rate today", body.getString("q"))
         assertEquals("results", body.getString("mode"))
+        } finally { SpaceSearchProvider.appKey = saved }
     }
 
     @Test fun url_comes_from_config_else_the_space_host_https_only() {
