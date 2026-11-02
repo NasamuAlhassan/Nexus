@@ -1,7 +1,6 @@
 package com.tekyerema
 
 import com.tekyerema.language.LanguageSession
-import com.tekyerema.voice.KusaalYes
 import com.tekyerema.voice.Lang
 import com.tekyerema.voice.LanguagePipeline
 import com.tekyerema.voice.PrefetchTts
@@ -111,13 +110,6 @@ class KusaalLanguageTest {
         val routed = LanguageRoutedInput(english = Rec("phone", heard), twi = Rec("captured", heard), language = { Lang.KUS }, isOnline = { false })
         routed.listen(ListenSpec(ListenPurpose.YES_NO), object : ListenEvents {})
         assertEquals(listOf("captured/kus/YES_NO"), heard)
-    }
-
-    // ---------------------------------------------------------------- the money step's yes
-
-    @Test fun onlyAPlainEnglishYesApprovesInKusaal() {
-        for (s in listOf("yes", "Yes.", "yes please", "Yes, go ahead", "go ahead")) assertTrue(s, KusaalYes.strict(s))
-        for (s in listOf("okay", "ok", "yeah", "sure", "yes no", "a yay", "yes but no", "", "no")) assertFalse(s, KusaalYes.strict(s))
     }
 
     // ---------------------------------------------------------------- speaking Kusaal

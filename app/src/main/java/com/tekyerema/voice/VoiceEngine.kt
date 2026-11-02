@@ -26,8 +26,6 @@ import kotlinx.coroutines.launch
 object VoiceEngine {
     /** Languages that may carry their own on-device voice in the APK (assets/models/ondevice/<code>/tts). */
     private val ON_DEVICE_LANGS = listOf("kus")
-    /** The phone's own Twi voice when the build has one (offline Twi, 20 Oct 2026). */
-    private var twiLocal: SherpaTts? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private lateinit var settings: Settings
     private lateinit var systemTts: AndroidTts
@@ -178,20 +176,9 @@ object VoiceEngine {
 
     /** The user is speaking Twi right now. */
     fun speaksTwi(): Boolean = conversationLanguage() == Lang.TWI
-    /** DEBUG: say [text] with the phone's OWN voice for [language] (Twi or English), to time it ("first audio" in the log). */
-    /** The fixed Twi lines (and `speech.tts.prerender.twi` / [extra]) into the phone Twi voice's cache. */
-    fun prerenderTwi(extra: List<String> = emptyList()) {
-        if (!com.tekyerema.core.config.AppConfig.bool("speech.tts.prerender", true)) return
-        // + the app's other word-for-word Twi lines (locales.twFixed): the reference question took 2.8 s to start, "Yoo, merenyɛ" 1.9 s
-        // (Infinix, 29 Oct 2026). Made once — the cache keeps them on disk across restarts and installs.
-        val fixed = com.tekyerema.core.config.AppConfig.obj("locales.twFixed")?.let { o ->
-            o.keys().asSequence().filterNot { it.startsWith("_") }.map { o.optString(it) }.filter { it.isNotBlank() }.toList() }.orEmpty()
-        val lines = TwiPrerender.LINES + fixed + com.tekyerema.core.config.AppConfig.stringList("speech.tts.prerender.twi", emptyList()) + extra
-        try { twiLocal?.prerender(lines.distinct(), Lang.TWI) } catch (_: Throwable) {}
-    }
-
+    /** DEBUG: say [text] with the phone's OWN English voice, to time it ("first audio" in the log). */
     suspend fun speakOnDevice(text: String, language: String): Boolean =
-        (if (language == Lang.TWI) twiLocal?.let { RespellTts(it) } else ownVoice)?.speak(Verbalize.apply(text), language) ?: false
+        ownVoice?.speak(Verbalize.apply(text), language) ?: false
 
     /** When the user last asked for something (any input): a money follow-up isn't spoken over a newer request. */
     @Volatile var lastRequestAt = 0L
@@ -222,7 +209,6 @@ object VoiceEngine {
             readyLocalAt = now
             when (VoiceWarm.voiceToWarm(settings.forcedLanguage, settings.sessionLanguage, Long.MAX_VALUE, 0L)) {
                 Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
-                Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
             }
         }
         if (!com.tekyerema.core.NetworkMonitor.isOnline()) { com.tekyerema.language.SpaceWarm.log("$reason: phone voices warm; offline, so nothing online"); return }
@@ -370,17 +356,13 @@ object VoiceEngine {
         // and the phone's engine stays behind it, so a missing or failed model is never silence.
         val own = SherpaTts(app).takeIf { it.present }?.let { v -> ownVoice = v; com.tekyerema.language.PlainLatinVoice(v) }
         englishVoice = if (own != null) AccentTts(own, systemVoice) else systemVoice
-        twiLocal = SherpaTts(app, OnDeviceVoice.dirFor(Lang.TWI)).takeIf { it.present }
         // Only the voice of the language in force, and only with memory to spare ([VoiceWarm]); the other loads with its first line.
         when (VoiceWarm.voiceToWarm(settings.forcedLanguage, settings.sessionLanguage, availMb(),
                 com.tekyerema.core.config.AppConfig.long("speech.warm.minAvailMb", 900L))) {
             Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
-            Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
         }
-        // The app's fixed Twi lines, made into the voice's cache in the background (SherpaTts.prerender) — offline, no quota.
-        scope.launch { kotlinx.coroutines.delay(com.tekyerema.core.config.AppConfig.long("speech.tts.prerender.afterMs", 20_000L)); prerenderTwi() }
         // Short of memory for the offline recogniser: the phone voices let go first (they reload for the reply) — see SherpaTts.releaseNow.
-        AsrMemory.onRelease(this) { ownVoice?.releaseNow(); twiLocal?.releaseNow() }
+        AsrMemory.onRelease(this) { ownVoice?.releaseNow() }
         langVoices = ON_DEVICE_LANGS.mapNotNull { l -> SherpaTts(app, OnDeviceVoice.dirFor(l)).takeIf { it.present }?.let { l to it } }.toMap()
         stage("ownVoice")
         android.util.Log.i("Tekyerema", "[STARTUP] on-device voice: ${ownVoice?.name ?: "none in this build"}" +
@@ -468,15 +450,7 @@ object VoiceEngine {
                 englishToTwi = { localizer.toTwi(it, promptWaitMs()) }
                 tts = RoutingTts(
                     english = SpeechProviders.tts("english", ttsRegistry, systemVoice, englishIds),
-                    twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice).let { chain ->
-                        // The phone's own Twi voice (models/ondevice/twi/tts, our Space's MMS-VITS voice): first when offline,
-                        // right after the network voices when online — never the English engine while it can speak.
-                        twiLocal?.let { local ->
-                            val networkOnly = SpeechProviders.resolve(SpeechProviders.ttsIds("twi", listOf("system")), ttsRegistry)
-                                .filter { it !== systemVoice }.let { l -> when (l.size) { 0 -> null; 1 -> l[0]; else -> FallbackTts(l) } }
-                            OfflineFirstTts(chain, RespellTts(local), isOnline, networkOnly ?: chain)   // English words respelled (voice/TwiRespell)
-                        } ?: chain
-                    },
+                    twi = SpeechProviders.tts("twi", ttsRegistry, systemVoice),
                     enToTw = { localizer.toTwi(it) },  // null (speak as-is) unless an English→Twi translator is configured
                     enToTwAll = { localizer.toTwiAll(it) },
                     // The FIRST configured network English voice (Gemini's Kore when its key is set, else Kafui on our Space): kept
@@ -665,7 +639,6 @@ object VoiceEngine {
                     last = now
                     when (now) {
                         Lang.GH_EN -> try { ownVoice?.warm() } catch (_: Throwable) {}
-                        Lang.TWI -> try { twiLocal?.warm() } catch (_: Throwable) {}
                     }
                 }
             }
@@ -727,7 +700,6 @@ object VoiceEngine {
         fun drop(lastUsedAt: Long) = TrimPolicy.shouldRelease(level, now - lastUsedAt, grace)
         sherpa?.let { s -> if (drop(s.lastUsedAt)) scope.launch { try { s.releaseAll() } catch (_: Throwable) {} } }
         ownVoice?.let { v -> if (TrimPolicy.shouldReleaseSmallVoice(level, now - v.lastUsedAt, grace)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
-        twiLocal?.let { v -> if (drop(v.lastUsedAt)) scope.launch(Dispatchers.Default) { try { v.release() } catch (_: Throwable) {} } }
         langVoices.values.forEach { v -> scope.launch(Dispatchers.Default) { try { if (TrimPolicy.shouldRelease(level, Long.MAX_VALUE, grace)) v.release() } catch (_: Throwable) {} } }
     }
 
