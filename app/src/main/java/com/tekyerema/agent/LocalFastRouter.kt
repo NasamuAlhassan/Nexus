@@ -145,6 +145,11 @@ class LocalFastRouter(
         }?.let { o ->
             return ownControl(if (com.tekyerema.memory.MemoryCommands.takeWipeConfirmed()) forget(FastIntent.Forget("all")) else o)
         }
+        // Learning from mistakes by voice (learning/): "learn from your mistakes", "forget my mistakes", "share my mistakes for training".
+        // Also shows each other utterance to the opt-in notes (a "no, that's wrong" about the task that just ended) and returns null for it.
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            com.tekyerema.learning.FailureCommands.handle(appContext, text)
+        }?.let { return ownControl(it) }
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" / "next" / "more" in the middle of reading messages reads the next ones (MessageReading).
         if (com.tekyerema.notifications.MessageCursor.pending && ScreenReadIntent.isContinue(text))

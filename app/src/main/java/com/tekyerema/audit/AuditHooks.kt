@@ -98,6 +98,7 @@ object AuditHooks {
     /** How the task ended (COMPLETED, COMPLETED_UNVERIFIED, CANNOT_DO, FAILED, STOPPED). */
     fun taskEnded(source: String, task: Long, status: String) {
         AuditLog.append(AuditEntry(0, task, source, AuditLog.TASK_END, "", outcome = status))
+        com.tekyerema.learning.FailureLearning.taskEnded(source, task, status)   // opt-in "learn from your mistakes": a no-op unless switched on
     }
 
     /** Recorded words for a policy outcome, for the viewer: "allowed", "asked you first", "blocked". */

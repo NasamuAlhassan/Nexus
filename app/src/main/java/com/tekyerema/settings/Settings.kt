@@ -361,6 +361,13 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("field_log", false)
         set(v) = put { putBoolean("field_log", v) }
 
+    /** Learning from mistakes (learning/, MASTER_STATUS #25): keep a private note, on this phone only, of tasks that went wrong
+     *  (names, numbers, amounts, codes and message text taken out), so the on-phone planner avoids the same slip, and so the
+     *  user may share the notes to help train the next model. Off by default; nothing is ever uploaded by itself. */
+    var learnFromMistakes: Boolean
+        get() = prefs.getBoolean("learn_from_mistakes", false)
+        set(v) = put { putBoolean("learn_from_mistakes", v) }
+
     // ---- Phone care alerts (phonecare/PhoneAlerts). A20e 2026-09-29: nothing told the user that money came in, who
     // called or that the battery was going (docs/agent/research/openclaw.md §5.2). Each alert is OFF until the user
     // switches it on (Settings › Phone care, or by voice). "Private alerts" starts ON — the stricter side: on the
