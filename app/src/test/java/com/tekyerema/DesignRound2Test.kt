@@ -4,6 +4,9 @@ import com.tekyerema.history.HistoryEntry
 import com.tekyerema.history.Outcome
 import com.tekyerema.ui.assistant.KeyFigure
 import com.tekyerema.ui.home.Usuals
+import com.tekyerema.ui.assistant.OutsideTap
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -125,5 +128,15 @@ class DesignRound2Test {
         // Full: a new candidate waits for tomorrow.
         assertEquals(listOf("a", "b", "c"), Usuals.settle(listOf("a", "b", "c"),
             listOf(u("z", 99), u("a", 2), u("b", 2), u("c", 2)), newDay = false).map { it.key })
+    }
+
+    // ---------------------------------------------------------------- OutsideTap (owner, 2 Nov 2026: close the card AND do it)
+
+    @Test fun `a tap outside the card closes it, a tap on it or a drag does not`() {
+        val card = Rect(24f, 40f, 696f, 500f)
+        assertTrue("a tab tap", OutsideTap.closes(Offset(360f, 1420f), Offset(362f, 1421f), card, slop = 16f))
+        assertFalse("the card's own button", OutsideTap.closes(Offset(100f, 450f), Offset(100f, 450f), card, slop = 16f))
+        assertFalse("a swipe across Home", OutsideTap.closes(Offset(360f, 900f), Offset(360f, 700f), card, slop = 16f))
+        assertTrue("no bounds yet: any tap", OutsideTap.closes(Offset(10f, 10f), Offset(10f, 10f), null, slop = 16f))
     }
 }

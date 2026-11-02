@@ -89,6 +89,8 @@ import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -487,26 +489,17 @@ private fun GlassSurface(
     val moneyOn by com.tekyerema.money.MoneyMoment.active.collectAsState()
     val moneyEdge = moneyEdgeColour(glass)
     Box(modifier.fillMaxSize()) {
-        // Tap outside a FINISHED result dismisses it, and the tap stops there (the orb or field underneath doesn't also get
-        // it; DECISIONS V2-3). Invisible to TalkBack, which has the surface's "Dismiss" action instead.
-        if (state.visible && allow.dismiss && !leaving) Box(
-            Modifier.matchParentSize().pointerInput(state.key) {
-                // A real TAP only: a press that lifts within touch slop. A swipe that starts outside is not a tap (detectTap…
-                // counted any press lifted inside the layer, so a drag across Home dismissed the result — emulator, 14 Oct).
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
-                    val up = waitForUpOrCancellation()
-                    if (up != null) {
-                        up.consume()
-                        if ((up.position - down.position).getDistance() < viewConfiguration.touchSlop) dismissNow()
-                    }
-                }
-            }.clearAndSetSemantics { }
-        )
+        // Tap outside a FINISHED result closes it, and the tap still does what it was aimed at (owner, 2 Nov 2026; OutsideTap —
+        // the app's root watches, never consumes). TalkBack has the surface's "Dismiss" action as well.
+        val closable = state.visible && allow.dismiss && !leaving
+        DisposableEffect(closable) {
+            OutsideTap.dismiss = if (closable) ({ dismissNow() }) else null
+            onDispose { OutsideTap.dismiss = null; OutsideTap.card = null }
+        }
         AnimatedVisibility(
             visible = state.visible,
-            modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp).widthIn(max = 560.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(horizontal = 12.dp, vertical = 6.dp).widthIn(max = 560.dp)
+                .onGloballyPositioned { OutsideTap.card = it.boundsInRoot() },
             enter = if (calm) fadeIn(tween(160)) else fadeIn(tween(240)) +
                 slideInVertically(SurfaceMotion.Arrive) { -it / 2 } +
                 scaleIn(SurfaceMotion.ArriveScale, initialScale = 0.94f, transformOrigin = TransformOrigin(0.5f, 0f)),

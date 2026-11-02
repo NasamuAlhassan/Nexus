@@ -92,7 +92,8 @@ private fun App() {
     SystemBarsFollowTheme()
 
     val calm = LocalCalmMotion.current
-    Box(Modifier.fillMaxSize()) {
+    // A tap anywhere outside a finished result closes it and still does its own job (ui/assistant/OutsideTap).
+    Box(with(com.tekyerema.ui.assistant.OutsideTap) { Modifier.fillMaxSize().closeResultsOnTapOutside() }) {
         // The page light in its OWN offscreen layer, a sibling under the content (UI audit, 20 Oct 2026): it is recorded once
         // and reused as one image while the orb or a card moves, instead of four full-screen gradients redrawn every frame.
         Box(Modifier.matchParentSize()
