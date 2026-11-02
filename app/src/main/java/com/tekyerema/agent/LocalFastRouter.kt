@@ -356,7 +356,6 @@ class LocalFastRouter(
         FastIntent.BrightnessDown -> stepBrightness(up = false) ?: brightnessViaSlider(null, -0.2f)
         is FastIntent.BrightnessSet -> setBrightness(intent.fraction)
         is FastIntent.Calculate -> handled(intent, intent.answer)
-        is FastIntent.TwiPhrase -> handled(intent, intent.answer)
         is FastIntent.DateAnswer -> handled(intent, intent.answer)
         is FastIntent.Convert -> handled(intent, intent.answer)
         is FastIntent.Spell -> handled(intent, intent.answer)
