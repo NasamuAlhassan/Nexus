@@ -42,6 +42,8 @@ enum class FireDecision {
     RETRY_LATER,
     /** Still busy after every retry — leave the line in the shade silently, speak nothing. */
     GIVE_UP_BUSY,
+    /** The user's opt-in morning brief (companion/BriefSchedule) — build it on the phone and speak it; the agent is never involved. */
+    SPEAK_BRIEF,
     /** "remind me …" / "say …" — speak the line locally; the agent is never involved. */
     SPEAK_REMINDER,
     /** A read-only goal — run it through the agent unattended and speak the answer. */
@@ -162,6 +164,8 @@ object ScheduledTasks {
         !s.enabled || !flagOn -> FireDecision.SKIP_DISABLED
         quietBlocks -> FireDecision.SKIP_QUIET
         busy -> if (attempt < maxRetries) FireDecision.RETRY_LATER else FireDecision.GIVE_UP_BUSY
+        // After the quiet-hours / busy gates above, so the brief never speaks into a call, a task or a money step.
+        com.tekyerema.companion.BriefSchedule.isBriefGoal(s.goal) -> FireDecision.SPEAK_BRIEF
         TriggerSafety.reminderLine(s.goal) != null -> FireDecision.SPEAK_REMINDER
         TriggerSafety.isReadOnlyGoal(s.goal) -> FireDecision.RUN_READ_ONLY
         else -> FireDecision.SPEAK_OFFER

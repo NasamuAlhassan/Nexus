@@ -217,6 +217,8 @@ object TriggerGate {
     fun userBusy(ctx: Context): Boolean {
         if (isAgentBusy(AgentEngine.state.value.status)) return true
         if (try { VoiceEngine.isRunning } catch (_: Throwable) { false }) return true
+        // A money step is under way (the amount read-back, the PIN pad): nothing unattended may speak over it.
+        if (try { com.tekyerema.money.MoneyMoment.active.value } catch (_: Throwable) { false }) return true
         val mode = (try { ctx.getSystemService(AudioManager::class.java)?.mode } catch (_: Throwable) { null }) ?: AudioManager.MODE_NORMAL
         return mode == AudioManager.MODE_IN_CALL || mode == AudioManager.MODE_IN_COMMUNICATION || mode == AudioManager.MODE_RINGTONE
     }

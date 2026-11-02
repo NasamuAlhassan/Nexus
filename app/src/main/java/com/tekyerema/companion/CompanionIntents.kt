@@ -31,7 +31,11 @@ object CompanionIntents {
         END("end"),
         /** "stop the spending notes" / "bring the spending notes back". */
         NOTES_OFF("notes_off"),
-        NOTES_ON("notes_on");
+        NOTES_ON("notes_on"),
+        /** "brief me every morning at 7": the daily brief on a clock ([BriefSchedule]). */
+        BRIEF_SET("brief_set"),
+        /** "stop the morning brief". */
+        BRIEF_OFF("brief_off");
 
         companion object { fun of(id: String?): Kind? = values().firstOrNull { it.id == id } }
     }
@@ -44,7 +48,10 @@ object CompanionIntents {
     private val LEAD = Regex("^(?:(?:hey|hi|hello|ok|okay|so|chale|abeg|please|kindly|yo|ei)[, ]+)*(?:nexus[, ]+)?(?:(?:please|kindly)[, ]+)?")
     private val TAIL = Regex("(?:[, ]+(?:please|now|for me|nexus|my dear))+$")
 
-    private fun core(raw: String): String = norm(raw).replaceFirst(LEAD, "").replace(TAIL, "").trim()
+    internal fun core(raw: String): String = norm(raw).replaceFirst(LEAD, "").replace(TAIL, "").trim()
+
+    /** Is [raw] (a whole utterance or a schedule's goal) a request for the day brief? No distress check, no schedule parsing. */
+    fun isBrief(raw: String): Boolean { val g = core(raw); return g.isNotEmpty() && BRIEF.any { it.matches(g) } }
 
     // ---------------------------------------------------------------- chat
     private const val A_BIT = "(?: (?:a bit|a little|small|for a (?:bit|while|minute|moment)|for some time))?"
@@ -146,6 +153,10 @@ object CompanionIntents {
         }
         if (NOTES_OFF.any { it.matches(g) }) return Kind.NOTES_OFF
         if (NOTES_ON.any { it.matches(g) }) return Kind.NOTES_ON
+        // The brief on a clock: "stop the morning brief", "brief me every morning at 7" (whole utterances; a compound request
+        // such as "… at 7 and call Ama" leaves a goal that is not the brief, so it stays the schedule path's).
+        if (BriefSchedule.isOff(g)) return Kind.BRIEF_OFF
+        if (BriefSchedule.parseSet(raw) != null) return Kind.BRIEF_SET
         if (HONEST.any { it.matches(g) }) return Kind.HONEST
         if (last == Kind.TEACH && chatting && TEACH_MORE.matches(g)) return Kind.TEACH
         if (chatting && END.matches(g)) return Kind.END
