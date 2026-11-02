@@ -1699,11 +1699,17 @@ class VoiceController(
             // A reading cut into parts ends "There's more — say continue": listen for it the same way, so going on is one
             // word instead of a new trigger plus "continue" (no card — it isn't a question the task is waiting on).
             val invitesMore = ReadingPace.invitesContinue(outcome.spoken)
-            val isQuestion = (outcome.spoken.trim().endsWith("?") || invitesMore) &&
+            // Companion mode ("let's talk", companion/CompanionSession): while a chat is on, every finished reply keeps the mic
+            // open for the next line, question or not — a back-and-forth, not one command (MASTER_STATUS #21, voice side).
+            // Silence still ends it (quiet runOnce → idle), and the follow-up cap still applies.
+            val chatting = com.tekyerema.companion.CompanionSession.active() &&
+                outcome.status in setOf(AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED)
+            if (chatting) Log.i("Tekyerema", "[VOICE] companion chat — listening for the next line")
+            val isQuestion = (outcome.spoken.trim().endsWith("?") || invitesMore || chatting) &&
                 agent.state.value.status != AgentStatus.WAITING_CONFIRMATION && followUpChain < maxFollowUps
             if (isQuestion) {
                 followUpChain++
-                if (!invitesMore) {
+                if (!invitesMore && outcome.spoken.trim().endsWith("?")) {
                     Log.i("Tekyerema", "[VOICE] agent asked a question — showing the ask card ($source)")
                     showAsking(outcome.spoken)         // a VISIBLE card over any app (typed OR spoken), so the user sees it's waiting
                 }
