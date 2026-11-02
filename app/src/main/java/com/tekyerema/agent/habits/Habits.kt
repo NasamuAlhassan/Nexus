@@ -28,6 +28,8 @@ class Habits(
 
     @Synchronized
     override fun completed(goal: String, fastIntent: String?, now: Long, canAsk: Boolean): HabitOffer? {
+        // Memory (#19): "Should I remember that 'my wife' means Pearl?" — once, after the task that resolved it, never with money.
+        if (canAsk) com.tekyerema.memory.MemoryLearning.takeOffer(goal)?.let { return HabitOffer(MEMORY_PLACEHOLDER, it.question, it.id) }
         if (!enabled()) return null
         val kind = RepeatDetector.kindOf(goal, fastIntent) ?: return null   // never a consequential request
         val event = RepeatDetector.Event(kind.id, now)
@@ -48,6 +50,10 @@ class Habits(
 
     @Synchronized
     override fun answered(offer: HabitOffer, answer: RepeatDetector.Answer): String {
+        offer.memoryOfferId?.let { id ->
+            return com.tekyerema.memory.MemoryLearning.answered(id, when (answer) {
+                RepeatDetector.Answer.YES -> true; RepeatDetector.Answer.NO -> false; RepeatDetector.Answer.NONE -> null })
+        }
         val p = offer.pattern
         return when (answer) {
             RepeatDetector.Answer.YES -> {
@@ -76,6 +82,8 @@ class Habits(
         const val PREFS = "tekyerema_habits"
         private const val KEY_HISTORY = "history"
         private const val KEY_MEMORY = "memory"
+        /** The pattern a memory question carries (never read: [HabitOffer.memoryOfferId] is set). */
+        private val MEMORY_PLACEHOLDER = RepeatDetector.Pattern(RepeatDetector.Kind.TIME, RepeatDetector.Cadence.DAILY, 0, 0, 0)
 
         /** H-12 "what do you remember": a line when requests are being noted, else null. */
         fun summary(ctx: Context): String? =

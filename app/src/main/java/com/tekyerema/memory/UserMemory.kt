@@ -8,7 +8,8 @@ import java.io.File
 /**
  * The user's memory on the phone: preferences, the contacts they use most, the requests they repeat, and what they told us.
  * One encrypted file (files/memory/user_memory.enc, [SecureStore] — AES-GCM, Keystore key), loaded once, rewritten on change.
- * Offline, never uploaded, and the planner prompt gets nothing from it. Logs say how many entries there are, never what they are.
+ * Offline, never uploaded. The ON-PHONE planner reads a few relevant lines of it ([PlannerMemory]); a cloud brain gets none unless
+ * Settings.shareMemoryWithCloud is on. Logs say how many entries there are, never what they are.
  * Never stored: PINs, passwords, OTPs, balances, amounts, message text, or anything said while a secret is being typed
  * ([MemoryCore.check] and [com.tekyerema.core.Privacy.secureStep]). Rules and tests: [MemoryCore].
  */
@@ -70,6 +71,17 @@ object UserMemory {
         if (name.isNullOrBlank() || secure() || !isOn(MemKind.CONTACT)) return
         try { update(ctx) { MemoryCore.upsert(it, MemKind.CONTACT, MemoryCore.contactKey(name, number), name, false, System.currentTimeMillis()) } }
         catch (_: Throwable) {}
+        MemoryLearning.contactUsed(name)   // ask-once: did "my wife" just reach Pearl? (offered later, once)
+    }
+
+    /**
+     * The app a message to [name] went out on ("WhatsApp" / "SMS"): once it has been the same app twice, the on-phone planner is told
+     * "Pearl Asante is usually messaged on WhatsApp" (memory/PlannerMemory). The name and the app only, never the message.
+     */
+    fun noteChannel(ctx: Context?, name: String?, app: String) {
+        if (name.isNullOrBlank() || secure() || !isOn(MemKind.PREF)) return
+        try { update(ctx) { MemoryCore.upsert(it, MemKind.PREF, PlannerMemory.channelKey(name, app), app, false, System.currentTimeMillis()) } }
+        catch (_: Throwable) {}
     }
 
     /** A request ran well on the fast path: [phrase] is how the user said it, [intent] what it resolved to. */
@@ -94,6 +106,7 @@ object UserMemory {
     /** "forget everything": the entries go and the file with them; the on/off switches the user chose stay. */
     fun clearAll(ctx: Context?) {
         update(ctx) { MemState(off = it.off) }
+        try { MemoryLearning.forget(ctx) } catch (_: Throwable) {}   // #19: the questions already asked go too
         try { LabelStore.forget(ctx, null) } catch (_: Throwable) {}   // #38: the names given to unlabelled buttons go too
         try { com.tekyerema.teach.TeachStore.shared.ensureLoaded(ctx); com.tekyerema.teach.TeachStore.shared.clear() } catch (_: Throwable) {}   // #24: taught skills too
     }

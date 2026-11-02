@@ -330,6 +330,7 @@ object SendSmsTool : Tool {
         }
         // Memory: who the user texts most — the contact's name only (never the message), and only a saved contact's.
         if (result.success && target.name != null) com.tekyerema.memory.UserMemory.noteContact(app, target.name, target.number)
+        if (result.success && target.name != null) com.tekyerema.memory.UserMemory.noteChannel(app, target.name, if (viaWhatsApp(args)) "WhatsApp" else "SMS")   // "usually messaged on …" for the planner
         return result
     }
 

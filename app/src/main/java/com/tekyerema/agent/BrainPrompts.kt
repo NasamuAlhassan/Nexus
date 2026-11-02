@@ -102,6 +102,7 @@ object BrainPrompts {
             append("USER GOAL (the newest thing the user said — trusted): ").append(ctx.goal).append("\n\n")
             append(nowLine()).append("\n\n")
             goalRules(ctx.goal)?.let { append(it).append("\n\n") }
+            append(com.tekyerema.memory.PlannerMemory.cloudSection(ctx.goal))   // empty unless Settings.shareMemoryWithCloud
             append("ACTIONS SO FAR THIS GOAL (most recent last):\n").append(historyText).append("\n\n")
             if (ctx.progress.isNotBlank())
                 append("PROGRESS SO FAR (what you already know this task — don't re-derive it):\n").append(ctx.progress).append("\n\n")
@@ -120,6 +121,7 @@ object BrainPrompts {
             append("USER GOAL (the newest thing the user said — trusted): ").append(ctx.goal).append("\n\n")
             append(nowLine()).append("\n\n")
             goalRules(ctx.goal)?.let { append(it).append("\n\n") }
+            append(com.tekyerema.memory.PlannerMemory.cloudSection(ctx.goal))   // empty unless Settings.shareMemoryWithCloud
             append("ACTIONS SO FAR THIS GOAL (most recent last):\n").append(historyText).append("\n\n")
             if (ctx.progress.isNotBlank())
                 append("PROGRESS SO FAR (what you already know this task — don't re-derive it):\n").append(ctx.progress).append("\n\n")

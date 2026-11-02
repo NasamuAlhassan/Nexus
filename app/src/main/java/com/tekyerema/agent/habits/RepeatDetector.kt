@@ -281,7 +281,10 @@ object RepeatDetector {
 }
 
 /** An offer to make now: the spoken [question] about [pattern]. */
-data class HabitOffer(val pattern: RepeatDetector.Pattern, val question: String)
+data class HabitOffer(val pattern: RepeatDetector.Pattern, val question: String,
+                      /** Set for the memory's ask-once question ("Should I remember that 'my wife' means Pearl?", memory/MemoryLearning),
+                       *  which rides this same one-question-after-a-task slot; [pattern] is then only a placeholder. */
+                      val memoryOfferId: String? = null)
 
 /** The voice hook's view of habits (VoiceController). [Habits] is the real one; tests use a fake. */
 interface HabitHost {
