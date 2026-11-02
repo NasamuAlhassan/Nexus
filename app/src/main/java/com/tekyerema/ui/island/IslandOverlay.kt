@@ -115,7 +115,7 @@ object IslandOverlay {
         }
         val state = MutableTransitionState(false).apply { targetState = true }
         visible = state
-        val simple = com.tekyerema.ui.theme.simpleUi()
+        val simple = com.tekyerema.ui.theme.calmUi()
         val tier = GlassTiers.detect(ctx, calm = false)
         val panel = ComposeView(host)
         val life = IslandOwner()

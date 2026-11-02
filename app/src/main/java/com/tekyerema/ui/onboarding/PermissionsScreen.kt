@@ -69,12 +69,12 @@ fun PermissionsScreen(onDone: () -> Unit) {
     // otherwise meets a silent page.
     androidx.compose.runtime.LaunchedEffect(step) {
         if (!com.tekyerema.voice.ScreenReader.active(context)) com.tekyerema.voice.VoiceEngine.announce(when (step) {
-            1 -> "Welcome to Tɛkyerɛma. To work for you it needs the microphone, calls, contacts, messages, location and calendar. " +
+            1 -> "Welcome to Nexus. To work for you it needs the microphone, calls, contacts, messages, location and calendar. " +
                 "Tap the big button at the bottom of the screen, then allow each one."
-            2 -> "Next, turn on screen control. Tap the button near the bottom; it opens Accessibility settings. Choose Tɛkyerɛma, " +
+            2 -> "Next, turn on screen control. Tap the button near the bottom; it opens Accessibility settings. Choose Nexus, " +
                 "switch it on, then come back."
-            3 -> "Next, let Tɛkyerɛma show over other apps. Tap the button near the bottom, switch it on, then come back."
-            else -> "Last step: let Tɛkyerɛma read your notifications, so it can read and reply to your messages. " +
+            3 -> "Next, let Nexus show over other apps. Tap the button near the bottom, switch it on, then come back."
+            else -> "Last step: let Nexus read your notifications, so it can read and reply to your messages. " +
                 "Tap the button near the bottom, switch it on, then come back. Or tap Skip."
         })
     }
@@ -93,7 +93,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
         )
         Spacer(Modifier.height(12.dp))
         Text(
-            "Say what you need. Tɛkyerɛma listens, understands, and does it for you — in English or Twi.",
+            "Say what you need. Nexus listens, understands, and does it for you.",
             style = MaterialTheme.typography.bodyLarge, color = Tk.TextSecondary
         )
         Spacer(Modifier.height(36.dp))
@@ -123,7 +123,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
                 modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(10.dp))
             Text(
-                "Screen control is how Tɛkyerɛma opens apps and taps for you. Turn it on for Tɛkyerɛma in the next screen, then come back.",
+                "Screen control is how Nexus opens apps and taps for you. Turn it on for Nexus in the next screen, then come back.",
                 style = MaterialTheme.typography.bodyLarge, color = Tk.TextSecondary
             )
             Spacer(Modifier.height(36.dp))
@@ -142,7 +142,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
                 modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(10.dp))
             Text(
-                "So Tɛkyerɛma can open apps, place calls, and show its \"yes or no\" over whatever you're doing, turn on \"Display over other apps\" for Tɛkyerɛma, then come back.",
+                "So Nexus can open apps, place calls, and show its \"yes or no\" over whatever you're doing, turn on \"Display over other apps\" for Nexus, then come back.",
                 style = MaterialTheme.typography.bodyLarge, color = Tk.TextSecondary
             )
             Spacer(Modifier.height(36.dp))
@@ -154,7 +154,7 @@ fun PermissionsScreen(onDone: () -> Unit) {
                 modifier = Modifier.semantics { heading() })
             Spacer(Modifier.height(10.dp))
             Text(
-                "So Tɛkyerɛma can read your messages and notifications to you, and reply for you, turn on notification access for Tɛkyerɛma, then come back.",
+                "So Nexus can read your messages and notifications to you, and reply for you, turn on notification access for Nexus, then come back.",
                 style = MaterialTheme.typography.bodyLarge, color = Tk.TextSecondary
             )
             Spacer(Modifier.height(36.dp))

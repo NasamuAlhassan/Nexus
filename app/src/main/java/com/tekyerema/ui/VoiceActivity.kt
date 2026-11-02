@@ -195,7 +195,7 @@ private fun Arrival(settings: Settings, onClose: () -> Unit) {
         // one TalkBack stop that began "Close Tɛkyerɛma" (Gate G, 13 October 2026). As a sibling it is one stop of its own,
         // "Close Tɛkyerɛma, button", visited last; the greeting, the orb and the field keep theirs. Touch is unchanged: the
         // content above has no click handling of its own, so a tap outside its controls still lands here.
-        val closeLabel = if (typing) "Hide keyboard" else "Close Tɛkyerɛma"
+        val closeLabel = if (typing) "Hide keyboard" else "Close Nexus"
         Box(
             Modifier
                 .matchParentSize()

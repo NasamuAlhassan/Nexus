@@ -37,7 +37,8 @@ object KeyboardSetupLogic {
 }
 
 object KeyboardSetupText {
-    const val NAME = "Tɛkyerɛma Twi keyboard"
+    /** As the phone's keyboard list shows it (res/values/ime.xml ime_name). */
+    const val NAME = "Nexus keyboard"
 
     fun statusLabel(s: KeyboardStatus) = when (s) {
         KeyboardStatus.NOT_ENABLED -> "Not added"
@@ -48,14 +49,13 @@ object KeyboardSetupText {
     /** The steps for where the user is, written to be read aloud (no symbols, one action per sentence). */
     fun steps(s: KeyboardStatus): String = when (s) {
         KeyboardStatus.NOT_ENABLED ->
-            "To add the Twi keyboard, tap Add the Twi keyboard. Your phone's keyboard list opens. " +
+            "To add the keyboard, tap Add the keyboard. Your phone's keyboard list opens. " +
                 "Find $NAME and switch it on. Your phone will warn that a keyboard can collect what you type. " +
                 "This keyboard keeps everything on your phone and sends nothing anywhere, so tap OK. Then come back here."
         KeyboardStatus.ENABLED_NOT_SELECTED ->
-            "The Twi keyboard is added. To start using it, tap Use the Twi keyboard, then choose $NAME from the list."
+            "The keyboard is added. To start using it, tap Use this keyboard, then choose $NAME from the list."
         KeyboardStatus.IN_USE ->
-            "The Twi keyboard is in use. The key where Q usually is types open e, and the key where C usually is " +
-                "types open o. The language key switches between Twi and English. " +
+            "The $NAME is in use. Big keys, swipe typing and voice typing are below. " +
                 "To go back to your other keyboard, touch and hold the language key or the space bar."
     }
 }

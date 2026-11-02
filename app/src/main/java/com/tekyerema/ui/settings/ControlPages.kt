@@ -126,9 +126,9 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("Control", onBack)
-        Note("You decide how much Tɛkyerɛma does on its own, which AI it uses, what it may spend and what it keeps. " +
+        Note("You decide how much Nexus does on its own, which AI it uses, what it may spend and what it keeps. " +
             "Changes apply straight away.")
-        GlassGroup("How Tɛkyerɛma works") {
+        GlassGroup("How Nexus works") {
             Column(Modifier.selectableGroup()) {
                 ChoiceRow("Normal", "Acts on its own, and always asks before calls, messages, money and other important steps.",
                     mode == ExecutionMode.STANDARD) { op.executionMode = ExecutionMode.STANDARD }
@@ -151,7 +151,7 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             SettingRow("App rules", value = remember(version) { appRulesSummary() }, icon = Icons.Outlined.Apps,
                 iconTint = Spectrum.Coral, description = "Apps it must stay out of, or only guide you in.", divider = false) { open(Page.APP_RULES) }
         }
-        Note("Whatever you choose here, Tɛkyerɛma always asks before calls, messages and money, and never reads or types a PIN or password.")
+        Note("Whatever you choose here, Nexus always asks before calls, messages and money, and never reads or types a PIN or password.")
         GlassGroup("AI and privacy") {
             SwitchRow("Use the cloud",
                 if (cloud) "On: bigger tasks use the online AI below." else "Off: nothing leaves your phone. Simple commands still work; " +
@@ -173,14 +173,14 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
                 icon = Icons.Outlined.NotificationsActive, iconTint = Spectrum.Coral) { op.messageAlertsEnabled = it }
             SwitchRow("Routines", "Your own phrases, like “good morning”, that run several steps.", routines,
                 icon = Icons.Outlined.Repeat, iconTint = Spectrum.Green) { op.routinesEnabled = it }
-            SwitchRow("Computer connection", "Lets a computer you trust, over a USB cable, ask Tɛkyerɛma to do tasks. Anything " +
+            SwitchRow("Computer connection", "Lets a computer you trust, over a USB cable, ask Nexus to do tasks. Anything " +
                 "important still needs your OK on this phone.", remote, divider = false,
                 icon = Icons.Outlined.Computer, iconTint = Spectrum.Aqua) { op.remoteControlEnabled = it }
         }
         GlassGroup("Your data") {
             SettingRow("Activity log", value = logCount?.let { "$it" }.orEmpty(), icon = Icons.Outlined.History, iconTint = Spectrum.Teal,
-                description = "What Tɛkyerɛma proposed, what you allowed and what happened. Any change to it shows.") { open(Page.AUDIT) }
-            SettingRow("What Tɛkyerɛma keeps", icon = Icons.Outlined.Inventory2, iconTint = Spectrum.Lime, divider = false,
+                description = "What Nexus proposed, what you allowed and what happened. Any change to it shows.") { open(Page.AUDIT) }
+            SettingRow("What Nexus keeps", icon = Icons.Outlined.Inventory2, iconTint = Spectrum.Lime, divider = false,
                 description = "See it, choose how long it's kept, export it or delete it.") { open(Page.DATA) }
         }
         Note("You can also say “offline mode”, “ask me before every step”, “normal mode”, “never touch WhatsApp”, " +
@@ -204,7 +204,7 @@ internal fun ProvidersPage(settings: Settings, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("AI provider and model", onBack)
         Note((if (!cloud) "The cloud is off, so none of these are used right now. " else "") +
-            "When a task needs the online AI, Tɛkyerɛma sends what you asked and what's on the screen — never a PIN or password.")
+            "When a task needs the online AI, Nexus sends what you asked and what's on the screen — never a PIN or password.")
         GlassGroup("Which AI, in what order") {
             Column(Modifier.selectableGroup()) {
                 ChoiceRow("Groq, then Gemini", "Gemini is used when Groq can't answer. A photo goes to both (a question at once, a " +
@@ -404,7 +404,7 @@ internal fun UsagePage(settings: Settings, onBack: () -> Unit) {
                     divider = i < byProvider.size - 1)
             }
         }
-        if (spent) Note("Today's limit is reached, so Tɛkyerɛma is working on this phone only until midnight.",
+        if (spent) Note("Today's limit is reached, so Nexus is working on this phone only until midnight.",
             Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         GlassGroup("Most online AI calls a day") {
             Column(Modifier.selectableGroup()) {
@@ -422,7 +422,7 @@ internal fun UsagePage(settings: Settings, onBack: () -> Unit) {
                 }
             }
         }
-        Note("At a limit, Tɛkyerɛma works on this phone only until midnight; simple commands keep working. A token is about " +
+        Note("At a limit, Nexus works on this phone only until midnight; simple commands keep working. A token is about " +
             "three-quarters of a word; one step of a task uses a few thousand.")
         GlassGroup("Most steps for one task") {
             Column(Modifier.selectableGroup()) {
@@ -466,7 +466,7 @@ internal fun DataPage(settings: Settings, onBack: () -> Unit, openAudit: () -> U
     val keep = remember(version) { com.tekyerema.core.Privacy.historyDays() }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-        PageTitle("What Tɛkyerɛma keeps", onBack)
+        PageTitle("What Nexus keeps", onBack)
         Note("All of it stays on this phone, encrypted. Nothing here is sent anywhere unless you export it. Screenshots are never saved.")
         GlassGroup("Kept now") {
             val list = items
@@ -500,7 +500,7 @@ internal fun DataPage(settings: Settings, onBack: () -> Unit, openAudit: () -> U
         val improve = remember(version) { settings.trajectoryConsent }
         val taskLog = remember(version) { settings.fieldLog }
         GlassGroup("Privacy") {
-            SwitchRow("Help improve Tɛkyerɛma", "Keep a copy of your tasks on this phone, encrypted, so they can " +
+            SwitchRow("Help improve Nexus", "Keep a copy of your tasks on this phone, encrypted, so they can " +
                 "be used to improve me. Nothing is sent anywhere. Turning this off deletes them.", improve) {
                 settings.trajectoryConsent = it
                 if (!it) com.tekyerema.core.telemetry.Trajectories.clear(context)

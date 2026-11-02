@@ -54,7 +54,7 @@ object WalkGuide {
     suspend fun start(ctx: Context, destination: String): String {
         val context = ctx.applicationContext.also { app = it }
         if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            return "I need permission to use your location for walking directions. You can allow it in Tɛkyerɛma's settings."
+            return "I need permission to use your location for walking directions. You can allow it in Nexus's settings."
         val here = currentLocation(context) ?: return openMaps(context, destination, "GPS has no fix right now, which is common indoors, so I can't tell where you are")
         val (generic, rest) = OsmClient.kindOnly(destination)
         val category = OsmClient.categoryOf(rest)
@@ -121,7 +121,7 @@ object WalkGuide {
     private suspend fun distanceToInner(ctx: Context, destination: String): String {
         val context = ctx.applicationContext
         if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
-            return "I need permission to use your location to tell you how far it is. You can allow it in Tɛkyerɛma's settings."
+            return "I need permission to use your location to tell you how far it is. You can allow it in Nexus's settings."
         // a distance needs no exact fix: the last one the phone knows if it is under 2 hours old, else a new one (8 s)
         val here = currentLocation(context, 2 * 3_600_000L, waitMs = 8_000L)
             ?: return "GPS has no fix right now, which is common indoors, so I can't say how far it is. Try near a window or outside."

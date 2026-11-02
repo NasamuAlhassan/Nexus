@@ -66,6 +66,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -83,9 +84,6 @@ import com.tekyerema.ui.theme.TkHaptic
 import com.tekyerema.ui.theme.TkMotion
 import com.tekyerema.ui.theme.glass
 import com.tekyerema.ui.theme.tkHaptic
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 
 /** Horizontal page margin, everywhere. */
 val PageMargin = 24.dp
@@ -96,39 +94,22 @@ private val CardShape = RoundedCornerShape(26.dp)
 // ---------------------------------------------------------------------------------------- brand
 
 /**
- * The Tɛkyerɛma mark drawn live: the ear spiral and the cyan pulse from the supplied icon, on a transparent
- * background. Identical geometry to res/drawable/ic_launcher_foreground.xml. The ear follows the text colour, so the
- * mark reads on both palettes.
+ * The Nexus mark: the logo itself (Logo.jpg — the glass head speaking, aqua to lime) on its own dark squircle, exactly as the
+ * launcher shows it, so the corner of Home and the icon on the phone are one object. It replaces the old hand-drawn ear glyph
+ * (redesign, 2 Nov 2026). Silent for TalkBack: the wordmark beside it carries the name.
  */
 @Composable
-fun BrandMark(size: Dp, modifier: Modifier = Modifier, ear: Color = Tk.Text, pulse: Color = Tk.Cyan) {
-    Canvas(modifier.size(size).clearAndSetSemantics { }) {
-        val s = this.size.minDimension / 108f
-        fun ease(a: Float, b: Float, t: Float) = a + (b - a) * (1f - cos(PI.toFloat() * t)) / 2f
-        fun rAt(th: Float) = when {
-            th <= 270f -> ease(13.3f, 19.5f, (th - 165f) / 105f)
-            th <= 360f -> ease(19.5f, 19.3f, (th - 270f) / 90f)
-            else -> ease(19.3f, 12.7f, (th - 360f) / 76f)
-        }
-        val earPath = Path()
-        var th = 165f
-        var first = true
-        while (th <= 436f) {
-            val r = rAt(th); val a = th * PI.toFloat() / 180f
-            val x = (54f + r * cos(a)) * s; val y = (53f + r * sin(a)) * s
-            if (first) { earPath.moveTo(x, y); first = false } else earPath.lineTo(x, y)
-            th += 2f
-        }
-        drawPath(earPath, ear, style = Stroke(width = 6.2f * s, cap = StrokeCap.Round, join = StrokeJoin.Round))
-        val pts = listOf(22.2f to 47.9f, 33.5f to 47.9f, 36.6f to 40.2f, 43.7f to 55.6f, 48.9f to 42.7f, 54.0f to 48.9f, 56.6f to 47.9f, 73.5f to 47.9f)
-        val pulsePath = Path().apply {
-            pts.forEachIndexed { i, (x, y) -> if (i == 0) moveTo(x * s, y * s) else lineTo(x * s, y * s) }
-        }
-        drawPath(pulsePath, pulse, style = Stroke(width = 1.65f * s, cap = StrokeCap.Round, join = StrokeJoin.Round))
-    }
+fun BrandMark(size: Dp, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.Image(
+        bitmap = androidx.compose.ui.graphics.ImageBitmap.imageResource(com.tekyerema.R.drawable.tk_logo),
+        contentDescription = null,
+        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+        filterQuality = androidx.compose.ui.graphics.FilterQuality.High,
+        modifier = modifier.size(size).clip(RoundedCornerShape(size * 0.28f)).clearAndSetSemantics { }
+    )
 }
 
-/** Mark + wordmark, top-left, read by TalkBack as one heading ("Tɛkyerɛma, heading" — the wordmark is the text; a second
+/** Mark + wordmark, top-left, read by TalkBack as one heading ("Nexus, heading" — the wordmark is the text; a second
  *  contentDescription would be read as well, see NavItem). */
 @Composable
 fun BrandRow(modifier: Modifier = Modifier) {
@@ -136,9 +117,9 @@ fun BrandRow(modifier: Modifier = Modifier) {
         modifier = modifier.semantics(mergeDescendants = true) { heading() },
         verticalAlignment = Alignment.CenterVertically
     ) {
-        BrandMark(size = 34.dp)
-        Spacer(Modifier.width(2.dp))
-        Text("Tɛkyerɛma", style = MaterialTheme.typography.titleSmall, color = Tk.Text)
+        BrandMark(size = 30.dp)
+        Spacer(Modifier.width(10.dp))
+        Text(com.tekyerema.ui.Brand.NAME, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Tk.Text)
     }
 }
 
@@ -308,7 +289,7 @@ fun IconTile(icon: ImageVector, tint: Color, modifier: Modifier = Modifier) {
 }
 
 /** On the pale palette the spectrum hues are deepened so the glyph keeps ≥3:1 against its tile. */
-private fun lerpDarker(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color(0xFF0D1326), 0.28f)
+private fun lerpDarker(c: Color): Color = androidx.compose.ui.graphics.lerp(c, Color(0xFF0E1F1C), 0.28f)   // toward the light palette's ink, not the old navy
 
 /**
  * Shared row chrome inside a glass group: 64 dp minimum, a focus outline, an inset hairline below. A press lights the
@@ -362,7 +343,9 @@ fun SettingRow(
         if (icon != null) { IconTile(icon, iconTint); Spacer(Modifier.width(16.dp)) }
         // A long value ("Groq → Google Gemini") goes under the description: on the right it squeezed the title and
         // description into a one-word-per-line column (Control page, A20e 2026-09-29). A short one stays on the right, capped.
-        val longValue = (value?.length ?: 0) > 14
+        // At large text (font scale 1.3+) every value goes under: beside the label it squeezed it until words broke mid-word
+        // ("Keyb / oard" at 200 %, emulator 2 Nov 2026).
+        val longValue = (value?.length ?: 0) > 14 || androidx.compose.ui.platform.LocalDensity.current.fontScale >= 1.3f
         Column(Modifier.weight(1f)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
             if (description != null) Text(description, style = MaterialTheme.typography.bodySmall, color = Tk.TextSecondary,
@@ -439,8 +422,9 @@ fun ChoiceRow(label: String, description: String? = null, selected: Boolean, div
 }
 
 /**
- * The one big action on a page (60 dp). Filled = primary (the text colour as a solid capsule — white on dark,
- * ink on light), outlined = secondary glass.
+ * The one big action on a page (60 dp). Filled = primary: the accent in the body with dark ink (DESIGN.md: the primary is
+ * teal, the colour in the glass; it was a solid white capsule, which read as a flat block — redesign 2 Nov 2026), lit by a
+ * soft sheen across its top. Not filled = secondary glass.
  *
  * It is physical: a press squashes it a little on a fast spring and it springs back (calm motion: it only darkens),
  * and a tap answers with the system's haptic for that kind of action ([haptic]).
@@ -462,7 +446,8 @@ fun BigButton(
     val shape = RoundedCornerShape(30.dp)
     val scale by animateFloatAsState(if (pressed && !calm) 0.95f else 1f,
         if (pressed) TkMotion.fastSpatial() else TkMotion.release(), label = "button press")
-    val solid = Tk.Text
+    val solid = Tk.Cyan
+    val sheen = Color.White.copy(alpha = if (Tk.Dark) 0.22f else 0.16f)
     val fill by animateColorAsState(
         when { filled && pressed -> solid.copy(alpha = 0.82f); filled -> solid; pressed -> Tk.Ink2; else -> Color.Transparent },
         TkMotion.fastEffects(), label = "button fill")
@@ -473,8 +458,11 @@ fun BigButton(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .then(if (filled) Modifier else Modifier.glass(shape, elevation = 6.dp))
             .clip(shape)
-            .drawBehind { drawRect(fill) }
-            .border(if (focused) 3.dp else 0.dp, if (focused) Tk.Cyan else Color.Transparent, shape)
+            .drawBehind {
+                drawRect(fill)
+                if (filled) drawRect(Brush.verticalGradient(0f to sheen, 0.5f to Color.Transparent))
+            }
+            .border(if (focused) 3.dp else 0.dp, if (focused) Tk.Focus else Color.Transparent, shape)
             .clickable(interactionSource = interaction, indication = null, role = Role.Button,
                 onClick = { view.tkHaptic(haptic); onClick() })
             // A spoken label replaces the visible text for TalkBack ("No, don't do it", not "No, don't do it. No."): the
@@ -484,7 +472,7 @@ fun BigButton(
         contentAlignment = Alignment.Center
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
-            color = if (filled) Tk.Ink else Tk.Text, textAlign = TextAlign.Center)
+            color = if (filled) Tk.OnAccent else Tk.Text, textAlign = TextAlign.Center)
     }
 }
 
@@ -524,7 +512,7 @@ fun CommandField(
             .fillMaxWidth()
             .heightIn(min = 58.dp)
             .glass(shape, strong = true, elevation = 12.dp)
-            .border(if (focused) 2.dp else 0.dp, if (focused) Tk.Focus else Color.Transparent, shape)
+            .border(if (focused) 2.dp else 0.dp, if (focused) Tk.Cyan else Color.Transparent, shape)   // state is light, in the accent (DESIGN.md)
             .padding(start = 22.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -536,7 +524,7 @@ fun CommandField(
                 .padding(vertical = 16.dp)
                 .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                 .onFocusChanged { onFocusChanged(it.isFocused) }
-                .semantics { contentDescription = "Type a command to Tɛkyerɛma" },
+                .semantics { contentDescription = "Type a request for ${com.tekyerema.ui.Brand.NAME}" },
             interactionSource = interaction,
             singleLine = true,
             textStyle = MaterialTheme.typography.bodyLarge.copy(color = Tk.Text),
@@ -553,7 +541,7 @@ fun CommandField(
                 Box(contentAlignment = Alignment.CenterStart) {
                     // The placeholder is for the eyes: TalkBack already says "Edit box. Type a command to Tɛkyerɛma" from the
                     // field's description, and read this on top of it (13 October 2026).
-                    if (text.isEmpty()) Text("Ask Tɛkyerɛma…", style = MaterialTheme.typography.bodyLarge, color = Tk.TextTertiary,
+                    if (text.isEmpty()) Text("Ask ${com.tekyerema.ui.Brand.NAME}…", style = MaterialTheme.typography.bodyLarge, color = Tk.TextTertiary,
                         modifier = Modifier.clearAndSetSemantics { })
                     inner()
                 }
@@ -571,17 +559,15 @@ fun CommandField(
             onMic != null -> Row(verticalAlignment = Alignment.CenterVertically) {
               // Our camera, one tap from home (owner, 20 Oct 2026): point at anything and ask, or count money.
               if (onCamera != null) IconButton(onClick = onCamera, modifier = Modifier.size(48.dp).semantics { contentDescription = "Look with the camera" }) {
-                Icon(androidx.compose.material.icons.Icons.Outlined.PhotoCamera, contentDescription = null, tint = Tk.Text,
+                Icon(androidx.compose.material.icons.Icons.Outlined.PhotoCamera, contentDescription = null, tint = Tk.TextSecondary,
                     modifier = Modifier.size(24.dp))
               }
-              IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to Tɛkyerɛma" }) {
-                Box(
-                    Modifier.size(40.dp).clip(CircleShape).let { m ->
-                        if (com.tekyerema.ui.theme.simpleUi()) m.background(Tk.Cyan)    // flat, and the glyph reads at AA
-                        else m.background(Brush.linearGradient(listOf(Spectrum.Aqua, Spectrum.Green), start = Offset.Zero, end = Offset(90f, 90f)))
-                    },
-                    contentAlignment = Alignment.Center
-                ) { MicGlyph(if (com.tekyerema.ui.theme.simpleUi()) Tk.OnAccent else Color.White, Modifier.size(20.dp)) }
+              IconButton(onClick = onMic, modifier = Modifier.size(48.dp).semantics { contentDescription = "Talk to ${com.tekyerema.ui.Brand.NAME}" }) {
+                // The one primary on Home: teal with dark ink (DESIGN.md: the primary is the colour in the body, ink ≈ 9:1), the
+                // same in every look; the old aqua→green gradient under a white glyph read at about 2:1.
+                Box(Modifier.size(42.dp).clip(CircleShape).background(Tk.Cyan), contentAlignment = Alignment.Center) {
+                    MicGlyph(Tk.OnAccent, Modifier.size(21.dp))
+                }
               }
             }
             else -> Spacer(Modifier.width(14.dp))

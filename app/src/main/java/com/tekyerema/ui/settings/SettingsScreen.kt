@@ -56,10 +56,11 @@ import com.tekyerema.ui.components.SettingRow
 import com.tekyerema.ui.components.SwitchRow
 import com.tekyerema.ui.theme.LocalCalmMotion
 import com.tekyerema.ui.theme.Tk
+import com.tekyerema.ui.theme.Look
 import com.tekyerema.ui.theme.TkMotion
 
 internal enum class Page {
-    ROOT, LANGUAGE, VOICE, KEYBOARD, PERMISSIONS, ACCESSIBILITY, HELP,
+    ROOT, VOICE, KEYBOARD, PERMISSIONS, ACCESSIBILITY, HELP,
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
     PHONE_CARE, MONEY_LIMITS, APP_RULES, PIN_PRACTICE;
 
@@ -88,17 +89,17 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
     ) { shown -> when (shown) {
         Page.ROOT -> Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             PageTitle("Settings")
-            GlassGroup("Voice & language") {
-                SettingRow("Language", value = remember(version) { languageLabel(settings.languageMode) },
-                    icon = Icons.Outlined.Language, iconTint = Spectrum.Aqua) { page = Page.LANGUAGE }
+            // Redesign 2 Nov 2026 (English only since 31 Oct): no Language page; the look of the app sits with Accessibility, where a
+            // low-vision user looks for it; every group has a heading TalkBack can jump to.
+            GlassGroup("Voice and typing") {
                 SettingRow("Voice", value = remember(version) { rateLabel(settings.speechRate) },
                     icon = Icons.Outlined.RecordVoiceOver, iconTint = Spectrum.Green) { page = Page.VOICE }
-                // G-05: the Twi keyboard's own page (setup, options, a box to try it) — reachable from here since 13 Oct 2026.
                 SettingRow("Keyboard", value = keyboardLabel(com.tekyerema.ime.rememberKeyboardStatus()),
                     icon = Icons.Outlined.Keyboard, iconTint = Spectrum.Teal, divider = false) { page = Page.KEYBOARD }
             }
-            GlassGroup {
-                SettingRow("Accessibility", icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Lime, divider = false) { page = Page.ACCESSIBILITY }
+            GlassGroup("Seeing and hearing") {
+                SettingRow("Accessibility", description = "Look, light or dark, sounds, the wake phrase",
+                    icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Lime, divider = false) { page = Page.ACCESSIBILITY }
             }
             GlassGroup("Safety") {
                 SettingRow("Permissions", value = permissionsSummary(context),
@@ -109,10 +110,12 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                     icon = Icons.Outlined.HealthAndSafety, iconTint = Spectrum.Lime, divider = false) { page = Page.PHONE_CARE }
             }
             GlassGroup {
-                SettingRow("Help", icon = Icons.Outlined.HelpOutline, iconTint = Spectrum.Green, divider = false) { page = Page.HELP }
+                SettingRow("Help", description = "What you can say, and how to stop", icon = Icons.Outlined.HelpOutline,
+                    iconTint = Spectrum.Aqua, divider = false) { page = Page.HELP }
             }
+            Text("${com.tekyerema.ui.Brand.NAME} · version ${remember { appVersion(context) }}", style = MaterialTheme.typography.bodySmall,
+                color = Tk.TextTertiary, modifier = Modifier.fillMaxWidth().padding(top = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
         }
-        Page.LANGUAGE -> LanguagePage(settings) { page = Page.ROOT }
         Page.VOICE -> VoicePage(settings) { page = Page.ROOT }
         Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
         Page.PERMISSIONS -> PermissionsPage { page = Page.ROOT }
@@ -131,12 +134,16 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
     } }
 }
 
-/** The Keyboard row's value: where the Twi keyboard stands on this phone. */
+/** The Keyboard row's value: where our keyboard stands on this phone. */
 private fun keyboardLabel(status: com.tekyerema.ime.KeyboardStatus): String = when (status) {
-    com.tekyerema.ime.KeyboardStatus.IN_USE -> "Twi keyboard in use"
-    com.tekyerema.ime.KeyboardStatus.ENABLED_NOT_SELECTED -> "Twi keyboard added"
-    com.tekyerema.ime.KeyboardStatus.NOT_ENABLED -> "Add the Twi keyboard"
+    com.tekyerema.ime.KeyboardStatus.IN_USE -> "In use"
+    com.tekyerema.ime.KeyboardStatus.ENABLED_NOT_SELECTED -> "Added"
+    com.tekyerema.ime.KeyboardStatus.NOT_ENABLED -> "Not added"
 }
+
+private fun appVersion(context: android.content.Context): String = try {
+    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+} catch (_: Throwable) { "" }
 
 /** "Alerts off" / "2 alerts on" — the Phone care row's value (on screen only). */
 private fun phoneCareSummary(s: Settings): String {
@@ -153,18 +160,6 @@ private fun controlSummary(): String {
         com.tekyerema.operator.ExecutionMode.GUIDE_ONLY -> "Guide only"
     }
     return mode + if (op.cloudAllowed) "" else " · offline"
-}
-
-private fun languageLabel(mode: String) = when (mode) {
-    Settings.LANG_MODE_ENGLISH -> "English"
-    Settings.LANG_MODE_TWI -> "Twi"
-    Settings.LANG_MODE_KUS -> "Kusaal"
-    else -> "English + Twi"
-}
-
-/** Kusaal is never guessed (no auto-detection): leaving it puts the remembered language back to English. */
-private fun leaveKusaal(settings: Settings) {
-    if (settings.sessionLanguage == com.tekyerema.voice.Lang.KUS) settings.sessionLanguage = com.tekyerema.voice.Lang.GH_EN
 }
 
 private fun rateLabel(rate: Int) = when (rate) { 0 -> "Slow"; 2 -> "Fast"; else -> "Normal" }
@@ -194,24 +189,6 @@ private fun rememberResumeTick(): androidx.compose.runtime.State<Int> {
 // -------------------------------------------------------------------------------------- pages
 
 @Composable
-private fun LanguagePage(settings: Settings, onBack: () -> Unit) {
-    val version by settings.changes.collectAsState()
-    val mode = remember(version) { settings.languageMode }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        PageTitle("Language", onBack)
-        Note("Choose how you want to speak to Tɛkyerɛma.")
-        GlassGroup {
-            Column(Modifier.selectableGroup()) {
-                ChoiceRow("English", "Ghanaian English only.", mode == Settings.LANG_MODE_ENGLISH) { settings.languageMode = Settings.LANG_MODE_ENGLISH; leaveKusaal(settings) }
-                ChoiceRow("Twi", "Twi only. Replies in Twi where a Twi voice is available.", mode == Settings.LANG_MODE_TWI) { settings.languageMode = Settings.LANG_MODE_TWI; leaveKusaal(settings) }
-                ChoiceRow("English + Twi", "Mix both freely. Tɛkyerɛma follows the language you use.", mode == Settings.LANG_MODE_BOTH, divider = false) { settings.languageMode = Settings.LANG_MODE_BOTH; leaveKusaal(settings) }
-                // Kusaal removed from the build (owner, 20 Oct 2026): English and Twi only.
-            }
-        }
-    }
-}
-
-@Composable
 private fun VoicePage(settings: Settings, onBack: () -> Unit) {
     val version by settings.changes.collectAsState()
     val speak = remember(version) { settings.speakAloud }
@@ -221,13 +198,12 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageTitle("Voice", onBack)
         GlassGroup {
-            SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak,
-                icon = Icons.Outlined.VolumeUp, iconTint = Spectrum.Green) { settings.speakAloud = it }
+            SwitchRow("Read replies aloud", "Turn off if you prefer TalkBack to read them.", speak) { settings.speakAloud = it }
             SwitchRow("Private reading", "On the loudspeaker, say who your messages are from, not what they say. " +
                 "Say “read them” to hear them. Headphones read them in full.", privateReading, divider = false) { settings.privateReading = it }
         }
         GlassGroup("Experience") { Column(Modifier.selectableGroup()) {
-            ChoiceRow("New to Tɛkyerɛma", "Fuller explanations, and more time to finish speaking.", profile == "beginner") { settings.profile = "beginner" }
+            ChoiceRow("New to ${com.tekyerema.ui.Brand.NAME}", "Fuller explanations, and more time to finish speaking.", profile == "beginner") { settings.profile = "beginner" }
             ChoiceRow("Experienced", "Short replies, and it answers as soon as you stop.", profile == "expert", divider = false) { settings.profile = "expert" }
         } }
         GlassGroup("Speaking speed") { Column(Modifier.selectableGroup()) {
@@ -237,10 +213,10 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
         } }
         val accent = remember(version) { settings.ttsAccent }
         GlassGroup("English voice") { Column(Modifier.selectableGroup()) {
-            ChoiceRow("Automatic", "Tɛkyerɛma's own Ghanaian voice when it is installed; British English until then.",
+            ChoiceRow("Automatic", "${com.tekyerema.ui.Brand.NAME}'s own Ghanaian voice when it is installed; British English until then.",
                 accent == com.tekyerema.voice.TtsAccent.AUTO) { settings.ttsAccent = com.tekyerema.voice.TtsAccent.AUTO }
             ChoiceRow("Ghanaian English",
-                if (com.tekyerema.voice.VoiceEngine.hasOwnVoice) "Tɛkyerɛma's own voice. Works without the internet."
+                if (com.tekyerema.voice.VoiceEngine.hasOwnVoice) "${com.tekyerema.ui.Brand.NAME}'s own voice. Works without the internet."
                 else "Not in this version of the app yet. British English speaks until it is.",
                 accent == com.tekyerema.voice.TtsAccent.GHANA) { settings.ttsAccent = com.tekyerema.voice.TtsAccent.GHANA }
             ChoiceRow("British English", selected = accent == "GB") { settings.ttsAccent = "GB" }
@@ -253,7 +229,7 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
                 com.tekyerema.voice.VoiceEngine.announce("Sending 5 cedis 50 pesewas to 0 5 5, 2 0 9, 3 6 9 0, an MTN number, with Mobile Money.")
             }
         }
-        Note("You can also say “speak slower”, “keep it short” or “be patient with me”. Twi is always spoken by the lab's Ghanaian voice.")
+        Note("You can also say “speak slower”, “keep it short” or “be patient with me”.")
     }
 }
 
@@ -298,7 +274,7 @@ private fun PermissionsPage(onBack: () -> Unit) {
         SettingRow("Calendar", v(calendar), divider = false) { if (!calendar) launcher.launch(arrayOf(android.Manifest.permission.READ_CALENDAR)) }
         }
         Note(
-            "Screen control lets Tɛkyerɛma open apps and tap for you. Read messages lets it read and reply to your " +
+            "Screen control lets ${com.tekyerema.ui.Brand.NAME} open apps and tap for you. Read messages lets it read and reply to your " +
                 "notifications. Show over other apps lets it ask for your OK without leaving what you were doing."
         )
     }
@@ -307,37 +283,50 @@ private fun PermissionsPage(onBack: () -> Unit) {
 @Composable
 private fun AccessibilityPage(settings: Settings, onPinPractice: () -> Unit, onBack: () -> Unit) {
     val version by settings.changes.collectAsState()
+    val lookVersion by Look.version.collectAsState()
     val haptics = remember(version) { settings.haptics }
     val sounds = remember(version) { settings.sounds }
-    val reduce = remember(version) { settings.reduceMotion }
     val floating = remember(version) { settings.floatingTrigger }
     val wake = remember(version) { settings.wakeWordEnabled }
+    val surface = remember(lookVersion) { Look.surface }
+    val motion = remember(lookVersion, version) { Look.fullMotion && !settings.reduceMotion }
     val context = LocalContext.current
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("Accessibility", onBack)
-        GlassGroup {
-        SwitchRow("Sounds", "A short tone when listening starts, ends, and when a task is done.", sounds) { settings.sounds = it }
-        SwitchRow("Vibration", "A different tap pattern for listening, done, needs your OK, and errors.", haptics) { settings.haptics = it }
-        SwitchRow("Reduce motion", "Keeps the visual still.", reduce) { settings.reduceMotion = it }
-        SwitchRow("Floating Talk button", "A button over other apps that starts Tɛkyerɛma. Needs screen control.", floating) { settings.floatingTrigger = it }
-        // A-07: the hands-free wake word, switchable by the user (it was only reachable over ADB).
-        SwitchRow("“Hey Tɛkyerɛma”", "Listen for the wake phrase so you can talk without touching the phone.", wake) { settings.wakeWordEnabled = it }
-        // J-18: the Gemini backup switch moved to Settings › Control › AI provider and model (WS-C), with each provider's
-        // data statement next to it.
-        // N-11: Samsung puts unused apps to sleep, which silently stops the wake word and background tasks.
-        SettingRow("Keep Tɛkyerɛma running", if (Perms.batteryUnrestricted(context)) "On" else "Off") { Perms.requestBatteryUnrestricted(context) }
-        // PinPracticePage (built 30 Sep 2026, never linked until the 24 Oct cleanup): learn TalkBack keypad typing on a
-        // made-up number before a real Mobile Money PIN screen.
-        SettingRow("Practise typing a PIN", description = "A made-up number on a keypad like the phone's. Never your real PIN.",
-            divider = false) { onPinPractice() }
-        }
-        Note("Text size and TalkBack follow your phone's accessibility settings.")
+        // The look first: a low-vision user who struggles to read the app comes here for exactly this (redesign, 2 Nov 2026).
+        GlassGroup("Look") { Column(Modifier.selectableGroup()) {
+            ChoiceRow("Standard", "Clear glass on the buttons, solid panels behind words.", surface == Look.AUTO) { Look.surface = Look.AUTO }
+            ChoiceRow("Solid", "Nothing see-through anywhere.", surface == Look.SOLID) { Look.surface = Look.SOLID }
+            ChoiceRow("Glass", "See-through glass everywhere. Words can be harder to read.", surface == Look.GLASS) { Look.surface = Look.GLASS }
+            ChoiceRow("High contrast", "Black and white with clear edges.", surface == Look.CONTRAST, divider = false) { Look.surface = Look.CONTRAST }
+        } }
         val appearance = remember(version) { settings.appearance }
-        GlassGroup("Appearance") { Column(Modifier.selectableGroup()) {
+        GlassGroup("Light or dark") { Column(Modifier.selectableGroup()) {
             ChoiceRow("Same as the phone", selected = appearance == Settings.APPEARANCE_SYSTEM) { settings.appearance = Settings.APPEARANCE_SYSTEM }
             ChoiceRow("Light", selected = appearance == Settings.APPEARANCE_LIGHT) { settings.appearance = Settings.APPEARANCE_LIGHT }
             ChoiceRow("Dark", selected = appearance == Settings.APPEARANCE_DARK, divider = false) { settings.appearance = Settings.APPEARANCE_DARK }
         } }
+        GlassGroup("Feedback") {
+            SwitchRow("Sounds", "A short tone when listening starts, ends, and when a task is done.", sounds) { settings.sounds = it }
+            SwitchRow("Vibration", "A different tap pattern for listening, done, needs your OK, and errors.", haptics) { settings.haptics = it }
+            SwitchRow("Motion", "Cards glide and buttons give under your finger. Off keeps the screen still, except the voice circle.",
+                motion, divider = false) { on -> Look.fullMotion = on; if (on) settings.reduceMotion = false }
+        }
+        GlassGroup("Starting ${com.tekyerema.ui.Brand.NAME}") {
+            // A-07: the hands-free wake word, switchable by the user (it was only reachable over ADB).
+            SwitchRow("“${com.tekyerema.ui.Brand.WAKE}”", "Listen for the wake phrase so you can talk without touching the phone.", wake) { settings.wakeWordEnabled = it }
+            SwitchRow("Floating Talk button", "A button over other apps that starts ${com.tekyerema.ui.Brand.NAME}. Needs screen control.", floating) { settings.floatingTrigger = it }
+            // N-11: Samsung puts unused apps to sleep, which silently stops the wake word and background tasks.
+            SettingRow("Keep ${com.tekyerema.ui.Brand.NAME} running", if (Perms.batteryUnrestricted(context)) "On" else "Off",
+                description = "So the phone never puts ${com.tekyerema.ui.Brand.NAME} to sleep.", divider = false) { Perms.requestBatteryUnrestricted(context) }
+        }
+        GlassGroup("Practice") {
+            // PinPracticePage (built 30 Sep 2026, never linked until the 24 Oct cleanup): learn TalkBack keypad typing on a
+            // made-up number before a real Mobile Money PIN screen.
+            SettingRow("Practise typing a PIN", description = "A made-up number on a keypad like the phone's. Never your real PIN.",
+                divider = false) { onPinPractice() }
+        }
+        Note("Text size, magnification and TalkBack follow your phone's accessibility settings.")
     }
 }
 
@@ -357,18 +346,18 @@ private fun HelpPage(settings: Settings, onBack: () -> Unit) {
             "“Speak slower.” · “Keep it short.” · “Be patient with me.”"
         ))
         HelpBlock("Talk from anywhere", listOf(
-            "Use the floating Talk button, the accessibility button in your navigation bar, or say “Hey Tɛkyerɛma”.",
-            "Press volume-down twice quickly, or add the Tɛkyerɛma tile to your Quick Settings.",
-            "Tɛkyerɛma listens straight away. Tap anywhere outside the circle to close it."
+            "Use the floating Talk button, the accessibility button in your navigation bar, or say “${com.tekyerema.ui.Brand.WAKE}”.",
+            "Press volume-down twice quickly, or add the ${com.tekyerema.ui.Brand.NAME} tile to your Quick Settings.",
+            "${com.tekyerema.ui.Brand.NAME} listens straight away. Tap anywhere outside the circle to close it."
         ))
         HelpBlock("Before anything risky", listOf(
-            "For calls, messages, money and settings that matter, Tɛkyerɛma asks you out loud — “Should I go ahead?” — and waits for you to say yes or no.",
+            "For calls, messages, money and settings that matter, ${com.tekyerema.ui.Brand.NAME} asks you out loud — “Should I go ahead?” — and waits for you to say yes or no.",
             "If it can’t make out your answer it asks once more, then leaves it. You can also tap Yes or No.",
             "To try it safely, say “send a practice message”. Nothing is sent."
         ))
         HelpBlock("To stop", listOf(
-            "Tap the centre of the screen while Tɛkyerɛma is working. Nothing more happens.",
-            "From any app: press volume-down twice, tap the Tɛkyerɛma tile, or press Stop on its notification."
+            "Say “stop”, or tap the circle twice while ${com.tekyerema.ui.Brand.NAME} is working. Nothing more happens.",
+            "From any app: press volume-down twice, tap the ${com.tekyerema.ui.Brand.NAME} tile, or press Stop on its notification."
         ))
         GlassGroup {
             var replay by remember { mutableStateOf("") }

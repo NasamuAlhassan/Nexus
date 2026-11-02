@@ -79,7 +79,7 @@ object LiquidStyles {
         grain = 0.028f, shadowKey = 0.16f, shadowAmbient = 0.09f)
 
     /** Like the platform's "Reduce transparency": nearly opaque, no grain or glint. */
-    fun solid(s: LiquidStyle) = s.copy(fill = s.fill.copy(alpha = 0.97f), grain = 0f, glint = s.glint * 0.5f)
+    fun solid(s: LiquidStyle) = s.copy(fill = s.fill.copy(alpha = 1f), grain = 0f, glint = s.glint * 0.5f)
 
     /** Like "Increase contrast": opaque black or white with a 2 dp border, no gradients. */
     fun highContrast(dark: Boolean) = LiquidStyle(
@@ -175,6 +175,10 @@ fun Modifier.liquidGlass(
             white(style.rimPeak * 0.25f), white(style.rimPeak)),
         floatArrayOf(0f, 1f / 12f, 1f / 6f, 0.42f, 0.5f, 0.58f, 5f / 6f, 11f / 12f, 1f))
     val rimMatrix = android.graphics.Matrix()
+    // On a pane taller than it is wide the light's ±30° arc, measured from the centre, ran a long way down the left side and read
+    // as a line (settings and history panes, emulator 2 Nov 2026). The angle is measured as if the pane were square: the light
+    // stays at the upper-left corner and fades before the side. Wide shapes (pills, the island, cards) are unchanged.
+    val tallSquash = if (h > w && h > 0f) w / h else 1f
     val rimBrush = ShaderBrush(rimShader)
     val rimStroke = Stroke(width = 1.dp.toPx())
     val borderStroke = Stroke(width = 2.dp.toPx())
@@ -214,6 +218,7 @@ fun Modifier.liquidGlass(
             if (p > 0.001f && at != Offset.Unspecified)
                 drawPath(path, Brush.radialGradient(0f to Color.White.copy(alpha = 0.18f * p), 1f to Color.Transparent, center = at, radius = h * 1.5f))
             rimMatrix.setRotate(lightDegrees(), w / 2f, h / 2f)
+            if (tallSquash < 1f) rimMatrix.postScale(1f, 1f / tallSquash, w / 2f, h / 2f)
             rimShaderLite.setLocalMatrix(rimMatrix)
             drawPath(rimPath, rimBrush, style = rimStroke)
         }
@@ -243,6 +248,7 @@ fun Modifier.liquidGlass(
                     radius = h * 1.5f, center = at)
         }
         rimMatrix.setRotate(lightDegrees(), w / 2f, h / 2f)
+        if (tallSquash < 1f) rimMatrix.postScale(1f, 1f / tallSquash, w / 2f, h / 2f)
         rimShader.setLocalMatrix(rimMatrix)
         drawPath(rimPath, rimBrush, style = rimStroke)
     }

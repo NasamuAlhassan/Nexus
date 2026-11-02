@@ -46,18 +46,18 @@ import androidx.compose.ui.unit.IntSize
  */
 object TkMotion {
     // Material 3 Expressive spring tokens (damping ratio / stiffness).
-    fun <T> fastSpatial(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(0.6f, 800f)
-    fun <T> defaultSpatial(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(0.8f, 380f)
-    fun <T> slowSpatial(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(0.8f, 200f)
-    fun <T> fastEffects(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(1f, 3800f)
-    fun <T> defaultEffects(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(1f, 1600f)
-    fun <T> slowEffects(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(1f, 800f)
+    fun <T> fastSpatial(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(0.6f, 800f)
+    fun <T> defaultSpatial(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(0.8f, 380f)
+    fun <T> slowSpatial(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(0.8f, 200f)
+    fun <T> fastEffects(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(1f, 3800f)
+    fun <T> defaultEffects(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(1f, 1600f)
+    fun <T> slowEffects(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(1f, 800f)
 
     /** The release after a press: a touch bouncier than [fastSpatial], so a button "springs back". */
-    fun <T> release(): FiniteAnimationSpec<T> = if (simpleUi()) snap() else spring(0.45f, 600f)
+    fun <T> release(): FiniteAnimationSpec<T> = if (calmUi()) snap() else spring(0.45f, 600f)
 
-    private fun offsetSpatial(): FiniteAnimationSpec<IntOffset> = if (simpleUi()) snap() else spring(0.8f, 380f, IntOffset(1, 1))
-    private fun sizeSpatial(): FiniteAnimationSpec<IntSize> = if (simpleUi()) snap() else spring(0.8f, 380f, IntSize(1, 1))
+    private fun offsetSpatial(): FiniteAnimationSpec<IntOffset> = if (calmUi()) snap() else spring(0.8f, 380f, IntOffset(1, 1))
+    private fun sizeSpatial(): FiniteAnimationSpec<IntSize> = if (calmUi()) snap() else spring(0.8f, 380f, IntSize(1, 1))
 
     /** Calm: a quick cross-fade instead of any movement. */
     private fun calmSwap(): ContentTransform = fadeIn(tween(160)) togetherWith fadeOut(tween(100))

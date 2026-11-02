@@ -519,7 +519,7 @@ private fun GlassSurface(
                             onDragStopped = { v -> onRelease(v) }
                         )
                         .semantics {
-                            paneTitle = "Tɛkyerɛma"
+                            paneTitle = "Nexus"
                             stateDescription = when (rest) { Rest.COMPACT -> "Compact"; Rest.EXPANDED -> "Expanded"; Rest.INPUT -> "Expanded, with a text field" }
                         }
                 ) {

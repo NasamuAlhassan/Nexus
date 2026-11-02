@@ -86,7 +86,7 @@ internal fun AuditPage(onBack: () -> Unit) {
                 "Kept for ${com.tekyerema.core.Privacy.historyDays()} days.")
         }
         val list = cards
-        if (list != null && list.isEmpty()) item { Note("Nothing yet. What Tɛkyerɛma does for you will appear here.") }
+        if (list != null && list.isEmpty()) item { Note("Nothing yet. What Nexus does for you will appear here.") }
         if (list != null) items(list, key = { it.task.toString() + it.time }) { card -> TaskCardView(card, shape) }
     }
 }

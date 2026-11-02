@@ -58,27 +58,28 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
     var trial by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-        PageTitle("Twi keyboard", onBack)
+        PageTitle("Keyboard", onBack)
         TwiKeyboardSetupCard(status)
-        Overline("Options")
-        Hairline(inset = PageMargin)
-        SwitchRow("Big keys", "Taller keys and larger letters.", big) { prefs.bigKeys = it; big = it }
-        SwitchRow("Vibrate on each key", null, vibrate) { prefs.vibrate = it; vibrate = it }
-        SwitchRow("Sound on each key", null, sound) { prefs.sound = it; sound = it }
-        SwitchRow("Word suggestions", "Offers words above the keys as you type: Twi with ɛ and ɔ in place, and English. " +
-            "Tap one to use it.", suggest) {
-            prefs.suggestions = it; suggest = it
-        }
-        SwitchRow("Swipe to type", "Slide your finger from letter to letter and lift: the word goes in, and other " +
-            "words it could be wait above the keys. Slide up from a top-row key for its number.", swipe) {
-            prefs.swipeTyping = it; swipe = it
-        }
-        SwitchRow("Turn 3 into ɛ and c into ɔ", "In Twi, when you finish a word typed the texting way, like mey3 or wc. " +
-            "Press delete straight after to undo it.", habit) { prefs.textingHabit = it; habit = it }
-        SwitchRow("Learn my words", "Remembers new words you type, on this phone only, to suggest them later. Never in " +
-            "password or PIN boxes. Turning this off deletes them.", learn) {
-            prefs.learnWords = it; learn = it
-            if (!it) LearnedWordStore.clear(context)
+        // In one pane like every other settings page (redesign, 2 Nov 2026: the options lay loose on the page with hairlines).
+        com.tekyerema.ui.components.GlassGroup("Options") {
+            SwitchRow("Big keys", "Taller keys and larger letters.", big) { prefs.bigKeys = it; big = it }
+            SwitchRow("Vibrate on each key", null, vibrate) { prefs.vibrate = it; vibrate = it }
+            SwitchRow("Sound on each key", null, sound) { prefs.sound = it; sound = it }
+            SwitchRow("Word suggestions", "Offers words above the keys as you type. Tap one to use it.", suggest) {
+                prefs.suggestions = it; suggest = it
+            }
+            SwitchRow("Swipe to type", "Slide your finger from letter to letter and lift: the word goes in, and other " +
+                "words it could be wait above the keys. Slide up from a top-row key for its number.", swipe) {
+                prefs.swipeTyping = it; swipe = it
+            }
+            // Twi only: shown when the keyboard is set to Twi (English is the default since 2 Nov 2026).
+            if (prefs.language == KbLanguage.TWI) SwitchRow("Turn 3 into ɛ and c into ɔ", "In Twi, when you finish a word typed the texting way, like mey3 or wc. " +
+                "Press delete straight after to undo it.", habit) { prefs.textingHabit = it; habit = it }
+            SwitchRow("Learn my words", "Remembers new words you type, on this phone only, to suggest them later. Never in " +
+                "password or PIN boxes. Turning this off deletes them.", learn, divider = false) {
+                prefs.learnWords = it; learn = it
+                if (!it) LearnedWordStore.clear(context)
+            }
         }
         Overline("Try it")
         OutlinedTextField(
@@ -87,13 +88,13 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = PageMargin),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = Tk.Text, unfocusedTextColor = Tk.Text, focusedBorderColor = Tk.Cyan,
-                unfocusedBorderColor = Tk.TextTertiary, focusedLabelColor = Tk.Cyan, unfocusedLabelColor = Tk.TextSecondary,
+                unfocusedBorderColor = androidx.compose.ui.graphics.Color.Transparent, unfocusedContainerColor = Tk.Ink2,
+                focusedContainerColor = Tk.Ink2, focusedLabelColor = Tk.Cyan, unfocusedLabelColor = Tk.TextSecondary,
                 cursorColor = Tk.Cyan)
         )
         Note("The keyboard keeps what you type on this phone. It never sends it anywhere and keeps no history. " +
             "Voice typing uses your phone's own speech service, and is off in password and PIN boxes. " +
-            "The suggested Twi words come from Tɛkyerɛma's own Twi and are still being checked by a Twi speaker; the " +
-            "English words are a public list of common words, kept on the phone.")
+            "The suggested words are a public list of common English words, kept on the phone.")
         Spacer(Modifier.height(24.dp))
     }
 }
@@ -112,9 +113,9 @@ fun TwiKeyboardSetupCard(status: KeyboardStatus = rememberKeyboardStatus()) {
         Text(KeyboardSetupText.steps(status), style = MaterialTheme.typography.bodyLarge, color = Tk.TextSecondary)
         Spacer(Modifier.height(20.dp))
         when (status) {
-            KeyboardStatus.NOT_ENABLED -> BigButton("Add the Twi keyboard", onClick = { KeyboardSetup.openKeyboardList(context) })
+            KeyboardStatus.NOT_ENABLED -> BigButton("Add the keyboard", onClick = { KeyboardSetup.openKeyboardList(context) })
             KeyboardStatus.ENABLED_NOT_SELECTED -> {
-                BigButton("Use the Twi keyboard", onClick = { KeyboardSetup.showPicker(context) })
+                BigButton("Use this keyboard", onClick = { KeyboardSetup.showPicker(context) })
                 Spacer(Modifier.height(12.dp))
                 BigButton("Open the keyboard list", onClick = { KeyboardSetup.openKeyboardList(context) }, filled = false)
             }

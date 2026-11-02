@@ -150,8 +150,8 @@ object OverlayConfirm {
             PromptSurface.Kind.QUESTION -> "Tɛkyerɛma rebisa. $prompt. Bua, anaa ka gyae."
             PromptSurface.Kind.SECURE -> "Ahotoso adeyɛ. $prompt. Sɛ wowie a, ka sɛ 'awie'."
         } else when (kind) {
-            PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
-            PromptSurface.Kind.QUESTION -> "Tɛkyerɛma is asking. $prompt. Say your answer, or double-tap Speak. Say stop to cancel."
+            PromptSurface.Kind.CONFIRM -> "Nexus needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
+            PromptSurface.Kind.QUESTION -> "Nexus is asking. $prompt. Say your answer, or double-tap Speak. Say stop to cancel."
             PromptSurface.Kind.SECURE -> "Secure step. $prompt. When you've finished, say done or double-tap Done."
         }
 

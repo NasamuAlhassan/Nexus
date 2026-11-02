@@ -26,8 +26,9 @@ fun Modifier.glass(
     tint: Color? = null
 ): Modifier = composed {
     val dark = Tk.palette.dark
-    val base = LiquidStyles.of(dark, glassMode())
-    val style = if (strong || base.border != null) base else base.copy(fill = base.fill.copy(alpha = if (dark) 0.62f else 0.58f))
+    // [strong] = a floating control (the tab bar, the ask field): glass by default. Anything else holds text you read: solid by
+    // default, so nothing behind it ever shows through its words (Look, redesign 2 Nov 2026).
+    val style = LiquidStyles.of(dark, if (strong) Look.controlMode() else Look.readingMode())
     liquidGlass(
         style = style,
         shape = GlassShape.Of(shape),
@@ -37,17 +38,15 @@ fun Modifier.glass(
 }
 
 /**
- * Simple mode (config `ui.simple`, default TRUE; owner 27 Oct 2026: no Liquid Glass, no decorative animation, for blind and
- * low-vision users): every glass surface draws as a flat, opaque, bordered panel and all motion snaps. One switch; set
- * `"ui": {"simple": false}` in a config file to bring the glass look back.
+ * Simple mode (config `ui.simple`): every glass surface draws as a flat, opaque, bordered panel and all motion snaps. It was the
+ * default from 27 Oct 2026 (owner: no Liquid Glass, no decorative animation, for blind and low-vision users); since the 2 Nov
+ * redesign the same needs are met without grey borders — reading surfaces are opaque (Look.readingMode) and motion is calm
+ * by default ([calmUi]) — so it is off unless a config turns it on.
  */
-fun simpleUi(): Boolean = try { com.tekyerema.core.config.AppConfig.bool("ui.simple", true) } catch (_: Throwable) { true }
+fun simpleUi(): Boolean = try { com.tekyerema.core.config.AppConfig.bool("ui.simple", false) } catch (_: Throwable) { false }
 
-/** The user's glass setting: tinted (default), solid (less see-through) or high contrast (settings `ui.glassMode`). */
-fun glassMode(): com.tekyerema.ui.glass.GlassMode = when (try {
-    com.tekyerema.core.config.AppConfig.string("ui.glassMode", "tinted").lowercase()
-} catch (_: Throwable) { "tinted" }) {
-    "solid" -> com.tekyerema.ui.glass.GlassMode.SOLID
-    "contrast", "high_contrast", "high-contrast" -> com.tekyerema.ui.glass.GlassMode.HIGH_CONTRAST
-    else -> com.tekyerema.ui.glass.GlassMode.TINTED
-}
+/** Calm motion: simple mode, or the default calm look (Look.fullMotion off). The orb ignores it (owner, 27 Oct 2026). */
+fun calmUi(): Boolean = simpleUi() || Look.calm()
+
+/** The glass of a floating control (Look.controlMode): kept for the island and the panels over other apps. */
+fun glassMode(): com.tekyerema.ui.glass.GlassMode = Look.controlMode()

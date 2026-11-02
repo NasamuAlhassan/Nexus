@@ -38,6 +38,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -182,7 +185,7 @@ fun HomeContent(
         voice.state == com.tekyerema.voice.VoiceState.TYPING -> "Type, or tap the orb to talk"
         else -> ""
     }.ifEmpty { when (presence) {
-        Presence.IDLE, Presence.DONE -> if (greet) "Tap the orb, or say “Hey Tɛkyerɛma”" else "Tap to talk"
+        Presence.IDLE, Presence.DONE -> if (greet) "Tap the circle, or say “${com.tekyerema.ui.Brand.WAKE}”" else "Tap to talk"
         Presence.ERROR -> "Tap to try again"
         Presence.CONFIRMING -> if (waitingOnUser) "Tap to answer" else ""
         Presence.CONFIRM_LISTENING -> com.tekyerema.voice.Confirmation.LISTEN_HINT
@@ -190,25 +193,34 @@ fun HomeContent(
         else -> "Tap to stop"
     } }
     val (label, stateText) = when (presence) {
-        Presence.IDLE -> "Talk to Tɛkyerɛma" to "Ready"
+        Presence.IDLE -> "Talk to ${com.tekyerema.ui.Brand.NAME}" to "Ready"
         Presence.LISTENING -> "Stop listening" to "Listening"
         Presence.THINKING -> "Cancel" to "Thinking"
         Presence.ACTING -> "Stop" to phrase.ifBlank { "Working" }
         Presence.CONFIRMING -> (if (waitingOnUser) "Answer" else "Cancel") to "Asking for your answer"
         Presence.CONFIRM_LISTENING -> (if (waitingOnUser) "Answer" else "Cancel") to "Listening for yes or no"
         Presence.SPEAKING -> "Stop talking and listen" to "Speaking"
-        Presence.DONE -> "Talk to Tɛkyerɛma" to "Done"
+        Presence.DONE -> "Talk to ${com.tekyerema.ui.Brand.NAME}" to "Done"
         Presence.ERROR -> "Try again" to "Something went wrong"
     }
 
     Box(modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (showBrand) {
-            BrandRow(Modifier.fillMaxWidth().padding(start = PageMargin - 6.dp, end = PageMargin, top = 14.dp))
+            // The brand steps back while the assistant card holds the top of the screen: under the card it read through the glass as
+            // a ghost of "Tɛkyerɛma" beside the card's own title (emulator, 2 Nov 2026), and TalkBack has nothing to find there.
+            val brandAlpha by androidx.compose.animation.core.animateFloatAsState(if (surfaceVisible) 0f else 1f,
+                tween(if (reduceMotion) 90 else 200), label = "brand")
+            BrandRow(Modifier.fillMaxWidth().padding(start = PageMargin, end = PageMargin, top = 14.dp)
+                .graphicsLayer { alpha = brandAlpha }
+                .then(if (surfaceVisible) Modifier.clearAndSetSemantics { } else Modifier))
         } else Spacer(Modifier.height(28.dp))
 
-        // The orb and the assistant's line travel together as one centred group.
-        Column(Modifier.weight(1f).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        // The orb and the assistant's line travel together as one centred group. While the assistant card holds the top of the
+        // screen the group makes room under it (the orb shrinks a little rather than sitting half under the card; redesign 2 Nov).
+        val cardRoom by androidx.compose.animation.core.animateDpAsState(if (surfaceVisible) 72.dp else 0.dp,
+            tween(if (reduceMotion) 0 else 260), label = "card room")
+        Column(Modifier.weight(1f).fillMaxWidth().padding(top = cardRoom), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             LivingVoice(
                 presence = presence,
                 level = { VoiceEngine.level.value },
@@ -229,6 +241,13 @@ fun HomeContent(
                     }
                 },
                 modifier = Modifier.fillMaxWidth().weight(1f, fill = false).aspectRatio(1f, matchHeightConstraintsFirst = true)
+                    // The orb is 60 % of its square; the rest is room for its glow. Reporting 80 % of the height (the glow still
+                    // draws, centred, into the margins) brings the greeting up under the orb instead of a hand's width below it.
+                    .layout { measurable, constraints ->
+                        val p = measurable.measure(constraints)
+                        val h = (p.height * 0.80f).toInt()
+                        layout(p.width, h) { p.place(0, (h - p.height) / 2) }
+                    }
             )
 
             // The assistant's line — or, with nothing to say, a greeting. Announced to TalkBack for transient states;

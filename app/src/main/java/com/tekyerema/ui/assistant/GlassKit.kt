@@ -162,7 +162,7 @@ object GlassTiers {
         val power = (context.getSystemService(Context.POWER_SERVICE) as? PowerManager)?.isPowerSaveMode == true
         val override = try { com.tekyerema.core.config.AppConfig.string("ui.glassTier", "auto") } catch (_: Throwable) { "auto" }
         return of(Build.VERSION.SDK_INT, mem.totalMem, am?.isLowRamDevice == true, power,
-            com.tekyerema.ui.theme.systemAnimatorScale(context), calm || com.tekyerema.ui.theme.simpleUi(), override)
+            com.tekyerema.ui.theme.systemAnimatorScale(context), calm || com.tekyerema.ui.theme.calmUi(), override)
     }
 }
 
@@ -213,8 +213,11 @@ fun Modifier.glassBody(
     tilt: () -> Float = { DEFAULT_LIGHT_DEGREES }
 ): Modifier = this.liquidGlass(
     // A card over another app is a "large" glass (Apple: more opaque) — words on it never read as text on top of text.
-    style = LiquidStyles.of(palette.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
-        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (palette.dark) 0.93f else 0.92f))
+    // The card is read, so it takes the reading material: opaque by default (redesign 2 Nov 2026 — at 0.93 the Home brand line
+    // showed through the card's title as a ghost); see-through only when the user chose Glass.
+    style = LiquidStyles.of(palette.dark, com.tekyerema.ui.theme.Look.readingMode()).let { s ->
+        if (s.border != null || com.tekyerema.ui.theme.Look.opaqueReading) s
+        else s.copy(fill = s.fill.copy(alpha = if (palette.dark) 0.93f else 0.92f))
     },
     shape = GlassShape.Rounded(radius),
     depth = GlassDepth.FLOATING,

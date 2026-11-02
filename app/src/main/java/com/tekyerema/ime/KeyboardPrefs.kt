@@ -37,7 +37,7 @@ class KeyboardPrefs(ctx: Context) {
         get() = p.getBoolean("learn_words", false)
         set(v) = p.edit().putBoolean("learn_words", v).apply()
     var language: KbLanguage
-        get() = if (p.getString("language", "twi") == "en") KbLanguage.ENGLISH else KbLanguage.TWI
+        get() = if (p.getString("language", "en") == "twi") KbLanguage.TWI else KbLanguage.ENGLISH   // English unless Twi was chosen (Nexus is English-first, 2 Nov 2026)
         set(v) = p.edit().putString("language", if (v == KbLanguage.ENGLISH) "en" else "twi").apply()
 
     companion object { const val FILE = "twi_keyboard" }

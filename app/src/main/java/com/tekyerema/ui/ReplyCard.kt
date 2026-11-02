@@ -70,10 +70,20 @@ object ReplyCard {
         try {
             val d = svc.resources.displayMetrics.density
             val lines = text.split("\n", limit = 2)
+            // The same material and inks as every reading surface (redesign, 2 Nov 2026): it follows light or dark like the rest of
+            // the app, and the body is OPAQUE — at 95 % white the app underneath read through the reply's words.
+            val dark = when (com.tekyerema.settings.Settings(svc).appearance) {
+                com.tekyerema.settings.Settings.APPEARANCE_DARK -> true
+                com.tekyerema.settings.Settings.APPEARANCE_LIGHT -> false
+                else -> (svc.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+                    android.content.res.Configuration.UI_MODE_NIGHT_YES
+            }
+            val ink = Color.parseColor(if (dark) "#F2F7F6" else "#0E1B1C")
+            val ink2 = Color.parseColor(if (dark) "#A9C3BC" else "#3B5751")
             val card = LinearLayout(svc).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding((20 * d).toInt(), (16 * d).toInt(), (20 * d).toInt(), (16 * d).toInt())
-                background = GradientDrawable().apply { setColor(Color.parseColor("#F2F7FAFC")); cornerRadius = 28 * d }
+                background = GradientDrawable().apply { setColor(Color.parseColor(if (dark) "#0E1419" else "#F6F8F9")); cornerRadius = 28 * d }
                 elevation = 10 * d
                 isClickable = true
                 setOnClickListener { hideNow() }
@@ -82,12 +92,12 @@ object ReplyCard {
             }
             card.addView(TextView(svc).apply {
                 this.text = lines[0]
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f); setTextColor(Color.parseColor("#14202B"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 19f); setTextColor(ink)
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD); maxLines = 6; ellipsize = android.text.TextUtils.TruncateAt.END
             })
             if (lines.size > 1 && lines[1].isNotBlank()) card.addView(TextView(svc).apply {
                 this.text = lines[1]
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f); setTextColor(Color.parseColor("#566574"))
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f); setTextColor(ink2)
                 setPadding(0, (6 * d).toInt(), 0, 0); maxLines = 4; ellipsize = android.text.TextUtils.TruncateAt.END
             })
             val wm = svc.getSystemService(Context.WINDOW_SERVICE) as WindowManager

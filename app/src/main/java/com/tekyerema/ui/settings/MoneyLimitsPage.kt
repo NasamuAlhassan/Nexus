@@ -45,7 +45,7 @@ internal fun MoneyLimitsPage(settings: Settings, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("Mobile Money limits", onBack)
-        Note("The most Tɛkyerɛma will help you send. A lower limit starts at once; a higher one, or none, starts after " +
+        Note("The most Nexus will help you send. A lower limit starts at once; a higher one, or none, starts after " +
             "${MoneyLimits.spokenWait(MoneyLimits.coolingOffMs()).removePrefix("in ")} — so no one on a call can talk you into " +
             "lifting it and sending straight away.")
         Note(status)

@@ -23,10 +23,10 @@ import com.tekyerema.ui.VoiceActivity
 import kotlin.math.abs
 
 /**
- * The persistent accessibility trigger: a 60 dp brand-blue disc with the Tɛkyerɛma mark, drawn as
+ * The persistent accessibility trigger: a 60 dp disc with the Nexus mark (the logo on its own black), drawn as
  * an accessibility overlay over every app while screen control is on. One tap starts the voice
  * experience on top of whatever the user is doing. Draggable along the screen edge; hidden while
- * Tɛkyerɛma itself is in front. TalkBack reads it as the button "Talk to Tɛkyerɛma".
+ * Nexus itself is in front. TalkBack reads it as the button "Talk to Nexus".
  */
 object TriggerBubble {
     private const val PREFS = "tekyerema_trigger"
@@ -109,7 +109,10 @@ object TriggerBubble {
     private class TriggerView(ctx: Context, private val onTap: () -> Unit) : View(ctx) {
         private val d = ctx.resources.displayMetrics.density
         private val fill = Paint(Paint.ANTI_ALIAS_FLAG)
-        private val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 2.5f * d; color = Color.WHITE }
+        // No outline ring (DESIGN.md: edges are drawn by light, never by a line): a rim lit toward the upper left and on the far
+        // edge, ~0 along the sides — the same light as every glass surface (redesign, 2 Nov 2026). It keeps the disc's edge
+        // visible over a dark app, where the logo's own black would otherwise melt in.
+        private val rim = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = 1.5f * d }
         private val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(90, 0, 0, 0) }
         // The Tɛkyerɛma logo, drawn clipped to the disc (replaces the old hand-drawn ear+pulse mark).
         private val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isFilterBitmap = true; isDither = true }
@@ -118,7 +121,7 @@ object TriggerBubble {
         private val clip = Path(); private val dst = android.graphics.RectF()
 
         init {
-            contentDescription = "Talk to Tɛkyerɛma"
+            contentDescription = "Talk to Nexus"
             isClickable = true
             isFocusable = true
             importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
@@ -127,7 +130,7 @@ object TriggerBubble {
         override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
             super.onInitializeAccessibilityNodeInfo(info)
             info.className = "android.widget.Button"
-            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, "Talk to Tɛkyerɛma"))
+            info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_CLICK, "Talk to Nexus"))
         }
 
         override fun performClick(): Boolean { super.performClick(); onTap(); return true }
@@ -135,9 +138,14 @@ object TriggerBubble {
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             val cx = w / 2f; val cy = h / 2f
             val disc = 30f * d                                       // 60 dp disc
-            // Dark disc base — matches the logo's backdrop and shows if the bitmap can't be decoded.
-            fill.shader = LinearGradient(cx - disc, cy - disc, cx + disc, cy + disc,
-                Color.parseColor("#111F45"), Color.parseColor("#1B49C8"), Shader.TileMode.CLAMP)
+            // Disc base = the logo's own black (#01060F), so the mark has no seam; it also shows if the bitmap can't be decoded.
+            fill.shader = null; fill.color = Color.parseColor("#01060F")
+            val w = Color.WHITE; val clear = Color.argb(0, 255, 255, 255)
+            val peak = Color.argb(200, 255, 255, 255); val far = Color.argb(90, 255, 255, 255)
+            rim.shader = android.graphics.SweepGradient(cx, cy,
+                intArrayOf(clear, far, clear, clear, peak, w, peak, clear, clear),
+                floatArrayOf(0f, 0.125f, 0.25f, 0.5f, 0.58f, 0.625f, 0.67f, 0.75f, 1f))
+            if (disc <= 0f) return
         }
 
         override fun onDraw(c: Canvas) {
@@ -151,7 +159,7 @@ object TriggerBubble {
                 c.drawBitmap(bmp, null, dst, logoPaint)
                 c.restoreToCount(save)
             }
-            c.drawCircle(cx, cy, r - outline.strokeWidth / 2, outline) // white ring on top
+            c.drawCircle(cx, cy, r - rim.strokeWidth / 2, rim)         // light on the rim, not a ring
         }
 
         /** Tap = launch; drag = move, then snap to the nearest edge and remember the spot. */

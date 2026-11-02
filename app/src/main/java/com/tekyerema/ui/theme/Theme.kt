@@ -228,8 +228,11 @@ fun TekyeremaTheme(forceDark: Boolean = false, content: @Composable () -> Unit) 
     val settings = remember(context) { Settings(context) }
     val version by settings.changes.collectAsState()
     val userReduce = remember(version) { settings.reduceMotion }
-    // Simple mode (ui.simple, default on) is always calm: no decorative motion; the system's setting still counts too.
-    val calm = simpleUi() || MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
+    // The look (Look: surfaces and motion) — every Compose root passes here, so this is where the store gets its context.
+    remember(context) { Look.init(context) }
+    val lookVersion by Look.version.collectAsState()
+    // Calm by default (Look.fullMotion off, and simple mode); the user's and the system's reduce-motion settings count too.
+    val calm = remember(lookVersion) { calmUi() } || MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
     val palette = if (forceDark || rememberDarkTheme()) DarkPalette else LightPalette
     val orbCalm = MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
     CompositionLocalProvider(LocalCalmMotion provides calm, LocalOrbCalm provides orbCalm, LocalTkPalette provides palette) {

@@ -67,7 +67,7 @@ internal fun PhoneCarePage(settings: Settings, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("Phone care", onBack)
-        Note("Tɛkyerɛma can check that everything it needs is working, and tell you about things that matter as they happen.")
+        Note("Nexus can check that everything it needs is working, and tell you about things that matter as they happen.")
         GlassGroup("Check my phone") {
             SettingRow("Check my phone", value = if (checking) "Checking…" else "", icon = Icons.Outlined.HealthAndSafety,
                 iconTint = Spectrum.Lime, divider = false,
@@ -110,7 +110,7 @@ internal fun PhoneCarePage(settings: Settings, onBack: () -> Unit) {
             Note("Money and missed-call alerts need “Read messages”. Turn it on in Settings, Permissions.")
         if ((money || missed) && !messageAlerts)
             Note("“Message alerts” is off in Settings, Control, so money and missed-call alerts stay quiet.")
-        Note("Alerts stay quiet at night${quietHoursLabel()}, during calls and while Tɛkyerɛma is busy, and each is said once. " +
+        Note("Alerts stay quiet at night${quietHoursLabel()}, during calls and while Nexus is busy, and each is said once. " +
             "Codes are never read out. You can also say “check my phone”, “tell me when I receive money”, “tell me about " +
             "missed calls”, “warn me when my battery is low” or “read my alerts”.")
     }

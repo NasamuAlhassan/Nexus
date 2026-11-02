@@ -208,8 +208,9 @@ private fun tint(c: Color): ColorFilter {
 }
 /** Orb radius as a share of the smaller side; the aura reaches ~1.55× that, inside the square. */
 private const val BASE_R = 0.30f
-private val LIGHTS = arrayOf(Spectrum.Aqua, Spectrum.Teal, Spectrum.Green, Spectrum.Coral)
-private val ErrorGrey = Color(0xFF6B7490)
+// The mark's own lights only (Logo.jpg: aqua → teal → green → lime); coral was off the palette (redesign, 2 Nov 2026).
+private val LIGHTS = arrayOf(Spectrum.Aqua, Spectrum.Teal, Spectrum.Green, Spectrum.Lime)
+private val ErrorGrey = Color(0xFF6E7F7B)   // a grey with the ink's green in it (was slate blue, off the palette)
 /** The waveform's taper toward the rim (sin^1.6). Clamped: sin(π) is a tiny negative → NaN. */
 private val WAVE_WINDOW = FloatArray(PresenceSim.THREAD_POINTS) { j ->
     sin(PI.toFloat() * j / (PresenceSim.THREAD_POINTS - 1f)).coerceAtLeast(0f).pow(1.6f)
@@ -350,7 +351,7 @@ private fun DrawScope.drawWaves(
     val twoPi = 2f * PI.toFloat()
     val x0 = cx - r * 0.98f
     val w = r * 1.96f
-    val colors = arrayOf(Spectrum.Aqua, Spectrum.Green, Spectrum.Coral)
+    val colors = arrayOf(Spectrum.Aqua, Spectrum.Green, Spectrum.Lime)
     for (k in 0 until 3) {
         val path = kit.wave
         path.reset()

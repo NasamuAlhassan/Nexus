@@ -117,11 +117,11 @@ internal fun AppRulesPage(settings: Settings, onBack: () -> Unit) {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("App rules", onBack)
-        Note("Keep Tɛkyerɛma out of an app, or let it only guide you there. A new rule starts at once; lifting one asks you first. " +
+        Note("Keep Nexus out of an app, or let it only guide you there. A new rule starts at once; lifting one asks you first. " +
             "Emergency help always works.")
         if (said.isNotEmpty()) Note(said, Modifier.semantics { liveRegion = LiveRegionMode.Polite })
         GlassGroup("Your rules") {
-            if (rules.isEmpty()) FixedRow("No rules yet", "Tɛkyerɛma may use any app, and still asks before anything important.",
+            if (rules.isEmpty()) FixedRow("No rules yet", "Nexus may use any app, and still asks before anything important.",
                 null, Icons.Outlined.Apps, Spectrum.Lime, divider = false)
             else rules.forEachIndexed { i, r ->
                 SettingRow(r.label, value = AppRules.name(r.rule), icon = ruleIcon(r.rule), iconTint = ruleTint(r.rule),
@@ -201,7 +201,7 @@ internal fun AppRulesPage(settings: Settings, onBack: () -> Unit) {
         val after = AppRules.stricter(AppRules.configRule(app.packageName, configDeny, configGuide), to)
         AlertDialog(
             onDismissRequest = { loosening = null },
-            title = { Text(if (after == null) "Let Tɛkyerɛma use ${app.label} again?" else "Let Tɛkyerɛma read and guide you in ${app.label}?",
+            title = { Text(if (after == null) "Let Nexus use ${app.label} again?" else "Let Nexus read and guide you in ${app.label}?",
                 modifier = Modifier.semantics { heading() }) },
             text = { Text(AppRules.askLine(app.label, from, after).substringBefore(", yes or no?") + "?") },
             confirmButton = {
