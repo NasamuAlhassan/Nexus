@@ -100,6 +100,10 @@ internal object TriggerRunner {
             }
             FireDecision.SPEAK_REMINDER -> { TriggerGate.speak(app, TriggerSafety.reminderLine(s.goal) ?: TriggerSafety.itsTime(s.goal)); finish(app, s) }
             FireDecision.SPEAK_OFFER -> { TriggerGate.speak(app, TriggerSafety.itsTime(s.goal)); finish(app, s) }
+            FireDecision.SPEAK_BRIEF -> {
+                val spoke = speakBrief(app, s)
+                if (!spoke && attempt < maxRetries()) retry(app, s, attempt, now) else finish(app, s)
+            }
             FireDecision.RUN_READ_ONLY -> {
                 val ran = runReadOnly(app, s, release)
                 if (!ran && attempt < maxRetries()) retry(app, s, attempt, now) else finish(app, s)
@@ -109,6 +113,20 @@ internal object TriggerRunner {
 
     private fun retry(app: Context, s: Schedule, attempt: Int, now: Long) =
         ScheduledTasks.armRetry(app, s.id, attempt + 1, now + retryDelayMs())
+
+    /**
+     * The opt-in morning brief: built on the phone (read-only, no model, no network) and spoken. Building it takes a moment, so the
+     * busy gate is checked again right before speaking; false = the user became busy meanwhile (the caller retries later).
+     * Companion mode switched off, or nothing to say, is silence — never a guess.
+     */
+    private suspend fun speakBrief(app: Context, s: Schedule): Boolean {
+        val line = com.tekyerema.companion.CompanionRuntime.scheduledBrief(app)
+        if (line.isNullOrBlank()) { Log.i(TriggerGate.TAG, "[TRIGGER] A-13 ${s.id} brief: nothing to say"); return true }
+        val busy = withContext(Dispatchers.Main) { TriggerGate.userBusy(app) }
+        if (busy) return false
+        TriggerGate.speak(app, line)
+        return true
+    }
 
     /** A one-off is used up once it has been handled (spoken, run, skipped or given up). */
     private fun finish(app: Context, s: Schedule) { if (s.once) ScheduledTasks.remove(app, s.id) }
@@ -121,6 +139,20 @@ internal object TriggerRunner {
     private suspend fun runReadOnly(app: Context, s: Schedule, release: () -> Unit): Boolean {
         val goal = s.goal.trim()
         if (!TriggerSafety.isReadOnlyGoal(goal)) { TriggerGate.speak(app, TriggerSafety.itsTime(goal)); return true }
+        // Phone data (texts, the catch-up, the call log, today's calendar) is read by the fast path's own handler — no engine
+        // task, so the user's screen is not stepped aside for it (ReadOnlyDoor). Anything else, or a handler that declines,
+        // is submitted to the agent exactly as before.
+        if (com.tekyerema.agent.ReadOnlyDoor.intentFor(goal) != null) {
+            if (withContext(Dispatchers.Main) { TriggerGate.userBusy(app) }) return false
+            com.tekyerema.agent.ReadOnlyDoor.run(app, goal)?.let { out ->
+                Log.i(TriggerGate.TAG, "[TRIGGER] A-13 ${s.id} read by the fast path (no engine task)")
+                if (out.spoken.isNotBlank()) {
+                    TriggerGate.speak(app, out.spoken, post = false)
+                    try { VoiceSessionService.postResult(app, com.tekyerema.agent.ReadOnlyDoor.shadeText(out)) } catch (_: Throwable) {}
+                }
+                return true
+            }
+        }
         // Busy-check and submit in ONE main-thread step: voice/UI submit on the main thread too, so nothing can slip in.
         val accepted = withContext(Dispatchers.Main) {
             if (TriggerGate.userBusy(app)) false

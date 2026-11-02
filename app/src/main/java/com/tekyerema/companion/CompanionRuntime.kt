@@ -66,7 +66,37 @@ object CompanionRuntime {
             CompanionIntents.Kind.END -> { CompanionSession.end(); remembered(said, "COMPANION_END", CompanionGuard.closing(said)) }
             CompanionIntents.Kind.NOTES_OFF -> { setMoneyNotes(app, false); FastOutcome("COMPANION_NOTES", CompanionLines.NOTES_OFF) }
             CompanionIntents.Kind.NOTES_ON -> { setMoneyNotes(app, true); FastOutcome("COMPANION_NOTES", CompanionLines.NOTES_ON) }
+            CompanionIntents.Kind.BRIEF_SET -> briefSet(app, said)
+            CompanionIntents.Kind.BRIEF_OFF -> briefOff(app)
         }
+    }
+
+    // ---------------------------------------------------------------- the brief on a clock (BriefSchedule; fired by TriggerRunner)
+    /** "brief me every morning at 7": store the schedule (the user's own opt-in), say when. Null = let the usual schedule path / agent have it. */
+    private fun briefSet(app: Context, said: String): FastOutcome? {
+        if (!com.tekyerema.core.config.FeatureFlags.isEnabled(com.tekyerema.agent.triggers.ScheduledTasks.FEATURE, true)) return null
+        val plan = BriefSchedule.parseSet(said) ?: return null
+        val stored = com.tekyerema.agent.triggers.ScheduledTasks.add(app, plan.schedule)
+            ?: return FastOutcome("COMPANION_BRIEF_SET", "Sorry, I couldn't set the morning brief. Please say it another way.")
+        Log.i(TAG, "[COMPANION] morning brief set ${com.tekyerema.agent.triggers.ScheduledTasks.whenPhrase(stored)}")
+        return FastOutcome("COMPANION_BRIEF_SET", BriefSchedule.confirmLine(plan.copy(schedule = stored)), acted = true)
+    }
+
+    private fun briefOff(app: Context): FastOutcome {
+        val mine = BriefSchedule.mine(com.tekyerema.agent.triggers.ScheduledTasks.userSchedules(app))
+        mine.forEach { com.tekyerema.agent.triggers.ScheduledTasks.remove(app, it.id) }
+        Log.i(TAG, "[COMPANION] morning brief off (${mine.size})")
+        return FastOutcome("COMPANION_BRIEF_OFF", if (mine.isEmpty()) BriefSchedule.NONE_LINE else BriefSchedule.OFF_LINE, acted = mine.isNotEmpty())
+    }
+
+    /**
+     * The brief to SPEAK when its schedule fires (agent/triggers/TriggerRunner): the same paragraph as "brief me", built on the
+     * phone, read-only, nothing kept in the conversation. Null when companion mode is off or nothing could be built (then nothing
+     * is said). The caller has already checked quiet hours, calls and money steps.
+     */
+    suspend fun scheduledBrief(app: Context): String? {
+        if (!CompanionSession.enabled()) return null
+        return try { buildBrief(app, null) } catch (t: Throwable) { Log.w(TAG, "[COMPANION] scheduled brief failed: ${t.message}"); null }
     }
 
     /** An answer the brain should know was given (its next turn follows it). [kept] replaces the words in the memory when they are private. */
@@ -127,7 +157,10 @@ object CompanionRuntime {
     }.timeInMillis
 
     // ---------------------------------------------------------------- the brief
-    private suspend fun brief(app: Context, controller: AccessibilityController?, said: String): FastOutcome {
+    private suspend fun brief(app: Context, controller: AccessibilityController?, said: String): FastOutcome =
+        remembered(said, "COMPANION_BRIEF", buildBrief(app, controller), kept = "(read out the user's day; details not kept)")
+
+    private suspend fun buildBrief(app: Context, controller: AccessibilityController?): String {
         val now = System.currentTimeMillis()
         val zone = TimeZone.getDefault()
         val hidePrivate = try { PrivateReading.enabled(app) && !PrivateReading.privateOutputConnected(app) } catch (_: Throwable) { false }
@@ -146,11 +179,10 @@ object CompanionRuntime {
                 (try { com.tekyerema.settings.Settings(app).preferredName.ifBlank { null } } catch (_: Throwable) { null })
         }
         val money = if (moneyNotes(app) && !hidePrivate) withContext(Dispatchers.IO) { try { moneySlice(now) } catch (_: Throwable) { null } } else null
-        val line = CompanionBrief.build(CompanionBrief.Inputs(
+        return CompanionBrief.build(CompanionBrief.Inputs(
             nowMs = now, zone = zone, name = name, events = events, eventTotal = total,
             messagesKnown = msgsKnown, messageCount = chat.size, topSender = top?.key, topSenderCount = top?.value ?: 0,
             missedCalls = calls, liked = liked, money = money, hidePrivate = hidePrivate)) { MoneyLimits.cedis(it) }
-        return remembered(said, "COMPANION_BRIEF", line, kept = "(read out the user's day; details not kept)")
     }
 
     private fun extraChats(): Set<String> = AppConfig.stringList("notifications.digest.messagingPackages", emptyList()).toSet()

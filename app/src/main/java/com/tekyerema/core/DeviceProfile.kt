@@ -15,8 +15,17 @@ object DeviceProfile {
     @Volatile var memoryClassMb: Int = 0; private set
     @Volatile var lowRamDevice: Boolean = false; private set
 
+    @Volatile private var activityManager: ActivityManager? = null
+
+    /** RAM free right now in MB (the system's availMem), or 0 when unknown (the profile isn't read). Used by the model-tier picker. */
+    fun availableRamMb(): Long {
+        val am = activityManager ?: return 0L
+        return try { ActivityManager.MemoryInfo().also { am.getMemoryInfo(it) }.availMem / (1024 * 1024) } catch (_: Throwable) { 0L }
+    }
+
     fun init(ctx: Context) {
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return
+        activityManager = am
         val mi = ActivityManager.MemoryInfo()
         try { am.getMemoryInfo(mi) } catch (_: Throwable) {}
         totalRamMb = mi.totalMem / (1024 * 1024)
