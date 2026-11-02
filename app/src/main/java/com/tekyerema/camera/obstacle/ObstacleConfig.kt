@@ -161,7 +161,8 @@ data class ObstacleConfig(
                 val k = keys.next()
                 if (k.startsWith("_")) continue
                 val c = o.optJSONObject(k) ?: continue
-                val say = c.optString("say", "").trim().ifEmpty { continue }
+                val say = c.optString("say", "").trim()
+                if (say.isEmpty()) continue
                 val group = Group.of(c.optString("group", "other"))
                 out[k.lowercase()] = ClassInfo(say, group, c.optDouble("scale", 1.0).toFloat().coerceIn(0.2f, 4f))
             }

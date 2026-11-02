@@ -33,6 +33,7 @@ object BriefSchedule {
     fun isBriefGoal(goal: String): Boolean = CompanionIntents.isBrief(goal)
 
     private val BRIEFISH = Regex("brief|rundown|run down|my day|catch me up|run me through|walk me through|take me through")
+    private val SCHEDULE_CUE = Regex("\\bevery\\b|\\beach\\b|^(?:(?:can|could|would|will) you |please )?(?:set up|setup|schedule|start|arrange|turn on|switch on|set)\\b")
     private val LEAD_CAN = Regex("^(?:(?:can|could|would|will) you|i (?:want|need) you to|i(?:'d| would) like you to) ")
     private val LEAD_SETUP = Regex("^(?:set up|setup|schedule|start|arrange|turn on|switch on|set)(?: for me)? (?:a |an |the |my |me a |me an )?")
 
@@ -43,7 +44,12 @@ object BriefSchedule {
         if (isOff(g)) return null
         var given = true
         var p = ScheduleParser.parse(g)
-        if (p == null) { p = ScheduleParser.parse("$g at $DEFAULT_HOUR"); given = false }
+        if (p == null) {
+            // No time said: only an explicit scheduling cue makes it a schedule — "give me my daily brief" is the brief NOW,
+            // not a daily schedule ("daily" there names the brief, it is not a recurrence).
+            if (!SCHEDULE_CUE.containsMatchIn(g)) return null
+            p = ScheduleParser.parse("$g at $DEFAULT_HOUR"); given = false
+        }
         // A one-off ("brief me at 7") is a plain schedule; only a recurring one is the morning brief.
         if (p == null || p.once) return null
         val goal = p.goal.lowercase().trim()
