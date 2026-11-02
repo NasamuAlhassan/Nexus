@@ -97,7 +97,7 @@ object CompanionRuntime {
         val crisis = k == CompanionIntents.Kind.CRISIS
         val helper = HelperPlan.currentHelper()
         val emergency = AppConfig.string("os.emergency.numbers.emergency", "112")
-        // TODO(owner): supply a VERIFIED Ghana mental-health helpline in config companion.helpline.number (+ .name). None is invented.
+        // The verified Ghana Mental Health Authority helpline lives in config companion.helpline.number (+ .name). None is invented.
         val helpline = AppConfig.string("companion.helpline.number", "").ifBlank { null }
         val helplineName = AppConfig.string("companion.helpline.name", "").ifBlank { null }
         val line = CompanionGuard.reply(if (crisis) CompanionGuard.Level.CRISIS else CompanionGuard.Level.LOW, helper, emergency,

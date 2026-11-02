@@ -9,9 +9,9 @@
       "messageHours": 12
     },
     "helpline": {
-      "_doc": "TODO(owner): put a VERIFIED Ghana mental-health helpline here (digits only) and its name. Left empty on purpose: no number is invented. When set, the crisis reply adds 'You can also call <name> on <number>'.",
-      "number": "",
-      "name": ""
+      "_doc": "Ghana Mental Health Authority national helpline, 24/7 (verified 2 Nov 2026 on mha-ghana.com: '24/7 Help Line 0800 678 678'; also MyJoyOnline 10 Oct 2026, Ghana Business News 15 Sep 2026). Voice only, no SMS/WhatsApp found; languages not stated. Research: docs/agent/research/GHANA_HELPLINE_2026-11-02.md. Re-verify before each release.",
+      "number": "0800678678",
+      "name": "the Mental Health Authority helpline"
     }
   }
 }
