@@ -54,7 +54,11 @@ object LocalModelRuntime {
 class LocalModelBrain(
     private val llm: OnDeviceLlm,
     /** Tools the model may never call, whatever the step offers. */
-    private val denied: Set<String> = DENIED
+    private val denied: Set<String> = DENIED,
+    /** One-line hints from the user's own opt-in notes of past mistakes (learning/): "Last time, tapping 'Search' in Bolt did not work."
+     *  They ride in this on-phone planner's "What I know" block ONLY — no cloud brain is ever given them. Empty unless the user turned
+     *  "learn from your mistakes" on and a near-identical request failed recently. */
+    private val hints: (String) -> List<String> = { goal -> com.tekyerema.learning.FailureLearning.hintsFor(goal) }
 ) : AgentBrain {
 
     // The task's conversation: its tool list is fixed when it opens (the KV the runtime reuses depends on an unchanged
@@ -90,12 +94,17 @@ class LocalModelBrain(
         var user: String
         val out: String?
         val s = session ?: llm.openSession(system, maxTokens)?.also { session = it; sessionTools = offered; sessionGoal = ctx.goal; turns = 0 }
+        // What the user's own notes of past mistakes say about a request like this one: read with the conversation's FIRST turn
+        // (or every turn of a single-turn run), never later ones. Empty almost always.
+        val learned: List<String> = if (s == null || turns == 0) {
+            try { hints(ctx.goal) } catch (_: Throwable) { emptyList() }
+        } else emptyList()
         if (s != null) {
             user = when {
                 // A conversation that opens mid-task (after a rollover or a new tool) starts from the full list of steps.
                 turns == 0 && ctx.history.isNotEmpty() ->
-                    com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation)
-                turns == 0 -> com.tekyerema.agent.llm.PlannerPrompt.firstTurn(ctx.goal, ctx.screen, ctx.conversation)
+                    com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation, learned)
+                turns == 0 -> com.tekyerema.agent.llm.PlannerPrompt.firstTurn(ctx.goal, ctx.screen, ctx.conversation, learned)
                 else -> com.tekyerema.agent.llm.PlannerPrompt.nextTurn(
                     ctx.history.drop(sentHistory).joinToString("\n").ifBlank { "done" }, ctx.screen)
             }
@@ -104,7 +113,7 @@ class LocalModelBrain(
             sentHistory = ctx.history.size
             if (out == null || s.tokens > AppConfig.int("router.localModel.maxContextTokens", 3_000)) closeSession()
         } else {
-            user = com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation)
+            user = com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation, learned)
             out = llm.chat(system, user, schema, maxTokens, timeout)
         }
         val ms = System.currentTimeMillis() - t0

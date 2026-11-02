@@ -61,6 +61,14 @@ object AgentEngine {
     private var appContext: Context? = null
     /** The app context for on-phone guides that run without a ToolContext (money/TelcoGuide). */
     fun appContext(): Context? = appContext
+
+    /** The app's name and the screen's short title in front now — labels only, never contents (see [com.tekyerema.core.ScreenSummary]) — for
+     *  the opt-in note of a task that went wrong (learning/FailureLearning). Null while a secret is being typed or the screen can't be read. */
+    suspend fun screenNoteForLearning(): Pair<String?, String?>? {
+        if (com.tekyerema.core.Privacy.secureStep) return null
+        val snap = try { controller?.takeIf { it.ready }?.buildSnapshot() } catch (_: Throwable) { null } ?: return null
+        return snap.appName to com.tekyerema.core.ScreenSummary.title(snap)
+    }
     private var settings: Settings? = null
     private lateinit var registry: ToolRegistry
     private val policy = PolicyEngine()
