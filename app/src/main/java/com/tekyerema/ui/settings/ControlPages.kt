@@ -155,6 +155,15 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
                 if (cloud) "On: bigger tasks use the online AI." else "Off: nothing leaves your phone. Simple commands still work; " +
                     "web search, picture descriptions and bigger tasks don't.",
                 cloud, icon = if (cloud) Icons.Outlined.Cloud else Icons.Outlined.CloudOff, iconTint = Spectrum.Teal) { op.cloudAllowed = it }
+            // Planner memory (brain session, memory/PlannerMemory, 2 Nov 2026; off by default): the online AI may read the short
+            // "What I know" lines. Only shown while the internet is allowed; the on-phone planner always has them.
+            if (cloud) {
+                val shareMemory = remember(version) { settings.shareMemoryWithCloud }
+                SwitchRow("Share what Nexus knows about you",
+                    "Lets the online AI see the people you've named and your usual apps, so bigger tasks go right. " +
+                        "Off: these stay on this phone.",
+                    shareMemory, icon = Icons.Outlined.Lightbulb, iconTint = Spectrum.Teal) { settings.shareMemoryWithCloud = it }
+            }
             // Owner's item 7 (2 Nov 2026; built by the brain session, Settings.moneyCurtain, off by default): the dark cover from the
             // read-back to the network's answer, not only during the PIN. Off by default because most users have some sight and
             // check the amount and the name on screen against the read-back; the PIN is covered either way.
