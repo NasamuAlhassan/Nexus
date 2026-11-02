@@ -7,7 +7,6 @@ import com.tekyerema.language.HttpAsrProvider
 import com.tekyerema.language.HttpReply
 import com.tekyerema.language.HttpSpeech
 import com.tekyerema.language.HttpSpeechSpec
-import com.tekyerema.language.HttpTranslationProvider
 import com.tekyerema.language.HttpTtsProvider
 import com.tekyerema.language.LanguageLayer
 import com.tekyerema.language.PlainLatinVoice
@@ -243,15 +242,6 @@ class LanguageLayerTest {
         // failure → false (never throws into the voice turn)
         t.reply = { json(500, "{}") }
         assertFalse(tts.speak("Something new", Lang.TWI))
-    }
-
-    @Test fun http_translation_returns_null_on_failure() = runTest {
-        val s = spec(""","response":{"path":"translation"}""", kind = "mt")
-        val ok = HttpTranslationProvider(s, { secrets }, FakeTransport { json(200, """{"translation":"Mema wo akye"}""") }, guard())
-        assertEquals("Mema wo akye", ok.translate("Good morning", Lang.GH_EN, Lang.TWI))
-        val bad = HttpTranslationProvider(s, { secrets }, FakeTransport { json(503, "{}") }, guard())
-        // (a line translated before may come from the phone's own cache — MtDiskCache; a new one fails cleanly)
-        assertNull(bad.translate("Good evening, a line never translated", Lang.GH_EN, Lang.TWI))
     }
 
     // ---------------------------------------------------------------- registry + routing

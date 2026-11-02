@@ -278,45 +278,6 @@ class HttpTtsProvider(
     override fun shutdown() = sink.stop()
 }
 
-/** Online translation, cached (bounded) because the same app lines recur. Null on any failure. */
-class HttpTranslationProvider(
-    val spec: HttpSpeechSpec,
-    private val secrets: () -> Map<String, String>,
-    private val transport: SpeechTransport,
-    private val guard: ProviderGuard
-) : TranslationProvider, HealthAware {
-    override val name = "http:${spec.id}"
-    override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available()   // WS-C
-    private val cache: MutableMap<String, String> = lru(spec.cacheEntries.coerceIn(0, 512))
-
-    override suspend fun translate(text: String, from: String, to: String): String? {
-        val f = HttpSpeech.languageCode(spec, from) ?: return null
-        val t = HttpSpeech.languageCode(spec, to) ?: return null
-        if (text.isBlank()) return null
-        val key = "$f>$t|$text"
-        cache[key]?.let { Log.i("Tekyerema", "[MT] ${spec.id} $from→$to cached (${text.length} chars)"); return it }
-        // Kept across restarts (MtDiskCache): a line translated in the morning's rehearsal is there on stage, at once, even
-        // with the translator slow or down (owner's overnight mission, 15 Oct 2026).
-        MtDiskCache.get(spec.id, key)?.let { if (spec.cacheEntries > 0) cache[key] = it
-            Log.i("Tekyerema", "[MT] ${spec.id} $from→$to from the phone's cache (${text.length} chars)"); return it }
-        if (!available()) return null
-        val t0 = System.currentTimeMillis()
-        return try {
-            guard.run {
-                val r = transport.send(HttpSpeech.mtRequest(spec, secrets(), text, f, t), spec.connectMs, spec.callMs)
-                HttpSpeech.failureOf(spec, r)?.let { throw it }
-                HttpSpeech.parseText(spec, r)
-            }.ifBlank { null }?.also {
-                if (spec.cacheEntries > 0) cache[key] = it
-                MtDiskCache.put(spec.id, key, it)
-                // Measured for the QA run (no content): the translator's own latency was invisible in the log before 3 Oct 2026.
-                Log.i("Tekyerema", "[MT] ${spec.id} $from→$to ok in ${System.currentTimeMillis() - t0}ms (${text.length} → ${it.length} chars)")
-            }
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ProviderGuard.log("MT", spec.id, e); null }
-    }
-}
-
 /**
  * Twi voice clips kept across restarts (owner, 2 October 2026: the HCI Lab voice allows 15 requests a day, and a Twi line
  * is now spoken in pieces — "Wopɛ sɛ mesoma | five Ghana cedis | ma Ama?" — whose fixed Twi words recur on every
@@ -357,79 +318,6 @@ object TtsDiskCache {
             val files = d.listFiles()?.sortedBy { it.lastModified() } ?: return
             if (files.size > MAX) files.take(files.size - MAX).forEach { it.delete() }
         } catch (_: Throwable) {}
-    }
-}
-
-/**
- * Translations kept across restarts, app-private, at most [MAX] (oldest dropped first). A line about a PIN or a balance is
- * never kept. Cleared with the app's data.
- */
-object MtDiskCache {
-    private const val MAX = 400
-    private val SECRET = Regex("(?i)\\b(pin|balance|password|otp|code)\\b")
-    private fun dir(id: String): java.io.File? = try {
-        com.tekyerema.agent.AgentEngine.appContext()?.let { java.io.File(it.filesDir, "mt_cache/$id").apply { mkdirs() } }
-    } catch (_: Throwable) { null }
-
-    fun get(id: String, key: String): String? = try {
-        dir(id)?.let { java.io.File(it, TtsDiskCache.name(key)) }?.takeIf { it.isFile }?.readText()?.ifBlank { null }
-    } catch (_: Throwable) { null }
-
-    fun put(id: String, key: String, value: String) {
-        if (SECRET.containsMatchIn(key) || SECRET.containsMatchIn(value)) return
-        try {
-            val d = dir(id) ?: return
-            java.io.File(d, TtsDiskCache.name(key)).writeText(value)
-            val files = d.listFiles()?.sortedBy { it.lastModified() } ?: return
-            if (files.size > MAX) files.take(files.size - MAX).forEach { it.delete() }
-        } catch (_: Throwable) {}
-    }
-}
-
-/**
- * Translation through a Gradio Space (dialect "gradio"): our own language Space, `PrinceAlhassanNasamu/tekyerema-lang`,
- * serving the owner's NLLB fine-tune (tekyerema-nllb600m-v1) — translation was switched on there on 2 October 2026. Two
- * calls (the event id, then its result), each under this client's timeouts; cached; null on any failure or when the Space
- * says it did not translate (`"covered": false`).
- */
-class GradioTranslationProvider(
-    val spec: HttpSpeechSpec,
-    private val secrets: () -> Map<String, String>,
-    private val transport: SpeechTransport,
-    private val guard: ProviderGuard
-) : TranslationProvider, HealthAware {
-    override val name = "gradio:${spec.id}"
-    override fun available() = com.tekyerema.operator.OperatorPolicy.cloudAllowed && guard.health.available()
-    private val cache: MutableMap<String, String> = lru(spec.cacheEntries.coerceIn(0, 512))
-
-    override suspend fun translate(text: String, from: String, to: String): String? {
-        val f = HttpSpeech.languageCode(spec, from) ?: return null
-        val t = HttpSpeech.languageCode(spec, to) ?: return null
-        if (text.isBlank()) return null
-        val key = "$f>$t|$text"
-        cache[key]?.let { Log.i("Tekyerema", "[MT] ${spec.id} $from→$to cached (${text.length} chars)"); return it }
-        // Kept across restarts (MtDiskCache): a line translated in the morning's rehearsal is there on stage, at once, even
-        // with the translator slow or down (owner's overnight mission, 15 Oct 2026).
-        MtDiskCache.get(spec.id, key)?.let { if (spec.cacheEntries > 0) cache[key] = it
-            Log.i("Tekyerema", "[MT] ${spec.id} $from→$to from the phone's cache (${text.length} chars)"); return it }
-        if (!available()) return null
-        val t0 = System.currentTimeMillis()
-        return try {
-            guard.run {
-                val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(), org.json.JSONArray().put(text).put(f).put(t)),
-                    spec.connectMs, spec.callMs)
-                HttpSpeech.failureOf(spec, call)?.let { throw it }
-                val id = HttpSpeech.gradioEventId(spec, call)
-                val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), id), spec.connectMs, spec.callMs)
-                HttpSpeech.failureOf(spec, result)?.let { throw it }
-                HttpSpeech.parseGradio(spec, result.text()) ?: ""
-            }.ifBlank { null }?.also {
-                if (spec.cacheEntries > 0) cache[key] = it
-                MtDiskCache.put(spec.id, key, it)
-                Log.i("Tekyerema", "[MT] ${spec.id} $from→$to ok in ${System.currentTimeMillis() - t0}ms (${text.length} → ${it.length} chars)")
-            }
-        } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { ProviderGuard.log("MT", spec.id, e); null }
     }
 }
 
