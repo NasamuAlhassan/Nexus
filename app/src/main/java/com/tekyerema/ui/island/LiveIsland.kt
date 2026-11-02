@@ -111,9 +111,13 @@ fun LiveIsland(
     LaunchedEffect(lead.id, lead.urgent) { if (lead.urgent) open = true }
     LaunchedEffect(open, lead.urgent, lead.id) { if (open && !lead.urgent) { delay(7_000); open = false } }
 
-    val style = LiquidStyles.of(g.dark, com.tekyerema.ui.theme.glassMode()).let { s ->
+    // The capsule is a control (glass); the OPEN card is read — "Time's up", a turn, a caller — so it takes the reading material,
+    // opaque unless the user chose Glass: at 0.95 the app's own title showed through its words ("Timers" under "Time's up",
+    // emulator 2 Nov 2026).
+    val style = LiquidStyles.of(g.dark, if (open) com.tekyerema.ui.theme.Look.readingMode() else com.tekyerema.ui.theme.glassMode()).let { s ->
         // Denser than our pages: over another app's text, words on glass must never read as "text on top of text" (NN/g).
-        if (s.border != null) s else s.copy(fill = s.fill.copy(alpha = if (open) (if (g.dark) 0.95f else 0.96f) else (if (g.dark) 0.93f else 0.92f)))
+        if (s.border != null || (open && com.tekyerema.ui.theme.Look.opaqueReading)) s
+        else s.copy(fill = s.fill.copy(alpha = if (open) (if (g.dark) 0.95f else 0.96f) else (if (g.dark) 0.93f else 0.92f)))
     }
     val tilt = com.tekyerema.ui.glass.rememberTiltLight(tier == GlassTier.FULL && !calm)
     val radius by animateDpAsState(if (open) 30.dp else 23.dp, if (calm) tween(0) else spring(0.82f, 170f), label = "islandRadius")

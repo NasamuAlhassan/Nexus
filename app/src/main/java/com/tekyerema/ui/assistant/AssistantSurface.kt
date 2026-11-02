@@ -847,10 +847,21 @@ private fun AnswerBody(
     Column(Modifier.padding(top = 10.dp)) {
         Reveal(0, key) {
             val text = ScreenText.of(if (expanded) p.body else p.summary)
-            Text(text, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp), color = GlassColors.Text,
-                maxLines = if (expanded) Int.MAX_VALUE else 4, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    role = Role.Button, onClickLabel = if (expanded) "Show less" else "Show the whole answer", onClick = onToggle))
+            // Compact holds 8 lines (it held 4 and cut a sentence the voice had said in full — review, 2 Nov 2026); whenever words
+            // are still hidden a visible "Show all" says so, not only a tap on the text that nothing pointed to.
+            var cut by remember(text, expanded) { mutableStateOf(false) }
+            Column {
+                Text(text, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp), color = GlassColors.Text,
+                    maxLines = if (expanded) Int.MAX_VALUE else 8, overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { r -> cut = r.hasVisualOverflow },
+                    modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        role = Role.Button, onClickLabel = if (expanded) "Show less" else "Show the whole answer", onClick = onToggle))
+                if (cut || (!expanded && p.body.length > p.summary.length + 2)) Text(
+                    "Show all", style = MaterialTheme.typography.labelLarge, color = GlassColors.Accent,
+                    modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle)
+                        .padding(top = 12.dp, bottom = 8.dp, end = 16.dp)
+                        .semantics { contentDescription = "Show the whole answer" })
+            }
         }
         if (p.sources.isNotEmpty()) Reveal(1, key) { Sources(p.sources, onOpenUrl) }
         if (expanded && steps.isNotEmpty()) Reveal(2, key) { Column { WhatIDid(); Steps(steps, expanded = true) } }

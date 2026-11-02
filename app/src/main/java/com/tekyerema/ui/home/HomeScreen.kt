@@ -330,7 +330,8 @@ private fun Greeting(twi: Boolean, name: String = "") {
     val (en, tw) = when (hour) {
         in 5..11 -> "Good morning" to "Maakye"
         in 12..16 -> "Good afternoon" to "Maaha"
-        else -> "Good evening" to "Maadwo"
+        in 17..22 -> "Good evening" to "Maadwo"
+        else -> "Hello" to "Hello"   // the small hours: "Good evening" at 3 AM read wrong (emulator, 2 Nov 2026)
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(com.tekyerema.voice.Welcome.withName(if (twi) tw else en, name), style = MaterialTheme.typography.displaySmall, color = Tk.Text, textAlign = TextAlign.Center,

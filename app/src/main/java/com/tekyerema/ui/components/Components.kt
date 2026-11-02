@@ -350,7 +350,8 @@ fun SettingRow(
             Text(label, style = MaterialTheme.typography.bodyLarge, color = Tk.Text)
             if (description != null) Text(description, style = MaterialTheme.typography.bodySmall, color = Tk.TextSecondary,
                 modifier = Modifier.padding(top = 2.dp))
-            if (longValue) Text(value!!, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary,
+            // (A row with no value has nothing to put here: `value!!` crashed Settings at large text — emulator, 2 Nov 2026.)
+            if (longValue && !value.isNullOrEmpty()) Text(value, style = MaterialTheme.typography.bodyMedium, color = Tk.TextSecondary,
                 modifier = Modifier.padding(top = 4.dp))
         }
         if (!value.isNullOrEmpty() && !longValue) {

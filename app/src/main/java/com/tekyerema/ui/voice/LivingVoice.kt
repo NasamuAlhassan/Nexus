@@ -144,13 +144,15 @@ fun LivingVoice(
                         0f to Color(0xFF1E4A48), 0.65f to Color(0xFF0F2A2B), 1f to Color(0xFF071617),
                         center = Offset(-0.18f * UNIT, -0.22f * UNIT), radius = UNIT * 1.25f
                     ) else Brush.radialGradient(
-                        0f to Color(0xFFFFFFFF), 0.65f to Color(0xFFEEF8F4), 1f to Color(0xFFD9EEE7),
+                        // Daylight glass (review, 2 Nov 2026: the pale orb read as a bubble): clear toward the light, then the
+                        // body thickens into the mark's teal at the edge, where real glass on a pale page bends the most light.
+                        0f to Color(0xFFFFFFFF), 0.48f to Color(0xFFEAF7F3), 0.82f to Color(0xFFC6E6DF), 1f to Color(0xFF9FD3C9),
                         center = Offset(-0.18f * UNIT, -0.22f * UNIT), radius = UNIT * 1.25f
                     ),
                     // The glass's weight: a soft darkening toward the lower edge, so it reads as a sphere, not a disc.
                     depth = Brush.radialGradient(
                         0f to Color.Transparent, 0.72f to Color.Transparent,
-                        1f to (if (palette.dark) Color(0x8C000000) else Color(0x33103B37)),
+                        1f to (if (palette.dark) Color(0x8C000000) else Color(0x52103B37)),
                         center = Offset(0f, -0.12f * UNIT), radius = UNIT * 1.08f
                     ),
                     // Light only where it strikes, zero elsewhere — no ring round the sphere (owner: no border lines).
@@ -288,7 +290,7 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
             val ang = swirl * 1.4f * (if (b % 2 == 0) -1f else 1f) + phase
             val orbit = r * (0.42f + 0.12f * sin(time * 0.41f + phase) * (if (calm) 0f else 1f))
             val radius = r * (0.86f + 0.14f * s.voiceGlow.value)
-            val a = ((0.48f + 0.5f * light) * (if (pal.dark) 0.92f else 0.62f) * alphaScale).coerceIn(0f, 1f)
+            val a = ((0.48f + 0.5f * light) * (if (pal.dark) 0.92f else 0.80f) * alphaScale).coerceIn(0f, 1f)
             withTransform({
                 translate(cx + orbit * cos(ang), cy + orbit * sin(ang) + r * 0.08f)
                 scale(radius / UNIT, radius / UNIT, Offset.Zero)
@@ -306,6 +308,16 @@ private fun DrawScope.drawOrb(s: PresenceSim, kit: OrbKit, pal: TkPalette, focus
         // The caustic: light that came through the glass, gathered in a crescent at the bottom (liquid glass's lensing).
         withTransform({ translate(cx + r * 0.10f, cy + r * 0.74f); scale(r * 0.62f / UNIT, r * 0.22f / UNIT, Offset.Zero) }) {
             drawCircle(kit.spec, radius = UNIT, center = Offset.Zero, alpha = ((if (pal.dark) 0.22f else 0.30f) * appear).coerceIn(0f, 1f))
+        }
+        // In daylight white light gathered on white glass doesn't show: the caustic carries the mark's colours instead, aqua into
+        // lime, the way the logo's own glass head is lit at its foot (review, 2 Nov 2026).
+        if (!pal.dark) {
+            withTransform({ translate(cx - r * 0.16f, cy + r * 0.70f); scale(r * 0.50f / UNIT, r * 0.20f / UNIT, Offset.Zero) }) {
+                drawCircle(kit.spec, radius = UNIT, center = Offset.Zero, alpha = (0.55f * appear).coerceIn(0f, 1f), colorFilter = tint(tone(Spectrum.Aqua)))
+            }
+            withTransform({ translate(cx + r * 0.30f, cy + r * 0.66f); scale(r * 0.42f / UNIT, r * 0.18f / UNIT, Offset.Zero) }) {
+                drawCircle(kit.spec, radius = UNIT, center = Offset.Zero, alpha = (0.50f * appear).coerceIn(0f, 1f), colorFilter = tint(tone(Spectrum.Lime)))
+            }
         }
     }
 

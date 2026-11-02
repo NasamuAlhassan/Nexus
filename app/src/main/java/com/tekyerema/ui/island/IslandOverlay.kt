@@ -111,7 +111,10 @@ object IslandOverlay {
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
-            y = topInset(host)
+            // In the status-bar band, over the camera notch, the way a Dynamic Island sits (review, 2 Nov 2026): below the status
+            // bar it covered the app's own title ("World Clock" read "Worl…lock" under it). Now it reaches about half as far into
+            // the app. TalkBack still gets the same live text.
+            y = 0
         }
         val state = MutableTransitionState(false).apply { targetState = true }
         visible = state
