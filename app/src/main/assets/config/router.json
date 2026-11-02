@@ -51,6 +51,12 @@
       "first": false,
       "path": "",
       "minRamMb": 2500,
+      "tiers": [
+        { "id": "qwen3.5-4b-v2", "file": "qwen3.5-4b.litertlm", "minTotalMb": 7000, "minFreeMb": 3500 },
+        { "id": "qwen3.5-2b-v3", "file": "qwen3.5-2b.litertlm", "minTotalMb": 3600, "minFreeMb": 2000 },
+        { "id": "granite-4.0-1b", "file": "granite-4.0-1b.litertlm", "minTotalMb": 2800, "minFreeMb": 1200 }
+      ],
+      "_tiersNote": "Device tiers (MASTER_STATUS #30), best first, files in files/ondevice/llm/. A tier loads when its file is installed, total RAM >= minTotalMb and free RAM >= minFreeMb (free unknown = ignored); otherwise the next smaller installed tier; none fits = no on-phone model (rules + cloud). The old single model.litertlm is the last resort under minRamMb. An explicit 'path' bypasses the tiers.",
       "maxTokens": 200,
       "timeoutMs": 90000,
       "maxContextTokens": 3000,

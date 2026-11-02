@@ -205,15 +205,38 @@ class LocalModelBrain(
         }
 
         /**
+         * The model file to load on THIS phone, or null (device tiers, MASTER_STATUS #30: [ModelTierPicker]). An explicit
+         * `router.localModel.path` is the owner's choice and only meets the old `minRamMb` guard; otherwise the files in the
+         * model folder (beside [LocalModelRuntime.defaultPath]) are matched to the phone's RAM. Logs one `[TIER]` line.
+         */
+        internal fun modelPath(): String? {
+            val total = com.tekyerema.core.DeviceProfile.totalRamMb
+            val explicit = AppConfig.string("router.localModel.path", "")
+            if (explicit.isNotBlank()) {
+                if (total in 1 until AppConfig.long("router.localModel.minRamMb", 2_500L)) return null
+                return explicit.takeIf { java.io.File(it).isFile }
+            }
+            val default = LocalModelRuntime.defaultPath
+            if (default.isBlank()) return null
+            val dir = java.io.File(default).parentFile ?: return null
+            val installed = try { dir.listFiles()?.filter { it.isFile }?.map { it.name }?.toSet() } catch (_: Throwable) { null } ?: emptySet()
+            if (installed.isEmpty()) return null   // no model file: nothing changes, nothing logged
+            val config = ModelTierPicker.configFromApp()
+            // The default file's own name is the legacy file, whatever it is called.
+            val free = com.tekyerema.core.DeviceProfile.availableRamMb()
+            val pick = ModelTierPicker.pick(total, free, installed, config.copy(legacyFile = java.io.File(default).name))
+            try { android.util.Log.i("Tekyerema", ModelTierPicker.logLine(total, free, installed, pick)) } catch (_: Throwable) {}
+            return pick.file?.let { java.io.File(dir, it).absolutePath }
+        }
+
+        /**
          * The model brain for THIS phone, or null (the default — nothing changes): off unless enabled in config, a
          * runtime registered, the model file present, and at least `router.localModel.minRamMb` of RAM.
          */
         fun ifEnabled(): AgentBrain? {
             if (!AppConfig.bool("router.localModel.enabled", false)) return null
             val loader = LocalModelRuntime.loader ?: return null
-            if (com.tekyerema.core.DeviceProfile.totalRamMb in 1 until AppConfig.long("router.localModel.minRamMb", 2_500L)) return null
-            val path = AppConfig.string("router.localModel.path", "").ifBlank { LocalModelRuntime.defaultPath }
-            if (path.isBlank() || !java.io.File(path).isFile) return null
+            val path = modelPath() ?: return null
             return try { LocalModelRuntime.get(path, loader)?.let { LocalModelBrain(it) } } catch (_: Throwable) { null }
         }
     }
