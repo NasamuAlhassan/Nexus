@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "obstacles": {
+    "_note": "Obstacle warnings while walking (camera/obstacle/*, camera mode 'walk'). PROTOTYPE, opt-in, a SUPPLEMENT to the cane: it never says the way is clear or safe. OFF until the walk-trial go/no-go passes (docs/agent/research/OFFLINE_VISION_AND_OBSTACLES_2026-11-02.md section 5). Every number below is an uncalibrated first guess: tune on recorded walks.",
+    "enabled": false,
+
+    "model": {
+      "_install": "NOT bundled. Add ONE file: YOLOX-Nano ONNX (Megvii-BaseDetection/YOLOX, Apache-2.0, COCO, ~3.7 MB, input float32 [1,3,416,416] BGR 0..255 NO normalisation, output [1,3549,85] = cx,cy,w,h (raw, undecoded), objectness, 80 class scores, already sigmoided). Official release asset: https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.onnx (if that URL 404s: export yolox_nano.pth from the same release with tools/export_onnx.py WITHOUT --decode_in_inference, opset 11). Put it at <externalFiles>/ondevice/obstacles/yolox_nano.onnx (adb push), or <files>/obstacles/yolox_nano.onnx, or app/src/main/assets/obstacles/yolox_nano.onnx. YOLOX-Tiny (yolox_tiny.onnx, ~20 MB, same 416 input) drops in with no code change. Do NOT use Ultralytics YOLO (AGPL).",
+      "file": "yolox_nano.onnx",
+      "side": 416,
+      "decoded": false,
+      "bgr": true,
+      "scoreMin": 0.35,
+      "nmsIou": 0.45,
+      "maxDetections": 20,
+      "threads": 2
+    },
+
+    "bands": {
+      "_note": "Box height as a fraction of the upright frame (times the class's scale, below), or a box that reaches the bottom edge. near ~ within about two steps, medium ~ a few steps, far ~ farther. Bands, never metres.",
+      "near":   { "minHeight": 0.50, "minBottom": 0.97, "bottomMinHeight": 0.30 },
+      "medium": { "minHeight": 0.25, "minBottom": 0.85, "bottomMinHeight": 0.12 },
+      "far":    { "minHeight": 0.10 }
+    },
+
+    "direction": {
+      "leftBelow": 0.38,
+      "rightAbove": 0.62,
+      "spanWidth": 0.45
+    },
+
+    "approach": {
+      "windowMs": 1200,
+      "minSamples": 3,
+      "growth": 1.25,
+      "minDelta": 0.04
+    },
+
+    "debounce": {
+      "confirmFrames": 2,
+      "dropAfterMs": 1000,
+      "matchIou": 0.15
+    },
+
+    "cooldown": {
+      "speakPerClassMs": 3000,
+      "speakAnyMs": 1200,
+      "repeatSameMs": 10000,
+      "hapticNearMs": 900,
+      "hapticMediumMs": 2500
+    },
+
+    "fps": {
+      "activeIntervalMs": 150,
+      "idleIntervalMs": 400,
+      "idleAfterMs": 4000
+    },
+
+    "watch": {
+      "sessionMs": 600000,
+      "blockedMeanLumaBelow": 22,
+      "blockedLumaStdBelow": 6,
+      "blockedMs": 3000,
+      "heartbeatMs": 0
+    },
+
+    "haptics": {
+      "_note": "Waveform timings in ms: pause, on, pause, on ... Strength = length/count (near longest). Direction = rhythm: ahead = even pulses, left = long then short, right = short then long. One motor cannot point, so the rhythm is the direction.",
+      "ahead": { "near": [0, 250, 80, 250, 80, 250], "medium": [0, 120, 100, 120], "far": [0, 40] },
+      "left":  { "near": [0, 400, 120, 120], "medium": [0, 250, 120, 80], "far": [0, 40] },
+      "right": { "near": [0, 120, 120, 400], "medium": [0, 80, 120, 250], "far": [0, 40] },
+      "approachingSuffix": [100, 80],
+      "farBuzz": false
+    },
+
+    "phrases": {
+      "disclaimer": "Walking mode. I may miss things, so keep using your cane.",
+      "stopped": "Stopped watching. I may have missed things.",
+      "blocked": "I can't see ahead, so I've stopped watching.",
+      "timeout": "I've been watching a while and will stop now. I may have missed things.",
+      "notInstalled": "The obstacle model isn't installed on this phone, so I can't warn you about obstacles.",
+      "loadFailed": "I couldn't load the obstacle model, so I can't warn you about obstacles.",
+      "disabled": "Obstacle warnings aren't switched on yet.",
+      "near": "close",
+      "far": "far",
+      "coming": "coming",
+      "ahead": "ahead",
+      "left": "left",
+      "right": "right",
+      "label": "Watching ahead"
+    },
+
+    "classes": {
+      "_note": "COCO class name -> what is said, its priority group (vehicle, motorbike, bicycle, person, pole, animal, other: lower is more urgent), and a size scale (a smaller thing looks smaller at the same distance, so its box height counts for more). Unlisted COCO classes are ignored. Goats come out as sheep/dog/cow, so animals are only ever 'Animal'.",
+      "car":            { "say": "Car",        "group": "vehicle",   "scale": 1.1 },
+      "bus":            { "say": "Bus",        "group": "vehicle",   "scale": 0.8 },
+      "truck":          { "say": "Truck",      "group": "vehicle",   "scale": 0.8 },
+      "train":          { "say": "Train",      "group": "vehicle",   "scale": 0.6 },
+      "motorcycle":     { "say": "Motorbike",  "group": "motorbike", "scale": 1.2 },
+      "bicycle":        { "say": "Bicycle",    "group": "bicycle",   "scale": 1.2 },
+      "person":         { "say": "Person",     "group": "person",    "scale": 1.0 },
+      "fire hydrant":   { "say": "Post",       "group": "pole",      "scale": 1.5 },
+      "stop sign":      { "say": "Sign post",  "group": "pole",      "scale": 1.5 },
+      "parking meter":  { "say": "Post",       "group": "pole",      "scale": 1.3 },
+      "dog":            { "say": "Animal",     "group": "animal",    "scale": 1.6 },
+      "cat":            { "say": "Animal",     "group": "animal",    "scale": 1.8 },
+      "sheep":          { "say": "Animal",     "group": "animal",    "scale": 1.6 },
+      "cow":            { "say": "Animal",     "group": "animal",    "scale": 1.2 },
+      "horse":          { "say": "Animal",     "group": "animal",    "scale": 1.0 },
+      "bench":          { "say": "Bench",      "group": "other",     "scale": 1.6 },
+      "chair":          { "say": "Chair",      "group": "other",     "scale": 1.6 },
+      "couch":          { "say": "Sofa",       "group": "other",     "scale": 1.4 },
+      "dining table":   { "say": "Table",      "group": "other",     "scale": 1.4 },
+      "potted plant":   { "say": "Plant",      "group": "other",     "scale": 1.6 },
+      "suitcase":       { "say": "Bag",        "group": "other",     "scale": 1.8 }
+    }
+  }
+}
