@@ -169,7 +169,10 @@ internal fun PromptPanel(
                         onSecureDone = onSecureDone, onStopTask = onStopTask,
                         onTypeConfirm = if (prompt.kind == PromptSurface.Kind.CONFIRM) onType else null)
                     else Column(Modifier.padding(top = 10.dp)) {
-                        Text(ScreenText.of(prompt.text), style = MaterialTheme.typography.bodyLarge, color = GlassColors.Text)
+                        // A question quoting messages read aloud keeps its cover while the answer is typed (ReadCover).
+                        val cover = if (prompt.kind == PromptSurface.Kind.CONFIRM) null else rememberReadCover(prompt.text)
+                        if (cover != null) ReadCoverBody(cover, speaking = false)
+                        else Text(ScreenText.of(prompt.text), style = MaterialTheme.typography.bodyLarge, color = GlassColors.Text)
                         // Back closes the box and brings the pills back (the window takes focus only while it is typed into).
                         Box(Modifier.onPreviewKeyEvent { e ->
                             if (e.key == Key.Back && e.type == KeyEventType.KeyUp) { onCloseTyping(); true } else false

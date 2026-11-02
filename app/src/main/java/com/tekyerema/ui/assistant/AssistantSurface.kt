@@ -514,7 +514,14 @@ private fun GlassSurface(
                 else fadeOut(tween(180)) + slideOutVertically(SurfaceMotion.Leave) { -it / 2 }
         ) {
             CompositionLocalProvider(LocalGlass provides glass) {
-                val summary = spokenSummary(state)
+                // Messages hidden on screen (ReadCover): TalkBack hears the cover too, never the words (the voice reads them).
+                val coverOf = when (val p = state.preview) {
+                    is SurfaceModel.Preview.Answer -> p.body
+                    is SurfaceModel.Preview.Action -> p.summary
+                    else -> state.waiting?.takeIf { it.kind != PromptSurface.Kind.CONFIRM }?.text.orEmpty()
+                }
+                val readCover = rememberReadCover(coverOf)
+                val summary = readCover?.let { "${state.title}. ${it.description}" } ?: spokenSummary(state)
                 // OUTER, still: it reads the finger (draggable + nested scroll) in coordinates that don't move with the glass.
                 // Measured inside the moving glass, a 100 dp flick read as 41 dp at 0 dp/s and never dismissed (emulator log).
                 Box(
@@ -689,8 +696,8 @@ private fun Body(
             Mode.WORKING, Mode.PROCESSING -> Reveal(0, s.key) { Steps(s.steps.filterNot { it.active }, expanded) }
             Mode.WAITING -> s.waiting?.let { Waiting(it, voice, resolving, reaction, twi, tier, onConfirm, onChoice, onAnswerByVoice, onType, onSecureDone, onStopTask) }
             else -> when (val p = s.preview) {
-                is SurfaceModel.Preview.Answer -> AnswerBody(s.key, p, s.steps, expanded, tier, twi, onToggle, onOpenUrl, onOpenMaps)
-                is SurfaceModel.Preview.Action -> ActionBody(s.key, p, s.steps, expanded, onToggle)
+                is SurfaceModel.Preview.Answer -> AnswerBody(s.key, p, s.steps, expanded, tier, twi, onToggle, onOpenUrl, onOpenMaps, speaking = s.speaking)
+                is SurfaceModel.Preview.Action -> ActionBody(s.key, p, s.steps, expanded, onToggle, speaking = s.speaking)
                 is SurfaceModel.Preview.Problem -> ProblemBody(s.key, p, s.mode == Mode.CANCELLED, tier, onRetry)
                 null -> {}
             }
@@ -760,6 +767,10 @@ internal fun Waiting(
         val facts = remember(w.text) { if (w.kind == PromptSurface.Kind.CONFIRM) ConfirmFacts.parse(w.text) else null }
         Reveal(0, w.seq to w.text) {
             val shown = ScreenText.of(w.text)
+            // A question that quotes messages being read (ReadCover) shows who and when only. Never a confirmation: its words are
+            // what the user is about to send or do, and must be seen.
+            val cover = if (w.kind == PromptSurface.Kind.CONFIRM) null else rememberReadCover(w.text)
+            if (cover != null) ReadCoverBody(cover, speaking = voice.state == com.tekyerema.voice.VoiceState.SPEAKING) else
             Column {
                 facts?.let { f ->
                     PersonPreview(f)
@@ -856,8 +867,26 @@ internal fun Waiting(
 @Composable
 private fun AnswerBody(
     key: String, p: SurfaceModel.Preview.Answer, steps: List<SurfaceModel.StepView>, expanded: Boolean, tier: GlassTier, twi: Boolean,
-    onToggle: () -> Unit, onOpenUrl: (String) -> Unit, onOpenMaps: (String, String?) -> Unit
+    onToggle: () -> Unit, onOpenUrl: (String) -> Unit, onOpenMaps: (String, String?) -> Unit, speaking: Boolean = false
 ) {
+    // Messages read aloud with "Hide messages on screen" on: who and when only, never the words (ReadCover). "Say again" stays —
+    // it reads them aloud once more, which is the point.
+    val cover = rememberReadCover(p.body)
+    if (cover != null) {
+        Column(Modifier.padding(top = 10.dp)) {
+            Reveal(0, key) {
+                Column {
+                    ReadCoverBody(cover, speaking)
+                    if (LocalReadsAloud.current) Text(
+                        "Say again", style = MaterialTheme.typography.labelLarge, color = GlassColors.Accent,
+                        modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { VoiceEngine.repeatLast() }
+                            .padding(top = 12.dp, bottom = 8.dp, end = 24.dp)
+                            .semantics { contentDescription = "Say the messages again" })
+                }
+            }
+        }
+        return
+    }
     Column(Modifier.padding(top = 10.dp)) {
         Reveal(0, key) {
             val text = ScreenText.of(if (expanded) p.body else p.summary)
@@ -957,7 +986,10 @@ private fun WhatIDid() {
 }
 
 @Composable
-private fun ActionBody(key: String, p: SurfaceModel.Preview.Action, steps: List<SurfaceModel.StepView>, expanded: Boolean, onToggle: () -> Unit) {
+private fun ActionBody(key: String, p: SurfaceModel.Preview.Action, steps: List<SurfaceModel.StepView>, expanded: Boolean, onToggle: () -> Unit,
+                       speaking: Boolean = false) {
+    val cover = rememberReadCover(p.summary)
+    if (cover != null) { Column(Modifier.padding(top = 10.dp)) { Reveal(0, key) { ReadCoverBody(cover, speaking) } }; return }
     Column(Modifier.padding(top = 10.dp)) {
         Reveal(0, key) {
             Text(ScreenText.of(p.summary), style = MaterialTheme.typography.bodyLarge.answerSized(), color = GlassColors.Text,

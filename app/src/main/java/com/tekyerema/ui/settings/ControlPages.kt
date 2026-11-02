@@ -160,7 +160,13 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             val moneyCurtain = remember(version) { settings.moneyCurtain }
             SwitchRow("Cover the screen during money",
                 "Hides the amount, the name and the balance from people nearby. You'll still hear everything.",
-                moneyCurtain, divider = false, icon = Icons.Outlined.VisibilityOff, iconTint = Spectrum.Gold) { settings.moneyCurtain = it }
+                moneyCurtain, icon = Icons.Outlined.VisibilityOff, iconTint = Spectrum.Gold) { settings.moneyCurtain = it }
+            // Owner's order (2 Nov 2026, notifications/ReadAloudScreen): the screen side of private reading. Off by default for the
+            // same reason as the money cover: many users read their messages on screen.
+            val hideMessages = remember(version) { settings.hideReadMessages }
+            SwitchRow("Hide messages on screen",
+                "While I read your messages aloud, the screen shows who sent them and when, not what they say.",
+                hideMessages, divider = false, icon = Icons.Outlined.ChatBubbleOutline, iconTint = Spectrum.Coral) { settings.hideReadMessages = it }
         }
         GlassGroup("Runs by itself") {
             SwitchRow("Schedules", "Reminders and read-outs at times you set.", schedules,

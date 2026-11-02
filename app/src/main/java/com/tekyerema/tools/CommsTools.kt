@@ -268,6 +268,11 @@ object ReadNotificationsTool : Tool {
         com.tekyerema.notifications.PrivateReading.gate(ctx.appContext, filtered.map { it.sender ?: it.title ?: it.appLabel },
             filtered.joinToString(" ") { r -> "${r.spokenSource}: ${r.text.orEmpty()}".trim().let { if (it.last() in ".!?") it else "$it." } },
             explicitBalance)?.let { return ToolResult(true, it, data = JSONObject().put("private", true), channel = "native") }
+        // The screen side of private reading (notifications/ReadAloudScreen): the cloud's answer may quote these words.
+        filtered.forEach { r -> r.text?.takeIf { it.isNotBlank() }?.let { t -> try {
+            com.tekyerema.notifications.ReadAloudScreen.note(r.sender ?: r.title, r.appLabel, null,
+                listOf(t, com.tekyerema.notifications.PrivateReading.maskBalances(t)))
+        } catch (_: Throwable) {} } }
         // E-15: "WhatsApp — Ama: …" (app label + real sender), plus the buttons each notification offers (E-17).
         val body = filtered.joinToString("\n") { r ->
             val acts = r.actions.mapNotNull { a -> a.title?.toString()?.takeIf { it.isNotBlank() } }

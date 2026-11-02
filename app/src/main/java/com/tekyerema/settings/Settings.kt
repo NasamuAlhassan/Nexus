@@ -321,6 +321,13 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_MONEY_CURTAIN, com.tekyerema.core.config.AppConfig.bool("privacy.moneyCurtain", false))
         set(v) = put { putBoolean(KEY_MONEY_CURTAIN, v) }
 
+    /** Settings › Privacy (2 Nov 2026, notifications/ReadAloudScreen): while messages are read aloud, the answer card and the
+     *  panel over other apps show who and when only — "Reading 3 messages aloud" — never the words. Off by default: low-vision
+     *  users read their messages on screen. The voice is governed by [privateReading]; this is the screen. */
+    var hideReadMessages: Boolean
+        get() = prefs.getBoolean(KEY_HIDE_READ_MESSAGES, com.tekyerema.core.config.AppConfig.bool("privacy.hideReadMessages", false))
+        set(v) = put { putBoolean(KEY_HIDE_READ_MESSAGES, v) }
+
     var reduceMotion: Boolean
         get() = prefs.getBoolean(KEY_REDUCE_MOTION, false)
         set(v) = put { putBoolean(KEY_REDUCE_MOTION, v) }
@@ -405,6 +412,7 @@ class Settings(context: Context) {
         private const val KEY_SPEAK = "speak_aloud"
         private const val KEY_RATE = "speech_rate"
         private const val KEY_MONEY_CURTAIN = "money_curtain"
+        private const val KEY_HIDE_READ_MESSAGES = "hide_read_messages"
         private const val KEY_TTS_ACCENT = "tts_accent"
         private const val KEY_HAPTICS = "haptics"
         private const val KEY_SOUNDS = "sounds"

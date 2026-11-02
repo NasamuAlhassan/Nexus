@@ -31,7 +31,11 @@ object MessageReading {
         head.append('.')
         // A likely scam is said once, after who and before the words, never changing them (money/fraud/ScamWarning).
         val warning = com.tekyerema.money.fraud.ScamWarning.before(m.who, m.text)?.let { it + SpokenText.PAUSE } ?: ""
-        return head.toString() + SpokenText.PAUSE + warning + SpokenText.forEar(m.text)
+        val said = SpokenText.forEar(m.text)
+        // The screen side of private reading (ReadAloudScreen): remember these words so an answer showing them gets the cover.
+        try { ReadAloudScreen.note(m.who, if (plain()) null else m.where, if (plain()) null else m.whenSpoken,
+            listOf(m.text, said, PrivateReading.maskBalances(m.text))) } catch (_: Throwable) {}
+        return head.toString() + SpokenText.PAUSE + warning + said
     }
 
     data class Page(val text: String, val rest: List<Msg>)
