@@ -457,10 +457,7 @@ object VoiceEngine {
                 android.util.Log.i("Tekyerema", "[STARTUP] Kusaal: voice=${others[Lang.KUS]?.name ?: "none"} " +
                     "mt in=${kusToEnglish?.name ?: "none"} out=${enKus?.name ?: "none"} hear=${SpeechProviders.onlineAsrIds(Lang.KUS)}")
                 val englishIds = if (own != null) listOf("ghvoice", "system") else listOf("system")
-                // With no internet the phone's own student translator answers (language/StudentMt; null when its files aren't there).
-                com.tekyerema.language.StudentMt.init(app)
-                val enTw = com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline,
-                    offline = com.tekyerema.language.StudentMt.providerOrNull())
+                val enTw = com.tekyerema.language.LanguageLayer.translator(Lang.GH_EN, Lang.TWI, layer.mt, isOnline)
                 val localizer = com.tekyerema.language.ReplyLocalizer(enTw)
                 englishToTwiMt = enTw
                 // …and the way in: a Twi request reaches the cloud planner in English too (with its Twi), as it did with Khaya.
