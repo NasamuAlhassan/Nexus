@@ -388,6 +388,12 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("learn_from_mistakes", false)
         set(v) = put { putBoolean("learn_from_mistakes", v) }
 
+    /** Planner memory (memory/PlannerMemory, #19): let the CLOUD assistant read the short "What I know" lines (people you named, your usual
+     *  app for them, told facts) when it plans. Off by default; the on-phone planner always has them and nothing leaves the phone. */
+    var shareMemoryWithCloud: Boolean
+        get() = prefs.getBoolean("share_memory_with_cloud", false)
+        set(v) = put { putBoolean("share_memory_with_cloud", v) }
+
     // ---- Phone care alerts (phonecare/PhoneAlerts). A20e 2026-09-29: nothing told the user that money came in, who
     // called or that the battery was going (docs/agent/research/openclaw.md §5.2). Each alert is OFF until the user
     // switches it on (Settings › Phone care, or by voice). "Private alerts" starts ON — the stricter side: on the

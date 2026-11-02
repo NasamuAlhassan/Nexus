@@ -58,7 +58,10 @@ class LocalModelBrain(
     /** One-line hints from the user's own opt-in notes of past mistakes (learning/): "Last time, tapping 'Search' in Bolt did not work."
      *  They ride in this on-phone planner's "What I know" block ONLY — no cloud brain is ever given them. Empty unless the user turned
      *  "learn from your mistakes" on and a near-identical request failed recently. */
-    private val hints: (String) -> List<String> = { goal -> com.tekyerema.learning.FailureLearning.hintsFor(goal) }
+    private val hints: (String) -> List<String> = { goal -> com.tekyerema.learning.FailureLearning.hintsFor(goal) },
+    /** The user's own memory for this goal ("my wife" is the contact Pearl, usual app, told facts; memory/PlannerMemory): at most 10 short
+     *  lines in the same "What I know" block as [hints]. On-phone planner only — a cloud brain never gets them unless the user shares. */
+    private val memory: (String) -> List<String> = { goal -> com.tekyerema.memory.PlannerMemory.forGoal(goal) }
 ) : AgentBrain {
 
     // The task's conversation: its tool list is fixed when it opens (the KV the runtime reuses depends on an unchanged
@@ -97,7 +100,9 @@ class LocalModelBrain(
         // What the user's own notes of past mistakes say about a request like this one: read with the conversation's FIRST turn
         // (or every turn of a single-turn run), never later ones. Empty almost always.
         val learned: List<String> = if (s == null || turns == 0) {
-            try { hints(ctx.goal) } catch (_: Throwable) { emptyList() }
+            com.tekyerema.memory.PlannerMemory.merge(
+                try { memory(ctx.goal) } catch (_: Throwable) { emptyList() },
+                try { hints(ctx.goal) } catch (_: Throwable) { emptyList() })
         } else emptyList()
         if (s != null) {
             user = when {

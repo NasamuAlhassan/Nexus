@@ -51,6 +51,12 @@ object MemoryCore {
         return t.isNotEmpty() && t.length <= 100 && !SECRET_WORD.containsMatchIn(t) && !LONG_DIGITS.containsMatchIn(t)
     }
 
+    /** A line fit for the planner's "What I know" block: short, and no secret word, currency sign or long digit run (planner prompt guard). */
+    fun safeForPrompt(line: String): Boolean {
+        val t = line.trim()
+        return t.isNotEmpty() && t.length <= 140 && !SECRET_WORD.containsMatchIn(t) && !LONG_DIGITS.containsMatchIn(t)
+    }
+
     /** A contact name: anything but a phone number saved as a name. */
     fun safeName(name: String): Boolean {
         val t = name.trim()
@@ -188,6 +194,8 @@ object MemoryCore {
             "rate" -> when (value) { "slow" -> "you like me to speak slowly"; "fast" -> "you like me to speak fast"; else -> "you like me to speak at a normal pace" }
             "language" -> "you prefer ${if (value == "twi") "Twi" else "English"}" + if (ctx.isNotEmpty()) " for $ctx" else ""
             "verbosity" -> if (value == "brief") "you like short answers" else "you like more detail"
+            // "channel:pearl asante:whatsapp" (PlannerMemory.channelKey): the app the user usually writes to that person on.
+            "channel" -> "you usually message ${ctx.substringBeforeLast(':')} on $value"
             else -> "$key is $value"
         }
     }
@@ -197,7 +205,7 @@ object MemoryCore {
         val out = ArrayList<String>()
         if (preferredName.isNotBlank()) out.add("you like to be called $preferredName")
         relations.forEach { (r, n) -> out.add("your $r is $n") }
-        s.entries.filter { it.kind == MemKind.PREF }.sortedBy { it.firstAt }.forEach { out.add(spokenEntry(it)) }
+        s.entries.filter { it.kind == MemKind.PREF && (it.key.substringBefore(':') != "channel" || it.count >= 2) }.sortedBy { it.firstAt }.forEach { out.add(spokenEntry(it)) }
         s.entries.filter { it.kind == MemKind.FACT }.sortedBy { it.firstAt }.forEach { out.add(spokenEntry(it)) }
         topContacts(s, now, 5).forEach { out.add(spokenEntry(it)) }
         topTasks(s, now, 3).forEach { out.add(spokenEntry(it)) }

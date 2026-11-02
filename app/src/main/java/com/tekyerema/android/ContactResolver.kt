@@ -106,6 +106,7 @@ object ContactResolver {
     fun resolve(context: Context, name: String): List<Contact> {
         if (isPronoun(name)) return emptyList()   // nobody is named: the caller asks who, never guesses
         Relations.ensureLoaded(context)
+        com.tekyerema.memory.MemoryLearning.noteSaid(name)   // ask-once: "my wife" with no saved relation (memory/MemoryLearning)
         // C-03: try the name as said, then its family aliases, before fuzzy matching.
         val family = isFamilyWord(name)
         for (candidate in aliasesFor(name)) {
