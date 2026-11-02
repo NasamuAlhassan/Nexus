@@ -78,7 +78,7 @@ object UserMemory {
         try { update(ctx) { MemoryCore.upsert(it, MemKind.TASK, intent, phrase, false, System.currentTimeMillis()) } }
         catch (_: Throwable) {}
     }
-    private val SKIP_INTENT = Regex("^(MEMORY|FORGET|SET_|DELETE|CLEAR|CREATE|UNDO|RELATION|WATCH|ALERT|CALL|SMS|SEND|MOMO|MONEY|USSD|TWI|CALCULATE|MEANING|NEXT_STEP)")
+    private val SKIP_INTENT = Regex("^(MEMORY|FORGET|SET_|DELETE|CLEAR|CREATE|UNDO|RELATION|WATCH|ALERT|CALL|SMS|SEND|MOMO|MONEY|USSD|TWI|CALCULATE|MEANING|NEXT_STEP|COMPANION)")
 
     /** Of contacts that fit [said] equally, the one used far more than the others — else all of them, unchanged. */
     fun <T> preferContact(ctx: Context?, said: String, hits: List<T>, nameOf: (T) -> String, numberOf: (T) -> String): List<T> {

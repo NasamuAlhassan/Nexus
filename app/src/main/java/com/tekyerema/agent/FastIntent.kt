@@ -186,6 +186,11 @@ sealed class FastIntent(val name: String) {
     data class AlertSwitch(val kind: String, val on: Boolean) : FastIntent("ALERT_SWITCH")
     /** "read it" (just after a private alert) / "read my alerts". */
     object ReadAlert : FastIntent("READ_ALERT")
+    /** Companion mode (companion/, MASTER_STATUS #21): "let's talk", "brief me", "teach me something", "I'm so lonely" … [kind] is
+     *  a [com.tekyerema.companion.CompanionIntents.Kind] id. The user's words ([said]) are not part of equality and are never logged. */
+    data class CompanionTalk(val kind: String) : FastIntent("COMPANION_${kind.uppercase()}") {
+        var said: String = ""
+    }
 }
 
 /**
@@ -364,6 +369,12 @@ object FastIntentClassifier {
      * my mother is" is a relation, not "forget a person's messages"; "is battery saver on" is not the battery level.
      */
     private fun overnight(g: String, raw: String): FastIntent? {
+        // Companion mode (companion/): "let's talk", "brief me", "teach me something", "I'm so lonely" — first, so a sad word or "talk to
+        // me" is never taken for a command; distress is found anywhere in the sentence, the rest are whole utterances.
+        if (com.tekyerema.companion.CompanionSession.enabled()) {
+            com.tekyerema.companion.CompanionIntents.classify(raw, com.tekyerema.companion.CompanionSession.active(),
+                com.tekyerema.companion.CompanionSession.lastKind)?.let { k -> return FastIntent.CompanionTalk(k.id).also { it.said = raw } }
+        }
         // C-03 / H-08 relationship contacts.
         com.tekyerema.android.Relations.parseForget(g)?.let { return FastIntent.ForgetRelation(it) }
         com.tekyerema.android.Relations.parseQuery(g)?.let { return FastIntent.RelationQuery(it) }

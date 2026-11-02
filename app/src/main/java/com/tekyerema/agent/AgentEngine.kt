@@ -144,6 +144,16 @@ object AgentEngine {
         pushConvo(line, max + 120)
     }
 
+    /** Companion mode (companion/): a turn the fast path answered on its own ("let's talk" → its opener) is remembered, so the
+     *  brain that answers the user's next words knows what was just asked. [reply] must hold nothing private (no calendar,
+     *  names or amounts — the caller passes a marker for those). Never called with an empty [user] or [reply]. */
+    fun noteCompanionTurn(user: String, reply: String) {
+        if (user.isBlank() || reply.isBlank()) return
+        conversationSnapshot()   // a stale conversation goes first, as it would for a new request
+        pushConvo("User: $user")
+        pushConvo("Nexus:$reply")
+    }
+
     /** H-10: a conversation ends after a quiet spell (default 30 min) — a new request an hour later must not be read
      *  as a follow-up to an old one ("him" resolving to someone from this morning). */
     private fun conversationSnapshot(): List<String> = synchronized(conversation) {
