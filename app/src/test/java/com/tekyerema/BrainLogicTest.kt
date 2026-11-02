@@ -3,7 +3,9 @@ package com.tekyerema
 import com.tekyerema.agent.AgentBrain
 import com.tekyerema.agent.AgentDecision
 import com.tekyerema.agent.BrainContext
+import com.tekyerema.agent.BrainPrompts
 import com.tekyerema.agent.LocalBrain
+import com.tekyerema.agent.LocalFastRouter
 import com.tekyerema.agent.OfflineCapability
 import com.tekyerema.agent.RoutingBrain
 import kotlinx.coroutines.runBlocking
@@ -436,6 +438,32 @@ class BrainLogicTest {
         val d2 = r.decide(ctx("open WhatsApp"))                     // sticky: stays on cloud
         assertTrue(d2 is AgentDecision.Done)
         assertEquals(2, cloud.calls)
+    }
+
+    @Test fun router_answers_device_facts_on_the_phone_before_any_cloud() = runBlocking {
+        // 2 Nov 2026: a goal that skipped the fast path (scheduled task, offline queue, debug hook) reached the cloud brain,
+        // which invented "The time is 10:45 a.m." at 03:36. The facts hook answers first, online or offline, first step only.
+        val cloud = FakeBrain(AgentDecision.Done("The time is 10:45 a.m."))
+        val saved = LocalFastRouter.facts
+        com.tekyerema.agent.AnswerCache.shared.clear()   // H-11's shared cache is static: another test's cloud answer would short-circuit this one
+        try {
+            LocalFastRouter.facts = { g: String -> if (g == "what time is it") "The time is 3:36 AM." else null }
+            val online = RoutingBrain(LocalBrain(), cloud) { true }
+            val d = online.decide(ctx("what time is it"))
+            assertTrue(d is AgentDecision.Done && (d as AgentDecision.Done).summary == "The time is 3:36 AM.")
+            assertEquals("the cloud is never asked the time", 0, cloud.calls)
+            val offline = RoutingBrain(LocalBrain(), cloud) { false }
+            assertTrue(offline.decide(ctx("what time is it")) is AgentDecision.Done)
+            // not a fact → the usual route (the goal the sticky test proves defers to the cloud; the shared cache was cleared above)
+            // a fresh router + LocalBrain, as the engine builds per task (LocalBrain keeps per-task state)
+            com.tekyerema.agent.AnswerCache.shared.clear()
+            val d2 = RoutingBrain(LocalBrain(), cloud) { true }.decide(ctx("reconcile my quarterly ledgers"))
+            assertEquals("a non-fact goes to the cloud as before (got $d2)", 1, cloud.calls)
+            assertTrue(d2 is AgentDecision.Done)
+            assertTrue("the prompt tells the cloud the phone's clock", BrainPrompts.userText(ctx("what day is it")).contains("NOW (the phone's clock): "))
+        } finally {
+            LocalFastRouter.facts = saved
+        }
     }
 
     @Test fun router_offline_refuses_network_intent() {

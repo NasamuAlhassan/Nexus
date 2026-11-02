@@ -160,6 +160,9 @@ val slimApk = project.hasProperty("slimApk")
 tasks.withType<com.android.build.gradle.tasks.MergeSourceSetFolders>().configureEach {
     if (name.endsWith("Assets")) {
         inputs.property("slimApk", slimApk)
+        // The excluded paths are an input too, so adding one (twi, 2 Nov 2026) re-runs the merge instead of leaving an
+        // UP-TO-DATE merged dir that still holds the old files (the 03:19 slim build was still 1.2 GB for that reason).
+        inputs.property("slimApkExcludes", listOf("models/ondevice/eng/asr", "models/ondevice/twi"))
         // Only the recogniser: models/ondevice/eng/tts is the offline Kafui voice (63 MB), which the slim build used to drop
         // along with it although nothing pushes that voice to the phone (cleanup, 24 Oct 2026).
         // Nexus (2 Nov 2026): the Twi voice and MT models (models/ondevice/twi, 315 MB) leave the slim build too — local languages

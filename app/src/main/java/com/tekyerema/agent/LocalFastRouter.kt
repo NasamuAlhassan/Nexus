@@ -293,6 +293,25 @@ class LocalFastRouter(
             .let { it is AgentDecision.CallTool || it is AgentDecision.Done }
     } catch (_: Throwable) { false }
 
+    init {
+        facts = { text -> try { factAnswer(text) } catch (_: Throwable) { null } }
+    }
+
+    /** The spoken answer to a pure device-fact question (see [facts]), or null for anything that acts or isn't one. */
+    fun factAnswer(text: String): String? = when (val intent = FastIntentClassifier.classify(text, routines = false)) {
+        FastIntent.Time -> timeText()
+        FastIntent.Date -> dateText()
+        FastIntent.Day -> dayText()
+        FastIntent.Battery -> batteryText()
+        FastIntent.Storage -> storageText()
+        FastIntent.DeviceInfo -> deviceText()
+        is FastIntent.WorldTime -> intent.answer
+        is FastIntent.DateAnswer -> intent.answer
+        is FastIntent.Calculate -> intent.answer
+        is FastIntent.Convert -> intent.answer
+        else -> null
+    }
+
     private suspend fun execute(intent: FastIntent): FastOutcome? = when (intent) {
         FastIntent.Time -> handled(intent, if (turnLanguage == Lang.TWI) java.util.Calendar.getInstance().let {
             TwiInfoLines.time(it.get(java.util.Calendar.HOUR_OF_DAY), it.get(java.util.Calendar.MINUTE)) } else timeText())
@@ -1829,6 +1848,13 @@ class LocalFastRouter(
 
     companion object {
         private const val TAG = "Tekyerema"
+        /**
+         * Device facts for the brains (2 Nov 2026): the time, date, day, battery, storage, device, a sum or a unit conversion,
+         * answered on the phone from any entry point. A goal that skips the fast path (a scheduled task, the offline queue
+         * replaying a request, the debug hook) used to reach the cloud brain, which INVENTED a time ("The time is 10:45 a.m."
+         * at 03:36, emulator). RoutingBrain asks this first; set by the app's router instance, read-only, no side effects.
+         */
+        @Volatile var facts: ((String) -> String?)? = null
         /** The switch to English, said in English (the one line the router compares by identity, never by its words). */
         private const val OKAY_ENGLISH = "Okay, English."
         /** When "read this" / "read the screen" was last asked (elapsedRealtime; 0 = never). The reading itself is the

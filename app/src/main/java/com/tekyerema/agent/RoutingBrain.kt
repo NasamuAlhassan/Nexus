@@ -303,6 +303,13 @@ class RoutingBrain(
             android.util.Log.i("Tekyerema", "[ROUTE] answered from the recent-answer cache")
             return AgentDecision.Done(it)
         }
+        // A device fact (time, date, battery…) is answered on the phone whatever door the goal came through; the cloud
+        // brain, asked the time, invented one (2 Nov 2026). Only for a first step, so a mid-task "what time is it" still
+        // belongs to the task's brain.
+        if (ctx.history.isEmpty() && !stickyCloud) LocalFastRouter.facts?.invoke(ctx.goal)?.let {
+            android.util.Log.i("Tekyerema", "[ROUTE] device fact answered on the phone")
+            return AgentDecision.Done(it)
+        }
         if (cloud != null && isOnline() && linkAnswers()) {
             // Step one of a task about a named app: open it here — deterministic, ~0 ms instead of a round-trip.
             if (!stickyCloud && ctx.history.isEmpty()) appForGoal?.invoke(ctx.goal)?.let { (label, pkg) ->
