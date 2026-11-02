@@ -208,6 +208,53 @@ class TeachReplayTest {
         assertEquals(HandOverWhy.MISSING, r.why)
     }
 
+    // ---------------------------------------------------------------- Back / Home keys
+
+    private val back = TeachStep(StepKind.BACK, mtn, appName = "MyMTN")
+    private val home = TeachStep(StepKind.HOME, mtn, appName = "MyMTN")
+
+    @Test fun a_back_step_is_pressed_through_the_host_without_looking_for_an_element() {
+        val p = phone("data")
+        val r = run(TeachSkill("x", listOf(back, click("Balance"))), p)
+        assertEquals(ReplayResult.Done(2, 0, false), r)
+        assertEquals(listOf("BACK:null", "CLICK:Balance"), p.acted)
+    }
+
+    @Test fun back_in_the_wrong_app_hands_over_instead_of_leaving_it() {
+        val p = phone("other")
+        val r = run(TeachSkill("x", listOf(back)), p) as ReplayResult.HandOver
+        assertEquals(HandOverWhy.WRONG_SCREEN, r.why)
+        assertTrue(p.acted.isEmpty())
+    }
+
+    @Test fun home_works_from_any_app() {
+        val p = phone("other")
+        assertEquals(ReplayResult.Done(1, 0, false), run(TeachSkill("x", listOf(home)), p))
+        assertEquals(listOf("HOME:null"), p.acted)
+    }
+
+    @Test fun a_key_step_stops_at_a_private_screen_and_at_a_denied_app() {
+        val p = phone("data"); p.privateScreen = true
+        assertEquals(ReplayResult.Private(0), run(TeachSkill("x", listOf(back)), p))
+        assertTrue(p.acted.isEmpty())
+        val b = Phone(mapOf("b" to screen("com.blocked", el(1, "Data"))), "b"); b.blocked = "deny"
+        assertEquals(HandOverWhy.BLOCKED, (run(TeachSkill("x", listOf(TeachStep(StepKind.HOME, "com.blocked"))), b) as ReplayResult.HandOver).why)
+        assertTrue(b.acted.isEmpty())
+    }
+
+    @Test fun a_key_step_the_gates_refuse_is_handed_over_not_done() {
+        val p = phone("data"); p.actAnswer = StepRun.Blocked("keys are off")
+        val r = run(TeachSkill("x", listOf(back, click("Balance"))), p) as ReplayResult.HandOver
+        assertEquals(HandOverWhy.BLOCKED, r.why)
+        assertEquals(listOf(back, click("Balance")), r.remaining)
+    }
+
+    @Test fun key_steps_are_never_unnamed_or_sensitive_and_have_nothing_to_match() {
+        assertFalse(back.unnamed); assertFalse(home.unnamed)
+        assertFalse(com.tekyerema.teach.StepWords.isSensitive(back)); assertFalse(com.tekyerema.teach.StepWords.isSensitive(home))
+        assertTrue(StepMatcher.find(back, screen(mtn, el(1, "Back"))) is StepMatcher.Match.Missing)
+    }
+
     @Test fun a_skill_that_ended_at_a_private_screen_says_so() {
         val p = phone("home")
         val r = run(TeachSkill("pay", listOf(click("Data")), endsAtPrivate = true), p)

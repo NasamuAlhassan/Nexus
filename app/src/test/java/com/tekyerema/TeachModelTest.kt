@@ -76,6 +76,27 @@ class TeachModelTest {
         assertTrue(TeachCommands.handOverGoal(t).endsWith("Ask me what to type before you type it."))
     }
 
+    @Test fun back_and_home_steps_survive_json_and_read_back_in_plain_words() {
+        val keys = listOf(TeachStep(StepKind.BACK, mtn, appName = "MyMTN"), TeachStep(StepKind.HOME, mtn))
+        assertEquals(TeachSkill("x", keys), TeachSkill.fromJson(JSONObject(TeachSkill("x", keys).toJson().toString())))
+        assertEquals("go back", StepWords.describe(keys[0]))
+        assertEquals("go to the home screen", StepWords.describe(keys[1]))
+        assertEquals("first tap Data, then go back, then go to the home screen.", StepWords.spoken(listOf(steps[1]) + keys))
+        assertTrue(StepKind.BACK.isKey && StepKind.HOME.isKey && !StepKind.CLICK.isKey)
+    }
+
+    @Test fun the_hand_over_is_spoken_in_one_short_line_with_the_reason() {
+        fun over(why: HandOverWhy, line: String) = ReplayResult.HandOver(1, why, line, listOf(steps[1]))
+        assertEquals("I couldn't find Data, so I'll do the rest my way.", TeachCommands.handOverSpoken(over(HandOverWhy.MISSING, "I couldn't find Data.")))
+        assertEquals("This isn't the screen I expected, so I'll do the rest my way.",
+            TeachCommands.handOverSpoken(over(HandOverWhy.WRONG_SCREEN, "This isn't the screen I expected.")))
+        assertEquals("This step needs your yes, so I'll do the rest my way and ask you first.",
+            TeachCommands.handOverSpoken(over(HandOverWhy.NEEDS_YES, "This step needs your yes.")))
+        assertEquals("I'll do the rest my way, and ask you what to type.",
+            TeachCommands.handOverSpoken(over(HandOverWhy.NEEDS_TEXT, "I need you to tell me what to type in the Search box.")))
+        assertEquals("I'll do the rest my way.", TeachCommands.handOverSpoken(over(HandOverWhy.FAILED, " . ")))
+    }
+
     @Test fun steps_the_policy_would_ask_about_are_flagged_from_the_label() {
         assertTrue(StepWords.isSensitive(TeachStep(StepKind.CLICK, mtn, label = "Send")))
         assertTrue(StepWords.isSensitive(TeachStep(StepKind.CLICK, mtn, label = "Pay now")))

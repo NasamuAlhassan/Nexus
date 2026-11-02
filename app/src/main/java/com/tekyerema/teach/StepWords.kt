@@ -33,6 +33,8 @@ object StepWords {
         StepKind.TYPE -> (if (s.text != null) "type “${short(s.text)}” into the ${boxName(s)} box" else "type into the ${boxName(s)} box") +
             if (s.submit) " and search" else ""
         StepKind.SCROLL -> "scroll ${s.direction ?: "down"}"
+        StepKind.BACK -> "go back"
+        StepKind.HOME -> "go to the home screen"
     }
 
     /** "first open MyMTN, then tap Data, then tap Balance." — at most [max] steps are named, the rest counted. */

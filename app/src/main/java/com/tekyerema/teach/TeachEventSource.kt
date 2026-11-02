@@ -71,6 +71,28 @@ object TeachEventSource {
         }
     }
 
+    /**
+     * The user pressed Back or Home: a [RawEvent] for the key-up the service's key filter saw, in the app that was in front
+     * ([pkg]). Back makes no click, and the window change after it can't be told from an app moving on by itself, so the key
+     * is the only reliable signal. Null for any other key or for our own screen. Nothing on screen is opened or read.
+     */
+    fun keyToRaw(service: AccessibilityService, keyCode: Int, pkg: String?): RawEvent? {
+        val type = when (keyCode) {
+            android.view.KeyEvent.KEYCODE_BACK -> RawEvent.Type.KEY_BACK
+            android.view.KeyEvent.KEYCODE_HOME -> RawEvent.Type.KEY_HOME
+            else -> return null
+        }
+        if (pkg == null || pkg == service.packageName) return null
+        val now = System.currentTimeMillis()
+        if (pkg == defaultIme(service)) return RawEvent(type, pkg, now, isIme = true)
+        val denied = ScreenPrivacy.isDenied(pkg)
+        if (TelephonyWindows.matches(pkg) || denied) return RawEvent(type, pkg, now, denied = denied)
+        val pm = service.packageManager
+        return RawEvent(type, pkg, now, appName = appName(pm, pkg),
+            isShell = pkg == "com.android.systemui" || pkg == homePackage(pm),
+            launchable = launchable.getOrPut(pkg) { pm.getLaunchIntentForPackage(pkg) != null })
+    }
+
     /** What a tap was on: the node's text or description, else the first short caption below it (a row's title). */
     private fun clickLabel(src: AccessibilityNodeInfo?, e: AccessibilityEvent): String? {
         Sanitize.label(src?.text?.toString())?.let { return it.take(60) }

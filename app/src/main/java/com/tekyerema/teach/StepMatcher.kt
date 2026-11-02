@@ -31,6 +31,7 @@ object StepMatcher {
             StepKind.CLICK, StepKind.LONG_CLICK -> findControl(step, snap)
             StepKind.SCROLL -> snap.elements.firstOrNull { it.scrollable }?.let { Match.Found(it, "scrollable") } ?: Match.Missing("something to scroll")
             StepKind.OPEN_APP -> Match.Missing("app")
+            StepKind.BACK, StepKind.HOME -> Match.Missing("a key")   // keys have no element; ReplayEngine handles them before matching
         }
     }
 

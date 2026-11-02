@@ -289,6 +289,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
      *  gesture to interrupt and take over). Volume-up twice → repeat the last reply. The keys are never swallowed. */
     override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
         val e = event ?: return false
+        com.tekyerema.teach.TeachCommands.onKey(this, e.keyCode, e.action)   // teach mode: the user's own Back / Home while recording; never consumes
         // On the network's PIN screen the volume keys are the PIN pad (money/PinPad): consumed, both down and up, so
         // the volume doesn't move and no other gesture reads them.
         // MTN's confirmation after the PIN: volume up confirms (money/ussd/AfterPinConfirm), before the PIN pad reads the key.
@@ -889,7 +890,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     }
 
     /** A keyboard window is on screen. */
-    private fun keyboardUp(): Boolean = try {
+    fun keyboardUp(): Boolean = try {
         windows.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
     } catch (_: Throwable) { false }
 
