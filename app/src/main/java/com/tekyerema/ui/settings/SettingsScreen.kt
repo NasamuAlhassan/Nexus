@@ -44,6 +44,7 @@ import androidx.compose.material.icons.outlined.HealthAndSafety
 import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Language
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Replay
 import androidx.compose.material.icons.outlined.Tune
@@ -65,7 +66,7 @@ import com.tekyerema.ui.theme.TkMotion
 internal enum class Page {
     ROOT, VOICE, KEYBOARD, PERMISSIONS, ACCESSIBILITY, HELP,
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
-    PHONE_CARE, MONEY_LIMITS, APP_RULES, PIN_PRACTICE, DEVELOPER;
+    PHONE_CARE, MONEY_LIMITS, APP_RULES, PIN_PRACTICE, DEVELOPER, LEARNED;
 
     val parent: Page get() = when (this) {
         ROOT -> ROOT
@@ -107,6 +108,11 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
             GlassGroup("Seeing and hearing") {
                 SettingRow("Accessibility", description = "Look, light or dark, sounds, the wake phrase",
                     icon = Icons.Outlined.AccessibilityNew, iconTint = Spectrum.Lime, divider = false) { page = Page.ACCESSIBILITY }
+            }
+            // What the phone has learned from the user (2 Nov 2026): taught skills and button names, each one removable here.
+            GlassGroup("Memory") {
+                SettingRow("What ${com.tekyerema.ui.Brand.NAME} has learned", description = "Skills you showed it and names you gave buttons",
+                    icon = Icons.Outlined.Lightbulb, iconTint = Spectrum.Gold, divider = false) { page = Page.LEARNED }
             }
             GlassGroup("Safety") {
                 SettingRow("Permissions", value = permissionsSummary(context),
@@ -157,6 +163,7 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.MONEY_LIMITS -> MoneyLimitsPage(settings) { page = Page.CONTROL }   // money safety round 2
         Page.APP_RULES -> AppRulesPage(settings) { page = Page.CONTROL }
         Page.PIN_PRACTICE -> PinPracticePage { page = Page.ACCESSIBILITY }
+        Page.LEARNED -> LearnedPage { page = Page.ROOT }
     } }
 }
 
@@ -232,6 +239,17 @@ private fun VoicePage(settings: Settings, onBack: () -> Unit) {
             ChoiceRow("New to ${com.tekyerema.ui.Brand.NAME}", "Fuller explanations, and more time to finish speaking.", profile == "beginner") { settings.profile = "beginner" }
             ChoiceRow("Experienced", "Short replies, and it answers as soon as you stop.", profile == "expert", divider = false) { settings.profile = "expert" }
         } }
+        // Companion mode (brain session, companion/, 2 Nov 2026): chat, a daily brief, gentle notes. Everything personal stays on the phone.
+        val companion = remember(version) { settings.companionEnabled }
+        var moneyNotes by remember { mutableStateOf(settings.companionMoneyNotes) }
+        GlassGroup("Companion") {
+            SwitchRow("Companion", "Chat when you feel like it, and a short daily brief when you ask for one. Built on this phone; " +
+                "the brief is never sent anywhere.", companion, divider = !companion) { settings.companionEnabled = it }
+            if (companion) SwitchRow("Spending notes", "A short note about your Mobile Money spending in the daily brief. " +
+                "Asking “how am I doing with money” always works.", moneyNotes, divider = false) {
+                settings.companionMoneyNotes = it; moneyNotes = it
+            }
+        }
         GlassGroup("Speaking speed") { Column(Modifier.selectableGroup()) {
             ChoiceRow("Slow", selected = rate == 0) { settings.speechRate = 0 }
             ChoiceRow("Normal", selected = rate == 1) { settings.speechRate = 1 }
