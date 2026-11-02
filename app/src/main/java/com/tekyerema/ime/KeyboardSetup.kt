@@ -6,7 +6,7 @@ import android.provider.Settings
 import android.view.inputmethod.InputMethodManager
 
 /**
- * G-05 — getting the Twi keyboard turned on. Android needs two user steps that no app can do for them:
+ * G-05 — getting the Nexus keyboard turned on. Android needs two user steps that no app can do for them:
  *  1. ENABLE it in the keyboard list (Settings.ACTION_INPUT_METHOD_SETTINGS). Android then warns that a keyboard
  *     "may be able to collect all the text you type"; the user must accept.
  *  2. SELECT it as the keyboard in use (InputMethodManager.showInputMethodPicker — only works while our own window

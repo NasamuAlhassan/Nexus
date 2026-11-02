@@ -4,8 +4,8 @@ import android.text.InputType
 import android.view.inputmethod.EditorInfo
 
 /**
- * G-05 — the keyboard's typing rules, pure and unit-tested: shift/caps, the word at the cursor, the "3"→ɛ / "c"→ɔ
- * texting habit, and what the enter key does. The service only feeds these what the editor reports.
+ * G-05 — the keyboard's typing rules, pure and unit-tested: shift/caps, the word at the cursor and what the enter
+ * key does. The service only feeds these what the editor reports.
  */
 
 /**
@@ -64,97 +64,6 @@ object WordAtCursor {
         else while (i > 0 && !s[i - 1].isWhitespace() && !isWordChar(s[i - 1])) i--
         return (s.length - i).coerceAtLeast(1)
     }
-}
-
-/**
- * The texting habit: without an Akan keyboard people type "3" for ɛ and "c" for ɔ ("mey3", "wc"). In Twi mode, when
- * the user finishes a word, those stand-ins become the real letters — only where that cannot damage numbers or
- * English words:
- *  - "3" converts only as a single digit touching a letter ("y3", "3na"), never inside a number ("233", "30"), never in
- *    a number-with-unit or ordinal ("3pm", "3rd", "3GB"), never alone (a lone 3 is a number).
- *  - "c" converts where English cannot use it: not before a vowel or h/l/r/y ("cedi", "check", "class"), not after a
- *    vowel ("back", "music"), not in ALL-CAPS acronyms ("ECG", "PC"), not in a few known words ("etc", "disc"). A word
- *    that already shows Twi (a "3", ɛ or ɔ) converts every c ("cy3" → "ɔyɛ").
- * The ")" for ɔ habit is deliberately NOT converted: ")" is real punctuation far too often.
- */
-object TextingHabit {
-    private val UNIT_OR_ORDINAL = Regex("^\\d+(st|nd|rd|th|am|pm|g|gb|mb|kb|kg|km|cm|mm|ml|d|k|x|s|hrs?|mins?)$", RegexOption.IGNORE_CASE)
-    private val KEEP = setOf("mp3", "etc", "disc", "zinc", "sync", "arc", "abc")
-    private const val VOWELS = "aeiou"
-
-    fun convert(word: String): String {
-        if (word.isEmpty() || word.lowercase() in KEEP || UNIT_OR_ORDINAL.matches(word)) return word
-        if (!word.any { it.isLetter() }) return word
-        val letters = word.filter { it.isLetter() }
-        val allCaps = letters.length >= 2 && letters.all { it.isUpperCase() }
-        val sb = StringBuilder(word.length)
-        for (i in word.indices) {
-            val c = word[i]
-            if (c == '3' && isLoneDigit(word, i) && touchesLetter(word, i)) sb.append(if (allCaps) 'Ɛ' else 'ɛ') else sb.append(c)
-        }
-        val step1 = sb.toString()
-        val twiEvidence = step1.any { it == 'ɛ' || it == 'Ɛ' || it == 'ɔ' || it == 'Ɔ' }
-        if (allCaps && !twiEvidence) return step1
-        val out = StringBuilder(step1.length)
-        for (i in step1.indices) {
-            val c = step1[i]
-            if ((c == 'c' || c == 'C') && (twiEvidence || cIsOpenO(step1, i))) out.append(if (c == 'C') 'Ɔ' else 'ɔ') else out.append(c)
-        }
-        return out.toString()
-    }
-
-    private fun isLoneDigit(w: String, i: Int) =
-        (i == 0 || !w[i - 1].isDigit()) && (i == w.length - 1 || !w[i + 1].isDigit())
-
-    private fun touchesLetter(w: String, i: Int) =
-        (i > 0 && (w[i - 1].isLetter() || w[i - 1] == '3')) || (i < w.length - 1 && (w[i + 1].isLetter() || w[i + 1] == '3'))
-
-    private fun cIsOpenO(w: String, i: Int): Boolean {
-        val prev = if (i > 0) w[i - 1].lowercaseChar() else null
-        val next = if (i < w.length - 1) w[i + 1].lowercaseChar() else null
-        if (next != null && next in "aeiouhlry'’") return false
-        if (prev != null && prev in VOWELS) return false
-        return true
-    }
-}
-
-/**
- * When a word is finished (space, enter or sentence punctuation) the habit conversion runs once; a backspace straight
- * after it puts the original back — the same "undo the autocorrect" gesture Gboard uses, so nothing is ever forced —
- * and the restored word is not converted again when the user finishes it the second time.
- */
-class HabitSession {
-    data class Replacement(val deleteBefore: Int, val insert: String)
-
-    private var last: Triple<String, String, String>? = null   // original, converted, separator
-    private var suppressed: String? = null
-
-    /** The user finishes [word] with [separator]; [before] is the character in front of the word. Returns the edit
-     *  to make INSTEAD of just typing the separator, or null to type it as usual. */
-    fun onWordEnd(word: String, before: Char?, separator: String): Replacement? {
-        val skip = word.isEmpty() || word == suppressed || (before != null && (before in ".@/:_-#" || before.isDigit()))
-        suppressed = null
-        if (skip) { last = null; return null }
-        val converted = TextingHabit.convert(word)
-        if (converted == word) { last = null; return null }
-        last = Triple(word, converted, separator)
-        return Replacement(word.length, converted + separator)
-    }
-
-    /** Backspace. If the text still ends with the conversion just made, undo it (and the separator) in one step. */
-    fun onBackspace(textBeforeCursor: CharSequence?): Replacement? {
-        val (original, converted, separator) = last ?: return null
-        last = null
-        val tail = converted + separator
-        if (textBeforeCursor == null || !textBeforeCursor.endsWith(tail)) return null
-        suppressed = original
-        return Replacement(tail.length, original)
-    }
-
-    /** Any other key or a cursor move: the undo window closes. */
-    fun onOtherInput() { last = null }
-
-    fun reset() { last = null; suppressed = null }
 }
 
 /** What the enter key shows, says and does for the current field (EditorInfo.imeOptions / inputType). */

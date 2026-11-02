@@ -6,8 +6,6 @@ import com.tekyerema.ime.DictationText
 import com.tekyerema.ime.EnterBehaviour
 import com.tekyerema.ime.EnterKeys
 import com.tekyerema.ime.FieldPolicy
-import com.tekyerema.ime.HabitSession
-import com.tekyerema.ime.KbLanguage
 import com.tekyerema.ime.KeyKind
 import com.tekyerema.ime.KeyNames
 import com.tekyerema.ime.KeyboardLayout
@@ -20,7 +18,6 @@ import com.tekyerema.ime.Page
 import com.tekyerema.ime.PadKind
 import com.tekyerema.ime.ShiftMachine
 import com.tekyerema.ime.ShiftState
-import com.tekyerema.ime.TextingHabit
 import com.tekyerema.ime.TwiLexicon
 import com.tekyerema.ime.VoicePlan
 import com.tekyerema.ime.VoiceRoute
@@ -33,32 +30,24 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
-/** G-05 — the Tɛkyerɛma Twi keyboard's pure logic: layouts and spoken key names, shift, the word at the cursor, the
- *  "3"/"c" texting habit and its undo, the enter key, the per-field safety policy (passwords/PINs), suggestions and
- *  learned words, the voice-key route, setup status — and a guard that nothing in ime/ logs or touches the network. */
+/** G-05 — the Nexus keyboard's pure logic (English only since 31 Oct 2026): layouts and spoken key names, shift, the
+ *  word at the cursor, the enter key, the per-field safety policy (passwords/PINs), suggestions and learned words, the
+ *  voice-key route, setup status — and a guard that nothing in ime/ logs or touches the network. */
 class TwiKeyboardTest {
 
     private val enter = EnterKeys.of(EditorInfo.IME_ACTION_SEND, InputType.TYPE_CLASS_TEXT)
     private fun chars(l: KeyboardLayout) = l.rows.flatten().filter { it.kind == KeyKind.CHAR }.map { it.text }
-    private fun allLayouts(): List<KeyboardLayout> = KbLanguage.values().flatMap { lang ->
-        ShiftState.values().map { KeyboardLayouts.letters(lang, it, enter) } +
-            KeyboardLayouts.symbols(lang, enter) + KeyboardLayouts.moreSymbols(lang, enter)
-    } + PadKind.values().map { KeyboardLayouts.pad(it, enter) }
+    private fun allLayouts(): List<KeyboardLayout> =
+        ShiftState.values().map { KeyboardLayouts.letters(it, enter) } +
+            KeyboardLayouts.symbols(enter) + KeyboardLayouts.moreSymbols(enter) +
+            PadKind.values().map { KeyboardLayouts.pad(it, enter) }
 
     // ------------------------------------------------------------------------------------------ layouts
 
-    @Test fun twi_mode_puts_open_e_where_q_is_and_open_o_where_c_is() {
-        val l = KeyboardLayouts.letters(KbLanguage.TWI, ShiftState.OFF, enter)
-        assertEquals("ɛ", l.rows[0][0].text)
-        assertEquals(listOf("Shift", "z", "x", "ɔ", "v"), l.rows[2].take(5).map { if (it.kind == KeyKind.SHIFT) "Shift" else it.text })
-        // Q and C are one long-press away for names and English words.
-        assertTrue("q" in l.rows[0][0].variants)
-        assertTrue("c" in l.rows[2][3].variants)
-        assertFalse("q" in chars(l))
-    }
-
-    @Test fun english_mode_is_plain_qwerty_with_the_akan_letters_on_long_press() {
-        val l = KeyboardLayouts.letters(KbLanguage.ENGLISH, ShiftState.OFF, enter)
+    @Test fun the_keyboard_is_plain_qwerty_with_the_akan_letters_on_long_press_and_no_language_key() {
+        val l = KeyboardLayouts.letters(ShiftState.OFF, enter)
+        assertEquals(listOf("Shift", "z", "x", "c", "v"), l.rows[2].take(5).map { if (it.kind == KeyKind.SHIFT) "Shift" else it.text })
+        assertTrue("ɛ" !in chars(l) && "ɔ" !in chars(l))
         assertEquals("qwertyuiop".map { it.toString() }, l.rows[0].map { it.text })
         val e = l.rows[0].first { it.text == "e" }
         val o = l.rows[0].first { it.text == "o" }
@@ -67,12 +56,12 @@ class TwiKeyboardTest {
         assertTrue("ŋ" in l.rows[2].first { it.text == "n" }.variants)
     }
 
-    @Test fun shift_gives_capital_open_e_and_o_and_capital_options() {
-        val l = KeyboardLayouts.letters(KbLanguage.TWI, ShiftState.ONCE, enter)
-        assertEquals("Ɛ", l.rows[0][0].text)
-        assertTrue("Ɔ" in chars(l))
+    @Test fun shift_gives_capitals_and_capital_options() {
+        val l = KeyboardLayouts.letters(ShiftState.ONCE, enter)
+        assertEquals("Q", l.rows[0][0].text)
         assertEquals("Ɛ", l.rows[0].first { it.text == "E" }.variants.first())
-        assertEquals("⇪", KeyboardLayouts.letters(KbLanguage.TWI, ShiftState.LOCKED, enter).rows[2][0].label)
+        assertEquals("Ɔ", l.rows[0].first { it.text == "O" }.variants.first())
+        assertEquals("⇪", KeyboardLayouts.letters(ShiftState.LOCKED, enter).rows[2][0].label)
     }
 
     @Test fun every_row_is_ten_units_wide_and_the_pad_is_four() {
@@ -89,14 +78,14 @@ class TwiKeyboardTest {
         }
     }
 
-    @Test fun shift_and_language_changes_keep_the_same_shape_so_talkback_focus_stays() {
-        val a = KeyboardLayouts.letters(KbLanguage.TWI, ShiftState.OFF, enter)
-        assertEquals(a.shape(), KeyboardLayouts.letters(KbLanguage.TWI, ShiftState.LOCKED, enter).shape())
-        assertEquals(a.shape(), KeyboardLayouts.letters(KbLanguage.ENGLISH, ShiftState.ONCE, enter).shape())
+    @Test fun shift_changes_keep_the_same_shape_so_talkback_focus_stays() {
+        val a = KeyboardLayouts.letters(ShiftState.OFF, enter)
+        assertEquals(a.shape(), KeyboardLayouts.letters(ShiftState.LOCKED, enter).shape())
+        assertEquals(a.shape(), KeyboardLayouts.letters(ShiftState.ONCE, enter).shape())
     }
 
     @Test fun the_symbols_page_has_the_cedi_sign_first_among_currencies() {
-        val s = KeyboardLayouts.symbols(KbLanguage.TWI, enter)
+        val s = KeyboardLayouts.symbols(enter)
         val cedi = s.rows.flatten().first { it.text == "₵" }
         assertEquals("cedi sign", cedi.spoken)
         assertEquals("GH₵", cedi.variants.first())
@@ -119,7 +108,6 @@ class TwiKeyboardTest {
         assertEquals("k", KeyNames.spoken("k"))
         assertEquals("full stop", KeyNames.spoken("."))
         assertEquals("Shift, caps lock on", KeyNames.shift(ShiftState.LOCKED))
-        assertEquals("Twi keyboard. Switch to English", KeyNames.languageKey(KbLanguage.TWI))
     }
 
     // ------------------------------------------------------------------------------------------ typing
@@ -142,40 +130,9 @@ class TwiKeyboardTest {
         assertEquals("don't", WordAtCursor.of("I don't").text)
         assertEquals(WordAtCursor.Word("quote", '\''), WordAtCursor.of("'quote"))
         assertEquals(WordAtCursor.Word("", null), WordAtCursor.of(null))
-        assertEquals(WordAtCursor.Word("mey3", null), WordAtCursor.of("mey3"))
         assertEquals(7, WordAtCursor.deleteWordLength("hello world  "))
         assertEquals(2, WordAtCursor.deleteWordLength("hi, "))
         assertEquals(1, WordAtCursor.deleteWordLength(""))
-    }
-
-    @Test fun the_texting_habit_3_and_c_become_open_e_and_open_o() {
-        val cases = mapOf(
-            "mey3" to "meyɛ", "y3" to "yɛ", "3y3" to "ɛyɛ", "3na" to "ɛna", "d3n" to "dɛn", "s3" to "sɛ",
-            "wc" to "wɔ", "kc" to "kɔ", "kcc" to "kɔɔ", "cno" to "ɔno", "cdc" to "ɔdɔ", "ckc" to "ɔkɔ", "c" to "ɔ",
-            "cy3" to "ɔyɛ", "Wc" to "Wɔ", "C" to "Ɔ", "M3P3" to "MƐPƐ"
-        )
-        for ((typed, want) in cases) assertEquals(typed, want, TextingHabit.convert(typed))
-    }
-
-    @Test fun the_texting_habit_leaves_numbers_and_english_alone() {
-        for (w in listOf("3", "33", "233", "30", "3pm", "3rd", "23rd", "3GB", "4G", "mp3", "cedi", "call", "check", "back",
-            "school", "class", "credit", "cocoa", "accept", "music", "chale", "ECG", "PC", "WC", "etc", "c'mon", "cycle"))
-            assertEquals(w, w, TextingHabit.convert(w))
-    }
-
-    @Test fun a_conversion_is_undone_by_one_backspace_and_not_redone() {
-        val h = HabitSession()
-        val r = h.onWordEnd("wc", ' ', " ")!!
-        assertEquals(HabitSession.Replacement(2, "wɔ "), r)
-        val undo = h.onBackspace("Ɔkɔ wɔ ")!!
-        assertEquals(HabitSession.Replacement(3, "wc"), undo)
-        assertNull("the restored word stays as typed", h.onWordEnd("wc", ' ', " "))
-        assertEquals(HabitSession.Replacement(4, "meyɛ."), h.onWordEnd("mey3", null, "."))
-        h.onOtherInput()
-        assertNull("another key closes the undo window", h.onBackspace("meyɛ."))
-        assertNull("part of an address or number", h.onWordEnd("abc3", '.', " "))
-        assertNull(h.onWordEnd("kc", '@', " "))
-        assertNull("text changed underneath", HabitSession().apply { onWordEnd("wc", null, " ") }.onBackspace("something else"))
     }
 
     @Test fun the_enter_key_follows_the_field() {
@@ -201,7 +158,7 @@ class TwiKeyboardTest {
             assertTrue(FieldPolicy.isPasswordType(t))
             val p = FieldPolicy.of(t, 0, null, secureStep = false)
             assertTrue(p.sensitive); assertFalse(p.suggestions); assertFalse(p.learning); assertFalse(p.voice)
-            assertFalse(p.habitConversion); assertFalse(p.autoCapitalize)
+            assertFalse(p.autoCapitalize)
         }
         assertEquals(PadKind.PIN, FieldPolicy.of(InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_PASSWORD, 0, null, false).pad)
     }
@@ -220,11 +177,11 @@ class TwiKeyboardTest {
     @Test fun ordinary_and_special_text_fields() {
         val msg = FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES, 0, "Message", false)
         assertFalse(msg.sensitive); assertTrue(msg.suggestions); assertTrue(msg.learning); assertTrue(msg.voice)
-        assertTrue(msg.habitConversion); assertEquals(Page.LETTERS, msg.startPage)
+        assertEquals(Page.LETTERS, msg.startPage)
         val incognito = FieldPolicy.of(InputType.TYPE_CLASS_TEXT, EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING, null, false)
         assertTrue(incognito.suggestions); assertFalse(incognito.learning)
         val email = FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, 0, null, false)
-        assertFalse(email.suggestions); assertFalse(email.habitConversion); assertFalse(email.learning); assertFalse(email.autoCapitalize)
+        assertFalse(email.suggestions); assertFalse(email.learning); assertFalse(email.autoCapitalize)
         val noSuggest = FieldPolicy.of(InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS, 0, null, false)
         assertFalse(noSuggest.suggestions); assertFalse(noSuggest.learning)
         val phone = FieldPolicy.of(InputType.TYPE_CLASS_PHONE, 0, null, false)
@@ -233,42 +190,45 @@ class TwiKeyboardTest {
 
     // ------------------------------------------------------------------------------------------ suggestions
 
-    private val lexicon = TwiLexicon.parse(sequenceOf(
-        "# comment", "", "meyɛ\t5", "mepɛ\t6", "medaase\t1", "wɔ\t4", "wo\t5", "sɛ\t23", "kɔ\t11", "Frε\t3"))
+    private val english = TwiLexicon.parse(sequenceOf("# comment", "", "the\t22761659", "they\t5000000", "then\t3000000",
+        "me\t8500000", "mean\t500000", "cat\t200000", "come\t2000000", "Kwabɛna\t300", "Frε\t3"))
 
     @Test fun the_lexicon_parses_and_normalises() {
-        assertEquals(8, lexicon.size)
-        assertTrue("frɛ" in lexicon)          // Greek epsilon → ɛ, lower-cased
-        assertTrue("Meyɛ" in lexicon)
+        assertEquals(9, english.size)
+        assertTrue("kwabɛna" in english)        // lower-cased
+        assertTrue("The" in english)
     }
 
-    @Test fun plain_or_texting_spelling_finds_the_akan_letters() {
-        val s = WordSuggester(lexicon)
-        assertEquals("meyɛ", s.suggest("meye", twi = true).first())
-        assertEquals("meyɛ", s.suggest("mey3", twi = true).first())
-        assertTrue("wɔ" in s.suggest("wc", twi = true))
-        assertEquals("mepɛ", s.suggest("mep", twi = true).first())
-        assertEquals(listOf("Medaase"), s.suggest("Meda", twi = true))
-        assertEquals("MEYƐ", s.suggest("MEYE", twi = true).first())
-        assertTrue(s.suggest("me", twi = true, max = 2).size <= 2)
-        assertFalse("the finished word isn't offered back", "sɛ" in s.suggest("sɛ", twi = true))
-        assertTrue("English mode has no Twi list", s.suggest("mey", twi = false).isEmpty())
-        assertTrue(s.suggest("", twi = true).isEmpty())
+    @Test fun english_words_are_suggested_with_case_following_the_user() {
+        val s = WordSuggester({ english })
+        assertEquals("the", s.suggest("th").first())
+        assertTrue("mean" in s.suggest("me"))
+        assertEquals("Come", s.suggest("Co").first())
+        assertEquals("THE", s.suggest("TH").first())
+        assertTrue(s.suggest("me", max = 2).size <= 2)
+        assertFalse("the finished word isn't offered back", "the" in s.suggest("the"))
+        assertTrue(s.suggest("").isEmpty())
+        assertTrue(WordSuggester().suggest("th").isEmpty())
+    }
+
+    @Test fun a_name_with_akan_letters_is_found_by_its_plain_spelling() {
+        val s = WordSuggester({ english })
+        assertEquals("kwabɛna", s.suggest("kwabe").first())
+        assertEquals("kwabɛna", s.suggest("kwabena").first())   // a whole-word correction
     }
 
     @Test fun learned_words_are_suggested_and_never_hold_digits_or_known_words() {
         val lw = LearnedWords(max = 3)
-        assertTrue(lw.learn("Abrokyire", lexicon))
-        assertFalse(lw.learn("0244123456", lexicon))      // a phone number
-        assertFalse(lw.learn("1234", lexicon))            // a PIN
-        assertFalse(lw.learn("pass3word", lexicon))
-        assertFalse(lw.learn("meyɛ", lexicon))            // the bundled list already has it
-        assertFalse(lw.learn("a", lexicon))
-        val s = WordSuggester(lexicon) { lw.view() }
-        assertEquals("abrokyire", s.suggest("abro", twi = true).first())
-        assertEquals("abrokyire", s.suggest("abro", twi = false).first())
+        assertTrue(lw.learn("Abrokyire", english))
+        assertFalse(lw.learn("0244123456", english))      // a phone number
+        assertFalse(lw.learn("1234", english))            // a PIN
+        assertFalse(lw.learn("pass3word", english))
+        assertFalse(lw.learn("then", english))            // the bundled list already has it
+        assertFalse(lw.learn("a", english))
+        val s = WordSuggester({ english }) { lw.view() }
+        assertEquals("abrokyire", s.suggest("abro").first())
         // Over the cap the least-used word goes.
-        lw.learn("abrokyire", lexicon); lw.learn("kwaku", lexicon); lw.learn("ananse", lexicon); lw.learn("zzz", lexicon)
+        lw.learn("abrokyire", english); lw.learn("kwaku", english); lw.learn("ananse", english); lw.learn("zzz", english)
         assertEquals(3, lw.size)
         assertTrue("abrokyire" in lw.view())
         val round = LearnedWords.parse(lw.serialize())
@@ -278,32 +238,8 @@ class TwiKeyboardTest {
         assertEquals(0, LearnedWords.parse("1234\t9\nok\tx\n").size)   // junk in the file is ignored
     }
 
-    @Test fun the_bundled_word_list_is_marked_for_review_and_clean() {
-        val f = File("src/main/assets/ime/twi_words.tsv")
-        val text = f.readText()
-        assertTrue(text.contains("NEEDS NATIVE-SPEAKER REVIEW"))
-        val lex = TwiLexicon.parse(text.lineSequence())
-        assertTrue("a modest list, not an empty one: ${lex.size}", lex.size in 50..2000)
-        for ((w, c) in lex.words) {
-            assertTrue(w, w.none { it.isDigit() } && c > 0)
-            assertFalse(w, w.any { it in "εԑͻↄ" })
-        }
-        for (english in listOf("the", "call", "send", "tekyerema", "tɛkyerɛma")) assertFalse(english, english in lex)
-        assertTrue("sɛ" in lex && "medaase" in lex)
-    }
-
-    @Test fun english_words_are_suggested_in_both_modes_and_twi_leads_in_twi_mode() {
-        val english = TwiLexicon.parse(sequenceOf("the\t22761659", "they\t5000000", "then\t3000000", "me\t8500000",
-            "mean\t500000", "cat\t200000", "come\t2000000"))
-        val s = WordSuggester(lexicon, { english })
-        assertEquals("the", s.suggest("th", twi = false).first())
-        assertEquals("the", s.suggest("th", twi = true).first())        // no Twi word starts with th: English fills in
-        assertEquals(setOf("meyɛ", "mepɛ", "medaase"), s.suggest("me", twi = true).toSet())   // Twi first on the Twi keyboard
-        assertTrue("mean" in s.suggest("me", twi = false))
-        assertFalse("ɔ is not a c: typing ɔ must not offer English c-words", "cat" in s.suggest("ɔ", twi = true))
-        assertTrue("the texting c still finds c-words", "cat" in s.suggest("c", twi = true))
-        assertEquals("Come", s.suggest("Co", twi = false).first())
-        assertTrue(WordSuggester(lexicon).suggest("th", twi = false).isEmpty())
+    @Test fun the_twi_word_list_is_gone() {
+        assertFalse(File("src/main/assets/ime/twi_words.tsv").exists())
     }
 
     @Test fun the_bundled_english_list_is_large_credited_and_clean() {
@@ -329,16 +265,16 @@ class TwiKeyboardTest {
         val list = listOf(Triple(own, 0, "voice"), Triple("com.samsung/.Kb", 0, "keyboard"), Triple("com.google/.Voice", 1, "voice"))
         assertEquals("com.google/.Voice" to 1, VoicePlan.pickVoiceKeyboard(list, own))
         assertNull(VoicePlan.pickVoiceKeyboard(list.take(2), own))
-        assertEquals("ak-GH", VoicePlan.languageTag(KbLanguage.TWI))
+        assertEquals("en-GH", VoicePlan.LANGUAGE_TAG)
         for (code in 1..15) assertTrue(VoicePlan.errorMessage(code).isNotBlank())
         assertTrue(VoicePlan.isLanguageError(12) && !VoicePlan.isLanguageError(7))
     }
 
     @Test fun dictated_text_is_spaced_capitalised_and_spelled_properly() {
-        assertEquals(" call me later", DictationText.forInsertion("  call  me later ", twi = false, capitalize = false, textBefore = "Hi"))
-        assertEquals("Call me", DictationText.forInsertion("call me", false, true, ""))
-        assertEquals("Mepɛ sɛ", DictationText.forInsertion("mepε sɛ", twi = true, capitalize = true, textBefore = "(" ))
-        assertEquals("", DictationText.forInsertion("   ", false, false, "x"))
+        assertEquals(" call me later", DictationText.forInsertion("  call  me later ", capitalize = false, textBefore = "Hi"))
+        assertEquals("Call me", DictationText.forInsertion("call me", true, ""))
+        assertEquals("Call me", DictationText.forInsertion("call me", capitalize = true, textBefore = "("))
+        assertEquals("", DictationText.forInsertion("   ", false, "x"))
     }
 
     // ------------------------------------------------------------------------------------------ setup

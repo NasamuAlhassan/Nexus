@@ -9,7 +9,6 @@ import android.speech.SpeechRecognizer
 import android.view.inputmethod.InputMethodInfo
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
-import com.tekyerema.language.TwiText
 
 /**
  * G-05 — the keyboard's voice key.
@@ -45,8 +44,8 @@ object VoicePlan {
     fun pickVoiceKeyboard(candidates: List<Triple<String, Int, String>>, ownId: String): Pair<String, Int>? =
         candidates.firstOrNull { (id, _, mode) -> id != ownId && mode == "voice" }?.let { it.first to it.second }
 
-    /** The recogniser's language for the keyboard's language. Twi is asked for first; see [VoiceTyping] fallback. */
-    fun languageTag(language: KbLanguage) = if (language == KbLanguage.TWI) "ak-GH" else "en-GH"
+    /** The recogniser's language: Ghanaian English (English only since 31 Oct 2026). */
+    const val LANGUAGE_TAG = "en-GH"
 
     /** What to tell the user for a SpeechRecognizer error code (the codes are stable platform constants). */
     fun errorMessage(code: Int): String = when (code) {
@@ -63,12 +62,11 @@ object VoicePlan {
     fun isLanguageError(code: Int) = code == 12 || code == 13
 }
 
-/** How recognised speech is inserted: tidy spacing, Twi letters in their standard form, a capital where due. */
+/** How recognised speech is inserted: tidy spacing and a capital where due. */
 object DictationText {
-    fun forInsertion(recognized: String, twi: Boolean, capitalize: Boolean, textBefore: CharSequence?): String {
+    fun forInsertion(recognized: String, capitalize: Boolean, textBefore: CharSequence?): String {
         var t = recognized.trim().replace(Regex("\\s+"), " ")
         if (t.isEmpty()) return ""
-        if (twi) t = TwiText.canonical(t)
         if (capitalize) t = t.replaceFirstChar { it.uppercaseChar() }
         val prev = textBefore?.lastOrNull()
         val needsSpace = prev != null && !prev.isWhitespace() && prev !in "([{“‘\"'/@#"
@@ -104,7 +102,7 @@ class VoiceTyping(private val ctx: Context, private val listener: Listener) {
     interface Listener {
         fun onListening()
         fun onPartial(text: String)
-        fun onFinal(text: String, language: KbLanguage)
+        fun onFinal(text: String)
         fun onVoiceError(message: String)
         fun onIdle()
     }
@@ -112,16 +110,10 @@ class VoiceTyping(private val ctx: Context, private val listener: Listener) {
     private var recognizer: SpeechRecognizer? = null
     var listening = false
         private set
-    private var language = KbLanguage.ENGLISH
-    private var triedEnglishInstead = false
 
     fun available(): Boolean = try { SpeechRecognizer.isRecognitionAvailable(ctx) } catch (_: Throwable) { false }
 
-    fun start(lang: KbLanguage) {
-        language = lang
-        triedEnglishInstead = false
-        begin(VoicePlan.languageTag(lang))
-    }
+    fun start() = begin(VoicePlan.LANGUAGE_TAG)
 
     private fun begin(tag: String) {
         val r = recognizer ?: try { SpeechRecognizer.createSpeechRecognizer(ctx) } catch (_: Throwable) { null }
@@ -173,19 +165,12 @@ class VoiceTyping(private val ctx: Context, private val listener: Listener) {
             listening = false
             val text = best(results)
             if (text.isNullOrBlank()) listener.onVoiceError(VoicePlan.errorMessage(SpeechRecognizer.ERROR_NO_MATCH))
-            else listener.onFinal(text, if (triedEnglishInstead) KbLanguage.ENGLISH else language)
+            else listener.onFinal(text)
             listener.onIdle()
         }
 
         override fun onError(error: Int) {
             listening = false
-            // The phone's recogniser rarely has Twi: say so once and listen again in (Ghanaian) English.
-            if (language == KbLanguage.TWI && !triedEnglishInstead && VoicePlan.isLanguageError(error)) {
-                triedEnglishInstead = true
-                listener.onVoiceError("Your phone's voice typing doesn't have Twi. Listening in English.")
-                begin(VoicePlan.languageTag(KbLanguage.ENGLISH))
-                return
-            }
             listener.onVoiceError(VoicePlan.errorMessage(error))
             listener.onIdle()
         }

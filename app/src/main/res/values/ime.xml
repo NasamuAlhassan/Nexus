@@ -2,6 +2,6 @@
 <!-- G-05 Tɛkyerɛma Twi keyboard (ime/). Kept in its own file so the keyboard's resources never collide with the app's. -->
 <resources>
     <string name="ime_name">Nexus keyboard</string>
-    <string name="ime_subtype_twi">Twi (Akan) and English</string>
+    <string name="ime_subtype">English (Ghana)</string>
     <item name="ime_key_actions" type="id" />
 </resources>

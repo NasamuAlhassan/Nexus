@@ -28,17 +28,10 @@ class KeyboardPrefs(ctx: Context) {
     var swipeTyping: Boolean
         get() = p.getBoolean("swipe_typing", true)
         set(v) = p.edit().putBoolean("swipe_typing", v).apply()
-    /** "3" → ɛ and "c" → ɔ in Twi mode. On by default: the owner asked for it and a backspace undoes each one. */
-    var textingHabit: Boolean
-        get() = p.getBoolean("texting_habit", true)
-        set(v) = p.edit().putBoolean("texting_habit", v).apply()
     /** Learn new words. OFF by default — a keyboard should keep nothing unless the user asks it to. */
     var learnWords: Boolean
         get() = p.getBoolean("learn_words", false)
         set(v) = p.edit().putBoolean("learn_words", v).apply()
-    var language: KbLanguage
-        get() = if (p.getString("language", "en") == "twi") KbLanguage.TWI else KbLanguage.ENGLISH   // English unless Twi was chosen (Nexus is English-first, 2 Nov 2026)
-        set(v) = p.edit().putString("language", if (v == KbLanguage.ENGLISH) "en" else "twi").apply()
 
     companion object { const val FILE = "twi_keyboard" }
 }

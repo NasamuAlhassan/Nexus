@@ -23,13 +23,13 @@ import com.tekyerema.voice.Dictation
 import kotlin.concurrent.thread
 
 /**
- * G-05 — the Tɛkyerɛma Twi keyboard (an InputMethodService). Owner request: "the local language has keyboards — when
- * setting up you can add your Twi keyboard". Design and sources: docs/agent/research/overnight_twi_keyboard.md.
+ * G-05 — the Nexus keyboard (an InputMethodService; the class keeps its first name, the service id the phone knows).
+ * English only since 31 Oct 2026: the Twi mode, its word list and the 3/c texting habit are gone.
  *
  * PRIVACY — a keyboard sees everything typed, so this class:
  *  - never logs (no android.util.Log anywhere in ime/ — ImePrivacyTest fails the build otherwise), never uses the
  *    network, and keeps no history; the only thing it can store is the OPT-IN learned word list (word + count);
- *  - reads text only to find the word at the cursor (suggestions, the 3/c habit, delete-word) and forgets it;
+ *  - reads text only to find the word at the cursor (suggestions, delete-word) and forgets it;
  *  - in a sensitive field (see [FieldPolicy]: password types, a PIN/password/OTP hint, or the agent's Secure Input
  *    step) shows no suggestions, learns nothing, converts nothing, and turns the voice key off;
  *  - has no entry point for the agent: nothing but a touched key (or the user's own speech) types. The agent keeps
@@ -43,10 +43,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     private var enter = EnterKeys.of(0, InputType.TYPE_CLASS_TEXT)
     private var inputType = InputType.TYPE_CLASS_TEXT
     private var page = Page.LETTERS
-    private var language = KbLanguage.TWI
     private val shift = ShiftMachine()
-    private val habit = HabitSession()
-    private var lexicon = TwiLexicon.EMPTY
     private var english = TwiLexicon.EMPTY
     private lateinit var suggester: WordSuggester
     private var voice: VoiceTyping? = null
@@ -63,7 +60,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     // The user's options, read when each field opens (a change on the Settings page applies to the next field).
     private var optSuggest = true
     private var optSwipe = true
-    private var optHabit = true
     private var optLearn = false
     private var optVibrate = true
     private var optSound = false
@@ -71,11 +67,8 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     override fun onCreate() {
         super.onCreate()
         prefs = KeyboardPrefs(this)
-        lexicon = try {
-            assets.open("ime/twi_words.tsv").bufferedReader(Charsets.UTF_8).useLines { TwiLexicon.parse(it) }
-        } catch (_: Throwable) { TwiLexicon.EMPTY }
-        suggester = WordSuggester(lexicon, { english }) { if (optLearn) LearnedWordStore.get(this).view() else emptyMap() }
-        // The English list (20,000 words) parses off the main thread; until it lands the keyboard suggests Twi only.
+        suggester = WordSuggester({ english }) { if (optLearn) LearnedWordStore.get(this).view() else emptyMap() }
+        // The English list (20,000 words) parses off the main thread; until it lands only learned words are suggested.
         val main = Handler(Looper.getMainLooper())
         thread(name = "ime-words", isDaemon = true) {
             val lex = try {
@@ -110,15 +103,13 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         cancelPendingVoiceStart()
         voice?.cancel()
         Dictation.cancel()   // the field changed: never carry a dictation into it
-        optSuggest = prefs.suggestions; optHabit = prefs.textingHabit; optLearn = prefs.learnWords
+        optSuggest = prefs.suggestions; optLearn = prefs.learnWords
         optVibrate = prefs.vibrate; optSound = prefs.sound; optSwipe = prefs.swipeTyping
         inputType = info.inputType
         val hint = listOfNotNull(info.hintText, info.label, info.fieldName).joinToString(" ")
         policy = FieldPolicy.of(info.inputType, info.imeOptions, hint, Privacy.secureStep)
         enter = EnterKeys.of(info.imeOptions, info.inputType)
         page = policy.startPage
-        language = prefs.language
-        habit.reset()
         shift.reset()
         variantsOpen = false
         lastSpaceMs = 0L
@@ -158,7 +149,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         cancelPendingVoiceStart()
         voice?.cancel()
         Dictation.cancel()
-        habit.reset()
         variantsOpen = false
         forgetSwipe()
         view?.showSuggestions(emptyList())
@@ -178,7 +168,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         if (!isInputViewShown) return
-        if (newSelStart != newSelEnd) habit.onOtherInput()
         if (autoCapitalize()) render()
         refreshSuggestions()
     }
@@ -188,9 +177,9 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     private fun render() {
         val v = view ?: return
         v.setLayout(when (page) {
-            Page.LETTERS -> KeyboardLayouts.letters(language, shift.state, enter)
-            Page.SYMBOLS -> KeyboardLayouts.symbols(language, enter)
-            Page.MORE_SYMBOLS -> KeyboardLayouts.moreSymbols(language, enter)
+            Page.LETTERS -> KeyboardLayouts.letters(shift.state, enter)
+            Page.SYMBOLS -> KeyboardLayouts.symbols(enter)
+            Page.MORE_SYMBOLS -> KeyboardLayouts.moreSymbols(enter)
             Page.PAD -> KeyboardLayouts.pad(policy.pad ?: PadKind.NUMBER, enter)
         })
         // Swipe typing only where suggestions are allowed: never in a password or PIN box, never in the Secure Input step.
@@ -213,7 +202,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         val word = WordAtCursor.of(currentInputConnection?.getTextBeforeCursor(WINDOW, 0)).text
         if (word.isEmpty() && choices.isNotEmpty()) { v.showSuggestions(choices); return }   // the last swipe's other words stay on offer
         if (word.isNotEmpty()) forgetSwipe()
-        v.showSuggestions(suggester.suggest(word, language == KbLanguage.TWI))
+        v.showSuggestions(suggester.suggest(word))
     }
 
     private fun forgetSwipe() { choices = emptyList(); committed = null }
@@ -252,7 +241,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
                     currentInputConnection?.let { ic ->
                         ic.deleteSurroundingText(1, 0)
                         ic.commitText(". ", 1)
-                        habit.onOtherInput()
                     }
                     lastSpaceMs = 0
                     if (autoCapitalize()) render()
@@ -271,13 +259,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
             KeyKind.SYMBOLS -> switchPage(Page.SYMBOLS, "Numbers and symbols")
             KeyKind.MORE_SYMBOLS -> switchPage(Page.MORE_SYMBOLS, "More symbols")
             KeyKind.LETTERS -> { switchPage(Page.LETTERS, "Letters"); if (autoCapitalize()) render() }
-            KeyKind.LANGUAGE -> {
-                language = if (language == KbLanguage.TWI) KbLanguage.ENGLISH else KbLanguage.TWI
-                prefs.language = language
-                render()
-                view?.say(if (language == KbLanguage.TWI) "Twi keyboard" else "English keyboard")
-                refreshSuggestions()
-            }
             KeyKind.SPACER -> {}
         }
     }
@@ -291,7 +272,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         }
         KeyKind.SHIFT -> { shift.lock(); render(); view?.say("Caps lock on"); true }
         KeyKind.BACKSPACE -> { deleteWord(); true }
-        KeyKind.SPACE, KeyKind.LANGUAGE -> { showKeyboardPicker(); true }
+        KeyKind.SPACE -> { showKeyboardPicker(); true }
         else -> false
     }
 
@@ -326,11 +307,8 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     override fun onGesture(path: List<GestureDecoder.Step>) {
         if (variantsOpen) closeVariants()
         autoSpaced = false
-        val twi = language == KbLanguage.TWI
-        val sources = ArrayList<GestureDecoder.Source>(4)
-        if (twi) sources += GestureDecoder.Source(lexicon.words, bonus = 1.0, scale = WordScales.TWI)
+        val sources = ArrayList<GestureDecoder.Source>(2)
         sources += GestureDecoder.Source(english.words)
-        if (!twi) sources += GestureDecoder.Source(lexicon.words, bonus = -0.5, scale = WordScales.TWI)   // a Twi name on the English keyboard
         if (optLearn && policy.learning) sources += GestureDecoder.Source(LearnedWordStore.get(this).view().toList(), bonus = 0.5, scale = WordScales.LEARNED)
         val words = GestureDecoder.decode(path, sources, 4)
         if (words.isEmpty()) {
@@ -366,7 +344,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         val text = (if (space) " " else "") + word + " "
         ic.commitText(text, 1)
         ic.endBatchEdit()
-        habit.onOtherInput()
         committed = text
         choices = others
         autoSpaced = true
@@ -392,35 +369,24 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
             return
         }
         ic.commitText(text, 1)
-        habit.onOtherInput()
         if (page == Page.LETTERS && text.firstOrNull()?.isLetter() == true && shift.state == ShiftState.ONCE) {
             shift.afterCharacter()
             render()
         }
     }
 
-    /** A word ends with [separator] (space, punctuation, or "" before enter): learn it and apply the 3/c habit. */
+    /** A word ends with [separator] (space, punctuation, or "" before enter): type the separator and learn the word. */
     private fun finishWord(separator: String) {
         val ic = currentInputConnection ?: return
         val hasSelection = !ic.getSelectedText(0).isNullOrEmpty()
         val word = if (hasSelection) WordAtCursor.Word("", null) else WordAtCursor.of(ic.getTextBeforeCursor(WINDOW, 0))
-        val habitOn = language == KbLanguage.TWI && optHabit && policy.habitConversion && !Privacy.secureStep
-        val r = if (habitOn) habit.onWordEnd(word.text, word.before, separator) else { habit.onOtherInput(); null }
-        if (r != null) {
-            ic.beginBatchEdit()
-            ic.deleteSurroundingText(r.deleteBefore, 0)
-            ic.commitText(r.insert, 1)
-            ic.endBatchEdit()
-            learn(r.insert.removeSuffix(separator))
-        } else {
-            if (separator.isNotEmpty()) ic.commitText(separator, 1)
-            learn(word.text)
-        }
+        if (separator.isNotEmpty()) ic.commitText(separator, 1)
+        learn(word.text)
     }
 
     private fun learn(word: String) {
         if (!optLearn || !policy.learning || Privacy.secureStep || word.isEmpty() || word in english) return
-        LearnedWordStore.get(this).learn(word, lexicon)
+        LearnedWordStore.get(this).learn(word, english)
     }
 
     private fun backspace() {
@@ -431,19 +397,10 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
             forgetSwipe()
             autoSpaced = false
             ic.deleteSurroundingText(last.length, 0)
-            habit.onOtherInput()
             view?.say("Deleted ${last.trim()}")
             return
         }
         forgetSwipe()
-        habit.onBackspace(ic.getTextBeforeCursor(WINDOW, 0))?.let { r ->
-            ic.beginBatchEdit()
-            ic.deleteSurroundingText(r.deleteBefore, 0)
-            ic.commitText(r.insert, 1)
-            ic.endBatchEdit()
-            view?.say("Changed back to ${r.insert}")
-            return
-        }
         if (!ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
         // Nothing before the cursor: send a real DEL key so apps that act on it (e.g. removing a chip) still can.
         if (ic.getTextBeforeCursor(1, 0).isNullOrEmpty()) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
@@ -452,7 +409,6 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
 
     private fun deleteWord() {
         val ic = currentInputConnection ?: return
-        habit.onOtherInput()
         if (!ic.getSelectedText(0).isNullOrEmpty()) { ic.commitText("", 1); return }
         val n = WordAtCursor.deleteWordLength(ic.getTextBeforeCursor(WINDOW, 0))
         ic.deleteSurroundingText(n, 0)
@@ -513,9 +469,9 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         when (val route = VoicePlan.route(policy.voice && !Privacy.secureStep, micGranted, v.available(), voiceKeyboard != null, ownAsrReady())) {
             VoiceRoute.OWN_ASR -> beginListening("Starting voice typing…") {
                 // §3(a): our own mic + recogniser. A refusal before the mic opens falls back to the system route.
-                if (!Dictation.start(it == KbLanguage.TWI, dictationEars(it, fallbackAvailable = v.available()))) onIdle()
+                if (!Dictation.start(false, dictationEars(fallbackAvailable = v.available()))) onIdle()
             }
-            VoiceRoute.IN_KEYBOARD -> beginListening("Starting voice typing…") { v.start(it) }
+            VoiceRoute.IN_KEYBOARD -> beginListening("Starting voice typing…") { v.start() }
             VoiceRoute.VOICE_KEYBOARD -> switchToVoiceKeyboard()
             else -> VoicePlan.explain(route).let { view?.showMessage(it); view?.say(it) }
         }
@@ -524,33 +480,32 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     /** §3(a): our own dictation is the first choice when the config flag is on and the voice stack can serve it. */
     private fun ownAsrReady(): Boolean =
         AppConfig.bool("ime.dictation.ownAsr", true) &&
-            try { Dictation.available(language == KbLanguage.TWI) } catch (_: Throwable) { false }
+            try { Dictation.available(false) } catch (_: Throwable) { false }
 
     /** The shared listen choreography: cue, then start [go] after 250 ms. The field may change (or the keyboard
      *  close) during the cue: re-check it's still this field's voice turn — a password field or a Secure Input
      *  step never gets the mic. */
-    private fun beginListening(message: String, go: (KbLanguage) -> Unit) {
+    private fun beginListening(message: String, go: () -> Unit) {
         if (variantsOpen) closeVariants()
         listeningShown = true
         view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
         view?.showMessage(message)
         listenCue()
-        val lang = language
-        val start = Runnable { if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) go(lang) }
+        val start = Runnable { if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) go() }
         pendingVoiceStart = start
         view?.postDelayed(start, 250)
     }
 
     /** Dictation callbacks → the same show/say/commit paths the system route uses. [fallbackAvailable] = the
      *  phone's SpeechRecognizer existed at tap time, so a stack-not-ready refusal can hand the attempt over. */
-    private fun dictationEars(lang: KbLanguage, fallbackAvailable: Boolean) = object : Dictation.Listener {
+    private fun dictationEars(fallbackAvailable: Boolean) = object : Dictation.Listener {
         private var fellBack = false
         override fun onListening() {
             view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
             view?.showMessage("Listening… I stop when you pause.")
             view?.say("Listening")
         }
-        override fun onText(text: String) { commitDictation(text, lang) }
+        override fun onText(text: String) { commitDictation(text) }
         override fun onNothing(message: String, fallbackToSystem: Boolean) {
             if (fallbackToSystem) {
                 if (fallbackAvailable) { fellBack = true; return }   // onDone starts the system route instead
@@ -565,7 +520,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
             if (!fellBack) { onIdle(); return }
             val v = voice ?: VoiceTyping(this@TwiKeyboardService, this@TwiKeyboardService).also { voice = it }
             // The cue already played at the tap; keep the listening state and hand straight over.
-            if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) v.start(lang) else onIdle()
+            if (listeningShown && isInputViewShown && policy.voice && !Privacy.secureStep) v.start() else onIdle()
         }
     }
 
@@ -602,18 +557,17 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
 
     override fun onPartial(text: String) { view?.showMessage(text) }
 
-    override fun onFinal(text: String, spokenIn: KbLanguage) { commitDictation(text, spokenIn) }
+    override fun onFinal(text: String) { commitDictation(text) }
 
     /** Recognised speech → the field, one path for both voice routes. Announces what went in (§3(b)). */
-    private fun commitDictation(text: String, spokenIn: KbLanguage) {
+    private fun commitDictation(text: String) {
         // The field may have changed, or the agent's Secure Input step begun, while the user spoke.
         if (!policy.voice || Privacy.secureStep) return
         val ic = currentInputConnection ?: return
         val before = ic.getTextBeforeCursor(WINDOW, 0)
         val capital = policy.autoCapitalize && try { ic.getCursorCapsMode(inputType) != 0 } catch (_: Throwable) { false }
-        val insert = DictationText.forInsertion(text, spokenIn == KbLanguage.TWI, capital, before)
+        val insert = DictationText.forInsertion(text, capital, before)
         if (insert.isNotEmpty()) { ic.commitText(insert, 1); view?.say(DictationText.announceTyped(insert)) }
-        habit.onOtherInput()
         forgetSwipe()
         autoSpaced = false
     }

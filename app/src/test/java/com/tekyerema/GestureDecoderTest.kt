@@ -5,7 +5,6 @@ import com.tekyerema.ime.GestureDecoder.KeyBox
 import com.tekyerema.ime.GestureDecoder.Pt
 import com.tekyerema.ime.GestureDecoder.Source
 import com.tekyerema.ime.GestureDecoder.Step
-import com.tekyerema.ime.WordScales
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -20,8 +19,8 @@ import org.junit.Test
 class GestureDecoderTest {
 
     /** Row 0 at y 0..100; row 1 shifted right by half a key; row 2 by one and a half (the real layout's spacers). */
-    private fun board(twi: Boolean = false): List<KeyBox> {
-        val rows = if (twi) listOf("ɛwertyuiop", "asdfghjkl", "zxɔvbnm") else listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+    private fun board(): List<KeyBox> {
+        val rows = listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         val offsets = listOf(0f, 50f, 150f)
         return rows.flatMapIndexed { r, row ->
             row.mapIndexed { i, c -> val l = offsets[r] + i * 100f; val t = r * 100f; KeyBox(c.toString(), l, t, l + 100f, t + 100f) }
@@ -37,7 +36,6 @@ class GestureDecoderTest {
         "you" to 28_787_591, "the" to 22_761_659, "me" to 8_500_000, "they" to 5_000_000, "can" to 3_000_000,
         "don't" to 3_000_000, "hello" to 1_500_000, "made" to 1_200_000, "mean" to 500_000, "cat" to 200_000,
         "yo" to 100_000, "hell" to 90_000, "hero" to 60_000, "dont" to 20_000, "ho" to 10_000, "oat" to 500)
-    private val twi = listOf("medaase" to 1, "mepɛ" to 6, "meyɛ" to 5, "wɔ" to 4, "ɔkɔ" to 2)
     private val qwerty = board()
 
     @Test fun the_keys_a_path_crosses_come_in_order_without_repeats_or_gaps() {
@@ -87,18 +85,12 @@ class GestureDecoderTest {
         assertEquals("the", GestureDecoder.decodeKeys(listOf("t", "h", "e"), english).first())
     }
 
-    @Test fun twi_keys_stand_for_their_letters_and_for_the_keys_they_replaced() {
-        val tb = board(twi = true)
-        val twiMode = listOf(Source(twi, bonus = 1.0, scale = WordScales.TWI), Source(english))
-        fun top(word: String) = GestureDecoder.decode(GestureDecoder.steps(path(tb, word), tb), twiMode)
-        assertEquals("mepɛ", top("mepɛ").first())
+    @Test fun a_name_with_akan_letters_is_swiped_on_the_plain_keys() {
+        val names = listOf(Source(listOf("kwabɛna" to 300, "medaase" to 1)), Source(english))
+        fun top(word: String) = GestureDecoder.decode(GestureDecoder.steps(path(qwerty, word), qwerty), names)
+        assertEquals("kwabɛna", top("kwabena").first())     // the e key reads as an ɛ
         assertEquals("medaase", top("medase").first())      // the double a needs no second visit
-        assertEquals("me", top("me").first())
-        assertEquals("can", top("ɔan").first())              // ɔ sits where c was: English c-words can still be swiped
-        assertEquals("the", top("thɛ").first())              // and the ɛ key reads as an e
-        assertEquals(1.0, GestureDecoder.match("ɛ", 'ɛ'), 0.0)
-        assertTrue(GestureDecoder.match("ɛ", 'e') < 1.0 && GestureDecoder.match("ɛ", 'e') > GestureDecoder.match("ɛ", 'q'))
-        assertTrue(GestureDecoder.match("ɛ", 'q') > 0.0 && GestureDecoder.match("ɔ", 'c') > 0.0)
+        assertTrue(GestureDecoder.match("e", 'ɛ') < 1.0 && GestureDecoder.match("e", 'ɛ') > 0.0)
         assertEquals("the o key is not a c", 0.0, GestureDecoder.match("o", 'c'), 0.0)
         assertEquals("accents fold to the base letter", 0.75, GestureDecoder.match("e", 'é'), 0.0)
     }

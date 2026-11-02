@@ -9,7 +9,7 @@ import android.view.inputmethod.EditorInfo
  *
  *  - SENSITIVE (password, visible password, web password, number password / PIN, a field whose hint says PIN,
  *    password, passcode, OTP, CVV — a MoMo USSD PIN box is often a plain text or number field — or the agent's
- *    Secure Input step being active): no suggestions, no learning, no voice typing, no habit conversion. The keys
+ *    Secure Input step being active): no suggestions, no learning, no voice typing. The keys
  *    still type and are still spoken to TalkBack: since Android 8 apps are told to give accessibility complete
  *    information and leave password echo to the screen reader (Settings.Secure.ACCESSIBILITY_SPEAK_PASSWORD, deprecated).
  *  - IME_FLAG_NO_PERSONALIZED_LEARNING (incognito tabs, some messengers): suggestions may show, nothing is learned.
@@ -21,7 +21,6 @@ data class FieldPolicy(
     val sensitive: Boolean,
     val suggestions: Boolean,
     val learning: Boolean,
-    val habitConversion: Boolean,
     val autoCapitalize: Boolean,
     val voice: Boolean,
     val startPage: Page,
@@ -71,7 +70,6 @@ data class FieldPolicy(
                 sensitive = sensitive,
                 suggestions = prose && !noSuggestFlag,
                 learning = prose && !noSuggestFlag && !noLearning,
-                habitConversion = prose,
                 autoCapitalize = prose,
                 voice = isText && !sensitive,
                 startPage = if (pad != null) Page.PAD else Page.LETTERS,

@@ -95,8 +95,7 @@ object LiveTimer {
             spoken = "Your timer for $what is done")) { a ->
             when (a) { "stop" -> dismiss(context); "plus1" -> addMinute(context) }
         }
-        // [owner: verify the Twi]
-        try { com.tekyerema.voice.VoiceEngine.announceAnswer(line, "Timer no aba awieɛ. Ka 'stop'.", urgent = true) } catch (_: Throwable) {}
+        try { com.tekyerema.voice.VoiceEngine.announceAnswer(line, urgent = true) } catch (_: Throwable) {}
         TimerAlert.start(context, delayMs = 3_200L)
         ensureTicker()
     }

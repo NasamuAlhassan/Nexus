@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- G-05 Tɛkyerɛma Twi keyboard. One subtype: the keyboard switches Twi/English itself (its language key), so the
-     system list stays simple for a TalkBack user. The settings gear in the system keyboard list opens the app, whose
-     Settings › Twi keyboard page holds the options (a separate exported settings activity would be one more entry
-     point to harden). supportsSwitchingToNextInputMethod lets the system offer "next keyboard". -->
+<!-- G-05 the Nexus keyboard (English only since 31 Oct 2026; the Twi mode is gone). One subtype, so the system list
+     stays simple for a TalkBack user. The settings gear in the system keyboard list opens the app, whose Settings ›
+     Keyboard page holds the options (a separate exported settings activity would be one more entry point to harden).
+     supportsSwitchingToNextInputMethod lets the system offer "next keyboard". -->
 <input-method xmlns:android="http://schemas.android.com/apk/res/android"
     android:settingsActivity="com.tekyerema.ui.MainActivity"
     android:supportsSwitchingToNextInputMethod="true">
     <subtype
-        android:label="@string/ime_subtype_twi"
-        android:imeSubtypeLocale="ak_GH"
-        android:languageTag="ak-GH"
+        android:label="@string/ime_subtype"
+        android:imeSubtypeLocale="en_GH"
+        android:languageTag="en-GH"
         android:imeSubtypeMode="keyboard"
         android:isAsciiCapable="true" />
 </input-method>

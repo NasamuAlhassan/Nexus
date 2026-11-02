@@ -1,26 +1,21 @@
 package com.tekyerema.ime
 
 /**
- * G-05 — the Tɛkyerɛma Twi keyboard's key model. Pure Kotlin (no Android types), so every layout, label and spoken
- * name is unit-tested; the view only draws what this file describes.
+ * G-05 — the Nexus keyboard's key model. Pure Kotlin (no Android types), so every layout, label and spoken name is
+ * unit-tested; the view only draws what this file describes.
  *
- * Layout decisions (sources in docs/agent/research/overnight_twi_keyboard.md):
- *  - Twi mode is QWERTY with ɛ where Q is and ɔ where C is — the arrangement of the Keyman "Akan" keyboard (SIL /
- *    dcshci lab). Q and C are not Twi letters, and C is exactly where people who type "c" for ɔ already reach, so
- *    the habit and the layout agree. Q and C stay one long-press away for names and English words.
- *  - English mode is plain QWERTY; ɛ and ɔ are still a long-press on E and O, because Ghanaian English text names
- *    Twi people and places.
+ * Layout decisions:
+ *  - Plain QWERTY (English only since 31 Oct 2026; the Twi mode and its language key are gone). ɛ and ɔ stay a
+ *    long-press on E and O, because Ghanaian English text names Twi people and places.
  *  - Numbers/symbols put the cedi sign ₵ where other keyboards put $ (the local currency goes first).
  *  - Number, phone and PIN fields get a big 4×4 pad: fewer, larger targets for amounts and phone numbers.
  */
-enum class KeyKind { CHAR, SHIFT, BACKSPACE, SPACE, ENTER, SYMBOLS, MORE_SYMBOLS, LETTERS, LANGUAGE, SPACER }
+enum class KeyKind { CHAR, SHIFT, BACKSPACE, SPACE, ENTER, SYMBOLS, MORE_SYMBOLS, LETTERS, SPACER }
 
 enum class Page { LETTERS, SYMBOLS, MORE_SYMBOLS, PAD }
 
 /** Which pad a number-like field gets (see [FieldPolicy]). */
 enum class PadKind { NUMBER, PHONE, PIN, DATETIME }
-
-enum class KbLanguage { TWI, ENGLISH }
 
 enum class ShiftState { OFF, ONCE, LOCKED }
 
@@ -53,8 +48,7 @@ object KeyboardLayouts {
     private val ROW2 = "asdfghjkl"
     private val ROW3 = "zxcvbnm"
 
-    /** Long-press offers, lower-case; [shifted] upper-cases them. Tone accents are offered for names and French, not
-     *  for Twi (standard Akan spelling does not write tone). */
+    /** Long-press offers, lower-case; [shifted] upper-cases them. Accents are offered for names and French. */
     private val VARIANTS: Map<String, List<String>> = mapOf(
         "q" to listOf("1"),
         "w" to listOf("2"),
@@ -68,9 +62,7 @@ object KeyboardLayouts {
         "a" to listOf("á", "à", "â", "ä", "ã"),
         "i" to listOf("í", "ì", "î", "ï", "8"),
         "u" to listOf("ú", "ù", "û", "ü", "7"),
-        "c" to listOf("ɔ", "ç"),
-        "ɛ" to listOf("q", "e", "1"),
-        "ɔ" to listOf("c", "o"),
+        "c" to listOf("ç"),
         "." to listOf(",", "?", "!", "'", "\"", ":", ";", "-"),
         "," to listOf(";", ":", "'", "\""),
         "₵" to listOf("GH₵", "GH¢", "¢", "$", "€", "£"),
@@ -93,14 +85,10 @@ object KeyboardLayouts {
     /** Upper-case for a key: ɛ→Ɛ, ɔ→Ɔ, ŋ→Ŋ come from Unicode's own case pairs; multi-letter labels stay as they are. */
     fun upper(s: String): String = if (s.length == 1 && s[0].isLetter()) s.uppercase() else s
 
-    fun letters(language: KbLanguage, shift: ShiftState, enter: EnterKey): KeyboardLayout {
+    fun letters(shift: ShiftState, enter: EnterKey): KeyboardLayout {
         val shifted = shift != ShiftState.OFF
         fun letter(c: Char): Key {
-            val base = when {
-                language == KbLanguage.TWI && c == 'q' -> "ɛ"
-                language == KbLanguage.TWI && c == 'c' -> "ɔ"
-                else -> c.toString()
-            }
+            val base = c.toString()
             val t = if (shifted) upper(base) else base
             return Key(KeyKind.CHAR, t, variants = variantsOf(base, shifted))
         }
@@ -109,24 +97,24 @@ object KeyboardLayouts {
             ROW1.map(::letter),
             listOf(spacer(0.5f)) + ROW2.map(::letter) + spacer(0.5f),
             listOf(shiftKey) + ROW3.map(::letter) + backspace(),
-            bottomRow(Key(KeyKind.SYMBOLS, label = "?123", spoken = "Numbers and symbols", width = 1.5f), language, enter)
+            bottomRow(Key(KeyKind.SYMBOLS, label = "?123", spoken = "Numbers and symbols", width = 1.5f), enter)
         ))
     }
 
-    fun symbols(language: KbLanguage, enter: EnterKey): KeyboardLayout = KeyboardLayout(Page.SYMBOLS, listOf(
+    fun symbols(enter: EnterKey): KeyboardLayout = KeyboardLayout(Page.SYMBOLS, listOf(
         "1234567890".map { char(it.toString()) },
         listOf("@", "#", "₵", "_", "&", "-", "+", "(", ")", "/").map(::char),
         listOf(Key(KeyKind.MORE_SYMBOLS, label = "=\\<", spoken = "More symbols", width = 1.5f)) +
             listOf("*", "\"", "'", ":", ";", "!", "?").map(::char) + backspace(),
-        bottomRow(Key(KeyKind.LETTERS, label = "ABC", spoken = "Letters", width = 1.5f), language, enter)
+        bottomRow(Key(KeyKind.LETTERS, label = "ABC", spoken = "Letters", width = 1.5f), enter)
     ))
 
-    fun moreSymbols(language: KbLanguage, enter: EnterKey): KeyboardLayout = KeyboardLayout(Page.MORE_SYMBOLS, listOf(
+    fun moreSymbols(enter: EnterKey): KeyboardLayout = KeyboardLayout(Page.MORE_SYMBOLS, listOf(
         listOf("~", "`", "|", "•", "√", "π", "÷", "×", "¶", "∆").map(::char),
         listOf("£", "¢", "$", "€", "¥", "^", "°", "=", "{", "}").map(::char),
         listOf(Key(KeyKind.SYMBOLS, label = "?123", spoken = "Numbers and symbols", width = 1.5f)) +
             listOf("\\", "%", "©", "®", "[", "]", "<").map(::char) + backspace(),
-        bottomRow(Key(KeyKind.LETTERS, label = "ABC", spoken = "Letters", width = 1.5f), language, enter)
+        bottomRow(Key(KeyKind.LETTERS, label = "ABC", spoken = "Letters", width = 1.5f), enter)
     ))
 
     /** A 4×4 pad. The fourth column and the corners around 0 depend on the field; a PIN pad has digits only. */
@@ -145,12 +133,12 @@ object KeyboardLayouts {
         ))
     }
 
-    /** ?123 / ABC, language, comma, space, full stop, enter — ten units wide like the letter rows. */
-    private fun bottomRow(pageKey: Key, language: KbLanguage, enter: EnterKey): List<Key> = listOf(
+    /** ?123 / ABC, comma, space, full stop, enter — ten units wide like the letter rows. A long-press on space switches
+     *  to another keyboard (the job the old language key also did). */
+    private fun bottomRow(pageKey: Key, enter: EnterKey): List<Key> = listOf(
         pageKey,
-        Key(KeyKind.LANGUAGE, label = if (language == KbLanguage.TWI) "Twi" else "EN", spoken = KeyNames.languageKey(language)),
         char(","),
-        space(4f),
+        space(5f),
         char("."),
         enterKey(enter, 1.5f)
     )
@@ -209,8 +197,4 @@ object KeyNames {
         ShiftState.ONCE -> "Shift, on"
         ShiftState.LOCKED -> "Shift, caps lock on"
     }
-
-    /** The language key says what it SWITCHES TO — the action a double-tap performs. */
-    fun languageKey(current: KbLanguage) =
-        if (current == KbLanguage.TWI) "Twi keyboard. Switch to English" else "English keyboard. Switch to Twi"
 }

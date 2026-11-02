@@ -5,7 +5,7 @@ import kotlin.math.sqrt
 
 /**
  * G-05 (2) — swipe typing (13 October 2026): the finger slides across the letters of a word and lifts; the word is
- * decided here, on the phone, from the keys the path crossed and the word lists (Twi, English, the user's own). Pure,
+ * decided here, on the phone, from the keys the path crossed and the word lists (English and the user's own). Pure,
  * so every rule is unit-tested: [steps] turns sampled touch points into the keys they passed over and marks the ones
  * the user meant (where the path began, ended or turned a corner); [decode] ranks the words.
  *
@@ -135,8 +135,8 @@ object GestureDecoder {
 
     /**
      * How well the key [raw] (what is printed on it, lower-case) stands for the letter [c] of a word: the same letter 1.0;
-     * the same after the Twi fold 0.75 (the ɛ key for an e, or the e key for an ɛ); the ɔ key for a c and the ɛ key for a
-     * q 0.6 — the keys they replace in Twi mode, so "can" can still be swiped there; 0 = not this key.
+     * the same after folding 0.75 (the e key for an é or an ɛ, so a learned name like "Kwabɛna" can be swiped); 0 = not
+     * this key.
      */
     internal fun match(raw: String, c: Char): Double {
         if (raw.length != 1) return 0.0
@@ -144,8 +144,6 @@ object GestureDecoder {
         val lc = c.lowercaseChar()
         if (r == lc) return 1.0
         if (fold(r) == fold(lc)) return 0.75
-        if (r == 'ɔ' && lc == 'c') return 0.6
-        if (r == 'ɛ' && lc == 'q') return 0.6
         return 0.0
     }
 

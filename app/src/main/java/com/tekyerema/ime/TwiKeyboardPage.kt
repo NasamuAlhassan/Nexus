@@ -39,7 +39,7 @@ import com.tekyerema.ui.components.SwitchRow
 import com.tekyerema.ui.theme.Tk
 
 /**
- * G-05 — "Add the Twi keyboard": Settings › Twi keyboard. Self-contained (ime/ owns it; ui/ only links to it), built
+ * G-05 — "Add the Nexus keyboard": Settings › Keyboard. Self-contained (ime/ owns it; ui/ only links to it), built
  * from the shared row components so it looks like the rest of Settings. The steps are also SPOKEN when the page opens
  * or the user comes back from the system screen, unless TalkBack is reading the page (the onboarding K-10 pattern).
  */
@@ -53,7 +53,6 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
     var sound by remember { mutableStateOf(prefs.sound) }
     var suggest by remember { mutableStateOf(prefs.suggestions) }
     var swipe by remember { mutableStateOf(prefs.swipeTyping) }
-    var habit by remember { mutableStateOf(prefs.textingHabit) }
     var learn by remember { mutableStateOf(prefs.learnWords) }
     var trial by remember { mutableStateOf("") }
 
@@ -72,9 +71,6 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
                 "words it could be wait above the keys. Slide up from a top-row key for its number.", swipe) {
                 prefs.swipeTyping = it; swipe = it
             }
-            // Twi only: shown when the keyboard is set to Twi (English is the default since 2 Nov 2026).
-            if (prefs.language == KbLanguage.TWI) SwitchRow("Turn 3 into ɛ and c into ɔ", "In Twi, when you finish a word typed the texting way, like mey3 or wc. " +
-                "Press delete straight after to undo it.", habit) { prefs.textingHabit = it; habit = it }
             SwitchRow("Learn my words", "Remembers new words you type, on this phone only, to suggest them later. Never in " +
                 "password or PIN boxes. Turning this off deletes them.", learn, divider = false) {
                 prefs.learnWords = it; learn = it
