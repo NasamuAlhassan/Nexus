@@ -82,7 +82,8 @@ internal fun PromptPanel(
     val context = LocalContext.current
     val calm = LocalCalmMotion.current
     val tier = remember(calm) { GlassTiers.detect(context, calm) }
-    val glass = if (Tk.palette.dark) DarkGlass else LightGlass
+    val glass = com.tekyerema.ui.theme.glassPalette()
+    val moneyOn by com.tekyerema.money.MoneyMoment.active.collectAsState()
     val voice by VoiceEngine.state.collectAsState()
     val waiting = remember(prompt) { SurfaceModel.Waiting(prompt.kind, prompt.text, prompt.seq) }
     val hasChoices = remember(prompt.text) { prompt.kind == PromptSurface.Kind.QUESTION && QuestionChoices.of(prompt.text).isNotEmpty() }
@@ -145,6 +146,8 @@ internal fun PromptPanel(
                 .glassBody(radius, glass, mood = { currentMood },
                     light = { if (currentMood == LightMood.LISTENING) 0.25f + 0.75f * micLevel.floatValue else 0.22f },
                     sweep = { 0f }, glowShift = { 0f }, tier = tier, arrival = { arrival.value }, tilt = { tilt.value })
+                // A money read-back over the network's screens wears the gold edge too (MoneyMoment, as on the assistant card).
+                .then(if (moneyOn) Modifier.moneyEdge(radius, moneyEdgeColour(glass)) else Modifier)
                 .clip(if (com.tekyerema.ui.glass.glassLite()) androidx.compose.foundation.shape.RoundedCornerShape(radius) else ContinuousShape(radius))
                 .semantics { paneTitle = title }
         ) {

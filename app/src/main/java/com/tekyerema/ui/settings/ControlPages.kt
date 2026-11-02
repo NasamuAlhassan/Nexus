@@ -41,6 +41,7 @@ import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material.icons.outlined.VpnKey
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -103,7 +104,6 @@ import kotlinx.coroutines.withContext
 @Composable
 internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) -> Unit) {
     val version by settings.changes.collectAsState()
-    val usageTick by OperatorPolicy.changes.collectAsState()
     val op = OperatorPolicy
     val mode = remember(version) { op.executionMode }
     val cloud = remember(version) { op.cloudAllowed }
@@ -111,10 +111,6 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
     val schedules = remember(version) { op.schedulesEnabled }
     val alerts = remember(version) { op.messageAlertsEnabled }
     val routines = remember(version) { op.routinesEnabled }
-    val remote = remember(version) { op.remoteControlEnabled }
-    val providers = remember(version) { op.providers }
-    val usage = remember(usageTick) { op.usageToday() }
-    val keys = remember(version) { listOf("groq", "gemini").count { settings.userKey(it).isNotBlank() } }
     var logCount by remember { mutableStateOf<Int?>(null) }
     LaunchedEffect(version) { logCount = withContext(Dispatchers.IO) { com.tekyerema.audit.AuditLog.count() } }
 
@@ -126,8 +122,7 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("Control", onBack)
-        Note("You decide how much Nexus does on its own, which AI it uses, what it may spend and what it keeps. " +
-            "Changes apply straight away.")
+        Note("You decide how much Nexus does on its own, what it may spend and what it keeps. Changes apply straight away.")
         GlassGroup("How Nexus works") {
             Column(Modifier.selectableGroup()) {
                 ChoiceRow("Normal", "Acts on its own, and always asks before calls, messages, money and other important steps.",
@@ -152,18 +147,20 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
                 iconTint = Spectrum.Coral, description = "Apps it must stay out of, or only guide you in.", divider = false) { open(Page.APP_RULES) }
         }
         Note("Whatever you choose here, Nexus always asks before calls, messages and money, and never reads or types a PIN or password.")
-        GlassGroup("AI and privacy") {
-            SwitchRow("Use the cloud",
-                if (cloud) "On: bigger tasks use the online AI below." else "Off: nothing leaves your phone. Simple commands still work; " +
+        // 2 Nov 2026: the provider, keys and usage rows moved to Developer options (DevOptions) — the user's one real choice
+        // here is whether anything may go online.
+        GlassGroup("Privacy") {
+            SwitchRow("Use the internet",
+                if (cloud) "On: bigger tasks use the online AI." else "Off: nothing leaves your phone. Simple commands still work; " +
                     "web search, picture descriptions and bigger tasks don't.",
                 cloud, icon = if (cloud) Icons.Outlined.Cloud else Icons.Outlined.CloudOff, iconTint = Spectrum.Teal) { op.cloudAllowed = it }
-            SettingRow("AI provider and model", value = providers.joinToString(" → ") { Disclosure.name(it) }.ifEmpty { "None" },
-                icon = Icons.Outlined.SmartToy, iconTint = Spectrum.Green,
-                description = "Which online AI is used, in what order, and what each one does with your data.") { open(Page.PROVIDERS) }
-            SettingRow("Your API keys", value = if (keys == 0) "Built-in" else "$keys of yours", icon = Icons.Outlined.VpnKey,
-                iconTint = Spectrum.Gold, description = "Use your own account, or your own AI server.") { open(Page.KEYS) }
-            SettingRow("Limits and usage", value = "${usage.first} today", icon = Icons.Outlined.DataUsage, iconTint = Spectrum.Lime,
-                description = "How much online AI was used today, and the most it may use.", divider = false) { open(Page.USAGE) }
+            // Owner's item 7 (2 Nov 2026; built by the brain session, Settings.moneyCurtain, off by default): the dark cover from the
+            // read-back to the network's answer, not only during the PIN. Off by default because most users have some sight and
+            // check the amount and the name on screen against the read-back; the PIN is covered either way.
+            val moneyCurtain = remember(version) { settings.moneyCurtain }
+            SwitchRow("Cover the screen during money",
+                "Hides the amount, the name and the balance from people nearby. You'll still hear everything.",
+                moneyCurtain, divider = false, icon = Icons.Outlined.VisibilityOff, iconTint = Spectrum.Gold) { settings.moneyCurtain = it }
         }
         GlassGroup("Runs by itself") {
             SwitchRow("Schedules", "Reminders and read-outs at times you set.", schedules,
@@ -171,11 +168,8 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             // Phone care: this switch also silences the money and missed-call alerts (phonecare/PhoneAlerts).
             SwitchRow("Message alerts", "Tells you when someone you chose sends a message, and your money and missed-call alerts.", alerts,
                 icon = Icons.Outlined.NotificationsActive, iconTint = Spectrum.Coral) { op.messageAlertsEnabled = it }
-            SwitchRow("Routines", "Your own phrases, like “good morning”, that run several steps.", routines,
+            SwitchRow("Routines", "Your own phrases, like “good morning”, that run several steps.", routines, divider = false,
                 icon = Icons.Outlined.Repeat, iconTint = Spectrum.Green) { op.routinesEnabled = it }
-            SwitchRow("Computer connection", "Lets a computer you trust, over a USB cable, ask Nexus to do tasks. Anything " +
-                "important still needs your OK on this phone.", remote, divider = false,
-                icon = Icons.Outlined.Computer, iconTint = Spectrum.Aqua) { op.remoteControlEnabled = it }
         }
         GlassGroup("Your data") {
             SettingRow("Activity log", value = logCount?.let { "$it" }.orEmpty(), icon = Icons.Outlined.History, iconTint = Spectrum.Teal,
@@ -187,6 +181,55 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             "“what do you keep about me”, “how much have you used today”, “export my history” or “delete everything”.")
     }
 }
+
+// ------------------------------------------------------------------------------------------ developer options
+
+/** Tools for whoever builds or tests Nexus (see [DevOptions]): the online AI, keys, usage, the USB computer link and every look. */
+@Composable
+internal fun DeveloperPage(settings: Settings, onBack: () -> Unit, open: (Page) -> Unit) {
+    val version by settings.changes.collectAsState()
+    val usageTick by OperatorPolicy.changes.collectAsState()
+    val lookVersion by com.tekyerema.ui.theme.Look.version.collectAsState()
+    val op = OperatorPolicy
+    val providers = remember(version) { op.providers }
+    val usage = remember(usageTick) { op.usageToday() }
+    val keys = remember(version) { listOf("groq", "gemini").count { settings.userKey(it).isNotBlank() } }
+    val remote = remember(version) { op.remoteControlEnabled }
+    val surface = remember(lookVersion) { com.tekyerema.ui.theme.Look.surface }
+
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+        PageTitle("Developer options", onBack)
+        Note("For building and testing Nexus. Nothing here is needed to use it.")
+        GlassGroup("Online AI") {
+            SettingRow("AI provider and model", value = providers.joinToString(" → ") { Disclosure.name(it) }.ifEmpty { "None" },
+                icon = Icons.Outlined.SmartToy, iconTint = Spectrum.Green,
+                description = "Which online AI is used, in what order, and what each one does with your data.") { open(Page.PROVIDERS) }
+            SettingRow("Your API keys", value = if (keys == 0) "Built-in" else "$keys of yours", icon = Icons.Outlined.VpnKey,
+                iconTint = Spectrum.Gold, description = "Use your own account, or your own AI server.") { open(Page.KEYS) }
+            SettingRow("Limits and usage", value = "${usage.first} today", icon = Icons.Outlined.DataUsage, iconTint = Spectrum.Lime,
+                description = "How much online AI was used today, and the most it may use.", divider = false) { open(Page.USAGE) }
+        }
+        GlassGroup("Connections") {
+            SwitchRow("Computer connection", "Lets a computer you trust, over a USB cable, ask Nexus to do tasks. Anything " +
+                "important still needs your OK on this phone.", remote, divider = false,
+                icon = Icons.Outlined.Computer, iconTint = Spectrum.Aqua) { op.remoteControlEnabled = it }
+        }
+        // Accessibility offers Standard and High contrast only; the two material studies stay here for demos and testing.
+        GlassGroup("Every look") { Column(Modifier.selectableGroup()) {
+            val L = com.tekyerema.ui.theme.Look
+            ChoiceRow("Standard", "Glass on the buttons, solid panels behind words.", surface == L.AUTO) { L.surface = L.AUTO }
+            ChoiceRow("Solid", "Nothing see-through anywhere.", surface == L.SOLID) { L.surface = L.SOLID }
+            ChoiceRow("Glass", "See-through glass everywhere. Words can be harder to read.", surface == L.GLASS) { L.surface = L.GLASS }
+            ChoiceRow("High contrast", "Black and white with clear edges.", surface == L.CONTRAST, divider = false) { L.surface = L.CONTRAST }
+        } }
+        GlassGroup {
+            SettingRow("Hide developer options", description = "Tap the version $DEV_TAPS times to bring them back.",
+                divider = false) { DevOptions.set(false); onBack() }
+        }
+    }
+}
+
+private const val DEV_TAPS = DevOptions.TAPS
 
 // ------------------------------------------------------------------------------------------ provider & model
 

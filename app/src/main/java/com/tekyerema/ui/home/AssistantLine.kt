@@ -1,5 +1,6 @@
 package com.tekyerema.ui.home
 
+
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
@@ -119,6 +120,8 @@ private fun RevealText(text: String, revealAsked: Boolean, cps: Float, secondary
     val reveal = revealAsked && !remember { com.tekyerema.ui.glass.glassLite() }
     // I-08: a long answer keeps ALL its words (smaller type, up to 8 lines) instead of being cut at 3 lines.
     val long = text.length > 90
+    // Not scaled by Answer size: this line is already 27 sp and shares the screen with the circle — at "Largest" it overflowed into
+    // the hint (emulator, 2 Nov 2026). The card at the top is the reading surface that grows.
     val style = if (long) MaterialTheme.typography.titleLarge else MaterialTheme.typography.headlineMedium
     val color by animateColorAsState(if (secondary) Tk.TextSecondary else Tk.Text, TkMotion.slowEffects(), label = "line colour")
     val len = text.length.toFloat()

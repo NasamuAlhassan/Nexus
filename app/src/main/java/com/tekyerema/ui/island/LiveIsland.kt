@@ -78,6 +78,9 @@ import com.tekyerema.live.LiveActivity
 import com.tekyerema.live.LiveGlyph
 import com.tekyerema.live.LiveKind
 import com.tekyerema.ui.assistant.GlassPill
+import com.tekyerema.ui.assistant.moneyEdge
+import com.tekyerema.ui.assistant.moneyEdgeColour
+import androidx.compose.runtime.collectAsState
 import com.tekyerema.ui.assistant.GlassTier
 import com.tekyerema.ui.assistant.LocalGlass
 import com.tekyerema.ui.assistant.PillTone
@@ -131,6 +134,7 @@ fun LiveIsland(
     }
     val text = g.text
     val secondary = g.textSecondary
+    val moneyOn by com.tekyerema.money.MoneyMoment.active.collectAsState()
 
     Box(
         modifier
@@ -139,6 +143,8 @@ fun LiveIsland(
             // outside the shape, was cut into a pale rectangle round the corners.
             .liquidGlass(style, GlassShape.Rounded(radius), GlassDepth.FLOATING, lightDegrees = { tilt.value },
                 glow = { pulse?.let { glowColor.copy(alpha = it.value) } ?: if (lead.urgent) glowColor.copy(alpha = 0.18f) else Color.Transparent })
+            // A money flow is running (MoneyMoment): the island wears the same gold edge as the assistant card.
+            .then(if (moneyOn) Modifier.moneyEdge(radius, moneyEdgeColour(g)) else Modifier)
             .animateContentSize(if (calm) tween(0) else spring(0.82f, 170f))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { open = !open }
             .clearAndSetSemantics {

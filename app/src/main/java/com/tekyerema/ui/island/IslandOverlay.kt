@@ -127,7 +127,7 @@ object IslandOverlay {
         if (Build.VERSION.SDK_INT >= 28) panel.accessibilityPaneTitle = "Live"
         panel.setContent {
             TekyeremaTheme {
-                CompositionLocalProvider(LocalGlass provides if (Tk.palette.dark) DarkGlass else LightGlass) {
+                CompositionLocalProvider(LocalGlass provides com.tekyerema.ui.theme.glassPalette()) {
                     val acts by LiveActivities.state.collectAsState()
                     // Room around the island for its soft shadow (the window wraps it).
                     Box(Modifier.padding(start = 14.dp, end = 14.dp, top = 4.dp, bottom = 22.dp)) {

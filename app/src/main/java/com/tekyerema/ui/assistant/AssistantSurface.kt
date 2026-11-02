@@ -1,5 +1,7 @@
 package com.tekyerema.ui.assistant
 
+import com.tekyerema.ui.theme.answerSized
+
 import android.content.Intent
 import android.net.Uri
 import android.view.HapticFeedbackConstants
@@ -76,6 +78,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
@@ -168,6 +171,8 @@ fun AssistantSurfaceHost(
     modifier: Modifier = Modifier,
     /** The surface's visibility, for the host to quieten what would repeat it (the line under the orb). */
     onVisible: (Boolean) -> Unit = {},
+    /** Home is showing its own full-screen "Listening" (HomeContent): the card's plain "Listening…" steps aside, never anything else. */
+    hideListenCard: Boolean = false,
     /** The user's "read replies aloud": our own voice then says results and prompts, so TalkBack isn't also told them. */
     readsAloud: Boolean = false,
     /** True while the surface shows a result or is being moved: the Home orb holds still behind it (stage 7). */
@@ -210,6 +215,7 @@ fun AssistantSurfaceHost(
         (agent.status == AgentStatus.WAITING_CONFIRMATION || agent.status == AgentStatus.ASKING)
     val state = when {
         reduced.mode == Mode.WAITING && panelUp -> reduced.copy(mode = Mode.HIDDEN)
+        hideListenCard && reduced.listenOnly -> reduced.copy(mode = Mode.HIDDEN)
         resolving -> lastPrompt!!
         else -> reduced
     }
@@ -255,7 +261,7 @@ fun AssistantSurfaceHost(
     fun open(uri: String) {
         try { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
     }
-    GlassSurface(
+    CompositionLocalProvider(LocalReadsAloud provides readsAloud) { GlassSurface(
         state = state,
         voice = voice,
         resolving = resolving,
@@ -283,8 +289,11 @@ fun AssistantSurfaceHost(
         onSubmitText = { text -> VoiceEngine.submitTyped(text).accepted },
         onOpenUrl = { open(it) },
         onOpenMaps = { query, link -> open(link ?: MapsLink.of(query)) }
-    )
+    ) }
 }
+
+/** The user's "read replies aloud", for a result's "Say again" (shown only when our own voice reads replies). */
+private val LocalReadsAloud = androidx.compose.runtime.staticCompositionLocalOf { false }
 
 /**
  * The object itself, with its gestures. The finger offset lives in [dragPx] (read in the layer and draw phases only, so a drag
@@ -472,7 +481,11 @@ private fun GlassSurface(
     val maxHeight = (LocalConfiguration.current.screenHeightDp * 0.8f).dp
     val radius = 34.dp
     // The glass follows the phone's light or dark mode (owner, A20e, 14 Oct 2026; DECISIONS V2-11).
-    val glass = if (Tk.palette.dark) DarkGlass else LightGlass
+    val glass = com.tekyerema.ui.theme.glassPalette()
+    // "This is money" (owner's item 6, 2 Nov 2026; the state is the brain's MoneyMoment, with its own earcon): while a money flow
+    // runs — read-back, confirm, the network's menus, the PIN step — the card wears a gold edge, so it never looks like any other card.
+    val moneyOn by com.tekyerema.money.MoneyMoment.active.collectAsState()
+    val moneyEdge = moneyEdgeColour(glass)
     Box(modifier.fillMaxSize()) {
         // Tap outside a FINISHED result dismisses it, and the tap stops there (the orb or field underneath doesn't also get
         // it; DECISIONS V2-3). Invisible to TalkBack, which has the surface's "Dismiss" action instead.
@@ -539,6 +552,7 @@ private fun GlassSurface(
                             // (the glass draws its own soft shadow, outside its shape only — ui/glass/LiquidGlass)
                             .glassBody(radius, glass, mood = { currentMood }, light = lightLevel, sweep = { sweep?.value ?: 0f },
                                 glowShift = { visualPx() * 0.25f }, tier = tier, arrival = { arrival.value })
+                            .then(if (moneyOn) Modifier.moneyEdge(radius, moneyEdge) else Modifier)
                             .clip(if (com.tekyerema.ui.glass.glassLite()) androidx.compose.foundation.shape.RoundedCornerShape(radius) else ContinuousShape(radius))
                             .handle(glass.idleBar) { allow.followUp && rest == Rest.COMPACT }
                     ) {
@@ -765,7 +779,7 @@ internal fun Waiting(
                     }
                     Spacer(Modifier.padding(top = 12.dp))
                 }
-                Text(shown, style = if (facts != null) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge,
+                Text(shown, style = (if (facts != null) MaterialTheme.typography.bodyMedium else MaterialTheme.typography.bodyLarge).answerSized(),
                     color = if (facts != null) GlassColors.TextSecondary else GlassColors.Text, modifier = Modifier.semantics { contentDescription = shown })
             }
         }
@@ -850,17 +864,32 @@ private fun AnswerBody(
             // Compact holds 8 lines (it held 4 and cut a sentence the voice had said in full — review, 2 Nov 2026); whenever words
             // are still hidden a visible "Show all" says so, not only a tap on the text that nothing pointed to.
             var cut by remember(text, expanded) { mutableStateOf(false) }
+            val readsAloud = LocalReadsAloud.current
             Column {
-                Text(text, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp), color = GlassColors.Text,
+                // The one figure the answer is about, in large type above it (KeyFigure; none when it isn't clear which). Drawn
+                // only: the sentence below holds the same figure and is what TalkBack reads, so nothing is said twice.
+                val figure = remember(p.summary) { KeyFigure.of(p.summary) }
+                if (figure != null) BigFigure(figure.shown, Modifier.padding(bottom = 6.dp))
+                Text(text, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp).answerSized(), color = GlassColors.Text,
                     maxLines = if (expanded) Int.MAX_VALUE else 8, overflow = TextOverflow.Ellipsis,
                     onTextLayout = { r -> cut = r.hasVisualOverflow },
                     modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                         role = Role.Button, onClickLabel = if (expanded) "Show less" else "Show the whole answer", onClick = onToggle))
-                if (cut || (!expanded && p.body.length > p.summary.length + 2)) Text(
-                    "Show all", style = MaterialTheme.typography.labelLarge, color = GlassColors.Accent,
-                    modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle)
-                        .padding(top = 12.dp, bottom = 8.dp, end = 16.dp)
-                        .semantics { contentDescription = "Show the whole answer" })
+                val more = cut || (!expanded && p.body.length > p.summary.length + 2)
+                // "Say again" (2 Nov review — the commonest wish of blind users is control over what was just said; ASSETS 2018,
+                // CHI 2026): the same as saying "again" or pressing volume-up twice, now something a finger can find.
+                if (more || readsAloud) Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (readsAloud) Text(
+                        "Say again", style = MaterialTheme.typography.labelLarge, color = GlassColors.Accent,
+                        modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { VoiceEngine.repeatLast() }
+                            .padding(top = 12.dp, bottom = 8.dp, end = 24.dp)
+                            .semantics { contentDescription = "Say the answer again" })
+                    if (more) Text(
+                        "Show all", style = MaterialTheme.typography.labelLarge, color = GlassColors.Accent,
+                        modifier = Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle)
+                            .padding(top = 12.dp, bottom = 8.dp, end = 16.dp)
+                            .semantics { contentDescription = "Show the whole answer" })
+                }
             }
         }
         if (p.sources.isNotEmpty()) Reveal(1, key) { Sources(p.sources, onOpenUrl) }
@@ -871,6 +900,35 @@ private fun AnswerBody(
                 contentDescription = "Open ${p.mapQuery ?: "the place"} in your maps app")
         }
     }
+}
+
+/** The gold of a money flow: bright gold on dark glass, a deep gold on light (≥ 3:1 against the card, a UI edge's minimum), the
+ *  pair's own attention colour when a reading-colour pair is chosen. */
+internal fun moneyEdgeColour(g: GlassPalette): Color = when {
+    com.tekyerema.ui.theme.Look.pair() != null -> g.warm
+    g.dark -> Spectrum.Gold
+    else -> Color(0xFF8A5A00)
+}
+
+/** A 3 dp edge drawn over the card's own light, inside its shape. */
+internal fun Modifier.moneyEdge(radius: androidx.compose.ui.unit.Dp, colour: Color): Modifier = this.drawWithContent {
+    drawContent()
+    val w = 3.dp.toPx()
+    drawRoundRect(colour, topLeft = Offset(w / 2, w / 2), size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(radius.toPx() - w / 2), style = androidx.compose.ui.graphics.drawscope.Stroke(w))
+}
+
+/**
+ * A figure in large type (KeyFigure): 52 sp, capped so the phone's own large-text setting can't push it past 80 sp on screen
+ * (at 200 % a long amount would wrap mid-number). Tabular digits; hidden from TalkBack (the sentence carries it).
+ */
+@Composable
+internal fun BigFigure(shown: String, modifier: Modifier = Modifier) {
+    val fontScale = androidx.compose.ui.platform.LocalDensity.current.fontScale
+    val size = minOf(52f, 80f / fontScale).sp
+    Text(shown, style = TextStyle(fontSize = size, lineHeight = size * 1.12f, fontWeight = FontWeight.Bold,
+            letterSpacing = (-0.5).sp, fontFeatureSettings = "tnum"),
+        color = GlassColors.Text, maxLines = 2, modifier = modifier.clearAndSetSemantics { })
 }
 
 /** Sources as a quiet line of names — the search's own links — each a 48 dp target, not a chip. */
@@ -902,7 +960,7 @@ private fun WhatIDid() {
 private fun ActionBody(key: String, p: SurfaceModel.Preview.Action, steps: List<SurfaceModel.StepView>, expanded: Boolean, onToggle: () -> Unit) {
     Column(Modifier.padding(top = 10.dp)) {
         Reveal(0, key) {
-            Text(ScreenText.of(p.summary), style = MaterialTheme.typography.bodyLarge, color = GlassColors.Text,
+            Text(ScreenText.of(p.summary), style = MaterialTheme.typography.bodyLarge.answerSized(), color = GlassColors.Text,
                 modifier = Modifier.fillMaxWidth().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     role = Role.Button, onClickLabel = if (expanded) "Show less" else "Show what I did", onClick = onToggle))
         }

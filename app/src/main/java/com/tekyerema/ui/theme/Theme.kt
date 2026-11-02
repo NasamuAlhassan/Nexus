@@ -114,6 +114,28 @@ val LightPalette = TkPalette(
 
 val LocalTkPalette = staticCompositionLocalOf { DarkPalette }
 
+/** Answer size (Look.answerSize): 1 = standard. Read by [answerSized]. */
+val LocalAnswerScale = staticCompositionLocalOf { 1f }
+
+/** This style at the user's answer size — for the words of answers, questions and the line under the circle, not for controls. */
+@Composable
+@ReadOnlyComposable
+fun TextStyle.answerSized(): TextStyle {
+    val s = LocalAnswerScale.current
+    if (s == 1f) return this
+    return copy(fontSize = fontSize * s, lineHeight = if (lineHeight.isSp) lineHeight * s else lineHeight)
+}
+
+/** The glass palette for this screen: the reading-colour pair's when one is chosen, else dark or light glass. */
+@Composable
+@ReadOnlyComposable
+fun glassPalette(): com.tekyerema.ui.assistant.GlassPalette {
+    val p = LocalTkPalette.current
+    // Pair palettes are built from the pair, so the page colour identifies it without another read of Look.
+    val pair = ColourPairs.all.firstOrNull { it.page == p.ink && it.text == p.text }
+    return pair?.let { ColourPairs.glass(it) } ?: if (p.dark) com.tekyerema.ui.assistant.DarkGlass else com.tekyerema.ui.assistant.LightGlass
+}
+
 /**
  * The palette tokens, read in composition. Kept under the old names so screens read naturally ("Tk.Text"); a draw
  * lambda (not composable) takes the palette first: `val p = Tk.palette`.
@@ -233,9 +255,13 @@ fun TekyeremaTheme(forceDark: Boolean = false, content: @Composable () -> Unit) 
     val lookVersion by Look.version.collectAsState()
     // Calm by default (Look.fullMotion off, and simple mode); the user's and the system's reduce-motion settings count too.
     val calm = remember(lookVersion) { calmUi() } || MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
-    val palette = if (forceDark || rememberDarkTheme()) DarkPalette else LightPalette
+    // A reading-colour pair (Settings › Accessibility › Look) decides light or dark itself, over other apps too: it is a need, not a taste.
+    val pair = remember(lookVersion) { Look.pair() }
+    val palette = pair?.let { ColourPairs.palette(it) } ?: if (forceDark || rememberDarkTheme()) DarkPalette else LightPalette
     val orbCalm = MotionPolicy.calm(userReduce, rememberSystemAnimatorScale())
-    CompositionLocalProvider(LocalCalmMotion provides calm, LocalOrbCalm provides orbCalm, LocalTkPalette provides palette) {
+    val answerScale = remember(lookVersion) { Look.answerSize }
+    CompositionLocalProvider(LocalCalmMotion provides calm, LocalOrbCalm provides orbCalm, LocalTkPalette provides palette,
+        LocalAnswerScale provides answerScale) {
         MaterialTheme(colorScheme = schemeOf(palette), typography = TkTypography, shapes = TkShapes, content = content)
     }
 }

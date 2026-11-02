@@ -88,7 +88,7 @@ object ConfirmFacts {
 @Composable
 fun PersonPreview(f: ConfirmFacts.Facts, modifier: Modifier = Modifier) {
     val g = LocalGlass.current
-    val accent = if (g.dark) Color(0xFF2FD8C2) else Color(0xFF0B7F71)
+    val accent = if (com.tekyerema.ui.theme.Look.pair() != null) g.accent else if (g.dark) Color(0xFF2FD8C2) else Color(0xFF0B7F71)
     Column(modifier.fillMaxWidth().clearAndSetSemantics { }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
@@ -108,14 +108,14 @@ fun PersonPreview(f: ConfirmFacts.Facts, modifier: Modifier = Modifier) {
             }
             Spacer(Modifier.width(10.dp))
             when (f.kind) {
-                ConfirmFacts.Kind.MONEY -> Column(horizontalAlignment = Alignment.End) {
-                    Text("GHS ${f.amount}", style = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.Bold, fontFeatureSettings = "tnum"), color = g.text)
-                    Icon(Icons.Rounded.Payments, null, tint = accent, modifier = Modifier.size(20.dp))
-                }
+                ConfirmFacts.Kind.MONEY -> Icon(Icons.Rounded.Payments, null, tint = accent, modifier = Modifier.size(28.dp))
                 ConfirmFacts.Kind.CALL -> Icon(Icons.Rounded.Call, null, tint = accent, modifier = Modifier.size(28.dp))
                 ConfirmFacts.Kind.TEXT -> Icon(Icons.Rounded.ChatBubble, null, tint = accent, modifier = Modifier.size(26.dp))
             }
         }
+        // The amount on its own line in large type (design round 2, 2 Nov 2026): the one thing a low-vision user must check
+        // against the read-back before saying yes. It was 24 sp at the end of the name's row.
+        if (f.kind == ConfirmFacts.Kind.MONEY && f.amount != null) BigFigure("GH₵ ${f.amount}", Modifier.padding(top = 12.dp))
         f.message?.let { msg ->
             Spacer(Modifier.padding(top = 12.dp))
             val inner = LiquidStyles.of(g.dark, com.tekyerema.ui.theme.glassMode())

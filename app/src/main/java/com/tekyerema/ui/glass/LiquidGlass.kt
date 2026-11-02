@@ -82,10 +82,15 @@ object LiquidStyles {
     fun solid(s: LiquidStyle) = s.copy(fill = s.fill.copy(alpha = 1f), grain = 0f, glint = s.glint * 0.5f)
 
     /** Like "Increase contrast": opaque black or white with a 2 dp border, no gradients. */
-    fun highContrast(dark: Boolean) = LiquidStyle(
-        dark = dark, fill = if (dark) Color.Black else Color.White, thickTop = Color.Transparent, thickBottom = Color.Transparent,
-        edge = 0f, specular = 0f, glint = 0f, rimPeak = 0f, rimFar = 0f, grain = 0f, shadowKey = 0f, shadowAmbient = 0f,
-        border = if (dark) Color.White else Color.Black)
+    fun highContrast(dark: Boolean): LiquidStyle {
+        // A reading-colour pair (ui/theme/ColourPairs) gives the body and the edge its own colours: yellow edges on black, black on cream.
+        val pair = com.tekyerema.ui.theme.Look.pair()
+        return LiquidStyle(
+            dark = pair?.dark ?: dark, fill = pair?.card ?: if (dark) Color.Black else Color.White,
+            thickTop = Color.Transparent, thickBottom = Color.Transparent,
+            edge = 0f, specular = 0f, glint = 0f, rimPeak = 0f, rimFar = 0f, grain = 0f, shadowKey = 0f, shadowAmbient = 0f,
+            border = pair?.edge ?: if (dark) Color.White else Color.Black)
+    }
 
     fun of(dark: Boolean, mode: GlassMode = GlassMode.TINTED): LiquidStyle = when (mode) {
         GlassMode.TINTED -> if (dark) Dark else Light

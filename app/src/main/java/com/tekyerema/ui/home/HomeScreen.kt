@@ -40,6 +40,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.platform.LocalContext
@@ -72,6 +74,8 @@ import java.util.Calendar
 
 /** How long a spoken reply stays on Home before an idle screen greets instead. */
 private const val REPLY_FRESH_MS = 3 * 60_000L
+/** A listen that opens within this long of a spoken reply is a follow-up to it (keeps the answer card, no full-screen listening). */
+private const val FOLLOW_UP_MS = 8_000L
 /** How long a transient idle notice ("Cancelled.") stays. */
 private const val IDLE_HINT_MS = 20_000L
 
@@ -136,6 +140,7 @@ fun HomeContent(
         focusManager.clearFocus()   // tapping the orb while the keyboard is up: keyboard down, mic up
         if (Perms.mic(context)) VoiceEngine.start() else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
     }
+    val touchExploring = rememberTouchExploring()
     val stopEverything = { com.tekyerema.ui.assistant.StopGuard.press { VoiceEngine.cancel(); AgentEngine.stop() } }   // two taps (StopGuard)
     // The task is waiting on the USER (a question, a yes/no, the PIN step): a tap on the orb is how a person answers, so
     // it opens the mic for that answer — it used to be the kill switch here. A judge on the A20e (2026-09-29) was asked
@@ -179,9 +184,21 @@ fun HomeContent(
         .ifBlank { if (presence == Presence.IDLE && freshReply) voice.spoken else "" }
         .let { if (surfaceVisible && presence != Presence.LISTENING) "" else it }
     val greet = presence == Presence.IDLE && phrase.isEmpty() && !surfaceVisible
+    // Listening fills the screen (2 Nov review): the whole page turns teal, says "Listening" in large type with the words as they
+    // are heard, and the ask field gives way to one large Stop — so a low-vision user can tell from arm's length that Nexus is
+    // listening. Not while a result card is up: the quiet follow-up listen after an answer must not cover the answer.
+    // A FRESH listen only (the mic opened from rest): the quick follow-up listen just after an answer keeps the answer card instead.
+    // It used to require "no card up", but the card itself shows "Listening…" for every listen, so the page never appeared
+    // (emulator, 2 Nov 2026); the card's plain "Listening…" now steps aside for it (AssistantSurfaceHost.hideListenCard).
+    val freshListen = remember(presence) { System.currentTimeMillis() - voice.spokenAt > FOLLOW_UP_MS }
+    val listeningFull = presence == Presence.LISTENING && !waitingOnUser && freshListen
+    // The recogniser's live words (screen only, never a live region) — not partialHint, which carries our own prompts
+    // ("I'm here.", "Uh-huh.") and showed them in quotes as if the user had said them (emulator, 2 Nov 2026).
+    val heardWords = voice.livePartial.trim()
 
     val hint = when {
         notice.isNotEmpty() -> notice
+        listeningFull -> "Pause when you've finished"
         voice.state == com.tekyerema.voice.VoiceState.TYPING -> "Type, or tap the orb to talk"
         else -> ""
     }.ifEmpty { when (presence) {
@@ -205,6 +222,16 @@ fun HomeContent(
     }
 
     Box(modifier.fillMaxSize()) {
+    val listenTint by androidx.compose.animation.core.animateFloatAsState(if (listeningFull) 1f else 0f,
+        tween(if (reduceMotion) 90 else 280), label = "listening tint")
+    if (listenTint > 0f) {
+        val dark = Tk.palette.dark
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize().graphicsLayer { alpha = listenTint }) {
+            drawRect(androidx.compose.ui.graphics.Brush.verticalGradient(
+                if (dark) listOf(androidx.compose.ui.graphics.Color(0xFF0D4D44), androidx.compose.ui.graphics.Color(0xFF08302B), androidx.compose.ui.graphics.Color(0xFF04201C))
+                else listOf(androidx.compose.ui.graphics.Color(0xFF9FE6D8), androidx.compose.ui.graphics.Color(0xFFC6F0E6), androidx.compose.ui.graphics.Color(0xFFE4F7F1))))
+        }
+    }
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         if (showBrand) {
             // The brand steps back while the assistant card holds the top of the screen: under the card it read through the glass as
@@ -220,7 +247,13 @@ fun HomeContent(
         // screen the group makes room under it (the orb shrinks a little rather than sitting half under the card; redesign 2 Nov).
         val cardRoom by androidx.compose.animation.core.animateDpAsState(if (surfaceVisible) 72.dp else 0.dp,
             tween(if (reduceMotion) 0 else 260), label = "card room")
-        Column(Modifier.weight(1f).fillMaxWidth().padding(top = cardRoom), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        // Tap anywhere to talk (design round 2, 2 Nov 2026): at rest, with TalkBack off, the whole middle of Home — the circle, the
+        // greeting, the space round them — starts listening, so a low-vision user who doesn't use TalkBack needn't find a button.
+        // A plain touch handler: it adds nothing for TalkBack or Switch Access (they keep the one "Talk to Nexus" button).
+        val tapAnywhere = micShown(presence) && !surfaceVisible && !touchExploring
+        Column(Modifier.weight(1f).fillMaxWidth().padding(top = cardRoom)
+            .then(if (tapAnywhere) Modifier.pointerInput(Unit) { detectTapGestures { startListening() } } else Modifier),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
             LivingVoice(
                 presence = presence,
                 level = { VoiceEngine.level.value },
@@ -241,6 +274,11 @@ fun HomeContent(
                     }
                 },
                 modifier = Modifier.fillMaxWidth().weight(1f, fill = false).aspectRatio(1f, matchHeightConstraintsFirst = true)
+                    // At rest the orb and the mic both started listening, and TalkBack read "Talk to Nexus" twice (2 Nov review).
+                    // While the mic button is there the orb is a picture to TalkBack (a finger still taps it); in every other
+                    // state — listening, answering, speaking, working — it is the one control that stops or answers, so it speaks.
+                    // (Likewise while listening fills the screen: the wide Stop below is the one "Stop listening".)
+                    .then(if (micShown(presence) || listeningFull) Modifier.clearAndSetSemantics { } else Modifier)
                     // The orb is 60 % of its square; the rest is room for its glow. Reporting 80 % of the height (the glow still
                     // draws, centred, into the margins) brings the greeting up under the orb instead of a hand's width below it.
                     .layout { measurable, constraints ->
@@ -259,7 +297,14 @@ fun HomeContent(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Top
             ) {
-                AnimatedContent(
+                if (listeningFull) {
+                    // Not announced: TalkBack talking now would be heard by the microphone. The earcon and buzz mark the start.
+                    Text("Listening", style = MaterialTheme.typography.displaySmall.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold),
+                        color = Tk.Text, textAlign = TextAlign.Center)
+                    if (heardWords.isNotEmpty()) Text("“$heardWords”", style = MaterialTheme.typography.headlineSmall, color = Tk.Text,
+                        textAlign = TextAlign.Center, maxLines = 4, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 14.dp))
+                } else AnimatedContent(
                     targetState = greet && !imeOpen,
                     transitionSpec = { fadeIn(tween(if (reduceMotion) 120 else 320)) togetherWith fadeOut(tween(160)) },
                     label = "greeting"
@@ -277,14 +322,33 @@ fun HomeContent(
                 // the top now — one place to answer, the same AgentEngine.confirm gate (ui/assistant/AssistantSurface).
             }
         }
-        CommandField(
+        // "Your usual" (Usuals): at rest only — never over a question, a result card, the keyboard or the listening screen.
+        val imeUp = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
+        AnimatedVisibility(visible = showBrand && micShown(presence) && !surfaceVisible && !imeUp && !listeningFull,
+            enter = fadeIn(tween(if (reduceMotion) 90 else 220)), exit = fadeOut(tween(120))) {
+            UsualTiles(onRun = { text ->
+                focusManager.clearFocus()
+                val r = VoiceEngine.submitTyped(text)
+                notice = r.notice
+            }, modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
+        }
+        // While listening the ask field steps aside for one Stop the width of the screen. Ending a listen loses nothing, so it
+        // is one tap (the two-tap StopGuard is for stopping a task).
+        // (Listening over a running task — an interjection — still takes the two taps: Stop there ends the task too.)
+        if (listeningFull) BigButton("Stop", onClick = {
+                val taskRunning = agent.status == AgentStatus.THINKING || agent.status == AgentStatus.ACTING || agent.status == AgentStatus.PAUSED
+                if (taskRunning) stopEverything() else VoiceEngine.cancel()
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 4.dp).heightIn(min = 72.dp),
+            contentDescription = "Stop listening")
+        else CommandField(
             onSubmit = { text ->
                 val r = VoiceEngine.submitTyped(text)
                 notice = r.notice
                 r.accepted
             },
             onFocusChanged = { focused -> if (focused) VoiceEngine.beginTyping() else VoiceEngine.endTyping() },
-            onMic = if (presence == Presence.IDLE || presence == Presence.DONE || presence == Presence.ERROR) startListening else null,
+            onMic = if (micShown(presence)) startListening else null,
             onCamera = if (com.tekyerema.core.config.AppConfig.bool("camera.homeButton", true)) {
                 { try { context.startActivity(com.tekyerema.camera.CameraReadActivity.intent(context, com.tekyerema.camera.CameraReadActivity.MODE_DESCRIBE)) } catch (_: Throwable) {} }
             } else null,
@@ -307,7 +371,7 @@ fun HomeContent(
             exit = if (reduceMotion) androidx.compose.animation.ExitTransition.None else androidx.compose.animation.slideOutVertically { -it - 60 } + androidx.compose.animation.fadeOut()
         ) {
             androidx.compose.runtime.CompositionLocalProvider(com.tekyerema.ui.assistant.LocalGlass provides
-                    if (Tk.palette.dark) com.tekyerema.ui.assistant.DarkGlass else com.tekyerema.ui.assistant.LightGlass) {
+                    com.tekyerema.ui.theme.glassPalette()) {
                 com.tekyerema.ui.island.LiveIsland(live, onAction = { id, a -> com.tekyerema.live.LiveActivities.act(id, a) })
             }
         }
@@ -315,12 +379,30 @@ fun HomeContent(
         com.tekyerema.ui.assistant.AssistantSurfaceHost(
             voice = voice, agent = agent, twi = twi,
             onVisible = { surfaceVisible = it },
+            hideListenCard = listeningFull,
             readsAloud = speakAloud,
             onOrbPause = { orbPaused = it },
             modifier = Modifier.fillMaxSize()
         )
     }
 }
+
+/** TalkBack's touch exploration is on — followed live, so turning TalkBack on or off changes Home at once. */
+@Composable
+private fun rememberTouchExploring(): Boolean {
+    val context = LocalContext.current
+    val am = remember(context) { context.getSystemService(android.content.Context.ACCESSIBILITY_SERVICE) as? android.view.accessibility.AccessibilityManager }
+    var on by remember { mutableStateOf(am?.let { it.isEnabled && it.isTouchExplorationEnabled } ?: false) }
+    DisposableEffect(am) {
+        val l = android.view.accessibility.AccessibilityManager.TouchExplorationStateChangeListener { on = it && am?.isEnabled == true }
+        am?.addTouchExplorationStateChangeListener(l)
+        onDispose { am?.removeTouchExplorationStateChangeListener(l) }
+    }
+    return on
+}
+
+/** The ask field's mic button shows only at rest; then it, not the orb, is TalkBack's "Talk to Nexus". */
+private fun micShown(p: Presence) = p == Presence.IDLE || p == Presence.DONE || p == Presence.ERROR
 
 /** "Good morning" (Twi mode: "Maakye") — with the user's name from the welcome, "Good morning, Ama" — and what to do
  *  next. A heading, so TalkBack can land on it. */

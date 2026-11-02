@@ -3,4 +3,10 @@
     <string name="accessibility_service_label">Nexus (screen control)</string>
     <string name="accessibility_service_description">Nexus is an accessibility assistant that helps you operate your phone by voice or text. It reads the screen and performs actions on your behalf when you ask it to, so people who are blind or have low vision can accomplish tasks in one step.</string>
     <string name="notification_listener_label">Nexus (notifications)</string>
+    <!-- Home-screen widget (ui/widget/TalkWidget) -->
+    <string name="widget_talk">Talk</string>
+    <string name="widget_talk_description">Talk to Nexus</string>
+    <string name="widget_look">Look</string>
+    <string name="widget_look_description">Look with the camera: Nexus describes what is in front of you</string>
+    <string name="widget_description">Talk to Nexus with one tap, or let it look through the camera.</string>
 </resources>

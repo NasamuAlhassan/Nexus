@@ -317,6 +317,21 @@
                 android:resource="@xml/export_paths" />
         </provider>
 
+        <!-- Home-screen widget (ui/widget/TalkWidget): Talk and Look buttons. Exported for the system's widget-update broadcast only:
+             BIND_APPWIDGET is held by the system alone, so no other app can poke it (ManifestHardeningTest). -->
+        <receiver
+            android:name=".ui.widget.TalkWidget"
+            android:exported="true"
+            android:permission="android.permission.BIND_APPWIDGET"
+            android:label="Nexus">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_talk_info" />
+        </receiver>
+
         <!-- Tɛkyerɛma's own timer: the backstop alarm (live/LiveTimer). Not exported. -->
         <receiver android:name=".safety.DangerCancelReceiver" android:exported="false">
             <intent-filter><action android:name="com.tekyerema.DANGER_CANCEL" /></intent-filter>

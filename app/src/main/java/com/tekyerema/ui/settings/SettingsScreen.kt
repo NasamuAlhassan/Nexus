@@ -4,8 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,11 +65,12 @@ import com.tekyerema.ui.theme.TkMotion
 internal enum class Page {
     ROOT, VOICE, KEYBOARD, PERMISSIONS, ACCESSIBILITY, HELP,
     CONTROL, PROVIDERS, KEYS, USAGE, DATA, AUDIT,
-    PHONE_CARE, MONEY_LIMITS, APP_RULES, PIN_PRACTICE;
+    PHONE_CARE, MONEY_LIMITS, APP_RULES, PIN_PRACTICE, DEVELOPER;
 
     val parent: Page get() = when (this) {
         ROOT -> ROOT
-        PROVIDERS, KEYS, USAGE, DATA, AUDIT, MONEY_LIMITS, APP_RULES -> CONTROL
+        DATA, AUDIT, MONEY_LIMITS, APP_RULES -> CONTROL
+        PROVIDERS, KEYS, USAGE -> DEVELOPER
         else -> ROOT
     }
     val depth: Int get() = if (this == ROOT) 0 else parent.depth + 1
@@ -79,6 +83,9 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
     val version by settings.changes.collectAsState()
     BackHandler(enabled = page != Page.ROOT) { page = page.parent }
     val context = LocalContext.current
+    remember { DevOptions.init(context); 0 }
+    val devOn by DevOptions.on.collectAsState()
+    var versionTaps by remember { mutableIntStateOf(0) }
 
     // Deeper pages slide in from the right and back out to it (Material's shared axis X); calm motion cross-fades.
     val calm = LocalCalmMotion.current
@@ -113,8 +120,26 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
                 SettingRow("Help", description = "What you can say, and how to stop", icon = Icons.Outlined.HelpOutline,
                     iconTint = Spectrum.Aqua, divider = false) { page = Page.HELP }
             }
-            Text("${com.tekyerema.ui.Brand.NAME} · version ${remember { appVersion(context) }}", style = MaterialTheme.typography.bodySmall,
-                color = Tk.TextTertiary, modifier = Modifier.fillMaxWidth().padding(top = 20.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            if (devOn) GlassGroup {
+                SettingRow("Developer options", description = "The online AI, keys and testing tools",
+                    icon = Icons.Outlined.Tune, iconTint = Spectrum.Teal, divider = false) { page = Page.DEVELOPER }
+            }
+            // Tap the version DevOptions.TAPS times for the developer options (Android's own gesture). It stays plain text to
+            // TalkBack until the last few taps, so nobody hears a count they didn't ask for.
+            val versionLine = "${com.tekyerema.ui.Brand.NAME} · version ${remember { appVersion(context) }}"
+            val left = DevOptions.TAPS - versionTaps
+            Text(versionLine, style = MaterialTheme.typography.bodySmall, color = Tk.TextTertiary,
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 20.dp)
+                    .clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) {
+                        if (devOn) { page = Page.DEVELOPER; return@clickable }
+                        versionTaps++
+                        if (versionTaps >= DevOptions.TAPS) { DevOptions.set(true); versionTaps = 0 }
+                    }
+                    .semantics {
+                        if (!devOn && versionTaps in 3 until DevOptions.TAPS) stateDescription = "$left more taps for developer options"
+                    }
+                    .padding(vertical = 12.dp))
         }
         Page.VOICE -> VoicePage(settings) { page = Page.ROOT }
         Page.KEYBOARD -> com.tekyerema.ime.TwiKeyboardPage { page = Page.ROOT }
@@ -122,9 +147,10 @@ fun SettingsScreen(settings: Settings, modifier: Modifier = Modifier) {
         Page.ACCESSIBILITY -> AccessibilityPage(settings, onPinPractice = { page = Page.PIN_PRACTICE }) { page = Page.ROOT }
         Page.HELP -> HelpPage(settings) { page = Page.ROOT }
         Page.CONTROL -> ControlPage(settings, onBack = { page = Page.ROOT }) { page = it }
-        Page.PROVIDERS -> ProvidersPage(settings) { page = Page.CONTROL }
-        Page.KEYS -> KeysPage(settings) { page = Page.CONTROL }
-        Page.USAGE -> UsagePage(settings) { page = Page.CONTROL }
+        Page.DEVELOPER -> DeveloperPage(settings, onBack = { page = Page.ROOT }) { page = it }
+        Page.PROVIDERS -> ProvidersPage(settings) { page = Page.DEVELOPER }
+        Page.KEYS -> KeysPage(settings) { page = Page.DEVELOPER }
+        Page.USAGE -> UsagePage(settings) { page = Page.DEVELOPER }
         Page.DATA -> DataPage(settings, onBack = { page = Page.CONTROL }) { page = Page.AUDIT }
         Page.AUDIT -> AuditPage { page = Page.CONTROL }
         Page.PHONE_CARE -> PhoneCarePage(settings) { page = Page.ROOT }
@@ -294,17 +320,36 @@ private fun AccessibilityPage(settings: Settings, onPinPractice: () -> Unit, onB
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
         PageTitle("Accessibility", onBack)
         // The look first: a low-vision user who struggles to read the app comes here for exactly this (redesign, 2 Nov 2026).
+        // Two choices (2 Nov review): a mode that says "words can be harder to read" has no place in front of low-vision
+        // users. Solid and Glass stay under Developer options for demos; while one of them is on, neither row is ticked.
+        // Design round 2 (2 Nov): reading-colour pairs for low vision (ColourPairs — people differ, so a choice, not one "best").
+        val colours = remember(lookVersion) { Look.colours }
+        val standardColours = colours == com.tekyerema.ui.theme.ColourPairs.STANDARD
         GlassGroup("Look") { Column(Modifier.selectableGroup()) {
-            ChoiceRow("Standard", "Clear glass on the buttons, solid panels behind words.", surface == Look.AUTO) { Look.surface = Look.AUTO }
-            ChoiceRow("Solid", "Nothing see-through anywhere.", surface == Look.SOLID) { Look.surface = Look.SOLID }
-            ChoiceRow("Glass", "See-through glass everywhere. Words can be harder to read.", surface == Look.GLASS) { Look.surface = Look.GLASS }
-            ChoiceRow("High contrast", "Black and white with clear edges.", surface == Look.CONTRAST, divider = false) { Look.surface = Look.CONTRAST }
+            ChoiceRow("Standard", "Soft glass on the buttons, solid panels behind words.", standardColours && surface == Look.AUTO) {
+                Look.colours = com.tekyerema.ui.theme.ColourPairs.STANDARD; Look.surface = Look.AUTO }
+            ChoiceRow("High contrast", "Black and white with clear edges.", standardColours && surface == Look.CONTRAST) {
+                Look.colours = com.tekyerema.ui.theme.ColourPairs.STANDARD; Look.surface = Look.CONTRAST }
+            val pairs = com.tekyerema.ui.theme.ColourPairs.all
+            pairs.forEachIndexed { i, p ->
+                ChoiceRow(p.label, p.description, colours == p.id, divider = i < pairs.lastIndex) { Look.colours = p.id }
+            }
         } }
+        // A colour pair decides light or dark itself; the choice comes back with the standard colours.
         val appearance = remember(version) { settings.appearance }
-        GlassGroup("Light or dark") { Column(Modifier.selectableGroup()) {
+        if (standardColours) GlassGroup("Light or dark") { Column(Modifier.selectableGroup()) {
             ChoiceRow("Same as the phone", selected = appearance == Settings.APPEARANCE_SYSTEM) { settings.appearance = Settings.APPEARANCE_SYSTEM }
             ChoiceRow("Light", selected = appearance == Settings.APPEARANCE_LIGHT) { settings.appearance = Settings.APPEARANCE_LIGHT }
             ChoiceRow("Dark", selected = appearance == Settings.APPEARANCE_DARK, divider = false) { settings.appearance = Settings.APPEARANCE_DARK }
+        } }
+        // Answer size: bigger words where it matters (answers, questions, the line under the circle) without making every button
+        // and menu bigger too — on top of the phone's own font size.
+        val answerSize = remember(lookVersion) { Look.answerSize }
+        GlassGroup("Answer size") { Column(Modifier.selectableGroup()) {
+            val sizes = com.tekyerema.ui.theme.AnswerSizes.all
+            sizes.forEachIndexed { i, z ->
+                ChoiceRow(z.name, z.description, kotlin.math.abs(answerSize - z.scale) < 0.01f, divider = i < sizes.lastIndex) { Look.answerSize = z.scale }
+            }
         } }
         GlassGroup("Feedback") {
             SwitchRow("Sounds", "A short tone when listening starts, ends, and when a task is done.", sounds) { settings.sounds = it }
@@ -326,7 +371,18 @@ private fun AccessibilityPage(settings: Settings, onPinPractice: () -> Unit, onB
             SettingRow("Practise typing a PIN", description = "A made-up number on a keypad like the phone's. Never your real PIN.",
                 divider = false) { onPinPractice() }
         }
-        Note("Text size, magnification and TalkBack follow your phone's accessibility settings.")
+        // "Your usual" on Home (UsualTiles): the user can turn it off, and bring back tiles removed by a long-press.
+        val usualVersion by com.tekyerema.ui.home.UsualStore.version.collectAsState()
+        remember(context) { com.tekyerema.ui.home.UsualStore.init(context) }
+        val usualOn = remember(usualVersion) { com.tekyerema.ui.home.UsualStore.enabled }
+        val usualRemoved = remember(usualVersion) { com.tekyerema.ui.home.UsualStore.hidden().size }
+        GlassGroup("Home") {
+            SwitchRow("Your usual", "Up to three things you often ask for, as buttons on Home. Never a payment with an amount.",
+                usualOn, divider = usualRemoved > 0) { com.tekyerema.ui.home.UsualStore.enabled = it }
+            if (usualRemoved > 0) SettingRow("Bring back removed buttons", if (usualRemoved == 1) "1 removed" else "$usualRemoved removed",
+                description = "They come back when you ask for them often again.", divider = false) { com.tekyerema.ui.home.UsualStore.restore() }
+        }
+        Note("Text size everywhere, magnification and TalkBack follow your phone's accessibility settings. Answer size makes answers bigger still.")
     }
 }
 

@@ -123,7 +123,10 @@ fun GlassPill(
                 style = pillStyle,
                 shape = GlassShape.Capsule,
                 depth = GlassDepth.FLAT,
-                tint = if (pillStyle.border != null) null else if (tone == PillTone.PRIMARY) accent.copy(alpha = 0.90f) else quietTint,
+                // High contrast and the reading-colour pairs: the primary act is the inverse (filled with the words' colour, its
+                // label in the page's colour), so it stands apart from the quiet pills by more than its edge.
+                tint = if (pillStyle.border != null) (if (tone == PillTone.PRIMARY || chosen) g.text else null)
+                    else if (tone == PillTone.PRIMARY) accent.copy(alpha = 0.90f) else quietTint,
                 press = { val b = bloom.value; if (b < 1f) 1f - b else 0f },
                 pressAt = { pressAt }
             )
@@ -136,7 +139,7 @@ fun GlassPill(
                         val a = arming().coerceIn(0f, 1f)
                         if (a < 1f) drawRect(armBand, topLeft = Offset(size.width * a, 0f), size = Size(size.width * (1f - a), size.height))
                     }
-                    if (settle.value > 0f && tone != PillTone.PRIMARY) drawRect(accent.copy(alpha = 0.85f * settle.value))
+                    if (settle.value > 0f && tone != PillTone.PRIMARY && pillStyle.border == null) drawRect(accent.copy(alpha = 0.85f * settle.value))
                 }
             }
             .clickable(interactionSource = interaction, indication = null, enabled = available, role = Role.Button,
@@ -153,7 +156,7 @@ fun GlassPill(
     ) {
         Text(text, style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
             color = when {
-                pillStyle.border != null -> g.text
+                pillStyle.border != null -> if (tone == PillTone.PRIMARY || chosen) pillStyle.fill.copy(alpha = 1f) else g.text
                 tone == PillTone.PRIMARY || chosen -> onAccent
                 else -> g.text
             },

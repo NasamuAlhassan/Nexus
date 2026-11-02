@@ -26,6 +26,8 @@ object Look {
     private const val PREFS = "nexus_look"
     private const val KEY_SURFACE = "surface"
     private const val KEY_MOTION = "motion"
+    private const val KEY_COLOURS = "colours"
+    private const val KEY_ANSWER = "answer_size"
 
     @Volatile private var prefs: android.content.SharedPreferences? = null
     private val _version = MutableStateFlow(0L)
@@ -46,15 +48,29 @@ object Look {
         get() = prefs?.getBoolean(KEY_MOTION, false) ?: false
         set(v) { prefs?.edit()?.putBoolean(KEY_MOTION, v)?.apply(); _version.value++ }
 
-    /** The material of a floating control (tab bar, ask field, island). Config `ui.glassMode` wins when it is set. */
-    fun controlMode(): com.tekyerema.ui.glass.GlassMode = configMode() ?: when (surface) {
+    /** Reading colours (ColourPairs): "standard" follows Light/Dark; a pair sets the page, the words and the edges itself. */
+    var colours: String
+        get() = prefs?.getString(KEY_COLOURS, ColourPairs.STANDARD) ?: ColourPairs.STANDARD
+        set(v) { prefs?.edit()?.putString(KEY_COLOURS, v)?.apply(); _version.value++ }
+
+    /** The chosen colour pair, or null for the standard look. */
+    fun pair(): ColourPair? = ColourPairs.of(colours)
+
+    /** Answer size (AnswerSizes): a multiplier on the words of answers and questions, on top of the phone's font size. */
+    var answerSize: Float
+        get() = prefs?.getFloat(KEY_ANSWER, AnswerSizes.STANDARD) ?: AnswerSizes.STANDARD
+        set(v) { prefs?.edit()?.putFloat(KEY_ANSWER, v)?.apply(); _version.value++ }
+
+    /** The material of a floating control (tab bar, ask field, island). Config `ui.glassMode` wins when it is set. A colour
+     *  pair draws everything with the high-contrast material (opaque, a real edge in the pair's colour). */
+    fun controlMode(): com.tekyerema.ui.glass.GlassMode = configMode() ?: if (pair() != null) com.tekyerema.ui.glass.GlassMode.HIGH_CONTRAST else when (surface) {
         SOLID -> com.tekyerema.ui.glass.GlassMode.SOLID
         CONTRAST -> com.tekyerema.ui.glass.GlassMode.HIGH_CONTRAST
         else -> com.tekyerema.ui.glass.GlassMode.TINTED
     }
 
     /** The material of something you read (cards, lists, the read-back, replies). */
-    fun readingMode(): com.tekyerema.ui.glass.GlassMode = configMode() ?: when (surface) {
+    fun readingMode(): com.tekyerema.ui.glass.GlassMode = configMode() ?: if (pair() != null) com.tekyerema.ui.glass.GlassMode.HIGH_CONTRAST else when (surface) {
         GLASS -> com.tekyerema.ui.glass.GlassMode.TINTED
         CONTRAST -> com.tekyerema.ui.glass.GlassMode.HIGH_CONTRAST
         else -> com.tekyerema.ui.glass.GlassMode.SOLID

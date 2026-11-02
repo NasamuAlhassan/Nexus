@@ -1,5 +1,6 @@
 package com.tekyerema.ui.history
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -38,6 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import com.tekyerema.ui.components.Hairline
@@ -78,7 +80,12 @@ private val CardShape = RoundedCornerShape(22.dp)
 @Composable
 fun HistoryScreen(modifier: Modifier = Modifier) {
     val all by HistoryStore.entries.collectAsState()
-    val entries = remember(all) { all.filterNot { HistoryStore.isTestEntry(it.title) } }
+    val real = remember(all) { all.filterNot { HistoryStore.isTestEntry(it.title) } }
+    // Things the user cancelled themselves are hidden by default (2 Nov review: 4 of 5 rows on the emulator said "Cancelled",
+    // burying what was done). One row at the end brings them back; failures and interruptions always show.
+    var showCancelled by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val cancelled = remember(real) { real.count { it.outcome == Outcome.STOPPED } }
+    val entries = remember(real, showCancelled) { if (showCancelled) real else real.filterNot { it.outcome == Outcome.STOPPED } }
     val groups = remember(entries) { entries.groupBy { dayLabel(it.timeMs) }.toList() }
 
     Column(modifier.fillMaxSize()) {
@@ -97,6 +104,7 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                         color = Tk.TextSecondary, modifier = Modifier.padding(top = 4.dp))
                 }
             }
+            if (cancelled > 0) CancelledToggle(cancelled, showCancelled) { showCancelled = !showCancelled }
             return
         }
         // A task finishing while History is open slides the list down and fades its row in, instead of jumping (full motion).
@@ -113,8 +121,20 @@ fun HistoryScreen(modifier: Modifier = Modifier) {
                     }
                 }
             }
+            if (cancelled > 0) item(key = "cancelled") { CancelledToggle(cancelled, showCancelled) { showCancelled = !showCancelled } }
         }
     }
+}
+
+/** "Show 4 cancelled" / "Hide cancelled": a quiet text button under the list, 48 dp tall. */
+@Composable
+private fun CancelledToggle(count: Int, shown: Boolean, onToggle: () -> Unit) {
+    val words = if (shown) "Hide cancelled" else if (count == 1) "Show 1 cancelled" else "Show $count cancelled"
+    Text(words, style = MaterialTheme.typography.labelLarge, color = Tk.Cyan,
+        modifier = Modifier.padding(horizontal = CardMargin + 4.dp, vertical = 8.dp).heightIn(min = 48.dp)
+            .clickable(role = androidx.compose.ui.semantics.Role.Button, onClick = onToggle)
+            .padding(vertical = 14.dp, horizontal = 4.dp)
+            .semantics { contentDescription = if (shown) "Hide cancelled requests" else "Show $count cancelled requests" })
 }
 
 @Composable
@@ -158,7 +178,7 @@ private fun HistoryRow(e: HistoryEntry, divider: Boolean) {
 }
 
 /** The kind of task, from the words of its title: an icon for what it was for and a colour from the mark's palette. */
-private fun kindOf(title: String): Pair<ImageVector, Color> {
+internal fun kindOf(title: String): Pair<ImageVector, Color> {
     val t = title.lowercase()
     fun has(vararg w: String) = w.any { Regex("\\b$it").containsMatchIn(t) }
     return when {

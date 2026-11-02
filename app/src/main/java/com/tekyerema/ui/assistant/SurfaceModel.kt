@@ -54,7 +54,9 @@ object SurfaceModel {
         /** The task is paused (nothing is moving: the sign holds still and TalkBack hears "Paused", not "Working on it"). */
         val paused: Boolean = false,
         /** What this surface is about: "run:N" for agent run N, "reply:T" for a reply the voice gave at T without a run. */
-        val key: String = "run:$runSeq"
+        val key: String = "run:$runSeq",
+        /** Only "Listening…": the microphone is open and nothing else is going on (Home may show its own full-screen listening). */
+        val listenOnly: Boolean = false
     ) {
         val visible: Boolean get() = mode != Mode.HIDDEN
     }
@@ -92,7 +94,7 @@ object SurfaceModel {
         }
         // The microphone is open and nothing else is waiting (a follow-up after a reply, the icon pressed): say so — a beep alone
         // is easy to miss (owner, 19 Oct 2026: "always show that it is listening").
-        if (voice.state == VoiceState.LISTENING) return State(run, Mode.PROCESSING, if (twi) "Meretie…" else "Listening…")
+        if (voice.state == VoiceState.LISTENING) return State(run, Mode.PROCESSING, if (twi) "Meretie…" else "Listening…", listenOnly = true)
         // Understanding what was said (no run yet): a quiet processing state, nothing more to claim.
         if (voice.state == VoiceState.CAPTURED || voice.state == VoiceState.TRANSCRIBING || voice.state == VoiceState.UNDERSTANDING)
             return State(run, Mode.PROCESSING, "Understanding")
