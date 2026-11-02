@@ -28,9 +28,10 @@ object PinCurtain {
     @Volatile private var view: View? = null
     @Volatile private var shownAt = 0L
 
-    fun show() {
+    /** [force]: the whole-flow curtain (Settings › Privacy › moneyCurtain, money/MoneyMoment) — shown even with `pin.curtain` off. */
+    fun show(force: Boolean = false) {
         try {
-            if (!com.tekyerema.core.config.AppConfig.bool("pin.curtain", true)) return
+            if (!force && !com.tekyerema.core.config.AppConfig.bool("pin.curtain", true)) return
             main.post { showNow() }
         } catch (_: Throwable) {}   // JVM tests: no main looper
     }

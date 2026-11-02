@@ -314,6 +314,13 @@ class Settings(context: Context) {
         get() = prefs.getBoolean(KEY_SOUNDS, true)
         set(v) = put { putBoolean(KEY_SOUNDS, v) }
 
+    /** Settings › Privacy (2 Nov 2026): cover the screen for the WHOLE money flow, from the read-back until the network's
+     *  answer has left the screen (phone/PinCurtain, money/MoneyMoment). Off by default: low-vision users read the amount and
+     *  the name on screen as their own check of the read-back; the PIN step is covered either way (`pin.curtain`). */
+    var moneyCurtain: Boolean
+        get() = prefs.getBoolean(KEY_MONEY_CURTAIN, com.tekyerema.core.config.AppConfig.bool("privacy.moneyCurtain", false))
+        set(v) = put { putBoolean(KEY_MONEY_CURTAIN, v) }
+
     var reduceMotion: Boolean
         get() = prefs.getBoolean(KEY_REDUCE_MOTION, false)
         set(v) = put { putBoolean(KEY_REDUCE_MOTION, v) }
@@ -390,6 +397,7 @@ class Settings(context: Context) {
         private const val KEY_LANG_MODE = "language_mode"
         private const val KEY_SPEAK = "speak_aloud"
         private const val KEY_RATE = "speech_rate"
+        private const val KEY_MONEY_CURTAIN = "money_curtain"
         private const val KEY_TTS_ACCENT = "tts_accent"
         private const val KEY_HAPTICS = "haptics"
         private const val KEY_SOUNDS = "sounds"

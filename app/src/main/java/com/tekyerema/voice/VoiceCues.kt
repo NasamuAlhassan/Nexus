@@ -28,6 +28,8 @@ interface VoiceCues {
     fun error() {}
     /** K-02: a soft "still working" tick during a long task. */
     fun progress() {}
+    /** "This is money" (money/MoneyMoment): a bright two-note coin sound when a money step starts. */
+    fun money() {}
 }
 
 /** Synthesized earcons (no audio assets) plus a light haptic, each individually switchable. */
@@ -51,6 +53,8 @@ class AndroidVoiceCues(
     override fun needsOk() = cue("needsOk", listOf(587.3 to 90, 0.0 to 40, 587.3 to 90), 0.2, longArrayOf(0, 30, 90, 30))
     override fun error() = cue("error", listOf(330.0 to 110, 0.0 to 50, 294.0 to 140), 0.18, longArrayOf(0, 60, 80, 60, 80, 60))
     override fun progress() = cue("progress", listOf(523.3 to 40), 0.1, longArrayOf(0, 8))
+    // Higher and brighter than every other cue (E6 then A6), with a double tick: learnable as "money" by ear or by touch.
+    override fun money() = cue("money", listOf(1318.5 to 60, 0.0 to 25, 1760.0 to 130), 0.2, longArrayOf(0, 15, 70, 15, 70, 15))
 
     private fun cue(name: String, tones: List<Pair<Double, Int>>, gain: Double, pattern: LongArray) {
         haptic(configPattern(name) ?: pattern)

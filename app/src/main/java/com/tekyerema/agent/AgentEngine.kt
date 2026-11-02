@@ -488,6 +488,7 @@ object AgentEngine {
         secureChannel.trySend(false)   // unblock a pending Secure Input wait without resuming observation
         appContext?.let { OverlayConfirm.hide(it) }
         _state.update { it.copy(status = AgentStatus.STOPPED, pendingConfirmation = null, pendingConfirmationTwi = null) }
+        com.tekyerema.money.MoneyMoment.release(com.tekyerema.money.MoneyMoment.TASK)
         log(LogEntry.Kind.INFO, "Stopped by user.")
     }
 
@@ -1632,6 +1633,7 @@ object AgentEngine {
                                     com.tekyerema.core.config.AppConfig.bool("confirm.callImplicit", true))
                                     com.tekyerema.policy.ConfirmTiers.callingLine(prompt) else null
                                 val asked = callingLine ?: prompt
+                                moneyReadBack(decision.name)   // money/MoneyMoment: the earcon + gold edge start here
                                 log(LogEntry.Kind.CONFIRM, asked)
                                 // the Twi wording the user is asked in (debug builds only — the read-back names people and amounts)
                                 if (promptTwi != null && com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.i("Tekyerema", "[CONFIRM-TWI] $promptTwi")
@@ -2442,6 +2444,7 @@ object AgentEngine {
      *  must not end the newer run's journal, take its place in [activeRun], or write its status/result (review, 14 Oct 2026). */
     private fun finish(status: AgentStatus, stats: RunStats, paused: com.tekyerema.agent.journal.PauseReason? = null,
                        run: RunCtx? = activeRun) {
+        com.tekyerema.money.MoneyMoment.release(com.tekyerema.money.MoneyMoment.TASK)
         log(LogEntry.Kind.STATS, stats.summary())
         // Trust (2026-09-29, agent/helper/TrustFast.kt): remember this task for "tell my helper what you did", end its PIN mark,
         // and after a second failure in a row add "If you'd like, say “call my helper”" (once) to the spoken result.
@@ -2757,6 +2760,12 @@ object AgentEngine {
 
     /** Voice-UX (2026-09-29): tell the voice layer which app this run's step brought to the front (voice/AppNote.kt).
      *  Outside runTask on purpose — that method sits near the JVM's 64 KB limit. */
+    /** "This is money" (money/MoneyMoment): a money tool's read-back starts the money moment; [finish] / stop end it.
+     *  Out of runTask on purpose (that method is near the JVM's 64 KB limit). */
+    private fun moneyReadBack(tool: String) {
+        if (com.tekyerema.money.MoneyMoment.isMoneyTool(tool)) com.tekyerema.money.MoneyMoment.hold(com.tekyerema.money.MoneyMoment.TASK)
+    }
+
     private fun noteAppSwitch(snap: UiSnapshot?) {
         val pkg = snap?.appPackage ?: return
         _state.update { it.copy(appSwitch = AppSwitch(pkg, snap.appName, it.runSeq, com.tekyerema.core.ScreenSummary.title(snap))) }

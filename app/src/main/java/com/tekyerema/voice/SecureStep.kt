@@ -20,12 +20,14 @@ object SecureStep {
 
     fun begin(now: Long = System.currentTimeMillis(), appPackage: String? = null) {
         since = now; appPkg = appPackage; com.tekyerema.core.Privacy.secureStep = true
+        com.tekyerema.money.MoneyMoment.hold(com.tekyerema.money.MoneyMoment.PIN)   // "this is money" through the PIN
         // The screen is covered while a NETWORK PIN is entered (demo step 4); in an app the pad uses the app's own keypad, uncovered
         // (owner, 28 Oct 2026: "instead of a full coverage, use the buttons directly").
         if (appPackage == null) com.tekyerema.phone.PinCurtain.show()
     }
     fun end() {
         since = 0L; appPkg = null; com.tekyerema.core.Privacy.secureStep = false
+        com.tekyerema.money.MoneyMoment.release(com.tekyerema.money.MoneyMoment.PIN)
         com.tekyerema.phone.PinCurtain.hideWhenDialogGone()   // …and until the network's answer (a balance) has left the screen
     }
     fun active(now: Long = System.currentTimeMillis()): Boolean {
