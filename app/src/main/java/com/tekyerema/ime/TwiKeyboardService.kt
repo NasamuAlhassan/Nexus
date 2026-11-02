@@ -47,6 +47,9 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     private var english = TwiLexicon.EMPTY
     private lateinit var suggester: WordSuggester
     private var voice: VoiceTyping? = null
+    /** Local languages (LocalVoice, Phase 1): the language the mic listens in (null = English) and its dictation. */
+    private var voiceLang: LocalLang? = null
+    private var local: LocalDictation? = null
     private var variantsOpen = false
     private var lastSpaceMs = 0L
     private var listeningShown = false
@@ -85,6 +88,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         val v = TwiKeyboardView(this, this)
         view = v
         v.bigKeys = prefs.bigKeys
+        v.voiceLanguageName = prefs.voiceLanguage?.name
         render()
         return v
     }
@@ -105,7 +109,9 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         cancelPendingVoiceStart()
         voice?.cancel()
         Dictation.cancel()   // the field changed: never carry a dictation into it
-        optSuggest = prefs.suggestions; optLearn = prefs.learnWords
+        local?.cancel()
+        optSuggest = prefs.suggestions; optLearn = prefs.learnWords; voiceLang = prefs.voiceLanguage
+        view?.voiceLanguageName = voiceLang?.name
         optVibrate = prefs.vibrate; optSound = prefs.sound; optSwipe = prefs.swipeTyping
         inputType = info.inputType
         val hint = listOfNotNull(info.hintText, info.label, info.fieldName).joinToString(" ")
@@ -153,6 +159,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         cancelPendingVoiceStart()
         voice?.cancel()
         Dictation.cancel()
+        local?.cancel()
         variantsOpen = false
         forgetSwipe()
         view?.showSuggestions(emptyList())
@@ -164,6 +171,7 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         voice?.release()
         voice = null
         Dictation.cancel()
+        local?.release(); local = null
         if (optLearn) LearnedWordStore.saveIfDirty(this)
         super.onDestroy()
     }
@@ -206,7 +214,10 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         val word = WordAtCursor.of(currentInputConnection?.getTextBeforeCursor(WINDOW, 0)).text
         if (word.isEmpty() && choices.isNotEmpty()) { v.showSuggestions(choices); return }   // the last swipe's other words stay on offer
         if (word.isNotEmpty()) forgetSwipe()
-        v.showSuggestions(suggester.suggest(word))
+        val words = suggester.suggest(word)
+        // In a local language the empty strip says so: audio leaves the phone only in this mode (contract §6).
+        val lang = voiceLang
+        if (words.isEmpty() && lang != null && policy.voice) v.showMessage(LocalVoiceLines.online(lang)) else v.showSuggestions(words)
     }
 
     private fun forgetSwipe() { choices = emptyList(); committed = null }
@@ -465,6 +476,52 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
 
     override fun onVoiceKey() {
         if (Dictation.active) { Dictation.cancel(); view?.say("Stopped"); return }   // our mic: a second tap cancels
+        local?.takeIf { it.active }?.let { it.cancel(); view?.say("Stopped"); return }
+        val lang = voiceLang
+        if (lang != null && policy.voice && !Privacy.secureStep) {
+            val space = com.tekyerema.language.SpaceVoice.forPhone(this, prefs)
+            if (space != null) { startLocal(lang, space); return }
+            LocalVoiceLines.OFFLINE.let { view?.showMessage(it); view?.say(it) }   // then English, below
+        }
+        startEnglishVoice()
+    }
+
+    /** Dictation in a local language through the Space (LocalDictation). */
+    private fun startLocal(lang: LocalLang, space: com.tekyerema.language.SpaceVoice) {
+        val ld = local ?: LocalDictation(this, localHost).also { local = it }
+        if (variantsOpen) closeVariants()
+        listeningShown = true
+        view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
+        view?.showMessage("Starting ${lang.name} voice typing…")
+        listenCue()
+        ld.start(lang, prefs.sendMode, space)
+    }
+
+    private val localHost = object : LocalDictation.Host {
+        override fun listening(lang: LocalLang) {
+            view?.setVoiceState(TwiKeyboardView.VoiceKeyState.LISTENING)
+            view?.showMessage("Listening in ${lang.name}… I stop when you pause.")
+            view?.say("Listening")
+        }
+        override fun working(message: String) { view?.showMessage(message) }
+        override fun askMode(lang: LocalLang, pick: (SendMode?) -> Unit) {
+            view?.showChoices(listOf(lang.name to "Type it in ${lang.name}", "English" to "Type it in English")) { i ->
+                pick(if (i == 0) SendMode.MINE else SendMode.ENGLISH)
+            }
+            view?.say(LocalVoiceLines.ask(lang))
+        }
+        override fun type(text: String) { commitDictation(text) }
+        override fun tell(message: String) { view?.showMessage(message); view?.say(message) }
+        override fun fallBack(line: String) {
+            view?.showMessage(line); view?.say(line)
+            listeningShown = false
+            view?.postDelayed({ if (isInputViewShown) startEnglishVoice() }, 1_500)
+        }
+        override fun done() { onIdle() }
+    }
+
+    /** The English route (our own recogniser, the phone's, or the phone's voice keyboard). */
+    private fun startEnglishVoice() {
         val v = voice ?: VoiceTyping(this, this).also { voice = it }
         if (v.listening) { v.stop(); return }
         if (listeningShown) { onIdle(); return }   // tapped again before the microphone opened: don't open it
@@ -529,10 +586,25 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     }
 
     /** Long-press the microphone: go straight to the phone's voice keyboard (it returns here when done). */
+    /** Long-press the microphone: the language it listens in — English (on the phone) or a local language (online, through
+     *  the Space) — and, when the phone has one, its own voice keyboard (contract §3.1). The choice is remembered. */
     override fun onVoiceLongPress(): Boolean {
         if (!policy.voice || Privacy.secureStep) { VoicePlan.explain(VoiceRoute.OFF_IN_THIS_FIELD).let { view?.showMessage(it); view?.say(it) }; return true }
-        if (voiceKeyboard() == null) { VoicePlan.explain(VoiceRoute.UNAVAILABLE).let { view?.showMessage(it); view?.say(it) }; return true }
-        switchToVoiceKeyboard()
+        val langs = listOf<LocalLang?>(null) + LocalLanguages.ALL
+        val options = langs.map { l -> (l?.name ?: "English") to "Voice typing in ${l?.name ?: "English"}" + if (l == voiceLang) ", chosen" else "" } +
+            (if (voiceKeyboard() != null) listOf("Phone" to "The phone's own voice keyboard") else emptyList())
+        view?.showChoices(options) { i ->
+            if (i >= langs.size) { switchToVoiceKeyboard(); return@showChoices }
+            val l = langs[i]
+            voiceLang = l
+            prefs.voiceLanguage = l
+            view?.voiceLanguageName = l?.name
+            view?.setVoiceState(TwiKeyboardView.VoiceKeyState.IDLE)
+            val line = if (l == null) "Voice typing in English, on the phone." else
+                LocalVoiceLines.online(l) + ". Speech goes online to be written." + (if (prefs.firstWarning(l)) " " + l.warning else "")
+            view?.showMessage(line); view?.say(line)
+        }
+        view?.say("Voice typing language. " + options.joinToString(", ") { it.first })
         return true
     }
 

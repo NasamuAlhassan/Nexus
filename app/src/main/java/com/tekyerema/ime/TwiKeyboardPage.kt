@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +56,9 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
     var swipe by remember { mutableStateOf(prefs.swipeTyping) }
     var learn by remember { mutableStateOf(prefs.learnWords) }
     var trial by remember { mutableStateOf("") }
+    var voiceLang by remember { mutableStateOf(prefs.voiceLanguage) }
+    var sendMode by remember { mutableStateOf(prefs.sendMode) }
+    var resetSaid by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
         PageTitle("Keyboard", onBack)
@@ -77,6 +81,35 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
                 if (!it) LearnedWordStore.clear(context)
             }
         }
+        // Local languages (owner, 2 Nov 2026; docs/agent/KEYBOARD_LANGUAGES.md): the microphone listens in English on the phone,
+        // or in a local language online through our language service. Also on the keyboard: long-press the microphone.
+        com.tekyerema.ui.components.GlassGroup("Voice typing language") {
+            Column(Modifier.selectableGroup()) {
+                val langs = listOf<LocalLang?>(null) + LocalLanguages.ALL
+                langs.forEachIndexed { i, l ->
+                    com.tekyerema.ui.components.ChoiceRow(l?.name ?: "English",
+                        if (l == null) "On the phone." else "Online: what you say is sent to be written." + (l.warning?.let { " $it" } ?: ""),
+                        selected = voiceLang == l, divider = i < langs.lastIndex) { prefs.voiceLanguage = l; voiceLang = l }
+                }
+            }
+        }
+        if (voiceLang != null) com.tekyerema.ui.components.GlassGroup("Type my words in") {
+            Column(Modifier.selectableGroup()) {
+                val name = voiceLang?.name ?: "my language"
+                com.tekyerema.ui.components.ChoiceRow(name, "Your words, as you said them.", selected = sendMode == SendMode.MINE) {
+                    prefs.sendMode = SendMode.MINE; sendMode = SendMode.MINE }
+                com.tekyerema.ui.components.ChoiceRow("English", "Translated. Names and numbers are kept as you said them.",
+                    selected = sendMode == SendMode.ENGLISH) { prefs.sendMode = SendMode.ENGLISH; sendMode = SendMode.ENGLISH }
+                com.tekyerema.ui.components.ChoiceRow("Ask each time", "Choose after you speak.", selected = sendMode == SendMode.ASK,
+                    divider = false) { prefs.sendMode = SendMode.ASK; sendMode = SendMode.ASK }
+            }
+        }
+        if (voiceLang != null) com.tekyerema.ui.components.GlassGroup {
+            com.tekyerema.ui.components.SettingRow("Reset this phone's code", value = if (resetSaid) "Done" else null,
+                description = "A random code, renewed every month, that shares the language service fairly between phones. " +
+                    "It is not your number or account.", divider = false) { prefs.resetDevice(); resetSaid = true }
+        }
+        Note("Before anything is typed, the keyboard reads it back to you, in the language it will be typed in.")
         Overline("Try it")
         OutlinedTextField(
             value = trial, onValueChange = { trial = it },
@@ -89,7 +122,8 @@ fun TwiKeyboardPage(onBack: () -> Unit) {
                 cursorColor = Tk.Cyan)
         )
         Note("The keyboard keeps what you type on this phone. It never sends it anywhere and keeps no history. " +
-            "Voice typing uses your phone's own speech service, and is off in password and PIN boxes. " +
+            "Voice typing in English uses your phone; in another language it goes online to our language service, which " +
+            "keeps no recording or text. Voice typing is off in password and PIN boxes. " +
             "The suggested words are a public list of common English words, kept on the phone.")
         Spacer(Modifier.height(24.dp))
     }

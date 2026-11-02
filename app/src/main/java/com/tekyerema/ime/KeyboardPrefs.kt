@@ -33,6 +33,38 @@ class KeyboardPrefs(ctx: Context) {
         get() = p.getBoolean("learn_words", false)
         set(v) = p.edit().putBoolean("learn_words", v).apply()
 
+    // ---- local languages (LocalVoice, docs/agent/KEYBOARD_LANGUAGES.md)
+
+    /** The language the microphone listens in: a [LocalLang.code], or null for English (the default). */
+    var voiceLanguage: LocalLang?
+        get() = LocalLanguages.of(p.getString("voice_language", null))
+        set(v) = p.edit().putString("voice_language", v?.code).apply()
+    /** "Type my words in": my language / English / ask each time (the default). */
+    var sendMode: SendMode
+        get() = SendMode.of(p.getString("send_mode", null))
+        set(v) = p.edit().putString("send_mode", v.key).apply()
+    /** True the first time [lang]'s warning is due (then it is marked said). */
+    fun firstWarning(lang: LocalLang): Boolean {
+        if (lang.warning == null) return false
+        val said = p.getStringSet("warned_languages", emptySet()).orEmpty()
+        if (lang.code in said) return false
+        p.edit().putStringSet("warned_languages", said + lang.code).apply()
+        return true
+    }
+
+    /** This phone's code for the Space's fair-use budget ([DeviceTag]): a random id, renewed each month or on [resetDevice]. */
+    fun deviceTag(nowMs: Long): String {
+        val month = DeviceTag.month(nowMs)
+        var id = p.getString("device_id", null)
+        if (id == null || p.getInt("device_month", 0) != month) {
+            id = java.util.UUID.randomUUID().toString()
+            p.edit().putString("device_id", id).putInt("device_month", month).apply()
+        }
+        return DeviceTag.hash(id)
+    }
+
+    fun resetDevice() { p.edit().remove("device_id").remove("device_month").apply() }
+
     companion object { const val FILE = "twi_keyboard" }
 }
 

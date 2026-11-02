@@ -52,7 +52,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         fun onGesture(path: List<GestureDecoder.Step>)
     }
 
-    private enum class StripMode { SUGGESTIONS, VARIANTS, MESSAGE }
+    private enum class StripMode { SUGGESTIONS, VARIANTS, MESSAGE, CHOICES }
 
     private val strip = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
     private val stripContent = LinearLayout(context).apply { orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
@@ -107,7 +107,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
 
     fun setVoiceState(state: VoiceKeyState) {
         voiceKey.contentDescription = when (state) {
-            VoiceKeyState.IDLE -> "Voice typing"
+            VoiceKeyState.IDLE -> voiceLanguageName?.let { "Voice typing in $it. Double-tap and hold to change the language" } ?: "Voice typing"
             VoiceKeyState.LISTENING -> "Stop voice typing"
             VoiceKeyState.OFF -> "Voice typing, off in this box"
         }
@@ -434,6 +434,21 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
             setPadding(dp(12), 0, dp(8), 0)
         }, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
     }
+
+    /** A short list of choices in the strip ([label] shown, [spoken] for TalkBack): the voice language list, "Twi or English?".
+     *  [onPick] gets the index tapped; any other key replaces the strip as usual. */
+    fun showChoices(options: List<Pair<String, String>>, onPick: (Int) -> Unit) {
+        stripMode = StripMode.CHOICES
+        shownSuggestions = emptyList()
+        stripContent.removeAllViews()
+        options.forEachIndexed { i, (label, spoken) ->
+            stripContent.addView(stripButton(label, spoken) { onPick(i) },
+                LayoutParams(0, LayoutParams.MATCH_PARENT, 1f).apply { setMargins(dp(2), dp(2), dp(2), dp(2)) })
+        }
+    }
+
+    /** The voice key says which language it listens in ("Voice typing in Twi"). */
+    var voiceLanguageName: String? = null
 
     /** TalkBack speaks [text] (no-op without a screen reader). */
     fun say(text: String) { if (text.isNotBlank()) announceForAccessibility(text) }
