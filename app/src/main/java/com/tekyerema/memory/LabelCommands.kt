@@ -22,7 +22,12 @@ object LabelCommands {
 
     /** The outcome for [raw] when it is about button names, else null — carry on as before. */
     suspend fun handle(ctx: Context, raw: String, controller: AccessibilityController?): FastOutcome? {
-        if (com.tekyerema.core.Privacy.secureStep) return null
+        if (com.tekyerema.core.Privacy.secureStep) { LabelVision.clear(); return null }
+        // A vision-suggested name waiting for the user's yes or no ("The button at the top left looks like Search. Should I call
+        // it Search?"): a yes or no answers it; anything else drops the question and is handled as usual below.
+        if (LabelVision.hasPending()) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { LabelStore.ensureLoaded(ctx); LabelVision.answer(ctx, raw) }?.let { return it }
+        }
         val cmd = LabelParse.classify(raw) ?: return null
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             LabelStore.ensureLoaded(ctx)

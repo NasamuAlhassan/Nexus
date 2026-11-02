@@ -3,7 +3,10 @@
   "memory": {
     "labels": {
       "_note": "#38 label memory (memory/LabelStore): names for unlabelled icon buttons, kept per app on the phone only (encrypted), put on the screen the planner and the spoken readings see. Taught by voice or learned from a verified outcome; the Send confirmation is never lifted by a learned name. Off = no names are applied or learned (the user's voice 'forget' commands still work).",
-      "enabled": true
+      "enabled": true,
+      "_vision_note": "Opt-in (default false): after 'describe the screen', the online vision model (same Gemini consent and privacy gate as describe_screen) proposes a 1-3 word name for up to 3 unnamed icons and Nexus ASKS ('The button at the top left looks like Search. Should I call it Search?'); a name is kept only on the user's yes. Never on a private screen.",
+      "vision": false,
+      "visionTimeoutMs": 12000
     }
   }
 }

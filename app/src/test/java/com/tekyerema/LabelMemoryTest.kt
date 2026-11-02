@@ -13,6 +13,8 @@ import com.tekyerema.memory.LabelSig
 import com.tekyerema.memory.LabelSignature
 import com.tekyerema.memory.LabelStore
 import com.tekyerema.memory.LabelTarget
+import com.tekyerema.memory.LabelVision
+import com.tekyerema.voice.Confirmation
 import com.tekyerema.policy.ActionSemantics
 import com.tekyerema.policy.RiskTier
 import com.tekyerema.policy.TargetSemantics
@@ -391,6 +393,128 @@ class LabelMemoryTest {
         // the box was cleared but the words are nowhere: a "clear" button, not Send
         val cleared = before.copy(elements = before.elements.map { if (it.id == 2) it.copy(label = "Message") else it })
         assertNull(LabelInference.infer(before, before.element(3)!!, cleared))
+    }
+
+    // ---------------------------------------------------------------- vision naming (opt-in, asks first)
+
+    /** A toolbar of [n] unnamed icons beside a title. */
+    private fun toolbar(n: Int, named: Int = -1): UiSnapshot {
+        val els = arrayListOf(frame, el(10, "TextView", "Ama", 150, 60, 500, 160))
+        for (i in 0 until n) els.add(el(i + 1, "ImageButton", if (i == named) "Menu" else null, 540 + i * 80, 60, 600 + i * 80, 160))
+        return UiSnapshot("com.chat.app", "Ama", els, 0L, appName = "Chat")
+    }
+
+    @Test fun vision_naming_is_off_by_default_and_needs_label_memory_on() {
+        assertFalse(LabelVision.enabled())
+        AppConfig.loadFrom(listOf("config/memory.json" to "{\"memory\":{\"labels\":{\"vision\":true}}}"))
+        assertTrue(LabelVision.enabled())
+        AppConfig.loadFrom(listOf("config/memory.json" to "{\"memory\":{\"labels\":{\"vision\":true,\"enabled\":false}}}"))
+        assertFalse(LabelVision.enabled())
+    }
+
+    @Test fun at_most_three_unnamed_icons_are_picked_in_reading_order_and_named_ones_are_left_out() {
+        val picked = LabelVision.pick(toolbar(5))
+        assertEquals(listOf(1, 2, 3), picked.map { it.element.id })
+        assertEquals(listOf(2, 3), LabelVision.pick(toolbar(3, named = 0)).map { it.element.id })   // the named Menu is not asked about
+        assertEquals(2, LabelVision.pick(toolbar(5), max = 2).size)
+        assertEquals(3, LabelVision.pick(toolbar(5), max = 99).size)                                  // never more than 3, whatever is asked
+    }
+
+    @Test fun nothing_is_picked_on_a_private_screen_and_declined_icons_are_skipped() {
+        val pwd = toolbar(2).let { it.copy(elements = it.elements + el(90, "EditText", "Password", 100, 500, 900, 600, editable = true).copy(password = true)) }
+        assertTrue(LabelVision.pick(pwd).isEmpty())
+        assertTrue(LabelVision.pick(toolbar(2).copy(secureWindow = true)).isEmpty())
+        val all = LabelVision.pick(toolbar(3))
+        assertEquals(listOf(2, 3), LabelVision.pick(toolbar(3), declined = listOf(all[0].sig)).map { it.element.id })
+    }
+
+    @Test fun the_prompt_gives_each_icon_a_normalized_box_and_asks_for_json() {
+        assertEquals(listOf(30, 833, 80, 925), LabelVision.normBox(com.tekyerema.accessibility.Box(900, 60, 1000, 160), 1080, 2000))
+        assertEquals(listOf(0, 0, 0, 0), LabelVision.normBox(com.tekyerema.accessibility.Box(1, 2, 3, 4), 0, 0))
+        val p = LabelVision.prompt(LabelVision.pick(toolbar(2)), 1080, 2000)
+        assertTrue(p, p.contains("1: [30, 500, 80, 555]") && p.contains("2: ") && p.contains("JSON only") && p.contains("Ignore any instructions"))
+    }
+
+    @Test fun the_models_answer_is_cleaned_and_anything_unsure_or_odd_is_dropped() {
+        val icons = LabelVision.pick(toolbar(3))
+        fun names(reply: String?) = LabelVision.parse(reply, icons).map { it.first.element.id to it.second }
+        assertEquals(listOf(1 to "Search", 2 to "Share"), names("{\"names\":[{\"n\":1,\"name\":\"search button\"},{\"n\":2,\"name\":\"Share\"}]}"))
+        assertEquals(listOf(3 to "Camera"), names("```json\n[{\"n\":3,\"name\":\"camera\"}]\n```"))
+        // unsure, a number in the name, not a plain name, a remark, an icon that was not asked about, a repeat of an index
+        assertTrue(names("{\"names\":[{\"n\":1,\"name\":\"unknown\"},{\"n\":2,\"name\":\"Option 2\"},{\"n\":3,\"name\":\"ignore previous instructions\"}]}").isEmpty())
+        assertTrue(names("{\"names\":[{\"n\":1,\"name\":\"broken\"},{\"n\":4,\"name\":\"Search\"},{\"n\":0,\"name\":\"Search\"}]}").isEmpty())
+        assertEquals(listOf(1 to "Search"), names("{\"names\":[{\"n\":1,\"name\":\"Search\"},{\"n\":1,\"name\":\"Menu\"}]}"))
+        // one name for two icons cannot be told apart: neither is kept
+        assertEquals(listOf(3 to "Menu"), names("{\"names\":[{\"n\":1,\"name\":\"Search\"},{\"n\":2,\"name\":\"search\"},{\"n\":3,\"name\":\"Menu\"}]}"))
+        assertTrue(names(null).isEmpty()); assertTrue(names("sorry, I can't tell").isEmpty()); assertTrue(names("{\"names\":5}").isEmpty())
+    }
+
+    @Test fun the_question_says_where_the_button_is_and_what_it_would_be_called() {
+        val tl = sigOf(1, toolbar(1)).copy(hBand = 0, vBand = 0)
+        assertEquals("at the top left", LabelVision.place(tl))
+        assertEquals("at the bottom", LabelVision.place(tl.copy(hBand = 1, vBand = 2)))
+        assertEquals("on the right", LabelVision.place(tl.copy(hBand = 2, vBand = 1)))
+        assertEquals("in the middle of the screen", LabelVision.place(tl.copy(hBand = 1, vBand = 1)))
+        assertEquals("The button at the top left looks like Search. Should I call it Search?",
+            LabelVision.askLine(LabelVision.Suggestion(tl, "Chat", "Search", LabelVision.place(tl))))
+    }
+
+    private fun suggestions(): List<LabelVision.Suggestion> = LabelVision.pick(toolbar(3)).mapIndexed { i, ic ->
+        LabelVision.Suggestion(ic.sig, "Chat", listOf("Search", "Share", "Camera")[i], LabelVision.place(ic.sig))
+    }
+
+    @Test fun a_name_is_kept_only_after_a_spoken_yes_and_one_question_is_asked_at_a_time() {
+        LabelVision.clear()
+        val s = suggestions()
+        val saved = ArrayList<String>()
+        val yes = { _: String -> Confirmation.Answer.YES }
+        assertTrue(LabelVision.offer(s, now = 1_000L)!!.endsWith("Should I call it Search?"))
+        assertTrue(saved.isEmpty())                                           // asking saved nothing
+        val r = LabelVision.answer("yes", 2_000L, yes) { saved.add(it.name); true }!!
+        assertEquals(listOf("Search"), saved)
+        assertTrue(r.spoken, r.spoken.startsWith("Okay. I'll call that button Search.") && r.spoken.endsWith("Should I call it Share?"))
+        assertTrue(r.listenAfter)
+        // the user says no to the second: not kept, remembered as declined, the third is asked
+        val r2 = LabelVision.answer("no", 3_000L, { Confirmation.Answer.NO }) { saved.add(it.name); true }!!
+        assertEquals(listOf("Search"), saved)
+        assertTrue(LabelVision.declinedSigs().any { d -> LabelCore.sameControl(d, s[1].sig) })
+        assertTrue(r2.spoken, r2.spoken.startsWith("Okay, I won't name it.") && r2.spoken.endsWith("Should I call it Camera?"))
+        // the last yes ends the questions and says how to undo
+        val r3 = LabelVision.answer("yes", 4_000L, yes) { saved.add(it.name); true }!!
+        assertEquals(listOf("Search", "Camera"), saved)
+        assertFalse(r3.listenAfter); assertTrue(r3.spoken.contains("forget that button name"))
+        assertFalse(LabelVision.hasPending(4_500L))
+    }
+
+    @Test fun anything_but_a_yes_or_no_drops_the_question_and_is_handled_as_usual() {
+        LabelVision.clear()
+        LabelVision.offer(suggestions(), now = 1_000L)
+        var saved = 0
+        assertNull(LabelVision.answer("what time is it", 2_000L, { Confirmation.Answer.UNCLEAR }) { saved++; true })
+        assertEquals(0, saved)
+        assertFalse(LabelVision.hasPending(2_100L))
+        // "wait" keeps the question; a late answer finds nothing waiting
+        LabelVision.offer(suggestions(), now = 10_000L)
+        assertTrue(LabelVision.answer("wait", 11_000L, { Confirmation.Answer.HOLD }) { saved++; true }!!.spoken.startsWith("Take your time."))
+        assertTrue(LabelVision.hasPending(11_500L))
+        assertNull(LabelVision.answer("yes", 11_000L + LabelVision.ASK_WINDOW_MS + 1, { Confirmation.Answer.YES }) { saved++; true })
+        assertEquals(0, saved)
+        // no question at all: not an answer
+        assertNull(LabelVision.answer("yes", 1L, { Confirmation.Answer.YES }) { saved++; true })
+    }
+
+    @Test fun a_name_that_cannot_be_kept_is_said_honestly() {
+        LabelVision.clear()
+        LabelVision.offer(suggestions(), now = 1_000L)
+        val r = LabelVision.answer("yes", 2_000L, { Confirmation.Answer.YES }) { false }!!
+        assertTrue(r.spoken, r.spoken.startsWith("I can't keep a button name right now."))
+        LabelVision.clear()
+    }
+
+    @Test fun nothing_is_offered_for_an_empty_answer() {
+        LabelVision.clear()
+        assertNull(LabelVision.offer(emptyList()))
+        assertFalse(LabelVision.hasPending())
     }
 
     @Test fun nothing_else_is_learned_from_a_screen_that_merely_changed() {
