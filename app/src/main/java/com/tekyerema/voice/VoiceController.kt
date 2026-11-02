@@ -1517,6 +1517,25 @@ class VoiceController(
                 return
             }
 
+            // Short answers (voice/ShortReply): "more" / "go on" / "tell me more" after a cut reply speaks its next piece
+            // (before the fast path, where "continue" would be the media Play key). Any other request drops what waited.
+            if (ShortReply.pending) {
+                if (ShortReply.isMore(tr.canonical) && agent.state.value.status !in PROMPTS) {
+                    val line = ShortReply.next() ?: "That's all."
+                    Log.i("Tekyerema", "[VOICE] more of the last reply")
+                    set(VoiceState.SPEAKING, line)
+                    try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                    _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
+                    if (ReadingPace.invitesContinue(line) && source == InputSource.ASR && speakAloud() && hasMicPermission() &&
+                        followUpChain < maxFollowUps) {
+                        followUpChain++
+                        runOnce(quiet = true, questionPending = true)
+                    }
+                    return
+                }
+                ShortReply.clear()
+            }
+
             // LOCAL FAST PATH (demo-critical): deterministic device ops execute HERE, before the agent/LLM —
             // no reasoning, no screen read, no app launch merely to answer (never open Clock to tell the time).
             // Returns null for anything it can't confidently handle → the agent path below runs unchanged.
@@ -1803,7 +1822,7 @@ class VoiceController(
         val resultText = finalState.log.lastOrNull { it.kind == LogEntry.Kind.RESULT }?.text
         val reading = com.tekyerema.agent.ScreenReadIntent.isRead(goal) || com.tekyerema.agent.ScreenReadIntent.isContinue(goal) ||
             (resultText != null && ReadingPace.invitesContinue(resultText))
-        return Outcome(finalState.status, spokenFor(finalState.status, resultText, exact = reading))
+        return Outcome(finalState.status, spokenFor(finalState.status, resultText, exact = reading, full = ShortReply.askedInFull(goal)))
     }
 
     /**
@@ -1904,13 +1923,36 @@ class VoiceController(
     }
 
     /** §35: speech must never imply an action happened unless the agent verified it. */
-    private fun spokenFor(status: AgentStatus, resultText: String?, exact: Boolean = false): String {
+    private fun spokenFor(status: AgentStatus, resultText: String?, exact: Boolean = false, full: Boolean = false): String {
         // B-13: "brief" keeps the first sentence of the reply; the honesty tail is added AFTER trimming, never dropped.
         // ("detailed" no longer adds "That took N steps." — no spoken step numbers, owner 2026-09-28.)
         // [exact]: a reading the user asked for is never cut — "brief" used to keep only "You're in Messages." of a screen.
-        val text = resultText?.let { if (verbosity() == "brief" && !exact) SpeechLint.firstSentence(it) else it }?.let { SpeechLint.apply(it) }
         // The language in force (a forced English in a Twi conversation said "Ɛyɛ." — owner, 24 Oct 2026).
         val twi = twiNow()
+        // Short answers by default (2 Nov 2026, voice/ShortReply): at "normal", a finished task's reply is spoken up to
+        // ~30 words at a sentence end, then "Say more for the rest."; the rest waits for "more". Not a reading, not what
+        // was asked for in full, not a question or a safety line (ShortReply.cut), not in Twi.
+        var rest: String? = null
+        val text = resultText?.let {
+            when {
+                verbosity() == "brief" && !exact -> SpeechLint.firstSentence(it)
+                verbosity() == "normal" && !exact && !full && !twi && ShortReply.enabled() &&
+                    (status == AgentStatus.COMPLETED || status == AgentStatus.COMPLETED_UNVERIFIED) ->
+                    ShortReply.cut(SpokenReply.shape(it).ifEmpty { it }).also { c -> rest = c.rest }.head
+                else -> it
+            }
+        }?.let { SpeechLint.apply(it) }
+        ShortReply.hold(rest)
+        if (rest != null) Log.i("Tekyerema", "[VOICE] long reply cut at a sentence end — the rest waits for \"more\"")
+        val tail = if (rest != null) " " + ShortReply.TAIL else ""
+        return when (status) {
+            AgentStatus.COMPLETED -> (text ?: Closers.done(twi)) + tail
+            AgentStatus.COMPLETED_UNVERIFIED -> com.tekyerema.agent.SendReport.unverified(text ?: "I tried that") + tail
+            else -> spokenForRest(status, text, twi)
+        }
+    }
+
+    private fun spokenForRest(status: AgentStatus, text: String?, twi: Boolean): String {
         return when (status) {
             AgentStatus.COMPLETED -> text ?: Closers.done(twi)   // varied, never the same "Done." twice in a row
             // (Honest results 2026-09-29: a send's evidence line that already says "I can't confirm it went" isn't doubted twice.)

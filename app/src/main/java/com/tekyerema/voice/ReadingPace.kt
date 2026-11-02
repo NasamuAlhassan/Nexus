@@ -37,6 +37,7 @@ object ReadingPace {
 
     private const val MIN_CHARS = 160
     private const val MAX_CHARS = 600
-    private val INVITE = Regex("(?i)say [“\"']?(continue|go on)[”\"']?[.!]?$")
+    // "… say continue." (a reading in parts) and ShortReply's "Say more for the rest." (a reply cut short).
+    private val INVITE = Regex("(?i)say [“\"']?(continue|go on|more)[”\"']?(?: for the rest)?[.!]?$")
     private val ENOUGH = Regex("^(?:(?:ok(?:ay)?|thanks|thank you) )?(?:that'?s (?:enough|all|fine)|enough|be quiet|quiet|stop reading|stop talking|shut up|no more)(?: thanks| thank you| please)?$")
 }
