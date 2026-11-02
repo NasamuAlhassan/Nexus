@@ -61,10 +61,14 @@ class LocalModelBrain(
     // prefix), and only history lines newer than the last step go into the next turn.
     private var session: LlmSession? = null
     private var sessionTools: List<JSONObject> = emptyList()
+    private var sessionGoal: String? = null
     private var sentHistory = 0
     private var turns = 0   // user turns sent in the open conversation (its token count may include the system prompt)
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
+        // One conversation per TASK: a new goal, or a first step while an older conversation is still open (a task that
+        // ended without a done, a stop), closes it — the brain object outlives tasks, the conversation must not.
+        if (session != null && (sessionGoal != ctx.goal || (ctx.history.isEmpty() && turns > 0))) closeSession()
         val stepTools = (0 until ctx.openAiTools.length()).mapNotNull { ctx.openAiTools.optJSONObject(it)?.optJSONObject("function") }
             .filter { it.optString("name") !in denied }
         val registry = stepTools.associateBy { it.optString("name") } + REGISTRY_ALWAYS
@@ -76,13 +80,16 @@ class LocalModelBrain(
             else com.tekyerema.agent.llm.PlannerPrompt.offered(sessionTools.filter { it.optString("name") != "done" && it.optString("name") !in com.tekyerema.agent.llm.PlannerPrompt.ALWAYS } + stepTools, registry)
         val names = offered.map { it.optString("name") }.toSet()
         val system = com.tekyerema.agent.llm.PlannerPrompt.system(offered)
-        val schema = com.tekyerema.agent.llm.PlannerPrompt.replySchema(offered)
+        // Grammar-constrained decoding is OFF by default (Kaggle, 1 Nov 2026: the constraint forced a compact JSON shape the
+        // model never saw in training; it then named the nearest tool with EMPTY arguments or looped — 5/75 on the
+        // benchmark against 85.7 % unconstrained). ToolReply + the `names` check below validate the reply instead.
+        val schema = if (AppConfig.bool("router.localModel.constrainReply", false)) com.tekyerema.agent.llm.PlannerPrompt.replySchema(offered) else null
         val maxTokens = AppConfig.int("router.localModel.maxTokens", 200)
         val timeout = AppConfig.long("router.localModel.timeoutMs", 60_000L)
         val t0 = System.currentTimeMillis()
         var user: String
         val out: String?
-        val s = session ?: llm.openSession(system, maxTokens)?.also { session = it; sessionTools = offered; turns = 0 }
+        val s = session ?: llm.openSession(system, maxTokens)?.also { session = it; sessionTools = offered; sessionGoal = ctx.goal; turns = 0 }
         if (s != null) {
             user = when {
                 // A conversation that opens mid-task (after a rollover or a new tool) starts from the full list of steps.
@@ -117,6 +124,7 @@ class LocalModelBrain(
     private fun closeSession() {
         try { session?.close() } catch (_: Throwable) {}
         session = null
+        sessionGoal = null
     }
 
     private fun log(s: String) = try { android.util.Log.i("Tekyerema", s) } catch (_: Throwable) {}

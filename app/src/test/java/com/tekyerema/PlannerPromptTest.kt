@@ -132,7 +132,11 @@ Next action?""", u)
         assertTrue("USSD is never the model's, even when the step offers it", denied is AgentDecision.Malformed)
         val f = Fake("""{"tool":"set_alarm","args":{"hour":6}}""")
         LocalModelBrain(f).decide(ctx(alarm, ussd))
-        assertTrue("decoding is constrained to this step's tools", f.lastSchema!!.contains("set_alarm") && !f.lastSchema!!.contains("run_ussd"))
+        // Grammar-constrained decoding is off by default (Kaggle, 1 Nov 2026: the constraint emptied the arguments); the
+        // reply is validated after parsing instead — a tool this step did not offer is Malformed, never run.
+        assertTrue("no decoding grammar unless router.localModel.constrainReply", f.lastSchema == null)
+        val notOffered = LocalModelBrain(Fake("""{"tool":"set_timer","args":{"seconds":60}}""")).decide(ctx(alarm))
+        assertTrue("a tool the step did not offer is never run", notOffered is AgentDecision.Malformed)
         assertTrue(LocalModelBrain(Fake(null)).decide(ctx(alarm)) is AgentDecision.CannotDo)
     }
 }

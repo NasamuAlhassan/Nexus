@@ -42,6 +42,24 @@ class LiteRtLlm(context: Context, private val modelPath: String) : OnDeviceLlm {
         return e
     }
 
+    /**
+     * LiteRT-LM issue #3165 (open in 0.15–0.19): on recurrent-state hybrids (Qwen3.5's gated delta net, Mamba2) a shared
+     * engine reuses the previous conversation's running state, so from the second task on replies loop on empty think
+     * blocks or ignore the system prompt (Kaggle probe, 2 Nov 2026: the same case on one engine gave JSON/JSON/LOOP/JSON/LOOP;
+     * three fresh engines gave the right answer three times). Until the runtime's fix ships, every task gets its own
+     * engine: the used one is closed when its conversation ends and the next one loads in the background right away, so
+     * the load is paid while nobody is waiting. Runs on the model's thread. `router.localModel.freshEnginePerTask`.
+     */
+    private fun rotateEngine() {
+        if (!com.tekyerema.core.config.AppConfig.bool("router.localModel.freshEnginePerTask", true)) return
+        val old = engine ?: return
+        engine = null
+        try { old.close() } catch (_: Throwable) {}
+        thread.executor.execute {
+            try { engine() } catch (t: Throwable) { Log.w(TAG, "[LLM] $id pre-warm failed: ${t.javaClass.simpleName}") }
+        }
+    }
+
     override suspend fun complete(prompt: String, maxTokens: Int, timeoutMs: Long): String? =
         chat("", prompt, null, maxTokens, timeoutMs)
 
@@ -67,6 +85,7 @@ class LiteRtLlm(context: Context, private val modelPath: String) : OnDeviceLlm {
                     } finally {
                         current = null
                         c.close()
+                        rotateEngine()
                     }
                 } catch (t: Throwable) {
                     Log.w(TAG, "[LLM] $id ${if (timedOut) "timed out after $timeoutMs ms" else "failed: ${t.javaClass.simpleName}"}")
@@ -131,8 +150,11 @@ class LiteRtLlm(context: Context, private val modelPath: String) : OnDeviceLlm {
         override fun close() {
             val c = conv ?: return
             conv = null
-            // Closed on the model's thread, after any step still in flight there.
-            thread.executor.execute { try { c.close() } catch (_: Throwable) {} }
+            // Closed on the model's thread, after any step still in flight there; then the engine is rotated (see above).
+            thread.executor.execute {
+                try { c.close() } catch (_: Throwable) {}
+                rotateEngine()
+            }
         }
     }
 

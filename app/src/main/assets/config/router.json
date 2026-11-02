@@ -46,12 +46,16 @@
       "phrases": { "answer": "The internet is back. Earlier you asked: {goal}. {answer}" }
     },
     "localModel": {
-      "_note": "C-04 seam, OFF: an optional downloaded on-device model (e.g. FunctionGemma-270M via llama.cpp) mapping an unmatched utterance to ONE tool, used only without the cloud. Needs a runtime registered in LocalModelRuntime and the model file at 'path'. Nothing is bundled.",
+      "_note": "The on-device planner (LocalModelBrain + LiteRtLlm, 1 Nov 2026): a downloaded .litertlm in the app's files (never the APK), the benchmark's conversation prompt, one conversation per task. OFF until a model file is present; 'first' = local before the cloud. constrainReply: grammar-constrained decoding, OFF (it emptied the arguments, Kaggle 1 Nov). freshEnginePerTask: a new engine per task, ON while LiteRT-LM #3165 (recurrent-state leak between conversations on Qwen3.5) is open.",
       "enabled": false,
+      "first": false,
       "path": "",
       "minRamMb": 2500,
-      "maxTokens": 48,
-      "timeoutMs": 6000
+      "maxTokens": 200,
+      "timeoutMs": 90000,
+      "maxContextTokens": 3000,
+      "constrainReply": false,
+      "freshEnginePerTask": true
     }
   },
   "executor": {
