@@ -95,5 +95,6 @@ object UserMemory {
     fun clearAll(ctx: Context?) {
         update(ctx) { MemState(off = it.off) }
         try { LabelStore.forget(ctx, null) } catch (_: Throwable) {}   // #38: the names given to unlabelled buttons go too
+        try { com.tekyerema.teach.TeachStore.shared.ensureLoaded(ctx); com.tekyerema.teach.TeachStore.shared.clear() } catch (_: Throwable) {}   // #24: taught skills too
     }
 }

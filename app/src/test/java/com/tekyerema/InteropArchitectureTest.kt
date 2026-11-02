@@ -65,6 +65,9 @@ class InteropArchitectureTest {
         assertEquals(mapOf(
             "agent/AgentEngine.kt" to 2,        // the step loop (after the gate) and the goal-directed extra scrolls of an ALLOWed scroll
             "agent/LocalFastRouter.kt" to 1,    // runTool: only when PolicyEngine.evaluate(...) == ALLOW and ToolManifest allows "local"
+            "companion/CompanionRuntime.kt" to 1,   // the daily brief's calendar read: read-only, ToolManifest + PolicyEngine ALLOW only
+            "teach/ReplayHostAndroid.kt" to 2,      // a taught skill's step: ToolManifest(local) + TargetSemantics + PolicyEngine + StepGate, plain ALLOW only
+            "teach/TeachCommands.kt" to 1,          // reading the last screen after a replay: read-only, ToolManifest + PolicyEngine ALLOW only
             "safety/DangerAlert.kt" to 2,       // the danger code word: location link + SMS, only after the user turned it on and the cancel window ran out
             "tools/EmergencyTool.kt" to 2       // inside EmergencyTool.execute (TIER2, confirmed): its location link and SMS
         ), found)

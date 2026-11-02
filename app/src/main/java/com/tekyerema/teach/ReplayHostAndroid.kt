@@ -55,14 +55,14 @@ class ReplayHostAndroid(
         ?.takeIf { ToolManifest.isAvailable(it) && ToolManifest.mayCall(it, ToolManifest.CALLER_LOCAL) }
 
     override suspend fun openApp(step: TeachStep): StepRun {
-        val t = tool("open_app") ?: return StepRun.Failed("open_app unavailable")
+        val stepTool = tool("open_app") ?: return StepRun.Failed("open_app unavailable")
         for (app in listOfNotNull(step.pkg, step.appName).distinct()) {
             val args = JSONObject().put("app", app)
-            val pd = PolicyEngine().evaluate(t, args)
+            val pd = PolicyEngine().evaluate(stepTool, args)
             if (pd.outcome == PolicyOutcome.CONFIRM) return StepRun.NeedsYes(pd.confirmationPrompt ?: pd.reason)
             if (pd.outcome == PolicyOutcome.BLOCK) return StepRun.Blocked(pd.reason)
             val ctx = ToolContext(appContext, controller, NotificationStore)
-            val r = t.execute(args, ctx)
+            val r = stepTool.execute(args, ctx)
             if (r.success) { controller.waitForSettle(3000); return StepRun.Ok }
         }
         return StepRun.Failed("couldn't open ${step.appName ?: step.pkg}")
@@ -76,7 +76,7 @@ class ReplayHostAndroid(
             StepKind.SCROLL -> "scroll"
             StepKind.OPEN_APP -> return openApp(step)
         }
-        val t = tool(toolName) ?: return StepRun.Failed("$toolName unavailable")
+        val stepTool = tool(toolName) ?: return StepRun.Failed("$toolName unavailable")
         val args = JSONObject()
         if (element != null && element.source == ElementSource.TREE) args.put("element_id", element.id)
         when (step.kind) {
@@ -87,7 +87,7 @@ class ReplayHostAndroid(
         // ---- the gates (the same order as the engine's step)
         val label = element?.label ?: step.label
         val cls = TargetSemantics.classify(toolName, element, label, step.submit, snap)
-        var pd = PolicyEngine().evaluate(t, args, hasUntrustedParams = false, targetTier = cls.tier, hardBlock = cls.block,
+        var pd = PolicyEngine().evaluate(stepTool, args, hasUntrustedParams = false, targetTier = cls.tier, hardBlock = cls.block,
             context = PolicyEngine.ActionContext(label, cls.reason, snap.appPackage))
         pd = StepGate.unseenFloor(element, pd)
         if (pd.outcome == PolicyOutcome.CONFIRM) return StepRun.NeedsYes(pd.confirmationPrompt ?: pd.reason)
@@ -95,8 +95,8 @@ class ReplayHostAndroid(
         // ---- do it
         val ctx = ToolContext(appContext, controller, NotificationStore, observedBefore = snap,
             resolvedTarget = element?.let { ResolvedTarget(it, it.bounds.centerX, it.bounds.centerY, if (it.source == ElementSource.VISION) "vision" else "id") })
-        t.preflight(args, ctx)?.let { return StepRun.Failed(it.message) }
-        val r = t.execute(args, ctx)
+        stepTool.preflight(args, ctx)?.let { return StepRun.Failed(it.message) }
+        val r = stepTool.execute(args, ctx)
         if (!r.success) return StepRun.Failed(r.message)
         controller.waitForSettle(2500)
         return StepRun.Ok

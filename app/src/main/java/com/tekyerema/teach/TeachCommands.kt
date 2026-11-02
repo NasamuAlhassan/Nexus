@@ -83,7 +83,12 @@ object TeachCommands {
                 else if (AppConfig.bool("teach.readScreenAfter", true)) {
                     // What the skill was for is usually on the last screen (a balance, a status): read it, through the reader's own
                     // privacy rules (a PIN / password / code screen, or a denied app, is never read).
-                    val r = try { ReadScreenTool.execute(JSONObject(), ToolContext(ctx, c, NotificationStore)) } catch (_: Throwable) { null }
+                    val r = try {
+                        // the same gate as every other door: a capability switched off, or a policy that is not a plain ALLOW, reads nothing
+                        if (com.tekyerema.tools.ToolManifest.isAvailable(ReadScreenTool) &&
+                            com.tekyerema.policy.PolicyEngine().evaluate(ReadScreenTool, JSONObject()).outcome == com.tekyerema.policy.PolicyOutcome.ALLOW)
+                            ReadScreenTool.execute(JSONObject(), ToolContext(ctx, c, NotificationStore)) else null
+                    } catch (_: Throwable) { null }
                     if (r != null && r.success && r.message.isNotBlank()) said += " " + r.message
                 }
                 Result(FastOutcome("TEACH_RUN", said, systemVoice = false, ok = true, acted = true))
