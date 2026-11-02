@@ -186,6 +186,59 @@ class TeachRecorderTest {
         assertEquals(TeachRecorder.Result.Stopped(StopReason.TIMEOUT), r2.onEvent(click("A", 61_000L)))
     }
 
+    // ---------------------------------------------------------------- Back / Home keys
+
+    private fun key(type: RawEvent.Type, t: Long, pkg: String = app) = RawEvent(type, pkg, t, appName = "MyMTN", launchable = true)
+
+    @Test fun the_back_key_is_a_step_in_the_app_it_was_pressed_in() {
+        val r = rec()
+        r.onEvent(click("Data", 1000L))
+        assertTrue(r.onEvent(key(RawEvent.Type.KEY_BACK, 2000L)) is TeachRecorder.Result.Recorded)
+        val last = r.steps().last()
+        assertEquals(StepKind.BACK, last.kind); assertEquals(app, last.pkg); assertNull(last.label)
+        // two real Backs in a row are two steps; one press reported twice is one
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(key(RawEvent.Type.KEY_BACK, 2100L)))
+        r.onEvent(key(RawEvent.Type.KEY_BACK, 3000L))
+        assertEquals(listOf(StepKind.OPEN_APP, StepKind.CLICK, StepKind.BACK, StepKind.BACK), r.steps().map { it.kind })
+    }
+
+    @Test fun back_or_home_on_the_home_screen_is_not_a_step() {
+        val r = rec()
+        r.onEvent(click("Data", 1000L))
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(key(RawEvent.Type.KEY_BACK, 2000L, pkg = "com.sec.android.app.launcher").copy(isShell = true)))
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(key(RawEvent.Type.KEY_HOME, 2500L, pkg = "com.sec.android.app.launcher").copy(isShell = true)))
+        assertEquals(2, r.steps().size)
+    }
+
+    @Test fun home_is_a_step_and_opening_the_same_app_again_is_recorded_again() {
+        val r = rec()
+        r.onEvent(click("Data", 1000L))
+        assertTrue(r.onEvent(key(RawEvent.Type.KEY_HOME, 2000L)) is TeachRecorder.Result.Recorded)
+        assertEquals(StepKind.HOME, r.steps().last().kind)
+        r.onEvent(RawEvent(RawEvent.Type.WINDOW_CHANGED, app, 3000L, appName = "MyMTN", launchable = true))
+        assertEquals(listOf(StepKind.OPEN_APP, StepKind.CLICK, StepKind.HOME, StepKind.OPEN_APP), r.steps().map { it.kind })
+    }
+
+    @Test fun a_key_press_in_a_private_place_stops_the_recording_and_is_not_kept() {
+        val r = rec()
+        r.onEvent(click("Data", 1000L))
+        assertEquals(TeachRecorder.Result.Stopped(StopReason.PRIVATE), r.onEvent(key(RawEvent.Type.KEY_BACK, 2000L), secureNow = true))
+        assertTrue(r.steps().none { it.kind == StepKind.BACK })
+        val r2 = rec()
+        assertEquals(TeachRecorder.Result.Stopped(StopReason.PHONE_DIALOG), r2.onEvent(key(RawEvent.Type.KEY_BACK, 1000L, pkg = "com.android.phone")))
+        val r3 = rec()
+        assertEquals(TeachRecorder.Result.Stopped(StopReason.DENIED_APP), r3.onEvent(key(RawEvent.Type.KEY_HOME, 1000L).copy(denied = true)))
+        assertTrue(r3.steps().isEmpty())
+    }
+
+    @Test fun keys_on_the_keyboard_our_screens_and_system_dialogs_are_not_steps() {
+        val r = rec()
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(key(RawEvent.Type.KEY_BACK, 1000L).copy(isIme = true)))
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(key(RawEvent.Type.KEY_BACK, 1100L, pkg = "com.tekyerema")))
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(key(RawEvent.Type.KEY_BACK, 1200L, pkg = "android")))
+        assertTrue(r.steps().isEmpty())
+    }
+
     @Test fun nothing_is_recorded_when_it_is_off_and_discard_forgets_everything() {
         val r = TeachRecorder()
         assertEquals(TeachRecorder.Result.Ignored, r.onEvent(click("Data", 1000L)))

@@ -10,7 +10,16 @@ import org.json.JSONObject
  * no coordinates anywhere, so a taught skill survives a different screen size, a font change or a re-ordered list, and
  * replay finds the element again by name — or stops and says it couldn't (never taps blindly).
  */
-enum class StepKind { OPEN_APP, CLICK, LONG_CLICK, TYPE, SCROLL }
+enum class StepKind {
+    OPEN_APP, CLICK, LONG_CLICK, TYPE, SCROLL,
+    /** The user pressed Back (replayed through the key_event tool, "back"). [TeachStep.pkg] = the app it was pressed in. */
+    BACK,
+    /** The user pressed Home (replayed as "go to the home screen"). */
+    HOME;
+
+    /** A system key: no element to find, so replay does not match the screen against a label. */
+    val isKey: Boolean get() = this == BACK || this == HOME
+}
 
 data class TeachStep(
     val kind: StepKind,

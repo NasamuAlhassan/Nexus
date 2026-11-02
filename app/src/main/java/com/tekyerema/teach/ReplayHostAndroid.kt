@@ -74,6 +74,7 @@ class ReplayHostAndroid(
             StepKind.LONG_CLICK -> "long_press"
             StepKind.TYPE -> "type"
             StepKind.SCROLL -> "scroll"
+            StepKind.BACK, StepKind.HOME -> "key_event"   // the same global-action tool the agent's "go back" / "go home" uses
             StepKind.OPEN_APP -> return openApp(step)
         }
         val stepTool = tool(toolName) ?: return StepRun.Failed("$toolName unavailable")
@@ -82,10 +83,12 @@ class ReplayHostAndroid(
         when (step.kind) {
             StepKind.TYPE -> { args.put("text", step.text ?: return StepRun.Failed("no text kept")); if (step.submit) args.put("submit", true) }
             StepKind.SCROLL -> args.put("direction", step.direction ?: "down")
+            StepKind.BACK -> args.put("key", "back")
+            StepKind.HOME -> args.put("key", "home")
             else -> {}
         }
         // ---- the gates (the same order as the engine's step)
-        val label = element?.label ?: step.label
+        val label = element?.label ?: step.label ?: if (step.kind.isKey) args.optString("key") else null
         val cls = TargetSemantics.classify(toolName, element, label, step.submit, snap)
         var pd = PolicyEngine().evaluate(stepTool, args, hasUntrustedParams = false, targetTier = cls.tier, hardBlock = cls.block,
             context = PolicyEngine.ActionContext(label, cls.reason, snap.appPackage))

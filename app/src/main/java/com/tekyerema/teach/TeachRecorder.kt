@@ -38,7 +38,11 @@ data class RawEvent(
     /** The user's deny list names this app (J-11): nothing in it is recorded. */
     val denied: Boolean = false
 ) {
-    enum class Type { CLICK, LONG_CLICK, TEXT_CHANGED, SCROLLED, WINDOW_CHANGED }
+    /**
+     * KEY_BACK / KEY_HOME: the user pressed the Back / Home key (seen as a key-up by the service's key filter — Back makes no
+     * click event, and the window change it causes can't be told from an app moving on by itself). [pkg] = the app in front.
+     */
+    enum class Type { CLICK, LONG_CLICK, TEXT_CHANGED, SCROLLED, WINDOW_CHANGED, KEY_BACK, KEY_HOME }
 }
 
 /** Why recording stopped by itself (the user's own "stop" is not one of these). */
@@ -148,11 +152,14 @@ class TeachRecorder(
             RawEvent.Type.CLICK, RawEvent.Type.LONG_CLICK -> clicked(e, pkg)
             RawEvent.Type.TEXT_CHANGED -> typed(e, pkg)
             RawEvent.Type.SCROLLED -> scrolled(e, pkg)
+            RawEvent.Type.KEY_BACK, RawEvent.Type.KEY_HOME -> keyPressed(e, pkg)
         }
     }
 
     private val SYSTEM_DIALOGS = setOf("android", "com.google.android.permissioncontroller", "com.android.permissioncontroller",
         "com.google.android.packageinstaller", "com.android.packageinstaller")
+
+    private val KEY_DEBOUNCE_MS = 250L
 
     private fun stopTimeout() { recording = false; stopReason = StopReason.TIMEOUT }
 
@@ -221,6 +228,23 @@ class TeachRecorder(
         val step = TeachStep(StepKind.TYPE, pkg, appName = e.appName, screenTitle = e.screenTitle, label = name, viewId = e.viewId,
             role = e.role, hint = e.hint?.takeIf { it.isNotBlank() && it != text.trim() }, textLength = text.length)
         val r = add(Draft(step.copy(sensitive = StepWords.isSensitive(step)), e.timeMs, typed = text))
+        return r
+    }
+
+    /**
+     * The Back or Home key. Back is a step in the app it was pressed in; Home is "go to the home screen". Neither is recorded
+     * on the home screen itself (nothing to go back from), and the adapter never reports a Back that only hid the keyboard.
+     * Home forgets the current app, so opening the same app again afterwards is recorded as "open it" again.
+     */
+    private fun keyPressed(e: RawEvent, pkg: String): Result {
+        if (e.isShell) return Result.Ignored
+        val kind = if (e.type == RawEvent.Type.KEY_HOME) StepKind.HOME else StepKind.BACK
+        // One press reported twice (a key-up seen by two paths) is one press.
+        val last = drafts.lastOrNull()
+        if (last != null && last.step.kind == kind && last.step.pkg == pkg && e.timeMs - last.at < KEY_DEBOUNCE_MS) return Result.Ignored
+        if (kind == StepKind.BACK) ensureApp(e, pkg)
+        val r = add(Draft(TeachStep(kind, pkg, appName = e.appName), e.timeMs))
+        if (kind == StepKind.HOME) { lastPkg = null; lastClick = null }
         return r
     }
 

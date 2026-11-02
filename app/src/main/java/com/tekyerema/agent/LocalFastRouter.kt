@@ -1188,7 +1188,10 @@ class LocalFastRouter(
         if (!cloudOk && !i.picture && i.question == null) return null   // the agent / LocalBrain reads the screen's text instead
         val args = org.json.JSONObject().put("picture", i.picture)
         i.question?.let { args.put("question", it) }
-        return runTool("describe_screen", args)
+        // Opt-in `memory.labels.vision`: after a description of the SCREEN, offers to name an unnamed icon (asks first, never silent).
+        return runTool("describe_screen", args)?.let { o ->
+            if (i.picture || i.question != null) o else com.tekyerema.memory.LabelVision.afterDescribe(appContext, controller(), o)
+        }
     }
 
     /** "is WhatsApp installed?" — from the launcher list, with what to say next. */

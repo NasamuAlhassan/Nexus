@@ -99,7 +99,12 @@ object TeachCommands {
             }
             is ReplayResult.HandOver -> {
                 audit(words + ", then handed over", true)
-                Result(agentGoal = handOverGoal(result))
+                // The user hears why the replay stopped before the agent speaks ("I couldn't find Data, so I'll do the rest my
+                // way."): the agent's first words can be seconds away. The router takes the goal (and ignores the outcome), so
+                // the line is spoken here, once.
+                val said = handOverSpoken(result)
+                say(said)
+                Result(outcome = FastOutcome("TEACH_RUN", said, systemVoice = true, ok = true), agentGoal = handOverGoal(result))
             }
             ReplayResult.Cancelled -> Result(FastOutcome("TEACH_RUN", "Stopped.", systemVoice = true, ok = true))
             null -> Result(FastOutcome("TEACH_RUN", "Sorry, I couldn't run “$name” just now.", systemVoice = true, ok = false))
@@ -112,6 +117,13 @@ object TeachCommands {
         val steps = StepWords.asGoal(h.remaining).replaceFirstChar { it.uppercase() }
         val ask = if (h.why == HandOverWhy.NEEDS_TEXT) " Ask me what to type before you type it." else ""
         return "${h.line} Do the rest for me: $steps.$ask"
+    }
+
+    /** The one short line the user hears when a replay hands over: why it stopped, and that the rest is done another way. */
+    internal fun handOverSpoken(h: ReplayResult.HandOver): String = when (h.why) {
+        HandOverWhy.NEEDS_YES -> "This step needs your yes, so I'll do the rest my way and ask you first."
+        HandOverWhy.NEEDS_TEXT -> "I'll do the rest my way, and ask you what to type."
+        else -> h.line.trim().trimEnd('.', '!').trim().let { if (it.isEmpty()) "I'll do the rest my way." else "$it, so I'll do the rest my way." }
     }
 
     private fun audit(words: String, ok: Boolean) {
@@ -145,7 +157,29 @@ object TeachCommands {
 
     private fun announce(line: String) {
         Log.i(TAG, "[TEACH] stopped by itself, phase=${session.phase}")
+        say(line)
+    }
+
+    private fun say(line: String) {
         try { com.tekyerema.voice.VoiceEngine.announce(line, listenAfter = false) } catch (_: Throwable) {}
+    }
+
+    /**
+     * The user pressed Back or Home while a recording is on (forwarded by the service's key filter, key-up only; the key is
+     * never consumed). Back that only hides the keyboard is not a step. What the agent presses itself is not recorded.
+     */
+    fun onKey(service: TekyeremaAccessibilityService, keyCode: Int, action: Int) {
+        try {
+            if (action != android.view.KeyEvent.ACTION_UP) return
+            if (keyCode != android.view.KeyEvent.KEYCODE_BACK && keyCode != android.view.KeyEvent.KEYCODE_HOME) return
+            if (!session.recording) return
+            if (!enabled() || AgentEngine.isBusy) return
+            if (keyCode == android.view.KeyEvent.KEYCODE_BACK && service.keyboardUp()) return
+            val raw = TeachEventSource.keyToRaw(service, keyCode, service.foregroundPackage()) ?: return
+            val secure = SecureStep.active() || Privacy.secureStep
+            session.onEvent(raw, secure)?.let { notice -> announce(notice); return }
+            if (session.recording) requestCheck(service, raw.timeMs)
+        } catch (t: Throwable) { Log.w(TAG, "[TEACH] key skipped: ${t.javaClass.simpleName}") }
     }
 
     private fun requestCheck(c: AccessibilityController, since: Long) {

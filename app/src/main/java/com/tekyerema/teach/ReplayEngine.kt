@@ -77,6 +77,22 @@ object ReplayEngine {
                 }
                 i++; continue
             }
+            // ---- Back / Home: a system key, no element. Back must be pressed in the app it was taught in (a Back anywhere else
+            // leaves the wrong app); Home works from anywhere. Private and denied screens stop it like any other step.
+            if (s.kind.isKey) {
+                val keySnap = (if (s.kind == StepKind.BACK) screenFor(s, host) else host.snapshot())
+                    ?: return over(HandOverWhy.UNREADABLE, "I couldn't read the screen.")
+                if (host.isPrivate(keySnap)) return ReplayResult.Private(i)
+                host.appBlocked(keySnap.appPackage)?.let { return over(HandOverWhy.BLOCKED, "I can't use this app.") }
+                if (s.kind == StepKind.BACK && keySnap.appPackage != s.pkg) return over(HandOverWhy.WRONG_SCREEN, "This isn't the screen I expected.")
+                when (host.act(s, null, keySnap)) {
+                    StepRun.Ok -> ran++
+                    is StepRun.NeedsYes -> return over(HandOverWhy.NEEDS_YES, "This step needs your yes.")
+                    is StepRun.Blocked -> return over(HandOverWhy.BLOCKED, "I'm not allowed to do that step.")
+                    is StepRun.Failed -> return over(HandOverWhy.FAILED, "That step didn't work.")
+                }
+                i++; continue
+            }
             // ---- the screen must be the one the step was taught on
             var snap = screenFor(s, host) ?: return over(HandOverWhy.UNREADABLE, "I couldn't read the screen.")
             if (host.isPrivate(snap)) return ReplayResult.Private(i)
