@@ -112,6 +112,8 @@ object AgentEngine {
     private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
         com.tekyerema.money.TelcoUssdTool.NAME) + SIM_TOOLS
     private const val TAG = "Tekyerema"
+    /** Said before a money read-back within the call window (moneyCallLine). Short: the read-back question follows it. */
+    internal const val MONEY_AFTER_CALL = "Careful: an unknown number called you a few minutes ago. If they asked you to send this, don't."
     /** D-10: how much of a tool's result the model sees. Reading tools return content the user asked for (a message, a
      *  search answer) — cutting it at 140 characters lost the point of the call; actions keep a short line. */
     private val READING_TOOLS = BrainPrompts.READING_TOOLS
@@ -1613,7 +1615,7 @@ object AgentEngine {
                                 val heardLine = com.tekyerema.voice.HeardAs.line(goal, decision.name, decision.args)
                                 // …and a money word the recogniser got wrong ("10 pesos" → 10 pesewas): heard once, here
                                 val moneyHeard = com.tekyerema.voice.HeardAs.moneyLine(decision.name, decision.args)
-                                val disclosures = listOfNotNull(heardLine, moneyHeard)
+                                val disclosures = listOfNotNull(moneyCallLine(decision.name, decision.args), heardLine, moneyHeard)
                                 val prompt = com.tekyerema.mcp.RemoteGate.prompt(origin, (effectLine?.let { "$it\n" } ?: "") +
                                     disclosures.joinToString("") { "$it " } +
                                     com.tekyerema.policy.ActionSemantics.withRecipientNotice(
@@ -2781,6 +2783,14 @@ object AgentEngine {
      *  Outside runTask on purpose — that method sits near the JVM's 64 KB limit. */
     /** "This is money" (money/MoneyMoment): a money tool's read-back starts the money moment; [finish] / stop end it.
      *  Out of runTask on purpose (that method is near the JVM's 64 KB limit). */
+    /** Fraud step 2 (phone/CallShield): a send that starts soon after an ANSWERED call from an unknown number is the commonest
+     *  MoMo scam (the caller talks the victim through it). The read-back says so first; the user still decides. Only a money
+     *  tool that moves an amount — a balance check stays quiet. Out of runTask on purpose (the JVM 64 KB method limit). */
+    private fun moneyCallLine(tool: String, args: JSONObject): String? =
+        if (com.tekyerema.money.MoneyMoment.isMoneyTool(tool) && args.optString("amount").isNotBlank() &&
+            try { com.tekyerema.phone.CallShield.recentUnknownCall() } catch (_: Throwable) { false })
+            MONEY_AFTER_CALL else null
+
     private fun moneyReadBack(tool: String) {
         if (com.tekyerema.money.MoneyMoment.isMoneyTool(tool)) com.tekyerema.money.MoneyMoment.hold(com.tekyerema.money.MoneyMoment.TASK)
     }
