@@ -41,12 +41,16 @@ object SpeechControl {
         "no", "careful", "which", "who", "what", "where", "when", "how", "let", "sorry", "your", "nexus", "secure", "say", "shall", "should",
         "do", "did", "can", "could", "would", "will", "is", "are", "was", "new", "one", "two", "and", "but", "so", "if", "then", "today")
 
+    /** Capitalised but never a name worth spelling (trial 2 Nov 2026: "spell it" after the time spelled "PM: P, M."). */
+    private val NOT_NAMES = setOf("am", "pm", "a.m", "p.m", "gh", "ghs", "gh₵", "usd", "ok", "okay", "percent")
+
     /** The last name or number group in [line], spelled; null when there is none. */
     fun spellLast(line: String?): String? {
         if (line.isNullOrBlank()) return null
         DIGITS.findAll(line).lastOrNull()?.let { return spellNumber(it.value) }
         val names = CAP_RUN.findAll(line).mapNotNull { m ->
-            m.value.trim().split(Regex("\\s+")).dropWhile { it.lowercase() in STARTERS }.joinToString(" ").takeIf { it.length >= 2 }
+            m.value.trim().split(Regex("\\s+")).dropWhile { it.lowercase() in STARTERS }
+                .filterNot { it.lowercase().trimEnd('.', ',') in NOT_NAMES }.joinToString(" ").takeIf { it.length >= 2 }
         }.toList()
         val name = names.lastOrNull() ?: return null
         return "$name: " + name.split(Regex("\\s+")).joinToString(". ") { w ->

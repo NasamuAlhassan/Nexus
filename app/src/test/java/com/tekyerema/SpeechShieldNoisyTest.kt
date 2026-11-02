@@ -39,6 +39,9 @@ class SpeechShieldNoisyTest {
         assertEquals("Zero two four, one two three, four five six seven.", SpeechControl.spellLast("Calling Ama on 024 123 4567."))
         assertEquals("Five five eight, two zero one, three four.", SpeechControl.spellLast("Reference 55820134. Done."))
         assertNull(SpeechControl.spellLast("Okay, it's on."))
+        assertNull(SpeechControl.spellLast("The time is 3:40 PM."))                       // trial 2 Nov: was "PM: P, M."
+        assertNull(SpeechControl.spellLast("The time is three forty PM."))
+        assertEquals("Kofi: K, O, F, I.", SpeechControl.spellLast("Kofi called at 9:15 AM."))
         assertNull(SpeechControl.spellLast(""))
     }
 

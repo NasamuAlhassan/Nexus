@@ -1482,7 +1482,7 @@ class VoiceController(
                 val lastLine = _state.value.spoken
                 val line = when {
                     lastLine.isBlank() -> "I haven't said anything yet."
-                    control == SpeechControl.Kind.SPELL -> SpeechControl.spellLast(lastLine) ?: "There's no name or number in what I just said."
+                    control == SpeechControl.Kind.SPELL -> SpeechControl.spellLast(lastLine) ?: "There's nothing to spell in what I just said."
                     else -> lastLine
                 }
                 if (control == SpeechControl.Kind.SLOWER && lastLine.isNotBlank()) {
