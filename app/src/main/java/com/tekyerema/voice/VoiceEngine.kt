@@ -558,8 +558,9 @@ object VoiceEngine {
             "cloud brain keys: groq=${settings.groqApiKeys.size} gemini=${if (settings.geminiApiKey.isNotBlank()) 1 else 0}")
         val cues = AndroidVoiceCues(app, soundsOn = { settings.sounds }, hapticsOn = { settings.haptics })
         // "This is money": the coin earcon when a money step starts, and the optional whole-flow curtain (Settings › Privacy).
-        com.tekyerema.money.MoneyMoment.onStart = { cues.money() }
+        com.tekyerema.money.MoneyMoment.onStart = { android.util.Log.i("Tekyerema", "[MONEY] moment on, coin cue"); cues.money() }
         com.tekyerema.money.MoneyMoment.onChange = { on ->
+            if (!on) android.util.Log.i("Tekyerema", "[MONEY] moment off")   // c9: the trial scores the cue from these two lines
             if (settings.moneyCurtain) { if (on) com.tekyerema.phone.PinCurtain.show(force = true) else com.tekyerema.phone.PinCurtain.hideWhenDialogGone() }
         }
         val duplex = DuplexAudio(app)   // B-07
