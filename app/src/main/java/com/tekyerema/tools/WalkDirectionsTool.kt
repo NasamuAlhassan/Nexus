@@ -11,7 +11,7 @@ import org.json.JSONObject
  */
 object WalkDirectionsTool : Tool {
     override val name = "walk_directions"
-    override val description = "Walking directions, guided live by Tɛkyerɛma (never open a maps app); action=distance answers \"how far is X from here\" from the phone's own location."
+    override val description = "Walking directions, guided live by Nexus (never open a maps app); action=distance answers \"how far is X from here\" from the phone's own location."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val isAccelerator = true

@@ -247,7 +247,7 @@ object ReadNotificationsTool : Tool {
         // §1.1: never report absence-of-capability as absence-of-data. If the listener is off we CANNOT
         // see notifications — hard-fail honestly instead of speaking a false "you have no notifications".
         if (!com.tekyerema.ui.Perms.notifications(ctx.appContext))
-            return ToolResult(false, "Notification access is off — I can't read your notifications until you turn it on for Tɛkyerɛma in Settings.")
+            return ToolResult(false, "Notification access is off — I can't read your notifications until you turn it on for Nexus in Settings.")
         val filter = args.str("filter")?.trim()
         // Ongoing notifications (a call in progress, "Checking for new messages…") are state, not messages; a
         // "never touch" app's are not read either (audit half 2 #9).

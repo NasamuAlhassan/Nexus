@@ -84,7 +84,7 @@ class AppRulesTest {
         assertFalse(OperatorPolicy.setAppRule("com.acme.dialer", "Acme Phone", AppRule.NEVER))
         assertTrue(OperatorPolicy.appRules.isEmpty())
         assertTrue(say("never touch the phone app")!!.contains("call for help in an emergency"))
-        assertTrue(say("stay out of Tɛkyerɛma")!!.startsWith("I can't make a rule for Tɛkyerɛma"))
+        assertTrue(say("stay out of Tɛkyerɛma")!!.startsWith("I can't make a rule for Nexus"))
         assertTrue(OperatorPolicy.appRules.isEmpty())
     }
 

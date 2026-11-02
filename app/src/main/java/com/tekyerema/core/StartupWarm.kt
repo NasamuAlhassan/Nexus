@@ -30,6 +30,7 @@ object StartupWarm {
             warm("twi") { com.tekyerema.language.TwiCommands.hashCode() }
             warm("verbalize") { com.tekyerema.voice.Verbalize.hashCode(); com.tekyerema.voice.understand.SpokenNumbers.hashCode(); com.tekyerema.agent.NumberSpeech.hashCode() }
             warm("tools") { com.tekyerema.tools.ToolManifest.hashCode(); com.tekyerema.tools.Grounding.hashCode() }
+            warm("fraud") { com.tekyerema.money.fraud.ScamScore.model(app) }
             warm("money") { com.tekyerema.money.MoneyAsk.hashCode(); com.tekyerema.money.BankUssd.hashCode(); com.tekyerema.money.TelcoUssd.hashCode(); com.tekyerema.money.ussd.MenuBrain.hashCode() }
             Log.i("Tekyerema", "[STARTUP] warm ${SystemClock.uptimeMillis() - t0} ms: $marks")
             // The launchable-app list (a PackageManager query: 3.4 s on the emulator) is what the FIRST request pays for —

@@ -153,9 +153,9 @@ object UssdNavigatorTool : Tool {
         // Before any question or read-back (reliability audit, 20 Oct 2026): found only in execute(), these failed AFTER the
         // reference, the read-back, the correction and the "yes" — the worst moment.
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
-            return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open Mobile Money. Allow Phone for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "Nexus isn't allowed to make calls, so I can't open Mobile Money. Allow Phone for Nexus in Settings.", recoverable = false)
         if (ctx.controller == null)
-            return ToolResult(false, "The accessibility service isn't running, so I can't read the menu. Turn on Tɛkyerɛma in Settings, under Accessibility.", recoverable = false)
+            return ToolResult(false, "The accessibility service isn't running, so I can't read the menu. Turn on Nexus in Settings, under Accessibility.", recoverable = false)
         if (intent == TxIntent.CHECK_BALANCE) return null
         if (intent == TxIntent.GOAL) {
             if (args.str(ARG_GOAL).isNullOrBlank())
@@ -196,7 +196,7 @@ object UssdNavigatorTool : Tool {
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
-            return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open Mobile Money. Allow Phone for Tɛkyerɛma in Settings.")
+            return ToolResult(false, "Nexus isn't allowed to make calls, so I can't open Mobile Money. Allow Phone for Nexus in Settings.")
         val ctrl = ctx.controller ?: return ToolResult(false, "The accessibility service isn't running, so I can't read the menu.")
         val intent = intentOf(args)
         val root = (if (intent == TxIntent.GOAL) args.str(ARG_ROOT)?.takeIf { it in goalRoots(Provider.current(ctx.appContext).provider) }

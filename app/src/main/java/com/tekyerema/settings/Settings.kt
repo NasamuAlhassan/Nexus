@@ -209,7 +209,9 @@ class Settings(context: Context) {
      *  [LANG_MODE_ENGLISH] / [LANG_MODE_TWI] force that language; [LANG_MODE_BOTH] lets LID follow
      *  natural code-switching with [sessionLanguage] as the low-signal fallback. */
     var languageMode: String
-        get() = prefs.getString(KEY_LANG_MODE, LANG_MODE_BOTH) ?: LANG_MODE_BOTH
+        // Nexus is English only (owner, 31 Oct 2026): a Twi or auto mode stored by an older build is not followed.
+        get() = if (com.tekyerema.core.config.AppConfig.bool("speech.language.englishOnly", false)) LANG_MODE_ENGLISH
+            else prefs.getString(KEY_LANG_MODE, LANG_MODE_BOTH) ?: LANG_MODE_BOTH
         set(v) = put { putString(KEY_LANG_MODE, v) }
 
     /** Language to force for ASR/TTS, or null to follow the speaker (auto LID). */

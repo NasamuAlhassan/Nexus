@@ -410,6 +410,8 @@ class VoiceController(
      *  voice) — the A20e read the English question with the Twi voice (3 October 2026). [question] stays the English. */
     private suspend fun askByVoice(question: String, skipSpeech: Boolean = false, said: String? = null) {
         val lang = forceLanguage() ?: sessionLanguage()
+        // A planner's question is cleaned for the ear before anything shows or says it (SpokenReply: no JSON, no step numbers).
+        @Suppress("NAME_SHADOWING") val question = if (lang == Lang.TWI) question else SpokenReply.shape(question).ifEmpty { question }
         try {
             fillers?.stop()
             if (!skipSpeech && speakAloud()) {
@@ -1555,6 +1557,9 @@ class VoiceController(
             // Offline, words the meaning matcher mapped to a command only the LocalBrain runs ("read the screen") go as that command.
             val agentT0 = android.os.SystemClock.uptimeMillis()
             var outcome = runAgent(fastRouter?.agentGoal(tr.canonical) ?: tr.canonical) ?: return   // null: already set fail/cancel
+            // What the planner wrote, shaped for a listener (SpokenReply) — the screen shows the same words the voice says.
+            if (tr.language != Lang.TWI && outcome.spoken.isNotBlank())
+                outcome = outcome.copy(spoken = SpokenReply.shape(outcome.spoken).ifEmpty { outcome.spoken })
             // After a LONG task, a small warm word before the result ("Alright — it's sent.") — the breath a person takes
             // (micro_details.md quick win 8). Never on a question (the "?" tail must stay last) or a reading.
             // Not in Twi: a random opener makes the line different each time, so the lab voice's recording of it is never

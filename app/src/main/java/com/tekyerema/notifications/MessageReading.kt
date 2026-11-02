@@ -29,7 +29,9 @@ object MessageReading {
             m.whenSpoken?.trim()?.takeIf { it.isNotEmpty() }?.let { head.append(", ").append(it) }
         }
         head.append('.')
-        return head.toString() + SpokenText.PAUSE + SpokenText.forEar(m.text)
+        // A likely scam is said once, after who and before the words, never changing them (money/fraud/ScamWarning).
+        val warning = com.tekyerema.money.fraud.ScamWarning.before(m.who, m.text)?.let { it + SpokenText.PAUSE } ?: ""
+        return head.toString() + SpokenText.PAUSE + warning + SpokenText.forEar(m.text)
     }
 
     data class Page(val text: String, val rest: List<Msg>)

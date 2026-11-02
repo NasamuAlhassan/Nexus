@@ -132,10 +132,10 @@ object AuditExport {
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "application/json"
                 putExtra(Intent.EXTRA_STREAM, uri)
-                putExtra(Intent.EXTRA_SUBJECT, "Tɛkyerɛma history and activity log")
+                putExtra(Intent.EXTRA_SUBJECT, "Nexus history and activity log")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            val chooser = Intent.createChooser(send, "Share your Tɛkyerɛma history").apply {
+            val chooser = Intent.createChooser(send, "Share your Nexus history").apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             app.startActivity(chooser)

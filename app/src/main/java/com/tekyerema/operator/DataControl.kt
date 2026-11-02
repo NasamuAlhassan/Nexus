@@ -33,7 +33,7 @@ object DataControl {
             Item("Words the Twi keyboard learned", safe { com.tekyerema.ime.LearnedWordStore.count(app) }, null, "words"),
             // Money safety round 2: scrambled (salted hashes), never the numbers — only "have I paid this number before?".
             Item("Numbers you've sent Mobile Money to, kept scrambled", safe { com.tekyerema.money.KnownRecipients.count() }, null, "numbers"),
-            Item("Saved tasks to improve Tɛkyerɛma", safe { com.tekyerema.core.telemetry.Trajectories.count(app) },
+            Item("Saved tasks to improve Nexus", safe { com.tekyerema.core.telemetry.Trajectories.count(app) },
                 "${com.tekyerema.core.Privacy.trajectoryDays()} days", "tasks"),
             Item("Step-by-step traces", safe { File(app.filesDir, "traces").listFiles()?.size ?: 0 },
                 "${com.tekyerema.core.Privacy.traceDays()} days", "files"),

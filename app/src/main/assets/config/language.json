@@ -441,6 +441,8 @@
   },
   "speech": {
     "language": {
+      "_englishOnlyNote": "Nexus, 31 Oct 2026 (owner): English only — every turn is English whatever was stored before (settings.languageMode reads ENGLISH while this is true); false brings the old modes back.",
+      "englishOnly": true,
       "_note": "B-05 LanguageSession: replies follow the language of the user's last turn while the conversation is live (conversationTtlSec); the persisted habitual language (the low-signal fallback after a pause) changes only after habitualSwitchTurns turns in a row in the other language.",
       "conversationTtlSec": 300,
       "habitualSwitchTurns": 2

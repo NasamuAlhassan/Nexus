@@ -141,7 +141,7 @@ object RemoteControl {
         override fun announceCode(code: String) {
             app?.let { RemoteNotice.show(it, code) }
             val c = Pairing.spoken(code)
-            say("A computer wants to connect to Tɛkyerɛma. The code is $c. Again: $c.")
+            say("A computer wants to connect to Nexus. The code is $c. Again: $c.")
         }
 
         override fun connected(client: String) {
@@ -187,7 +187,7 @@ internal object RemoteNotice {
             val mgr = ctx.getSystemService(NotificationManager::class.java) ?: return
             if (Build.VERSION.SDK_INT >= 26 && mgr.getNotificationChannel(CHANNEL) == null)
                 mgr.createNotificationChannel(NotificationChannel(CHANNEL, "Computer connection", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Shows when a computer can ask Tɛkyerɛma for tasks, and the pairing code."
+                    description = "Shows when a computer can ask Nexus for tasks, and the pairing code."
                     setShowBadge(false)
                 })
             val off = PendingIntent.getBroadcast(ctx, 7, Intent(ACTION_OFF).setPackage(ctx.packageName),

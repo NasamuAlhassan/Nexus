@@ -114,7 +114,7 @@ object AuditView {
     fun chainLine(c: AuditChain.Check): String = when {
         c.intact && c.checked == 0 -> "The log is empty."
         c.intact -> "Log intact — all ${c.checked} entries check out; none was changed, moved or taken out from between others."
-        !c.ok -> "Warning: ${c.problem ?: "the log doesn't check out"}. Something changed this log outside Tɛkyerɛma."
+        !c.ok -> "Warning: ${c.problem ?: "the log doesn't check out"}. Something changed this log outside Nexus."
         else -> "Warning: ${c.unreadable} stored ${if (c.unreadable == 1) "entry" else "entries"} couldn't be read back; the rest check out."
     }
 }

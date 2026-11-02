@@ -19,7 +19,7 @@ object ScreenView {
     const val PRIVATE_SCREEN = "The screen is a PIN, password, code or robot-check screen, so it isn't shown."
     const val DENIED_APP = "The app on screen is on the user's deny list, so it isn't shown."
     const val NO_CAPTURE = "The app on screen asks not to be captured (a secure window), so it isn't shown."
-    const val UNAVAILABLE = "The screen can't be read right now (Tɛkyerɛma's accessibility service isn't connected)."
+    const val UNAVAILABLE = "The screen can't be read right now (Nexus's accessibility service isn't connected)."
 
     fun report(snap: UiSnapshot?, secureStep: Boolean, denyApps: Set<String>): ScreenReport {
         val why = when {

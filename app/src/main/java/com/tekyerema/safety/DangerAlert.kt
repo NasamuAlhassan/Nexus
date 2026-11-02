@@ -184,7 +184,7 @@ object DangerAlert {
             val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= 26) nm.createNotificationChannel(NotificationChannel(CHANNEL, "Danger alert", NotificationManager.IMPORTANCE_HIGH))
             val b = if (Build.VERSION.SDK_INT >= 26) android.app.Notification.Builder(app, CHANNEL) else @Suppress("DEPRECATION") android.app.Notification.Builder(app)
-            b.setSmallIcon(android.R.drawable.ic_dialog_alert).setContentTitle("Tɛkyerɛma danger alert").setContentText(text).setOngoing(cancelable)
+            b.setSmallIcon(android.R.drawable.ic_dialog_alert).setContentTitle("Nexus danger alert").setContentText(text).setOngoing(cancelable)
             if (cancelable) b.addAction(android.app.Notification.Action.Builder(null, "Cancel",
                 PendingIntent.getBroadcast(app, 0, Intent(ACTION_CANCEL).setPackage(app.packageName), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).build())
             nm.notify(NOTE_ID, b.build())

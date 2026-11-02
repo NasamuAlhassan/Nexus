@@ -410,7 +410,7 @@ class WakeWordService : Service() {
 
     private fun startForegroundSafe() {
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
-            .setContentTitle("Tɛkyerɛma")
+            .setContentTitle("Nexus")
             .setContentText("Listening for \"Hey Tɛkyerɛma\"")
             .setSmallIcon(applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
             .setOngoing(true).setCategory(NotificationCompat.CATEGORY_SERVICE).setPriority(NotificationCompat.PRIORITY_MIN)
@@ -451,7 +451,7 @@ class WakeWordService : Service() {
             val mgr = ctx.getSystemService(NotificationManager::class.java) ?: return
             if (mgr.getNotificationChannel(CHANNEL) == null)
                 mgr.createNotificationChannel(NotificationChannel(CHANNEL, "Wake word", NotificationManager.IMPORTANCE_MIN).apply {
-                    description = "Lets you activate Tɛkyerɛma hands-free."; setShowBadge(false)
+                    description = "Lets you activate Nexus hands-free."; setShowBadge(false)
                 })
         }
 

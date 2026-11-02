@@ -148,7 +148,7 @@ object MoneyStatusTool : Tool {
     override val params = listOf(ToolParam(ARG_MODE, "string", "status | last | spent | received | message", required = false,
         enumValues = listOf(STATUS, LAST, SPENT, RECEIVED, MESSAGE)))
 
-    private const val NO_SMS = "I need permission to read your text messages for that — allow SMS access for Tɛkyerɛma in Settings."
+    private const val NO_SMS = "I need permission to read your text messages for that — allow SMS access for Nexus in Settings."
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val app = ctx.appContext

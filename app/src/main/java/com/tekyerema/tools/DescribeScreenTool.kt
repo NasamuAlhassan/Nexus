@@ -75,7 +75,7 @@ object DescribeScreenTool : Tool {
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val c = ctx.controller
-            ?: return ToolResult(false, "I can't see the screen — screen control is off for Tɛkyerɛma.", recoverable = false)
+            ?: return ToolResult(false, "I can't see the screen — screen control is off for Nexus.", recoverable = false)
         val s = com.tekyerema.settings.Settings(ctx.appContext)
         suspend fun check(): String? {
             val snap = c.buildSnapshot()

@@ -32,7 +32,7 @@ object RouterRules {
             FastIntent.LockScreen, FastIntent.Notifications, FastIntent.AnswerCall, FastIntent.EndCall,
             FastIntent.LastSms, FastIntent.WhereAmI, FastIntent.Connectivity, FastIntent.NowPlaying, FastIntent.ShowAlarms,
             FastIntent.Screenshot, FastIntent.PowerMenu, FastIntent.TakePhoto, FastIntent.TakeSelfie, FastIntent.CalendarToday, FastIntent.LockQuery,
-            FastIntent.WhatChanged, FastIntent.ListSchedules, FastIntent.Undo, FastIntent.MemoryQuery,
+            FastIntent.WhatChanged, FastIntent.ScreenWhere, FastIntent.ListSchedules, FastIntent.Undo, FastIntent.MemoryQuery,
             FastIntent.ListRoutines, FastIntent.Resume
         ).associateBy { it.name }
     }

@@ -47,8 +47,8 @@ class TalkTileService : TileService() {
         val tile = qsTile ?: return
         val b = try { busy() } catch (_: Throwable) { false }
         tile.state = if (b) Tile.STATE_ACTIVE else Tile.STATE_INACTIVE
-        tile.label = "Tɛkyerɛma"
-        tile.contentDescription = if (b) "Tɛkyerɛma is working. Tap to stop." else "Talk to Tɛkyerɛma"
+        tile.label = "Nexus"
+        tile.contentDescription = if (b) "Nexus is working. Tap to stop." else "Talk to Nexus"
         tile.updateTile()
     }
 }

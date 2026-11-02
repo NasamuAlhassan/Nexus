@@ -41,10 +41,10 @@ object Health {
     fun isForceStop(reason: Int?): Boolean = reason == ApplicationExitInfo.REASON_USER_REQUESTED
 
     const val SCREEN_CONTROL_OFF = "Heads up: screen control is off, so I can only do simple things like the time, calls " +
-        "and settings. To turn it on, go to Settings, Accessibility, Installed apps, Tɛkyerɛma."
-    const val SCREEN_CONTROL_OFF_AFTER_FORCE_STOP = "Heads up: when Tɛkyerɛma was force-stopped or swiped away, Android " +
+        "and settings. To turn it on, go to Settings, Accessibility, Installed apps, Nexus screen control."
+    const val SCREEN_CONTROL_OFF_AFTER_FORCE_STOP = "Heads up: when Nexus was force-stopped or swiped away, Android " +
         "switched screen control off, so I can only do simple things like the time, calls and settings. To turn it back " +
-        "on, go to Settings, Accessibility, Installed apps, Tɛkyerɛma."
+        "on, go to Settings, Accessibility, Installed apps, Nexus screen control."
 
     /** The screen-control notice, told why when the last exit was a force-stop. Pure. */
     fun screenControlNotice(a11yEnabled: Boolean, lastExit: Int?): String? = when {

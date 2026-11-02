@@ -128,7 +128,7 @@ object AppRules {
     }
 
     fun meaning(r: AppRule?): String = when (r) {
-        null -> "Tɛkyerɛma may use it, and still asks before anything important."
+        null -> "Nexus may use it, and still asks before anything important."
         AppRule.GUIDE -> "Reads it and tells you what to tap, but never taps or types there."
         AppRule.NEVER -> "Won't open it, use it or read it, and skips its notifications."
     }
@@ -166,7 +166,7 @@ object AppRules {
     }
 
     fun protectedLine(label: String, kind: Protected): String = when (kind) {
-        Protected.SELF -> "I can't make a rule for Tɛkyerɛma itself. To stop me doing things, say “guide only”."
+        Protected.SELF -> "I can't make a rule for Nexus itself. To stop me doing things, say “guide only”."
         Protected.PHONE -> "I can't put $label off limits: I need it to call for help in an emergency."
     }
 

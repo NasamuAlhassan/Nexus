@@ -252,7 +252,7 @@ object SetTimerTool : Tool {
     override suspend fun verify(args: JSONObject, ctx: ToolContext, before: UiSnapshot?, after: UiSnapshot?, result: ToolResult): VerificationResult {
         if (!result.success) return VerificationResult(false, "the timer wasn't started")
         if (result.data?.optBoolean("ownTimer") == true)
-            return VerificationResult(com.tekyerema.live.LiveTimer.running().isNotEmpty(), "Tɛkyerɛma's own timer is counting down")
+            return VerificationResult(com.tekyerema.live.LiveTimer.running().isNotEmpty(), "Nexus's own timer is counting down")
         val listener = com.tekyerema.notifications.TekyeremaNotificationListener.instance
             ?: return VerificationResult(true, "the Clock app accepted the timer (it runs without a screen)")
         repeat(6) {

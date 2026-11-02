@@ -102,7 +102,7 @@ class PhoneCareIntentsTest {
         assertEquals("Okay. I'll tell you when you receive Mobile Money, but not your balance.", PhoneCareIntents.switchLine("money", true))
         assertEquals("Okay. I'll stop telling you about money.", PhoneCareIntents.switchLine("money", false))
         assertTrue(PhoneCareIntents.switchLine("money", true, notificationAccess = false)
-            .endsWith("But I can't see your notifications yet. To fix it: in Tɛkyerɛma, open Settings, Permissions, Read messages."))
+            .endsWith("But I can't see your notifications yet. To fix it: in Nexus, open Settings, Permissions, Read messages."))
         assertTrue(PhoneCareIntents.switchLine("missed_call", true, messageAlertsOn = false).contains("message alerts are switched off in Settings, Control"))
         assertTrue(PhoneCareIntents.switchLine("balance", true, moneyOn = false).contains("Money alerts are off."))
         assertEquals("Okay. I'll warn you when your battery gets low.", PhoneCareIntents.switchLine("battery", true, notificationAccess = false))

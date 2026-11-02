@@ -67,6 +67,9 @@ sealed class FastIntent(val name: String) {
      *  the router's name for that turn. */
     object MoreMessages : FastIntent("MORE_MESSAGES")
     object WhereAmI : FastIntent("WHERE_AM_I")
+    /** MASTER_STATUS #35: "which app am I in?", "what screen is this?" — the phone, not the street (WhereAmI is GPS);
+     *  one offline sentence from the tree ([com.tekyerema.core.ScreenSummary]). */
+    object ScreenWhere : FastIntent("WHERE_ON_SCREEN")
     object Connectivity : FastIntent("CONNECTIVITY")
     object NowPlaying : FastIntent("NOW_PLAYING")
     /** [mode] = "vibrate" | "silent" | "normal". */
@@ -234,6 +237,7 @@ object FastIntentClassifier {
         if (RE_FORGET_CHOICE.matches(g)) return FastIntent.Forget("choice")     // E: before "forget <person>"
         if (RE_FORGET_CHOICES.matches(g)) return FastIntent.Forget("choices")
         if (RE_CLEAR_HISTORY.matches(g)) return FastIntent.ClearHistory
+        if (RE_WHERE_ON_SCREEN.matches(g)) return FastIntent.ScreenWhere
         RE_FORGET_PERSON.matchEntire(g)?.let { m -> return FastIntent.Forget("person", watchName(raw, m.groupValues[1])) }
         // E-20, before the compound check: "open ChatGPT and ask it …" is ONE deterministic action (the question may
         // itself contain "and").
@@ -698,6 +702,10 @@ object FastIntentClassifier {
         "have i got(?: any)?|are there(?: any)?|did i get(?: any)?)(?: me)?(?: (?:my|the))?(?: (?:last|latest|newest|new|recent|unread))?" +
         " (whatsapp|whats app|telegram|messenger) (messages?|chats?)(?: from (.+?))?(?: please)?$")
     private val RE_LAST_SMS = Regex("\\b(?:read|check|what(?:'s| is| was)|any)\\b.*\\b(?:text messages?|texts|sms|my (?:last |latest |new )?text)\\b|^(?:my )?(?:last|latest|new) (?:text|sms|text message)s?$")
+    /** Whole utterances only: "where am I" alone stays the street (GPS); these name the phone, the app or the screen. */
+    private val RE_WHERE_ON_SCREEN = Regex("(?:(?:hey )?nexus,? )?(?:which|what) app (?:am i (?:in|on|using)(?: now| right now)?|is (?:this|open|on(?: the)? screen)(?: now)?)|" +
+        "what screen (?:is this|am i on)(?: now)?|where am i (?:on (?:the |my )?(?:phone|screen)|in (?:the |this )?app)(?: now)?|" +
+        "where am i on screen|what page (?:is this|am i on)")
     private val RE_WHERE_AM_I = Regex("\\b(?:where am i|where i am|what(?:'s| is) my (?:current )?location|my current location|what street am i on)\\b")
     // A place on the map. Whole utterances, and only wordings that ASK FOR THE MAP: a bare "where is X" is a question
     // (a blind user wants the answer spoken, not Maps opened) and "go to X" is an app or a screen ("go to settings") —

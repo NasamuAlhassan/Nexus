@@ -271,8 +271,8 @@ object OperatorCommands {
         val intent = if (c == Capability.NOTIFICATIONS) android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             else android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", ctx.packageName, null))
         try { ctx.startActivity(intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (_: Throwable) {}
-        return if (c == Capability.NOTIFICATIONS) " Android also needs to allow it: I've opened notification access — switch on Tɛkyerɛma."
-            else " Android also needs to allow it: I've opened Tɛkyerɛma's page in Settings — open Permissions and allow ${Capabilities.label(c)}."
+        return if (c == Capability.NOTIFICATIONS) " Android also needs to allow it: I've opened notification access — switch on Nexus notifications."
+            else " Android also needs to allow it: I've opened Nexus's page in Settings — open Permissions and allow ${Capabilities.label(c)}."
     }
 
     /**

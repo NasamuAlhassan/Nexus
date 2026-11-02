@@ -54,7 +54,7 @@ object Dictation {
         // Never speak a secret into a secure step — and never route that audio to any other recognizer either.
         secure -> Outcome.None("Voice typing is off during a secure step. Type it with the keys.")
         // A voice turn holds a microphone already; a second recorder would be silenced or silence it.
-        engineRunning -> Outcome.None("Tɛkyerɛma is already listening. Finish that conversation first.")
+        engineRunning -> Outcome.None("Nexus is already listening. Finish that conversation first.")
         // The captured stack isn't built or can't serve this language: the keyboard's old route may still work.
         !ready -> Outcome.None("own dictation isn't ready", fallbackToSystem = true)
         else -> null

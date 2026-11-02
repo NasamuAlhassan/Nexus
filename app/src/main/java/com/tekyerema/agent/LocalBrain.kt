@@ -529,7 +529,7 @@ class LocalBrain : AgentBrain {
         val src = screen.optJSONObject("perception")?.optString("source")
         val appName = listOf("app", "foreground", "package", "screen").map { screen.optString(it) }.firstOrNull { it.isNotBlank() && it != "unknown" }
         if (appName == null && (src == "none" || src == "no controller"))
-            return AgentDecision.Done("I can't see your screen — Tɛkyerɛma's accessibility service is off. Turn it on in Settings, under Accessibility.")
+            return AgentDecision.Done("I can't see your screen — Nexus's accessibility service is off. Turn it on in Settings, under Accessibility.")
         val app = listOf("app", "foreground", "package", "screen").map { screen.optString(it) }.firstOrNull { it.isNotBlank() }
         // K-01 / F-10 orientation: where you are, the main things you can DO (buttons, fields, switches), then
         // what is listed — so "what's on my screen" answers "where am I and what can I do here".

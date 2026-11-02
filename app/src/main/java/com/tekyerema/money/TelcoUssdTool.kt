@@ -188,7 +188,7 @@ object TelcoUssdTool : Tool {
     private suspend fun open(args: JSONObject, ctx: ToolContext, ctrl: com.tekyerema.accessibility.AccessibilityController): ToolResult {
         val flow = TelcoGuide.flowOf(args) ?: return ToolResult(false, "I don't have a checked code for that.", recoverable = false)
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
-            return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open ${flow.netName}'s menu. Allow Phone for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "Nexus isn't allowed to make calls, so I can't open ${flow.netName}'s menu. Allow Phone for Nexus in Settings.", recoverable = false)
         // An earlier request's PIN or payment prompt still in front is the user's to finish or cancel — never dialled over.
         UssdDialog.promptInFront(ctrl)?.let { p ->
             Log.i(TAG, "[TELCO] a PIN or payment prompt from an earlier request is still in front — not dialling over it")

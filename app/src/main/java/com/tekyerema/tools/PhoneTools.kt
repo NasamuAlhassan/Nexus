@@ -247,7 +247,7 @@ object SendSmsTool : Tool {
         // "reply to the last message": whoever texted last — never a contact called "the last message" (audit C17).
         if (ReplyTarget.meansLastSender(contact)) return lastSender(ctx)
         if (!ctx.appContext.granted(Manifest.permission.READ_CONTACTS))
-            return Recipient.Problem(ToolResult(false, "I can't look up $contact without contacts access — allow it for Tɛkyerɛma in Settings, or tell me the number.", recoverable = false))
+            return Recipient.Problem(ToolResult(false, "I can't look up $contact without contacts access — allow it for Nexus in Settings, or tell me the number.", recoverable = false))
         // One person saved twice is one match; "Ama ending 456" (an option we offered) picks that entry.
         val matches = ContactChoice.resolve(ctx.appContext, contact, preferFrequent = true)
         return when {
@@ -265,7 +265,7 @@ object SendSmsTool : Tool {
     private fun lastSender(ctx: ToolContext): Recipient {
         val app = ctx.appContext
         if (!app.granted(Manifest.permission.READ_SMS))
-            return Recipient.Problem(ToolResult(false, "I can't see who texted last without SMS access — allow it for Tɛkyerɛma in Settings, or tell me who to text.", recoverable = false))
+            return Recipient.Problem(ToolResult(false, "I can't see who texted last without SMS access — allow it for Nexus in Settings, or tell me who to text.", recoverable = false))
         val address = try {
             app.contentResolver.query(Telephony.Sms.Inbox.CONTENT_URI, arrayOf(Telephony.TextBasedSmsColumns.ADDRESS), null, null,
                 "${Telephony.TextBasedSmsColumns.DATE} DESC")?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
@@ -501,7 +501,7 @@ object SendSmsTool : Tool {
             try {
                 sms.sendMultipartTextMessage(number, null, parts, sentIntents, null)
             } catch (se: SecurityException) {
-                return ToolResult(false, "Android refused to send the text — check the SMS permission for Tɛkyerɛma.", recoverable = false)
+                return ToolResult(false, "Android refused to send the text — check the SMS permission for Nexus.", recoverable = false)
             } catch (iae: IllegalArgumentException) {
                 return ToolResult(false, "That number doesn't look like one I can text.")
             }
@@ -640,7 +640,7 @@ object CallControlTool : Tool {
         val action = action(args) ?: return ToolResult(false, "Should I answer the call or end it?")
         val app = ctx.appContext
         if (!app.granted(Manifest.permission.ANSWER_PHONE_CALLS))
-            return ToolResult(false, "I need permission to answer and end calls — allow it for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "I need permission to answer and end calls — allow it for Nexus in Settings.", recoverable = false)
         val telecom = app.getSystemService(TelecomManager::class.java)
             ?: return ToolResult(false, "The phone's call service isn't available.", recoverable = false)
         val state = callState(app)
@@ -659,7 +659,7 @@ object CallControlTool : Tool {
                 else ToolResult(false, "The phone didn't end the call — there may be no call to end.", channel = "native")
             }
         } catch (se: SecurityException) {
-            ToolResult(false, "Android didn't let me ${if (action == "answer") "answer" else "end"} the call — check the phone-call permission for Tɛkyerɛma.", recoverable = false)
+            ToolResult(false, "Android didn't let me ${if (action == "answer") "answer" else "end"} the call — check the phone-call permission for Nexus.", recoverable = false)
         } catch (t: Throwable) {
             ToolResult(false, "Couldn't ${if (action == "answer") "answer" else "end"} the call: ${t.javaClass.simpleName}.")
         }
@@ -713,7 +713,7 @@ object CallLogTool : Tool {
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val app = ctx.appContext
         if (!app.granted(Manifest.permission.READ_CALL_LOG))
-            return ToolResult(false, "I need call-log permission to see your calls — allow it for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "I need call-log permission to see your calls — allow it for Nexus in Settings.", recoverable = false)
         val filter = args.str("filter")?.trim()?.lowercase()
         val type = when (filter) {
             "missed" -> CallLog.Calls.MISSED_TYPE
@@ -754,7 +754,7 @@ object CallLogTool : Tool {
                 }
             } ?: return ToolResult(false, "Couldn't open the call log.", recoverable = true)
         } catch (se: SecurityException) {
-            return ToolResult(false, "I need call-log permission to see your calls — allow it for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "I need call-log permission to see your calls — allow it for Nexus in Settings.", recoverable = false)
         } catch (t: Throwable) {
             return ToolResult(false, "Couldn't read the call log: ${t.javaClass.simpleName}.", recoverable = true)
         }
@@ -790,7 +790,7 @@ object ReadSmsTool : Tool {
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val app = ctx.appContext
         if (!app.granted(Manifest.permission.READ_SMS))
-            return ToolResult(false, "I need permission to read your text messages — allow SMS access for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "I need permission to read your text messages — allow SMS access for Nexus in Settings.", recoverable = false)
         val sender = args.str("sender")?.trim()?.takeIf { it.isNotEmpty() }
         val contains = args.str("contains")?.trim()?.takeIf { it.isNotEmpty() }
         val limit = (args.intOrNull("limit") ?: 3).coerceIn(1, 10)
@@ -817,7 +817,7 @@ object ReadSmsTool : Tool {
                 }
             } ?: return ToolResult(false, "Couldn't open the SMS inbox.", recoverable = true)
         } catch (se: SecurityException) {
-            return ToolResult(false, "I need permission to read your text messages — allow SMS access for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "I need permission to read your text messages — allow SMS access for Nexus in Settings.", recoverable = false)
         } catch (t: Throwable) {
             return ToolResult(false, "Couldn't read the SMS inbox: ${t.javaClass.simpleName}.", recoverable = true)
         }

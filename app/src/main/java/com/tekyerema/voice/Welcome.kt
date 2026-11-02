@@ -82,7 +82,7 @@ object Welcome {
     }
 
     // ------------------------------------------------------------------ what is said
-    const val INTRO = "Hello, I'm Tɛkyerɛma. Let me ask you a few quick things. Say skip to move on, or just ask me for something."
+    const val INTRO = "Hello, I'm Nexus. Let me ask you a few quick things. Say skip to move on, or just ask me for something."
     const val CLOSING = "You can ask me to call someone, send a message, play music, or check your MoMo. Say 'what can you do' any time."
     const val SORRY = "Sorry, I didn't catch that. "
     const val OKAY = "Okay."

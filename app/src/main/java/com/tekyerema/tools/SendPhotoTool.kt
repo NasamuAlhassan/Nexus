@@ -18,7 +18,7 @@ import org.json.JSONObject
 object SendPhotoTool : Tool {
     override val name = "send_photo"
     override val description = "The way to SEND a new photo or selfie: call it FIRST, before opening any app. Takes it with " +
-        "Tɛkyerɛma's camera (camera=front for a selfie; beep countdown) and opens ANY app that takes shared pictures with it " +
+        "Nexus's camera (camera=front for a selfie; beep countdown) and opens ANY app that takes shared pictures with it " +
         "ready. Pick the person there; nothing is sent until Send is confirmed."
     override val scope = CapabilityScope.COMMS_SEND
     override val riskTier = RiskTier.TIER1
@@ -47,7 +47,7 @@ object SendPhotoTool : Tool {
         catch (t: Throwable) { PhotoCapture.done(PhotoCapture.Shot(null, "camera")); return ToolResult(false, "I couldn't open the camera.", recoverable = false) }
         val shot = withTimeoutOrNull(AppConfig.long("camera.sendPhoto.timeoutMs", 30_000L)) { answer.await() }
         val file = shot?.file ?: return ToolResult(false, when (shot?.why) {
-            "permission" -> "I need the camera permission to take the photo. Allow the camera for Tɛkyerɛma and ask again."
+            "permission" -> "I need the camera permission to take the photo. Allow the camera for Nexus and ask again."
             "closed" -> "The camera closed before the photo was taken."
             null -> "The camera didn't take the photo in time."
             else -> "I couldn't take the photo."

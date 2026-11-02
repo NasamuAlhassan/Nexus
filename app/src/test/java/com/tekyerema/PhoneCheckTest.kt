@@ -66,7 +66,7 @@ class PhoneCheckTest {
         assertEquals(7, found.size)
         val line = say(f)
         assertSpeakable(line)
-        assertTrue(line, line.startsWith("I can't use the microphone, so I can't hear you. To fix it: in Tɛkyerɛma, open Settings, Permissions, Microphone."))
+        assertTrue(line, line.startsWith("I can't use the microphone, so I can't hear you. To fix it: in Nexus, open Settings, Permissions, Microphone."))
         assertTrue(line.contains("Screen control is off") && line.contains("You're offline") && line.contains("I can't see your notifications"))
         assertFalse("the fifth and later are not spoken", line.contains("phone calls") || line.contains("text messages") || line.contains("sleep"))
         assertFalse("with problems left unsaid, nothing claims the rest works", line.contains("Everything else"))
@@ -89,7 +89,7 @@ class PhoneCheckTest {
 
     @Test fun screen_control_off_and_not_running_are_told_apart() {
         assertTrue(say(Facts(screenControlOn = false)).startsWith("Screen control is off, so I can't open apps or tap for you. " +
-            "To fix it: Settings, Accessibility, Installed apps, Tɛkyerɛma, and switch it on."))
+            "To fix it: Settings, Accessibility, Installed apps, Nexus screen control, and switch it on."))
         assertTrue(say(Facts(screenControlBound = false)).contains("switch it off, then on again."))
         assertTrue(say(Facts(notificationListenerBound = false)).startsWith("Notification access is on, but it isn't connected. To fix it: restart the phone."))
     }

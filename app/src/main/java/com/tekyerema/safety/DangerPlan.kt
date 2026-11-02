@@ -19,7 +19,7 @@ object DangerPlan {
     fun message(link: String?, accuracyM: Int?, time: String, manual: Boolean = false): String {
         val where = if (link != null) " My location: $link" + (accuracyM?.let { " (within about $it m)" } ?: "") else " I could not get my location."
         return "EMERGENCY: I may be in danger and " + (if (manual) "pressed SOS." else "used my danger code word.") + "$where Please call me, or call the police on 191 or 112. " +
-            "Sent automatically by Tɛkyerɛma at $time."
+            "Sent automatically by Nexus at $time."
     }
 
     /** What is said when the code word is heard: the cancel window and how to cancel it. */

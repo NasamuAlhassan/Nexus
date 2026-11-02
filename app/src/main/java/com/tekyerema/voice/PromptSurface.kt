@@ -60,5 +60,5 @@ object PromptSurface {
 
     /** The secure step's panel line. */
     fun secureText(twi: Boolean): String = if (twi) "Ahotoso adeyɛ — wo ankasa hyɛ mu. Merenhwɛ screen no."
-        else "Secure step — enter it yourself. Tɛkyerɛma isn't looking."
+        else "Secure step — enter it yourself. Nexus isn't looking."
 }

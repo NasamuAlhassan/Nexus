@@ -26,7 +26,7 @@ object TaskLive {
         val steps = SurfaceModel.stepsOf(st)
         val label = (steps.lastOrNull { it.active }?.label ?: steps.lastOrNull()?.past?.takeIf { it.isNotBlank() })
             ?: SurfaceModel.reduce(VoiceUiState(), st, twi = twi).title.ifBlank { if (twi) "Mereyɛ ho adwuma" else "Working on it" }
-        val title = if (twi) "Tɛkyerɛma reyɛ adwuma" else "Tɛkyerɛma is working"
+        val title = if (twi) "Nexus reyɛ adwuma" else "Nexus is working"
         val request = (st.request ?: st.goal).orEmpty().trim().take(80)
         return LiveActivity(
             id = ID, kind = LiveKind.TASK, title = title, compact = label.take(28),

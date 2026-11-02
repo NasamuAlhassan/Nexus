@@ -13,7 +13,7 @@ import org.json.JSONObject
  */
 object LookWithCameraTool : Tool {
     override val name = "look_with_camera"
-    override val description = "Open Tɛkyerɛma's own camera to answer a question about something physical in front of the user " +
+    override val description = "Open Nexus's own camera to answer a question about something physical in front of the user " +
         "(an object, money, a label, a colour, a sign, light). It speaks the answer itself. Not for the phone's screen."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1

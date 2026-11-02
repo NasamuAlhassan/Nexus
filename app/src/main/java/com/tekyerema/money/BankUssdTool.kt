@@ -86,7 +86,7 @@ object BankUssdTool : Tool {
     private suspend fun open(args: JSONObject, ctx: ToolContext, ctrl: com.tekyerema.accessibility.AccessibilityController): ToolResult {
         val bank = BankUssd.byKey(args.str(ARG_BANK)) ?: return ToolResult(false, "I only open bank codes I've checked.", recoverable = false)
         if (ctx.appContext.checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED)
-            return ToolResult(false, "Tɛkyerɛma isn't allowed to make calls, so I can't open ${bank.name}'s menu. Allow Phone for Tɛkyerɛma in Settings.", recoverable = false)
+            return ToolResult(false, "Nexus isn't allowed to make calls, so I can't open ${bank.name}'s menu. Allow Phone for Nexus in Settings.", recoverable = false)
         BankSession.end()
         try {
             ctx.appContext.startActivity(com.tekyerema.phone.SimChoice.attach(ctx.appContext, Intent(Intent.ACTION_CALL, Uri.parse("tel:" + Uri.encode(bank.code))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)))

@@ -32,7 +32,7 @@ val EXPECTS_PARAM = ToolParam(
 )
 
 // §1.19 — spoken to a user who can't see the screen, so it names the problem and the fix plainly.
-internal const val NO_SERVICE = "I can't see or control your screen yet — Tɛkyerɛma's accessibility service is off. Turn it on in Settings, under Accessibility."
+internal const val NO_SERVICE = "I can't see or control your screen yet — Nexus's accessibility service is off. Turn it on in Settings, under Accessibility."
 // §1.20 — a FLAG_SECURE window blocks screen reading; say that instead of implying the screen is empty.
 private const val SECURE_SCREEN = "This screen is protected — the app blocks screen reading, so I can't tell you what's on it."
 
@@ -340,7 +340,7 @@ object TypeTool : Tool {
         // G-05: some fields (custom editors, some web inputs) reject ACTION_SET_TEXT; paste the text instead.
         if (!ok && text.isNotEmpty()) {
             val cm = ctx.appContext.getSystemService(android.content.ClipboardManager::class.java)
-            if (cm != null && try { cm.setPrimaryClip(android.content.ClipData.newPlainText("Tɛkyerɛma", text)); true } catch (_: Throwable) { false }) {
+            if (cm != null && try { cm.setPrimaryClip(android.content.ClipData.newPlainText("Nexus", text)); true } catch (_: Throwable) { false }) {
                 ok = ctrl.nodeAction(nodeId, "paste")
                 how = "paste"
             }

@@ -19,10 +19,10 @@ import kotlinx.coroutines.launch
  */
 object A11yWatch {
     private const val TAG = "Tekyerema"
-    const val ASK = "Tɛkyerɛma accessibility is turned off. Would you like me to help you turn it on?"
-    const val OPENING = "Opening Accessibility settings. Find Tɛkyerɛma in the list, open it, and switch it on. I'll tell you when it's on."
-    const val DECLINED = "Okay. I won't ask again today. You can say: turn on Tɛkyerɛma accessibility, any time."
-    const val NOW_ON = "Tɛkyerɛma accessibility is on now."
+    const val ASK = "Nexus screen control is turned off. Would you like me to help you turn it on?"
+    const val OPENING = "Opening Accessibility settings. Find Nexus screen control in the list, open it, and switch it on. I'll tell you when it's on."
+    const val DECLINED = "Okay. I won't ask again today. You can say: turn on Nexus screen control, any time."
+    const val NOW_ON = "Nexus screen control is on now."
 
     private val TALKBACK = listOf("com.google.android.marvin.talkback", "com.samsung.android.accessibility.talkback", "com.android.talkback")
 
@@ -82,12 +82,12 @@ object A11yWatch {
                 else -> {}
             }
         }
-        if (Regex("\\b(?:turn on|switch on|enable|activate)\\b.*\\b(?:t[eɛ]ky[eɛ]r[eɛ]ma|tekyerema|my) accessibility\\b").containsMatchIn(t))
+        if (Regex("\\b(?:turn on|switch on|enable|activate)\\b.*\\b(?:t[eɛ]ky[eɛ]r[eɛ]ma|tekyerema|nexus|my) (?:accessibility|screen control)\\b").containsMatchIn(t))
             return if (ourEnabled(ctx)) NOW_ON.replace("now", "already") else openSettings(ctx)
         if (Regex("\\b(?:is|are)\\b.*\\btalk ?back\\b.*\\b(?:on|off|enabled|running)\\b").containsMatchIn(t))
             return if (talkBackEnabled(ctx)) "TalkBack is on." else "TalkBack is off."
-        if (Regex("\\b(?:is|are)\\b.*\\b(?:t[eɛ]ky[eɛ]r[eɛ]ma|tekyerema|your) accessibility\\b.*\\b(?:on|off|enabled|running)\\b").containsMatchIn(t))
-            return (if (ourEnabled(ctx)) "Tɛkyerɛma accessibility is on." else "Tɛkyerɛma accessibility is off.") +
+        if (Regex("\\b(?:is|are)\\b.*\\b(?:t[eɛ]ky[eɛ]r[eɛ]ma|tekyerema|nexus|your) (?:accessibility|screen control)\\b.*\\b(?:on|off|enabled|running)\\b").containsMatchIn(t))
+            return (if (ourEnabled(ctx)) "Nexus screen control is on." else "Nexus screen control is off.") +
                 " TalkBack is ${if (talkBackEnabled(ctx)) "on" else "off"}."
         return null
     }

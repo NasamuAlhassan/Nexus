@@ -49,7 +49,7 @@ object McpTools {
         .put(JSONObject()
             .put("name", RUN_TASK)
             .put("title", "Run a task on the phone")
-            .put("description", "Ask Tɛkyerɛma to do something on the user's Android phone, in plain words — exactly as if the " +
+            .put("description", "Ask Nexus to do something on the user's Android phone, in plain words — exactly as if the " +
                 "user had typed it. Returns a task_id straight away; follow it with get_task. The task is READ-ONLY unless " +
                 "the phone's user has allowed remote actions, and every step that changes anything waits for the person " +
                 "holding the phone to confirm it on the phone. Nothing here can approve it for them.")
@@ -88,7 +88,7 @@ object McpTools {
         .put(JSONObject()
             .put("name", GET_ACTIVITY)
             .put("title", "Recent activity")
-            .put("description", "What Tɛkyerɛma has done recently (its audit log, in plain words, with who asked) and the " +
+            .put("description", "What Nexus has done recently (its audit log, in plain words, with who asked) and the " +
                 "requests computers made over this connection.")
             .put("inputSchema", obj(
                 "since" to int("Unix time in milliseconds; default: the last hour.") { put("minimum", 0) },

@@ -310,12 +310,12 @@ class McpSession(
         val LEGACY_VERSIONS = listOf("2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05")
 
         const val SERVER_NAME = "tekyerema"
-        const val SERVER_TITLE = "Tɛkyerɛma phone agent"
+        const val SERVER_TITLE = "Nexus phone agent"
         const val LIST_TTL_MS = 3_600_000L
         const val RUN_TASKS_PER_MIN = 6
         const val TOOL_CALLS_PER_10S = 40
 
-        val INSTRUCTIONS = "Tɛkyerɛma is a voice assistant that operates the user's Android phone for them. Give it whole " +
+        val INSTRUCTIONS = "Nexus is a voice assistant that operates the user's Android phone for them. Give it whole " +
             "tasks in plain words with run_task and follow them with get_task. Remote tasks can only read unless the " +
             "phone's user has allowed remote actions; every step that changes anything waits for the person holding the " +
             "phone to confirm it on the phone (status waiting_for_phone_user) — nothing over this connection can approve it. " +

@@ -83,8 +83,8 @@ object PhoneCheck {
 
     /** A per-minute limit refills within a minute; a wait this long is the daily allowance (OpenAiCompatBrain's rule). */
     const val DAILY_WAIT_MS = 90_000L
-    private const val OPEN_SETTINGS = "To fix it: in Tɛkyerɛma, open Settings, Permissions,"
-    private const val A11Y_PATH = "Settings, Accessibility, Installed apps, Tɛkyerɛma"
+    private const val OPEN_SETTINGS = "To fix it: in Nexus, open Settings, Permissions,"
+    private const val A11Y_PATH = "Settings, Accessibility, Installed apps, Nexus screen control"
 
     /** The problems in [f], most important first. Pure. */
     fun findings(f: Facts): List<Finding> {
@@ -130,9 +130,9 @@ object PhoneCheck {
             !f.cloudAllowed -> add("cloud_off", 35, "The cloud is off, so bigger tasks and web answers won't work.",
                 "Say “use the cloud again” to switch it back on.")
             f.budgetSpent -> add("budget", 80, "You've reached today's online AI limit, so bigger tasks wait until tomorrow.",
-                "To change the limit: in Tɛkyerɛma, open Settings, Control, Limits and usage.")
+                "To change the limit: in Nexus, open Settings, Control, Limits and usage.")
             !f.onlineAi -> add("no_ai", 80, "No online AI is set up, so bigger tasks won't work.",
-                "To fix it: in Tɛkyerɛma, open Settings, Control, Your API keys.")
+                "To fix it: in Nexus, open Settings, Control, Your API keys.")
             f.mainModelWaitMs > DAILY_WAIT_MS -> add("ai_quota", 78, "My main AI has used up its allowance for now, " + when (f.weakPolicy) {
                 WeakModelPolicy.ALLOW -> "so a smaller backup AI is doing bigger tasks, and it can make mistakes."
                 WeakModelPolicy.NEVER -> "so I'll pause bigger tasks until it's back."
@@ -156,18 +156,18 @@ object PhoneCheck {
 
         // ---- staying awake (Samsung puts unused apps to sleep: the wake word and alerts stop)
         if (f.backgroundRestricted) add("sleep", 50, "Android is restricting me in the background, so “Hey Tɛkyerɛma” and alerts can stop.",
-            "To fix it: Settings, Apps, Tɛkyerɛma, Battery, and allow background activity.")
+            "To fix it: Settings, Apps, Nexus, Battery, and allow background activity.")
         else if (!f.batteryUnrestricted) add("sleep", 50, "Android may put me to sleep, so “Hey Tɛkyerɛma” and alerts can stop working.",
-            "To fix it: in Tɛkyerɛma, open Settings, Accessibility, Keep Tɛkyerɛma running.")
+            "To fix it: in Nexus, open Settings, Accessibility, Keep Nexus running.")
 
         // ---- small things
         val pct = f.batteryPct
         if (pct != null && pct in 0..LOW_BATTERY && !f.charging) add("battery", 45, "Your battery is at $pct percent.", "Plug in your charger soon.")
         if (!f.speakAloud) add("speak_aloud", 40, "Reading replies aloud is switched off.",
-            "To switch it on: in Tɛkyerɛma, open Settings, Voice, Read replies aloud.")
+            "To switch it on: in Nexus, open Settings, Voice, Read replies aloud.")
         if (f.a11yShortcut == false && !f.wakeWordOn && !f.floatingButtonOn)
             add("start", 20, "There's no quick way to start me from other apps.",
-                "To add one: in Tɛkyerɛma, open Settings, Accessibility, and switch on “Hey Tɛkyerɛma” or the floating Talk button.")
+                "To add one: in Nexus, open Settings, Accessibility, and switch on “Hey Tɛkyerɛma” or the floating Talk button.")
         return out.sortedByDescending { it.rank }
     }
 

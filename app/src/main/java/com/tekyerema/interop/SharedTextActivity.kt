@@ -46,6 +46,6 @@ class SharedTextActivity : Activity() {
     /** Spoken when replies are read aloud; a short toast either way so a screen reader user hears that it arrived. */
     private fun say(text: String) {
         com.tekyerema.voice.VoiceEngine.announce(text)
-        Toast.makeText(applicationContext, "Tɛkyerɛma has the text — ask me about it.", Toast.LENGTH_SHORT).show()
+        Toast.makeText(applicationContext, "Nexus has the text — ask me about it.", Toast.LENGTH_SHORT).show()
     }
 }

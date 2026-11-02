@@ -391,6 +391,7 @@ class LocalFastRouter(
         is FastIntent.Camera -> openCameraReader(intent.mode, intent.question)
         is FastIntent.ReadPhoto -> openPhotoReader(intent.mode)
         FastIntent.WhatChanged -> whatChanged()
+        FastIntent.ScreenWhere -> screenWhere()
         is FastIntent.Magnify -> magnify(intent.action)
         is FastIntent.SetEmergencyContact -> setEmergencyContact(intent.contact)
         is FastIntent.EmergencyLine -> emergencyLine(intent.service)
@@ -704,6 +705,15 @@ class LocalFastRouter(
         return handled(FastIntent.WhatChanged, line)
     }
 
+    /** MASTER_STATUS #35: one offline sentence about where the user is on the phone (no model, nothing read aloud but the
+     *  app's name, the screen's title and the box the keyboard is on — [com.tekyerema.core.ScreenSummary]). */
+    private suspend fun screenWhere(): FastOutcome {
+        val c = controller()
+        if (c == null || !c.ready) return handled(FastIntent.ScreenWhere, "I can't see the screen — screen control is off.")
+        val snap = try { c.buildSnapshot() } catch (_: Throwable) { null }
+        return handled(FastIntent.ScreenWhere, com.tekyerema.core.ScreenSummary.sentence(snap))
+    }
+
     /** K-09: full-screen magnification. */
     private fun magnify(action: String): FastOutcome? {
         val c = controller() ?: return null
@@ -804,7 +814,7 @@ class LocalFastRouter(
         val notifOn = com.tekyerema.ui.Perms.notifications(appContext)
         val callsOn = granted(android.Manifest.permission.READ_CALL_LOG)
         if (!notifOn && !callsOn) return handled(intent,
-            "I can't see your notifications or calls yet — turn on notification access for Tɛkyerɛma in Settings.")
+            "I can't see your notifications or calls yet — turn on notification access for Nexus in Settings.")
         val prefs = appContext.getSharedPreferences(DIGEST_PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         val hours = com.tekyerema.core.config.AppConfig.long("notifications.digest.windowHours", 12L).coerceIn(1L, 72L)
@@ -871,7 +881,7 @@ class LocalFastRouter(
             if (who != null && app == "WhatsApp") { Log.i(TAG, "[MSG] a WhatsApp message from a named person → the chat itself"); return null }
         }
         if (!com.tekyerema.ui.Perms.notifications(appContext)) return handled(intent,
-            "I can't see your messages yet — turn on notification access for Tɛkyerɛma in Settings.")
+            "I can't see your messages yet — turn on notification access for Nexus in Settings.")
         val extra = com.tekyerema.core.config.AppConfig.stringList("notifications.digest.messagingPackages", emptyList()).toSet()
         val msgs = capturedMessages().filter { !it.text.isNullOrBlank() && com.tekyerema.notifications.NotificationDigest.isMessage(it, extra) }
             .sortedByDescending { it.t }
@@ -918,7 +928,7 @@ class LocalFastRouter(
             Log.i(TAG, "[MSG] WhatsApp messages from a named person → the chat itself"); return null
         }
         if (!com.tekyerema.ui.Perms.notifications(appContext)) return handled(intent,
-            "I can't see your ${intent.app} messages yet — turn on notification access for Tɛkyerɛma in Settings.")
+            "I can't see your ${intent.app} messages yet — turn on notification access for Nexus in Settings.")
         val digest = com.tekyerema.notifications.NotificationDigest
         val pkgs = CHAT_APPS[intent.app].orEmpty()
         val from = intent.from
@@ -1009,7 +1019,7 @@ class LocalFastRouter(
     private fun setRelation(i: FastIntent.SetRelation): FastOutcome? {
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled("C-03", true)) return null
         if (!granted(android.Manifest.permission.READ_CONTACTS))
-            return if (i.explicit) handled(i, "I need contacts access to find ${i.contact} — allow it for Tɛkyerɛma in Settings.") else null
+            return if (i.explicit) handled(i, "I need contacts access to find ${i.contact} — allow it for Nexus in Settings.") else null
         val found = try { com.tekyerema.android.ContactResolver.resolve(appContext, i.contact) } catch (_: Throwable) { emptyList() }
         val names = found.map { it.name }.distinct()
         return when {
@@ -1292,7 +1302,7 @@ class LocalFastRouter(
             }, acted = now == want)
         } catch (se: SecurityException) {
             try { am.ringerMode = AudioManager.RINGER_MODE_VIBRATE } catch (_: Throwable) {}
-            action("RINGER_VIBRATE", "I put it on vibrate — full silent needs Do Not Disturb access for Tɛkyerɛma.")
+            action("RINGER_VIBRATE", "I put it on vibrate — full silent needs Do Not Disturb access for Nexus.")
         }
     }
 

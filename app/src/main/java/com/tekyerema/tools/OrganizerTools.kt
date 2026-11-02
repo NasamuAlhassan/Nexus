@@ -203,7 +203,7 @@ object CalendarTool : Tool {
 
     private suspend fun list(ctx: ToolContext, upcoming: Boolean): ToolResult {
         val app = ctx.appContext
-        val denied = "I don't have permission to read your calendar. Allow Calendar for Tɛkyerɛma in Settings."
+        val denied = "I don't have permission to read your calendar. Allow Calendar for Nexus in Settings."
         if (app.checkSelfPermission(Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED)
             return ToolResult(false, denied, recoverable = false)
         val zone = TimeZone.getDefault()
@@ -437,7 +437,7 @@ object LocationTool : Tool {
         val fine = app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val anyGrant = fine || app.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
         if (!anyGrant) return ToolResult(
-            false, "I don't have permission to use your location. Allow Location for Tɛkyerɛma in Settings.", recoverable = false
+            false, "I don't have permission to use your location. Allow Location for Nexus in Settings.", recoverable = false
         )
         val lm = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
             ?: return ToolResult(false, "This phone has no location service.", recoverable = false)
@@ -639,7 +639,7 @@ object ShowAlarmsTool : Tool {
 object ClipboardTool : Tool {
     override val name = "clipboard"
     override val description =
-        "Copy text to the clipboard, or read what's on it (Android only allows reading while Tɛkyerɛma is on screen)."
+        "Copy text to the clipboard, or read what's on it (Android only allows reading while Nexus is on screen)."
     override val scope = CapabilityScope.DEVICE_CONTROL
     override val riskTier = RiskTier.TIER1
     override val params = listOf(
@@ -648,7 +648,7 @@ object ClipboardTool : Tool {
     )
 
     private const val MAX_READ_CHARS = 1000
-    private const val BLOCKED = "Android only lets me read the clipboard while Tɛkyerɛma is on screen."
+    private const val BLOCKED = "Android only lets me read the clipboard while Nexus is on screen."
 
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val cm = ctx.appContext.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
@@ -658,7 +658,7 @@ object ClipboardTool : Tool {
                 val text = args.str("text")
                 if (text.isNullOrEmpty()) return ToolResult(false, "Tell me what text to copy.")
                 try {
-                    cm.setPrimaryClip(ClipData.newPlainText("Tɛkyerɛma", text))
+                    cm.setPrimaryClip(ClipData.newPlainText("Nexus", text))
                     ToolResult(true, "Copied to the clipboard — you can paste it anywhere.", channel = "native")
                 } catch (t: Throwable) {
                     ToolResult(false, "Couldn't copy to the clipboard: ${t.message}")

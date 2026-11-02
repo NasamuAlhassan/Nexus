@@ -22,7 +22,7 @@ object PhoneCareIntents {
     const val BALANCE = "balance"
     const val PRIVATE = "private"
 
-    private const val LEAD = "^(?:(?:please|okay|ok|hey|so|and|tekyerema|tɛkyerɛma|can you|could you|would you|will you)[, ]+)*"
+    private const val LEAD = "^(?:(?:please|okay|ok|hey|so|and|tekyerema|tɛkyerɛma|nexus|can you|could you|would you|will you)[, ]+)*"
     private const val TAIL = "(?: (?:please|for me|now|again))*$"
 
     private val CHECK = Regex(LEAD + "(?:" +
@@ -145,7 +145,7 @@ object PhoneCareIntents {
             !on -> null
             kind == BALANCE && !moneyOn -> "Money alerts are off. Say “tell me when I receive money” to switch them on."
             kind in setOf(MONEY, MISSED_CALL) && !notificationAccess ->
-                "But I can't see your notifications yet. To fix it: in Tɛkyerɛma, open Settings, Permissions, Read messages."
+                "But I can't see your notifications yet. To fix it: in Nexus, open Settings, Permissions, Read messages."
             kind in setOf(MONEY, MISSED_CALL) && !messageAlertsOn ->
                 "But message alerts are switched off in Settings, Control, so I'll stay quiet until you switch them on."
             else -> null

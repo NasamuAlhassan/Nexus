@@ -56,7 +56,7 @@ class VoiceSessionService : Service() {
             if (mgr.getNotificationChannel(CHANNEL) == null) {
                 mgr.createNotificationChannel(
                     NotificationChannel(CHANNEL, "Voice session", NotificationManager.IMPORTANCE_LOW).apply {
-                        description = "Keeps Tɛkyerɛma running while it handles your request."
+                        description = "Keeps Nexus running while it handles your request."
                         setShowBadge(false)
                     }
                 )
@@ -75,7 +75,7 @@ class VoiceSessionService : Service() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
             return NotificationCompat.Builder(ctx, CHANNEL)
-                .setContentTitle("Tɛkyerɛma is working")
+                .setContentTitle("Nexus is working")
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setSmallIcon(ctx.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
@@ -111,7 +111,7 @@ class VoiceSessionService : Service() {
             if (text.isBlank()) return
             ensureChannel(ctx)
             val n = NotificationCompat.Builder(ctx, CHANNEL)
-                .setContentTitle("Tɛkyerɛma")
+                .setContentTitle("Nexus")
                 .setContentText(text)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(text))
                 .setSmallIcon(ctx.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
