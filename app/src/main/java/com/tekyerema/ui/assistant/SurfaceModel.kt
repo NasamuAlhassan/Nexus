@@ -130,8 +130,11 @@ object SurfaceModel {
         if (reply.isNotEmpty() && replyFresh && replyKey != local.dismissedReplyKey &&
             (agent.status !in TERMINAL || run == local.dismissedRun || !runFresh)) {
             val asked = titleOf(voice.lastCanonical.ifBlank { voice.lastRaw })
-            return State(run, Mode.PRESENTING, asked.ifEmpty { "Answer" }, key = replyKey,
-                preview = Preview.Answer(asked.ifEmpty { "Answer" }, Summaries.compact(reply), reply), speaking = speaking)
+            // Nothing was asked (a notice like "That was too short. Tap and try again."): the card is titled by who is speaking,
+            // not "Answer" — there was no question (redesign, 2 Nov 2026).
+            val heading = asked.ifEmpty { com.tekyerema.ui.Brand.NAME }
+            return State(run, Mode.PRESENTING, heading, key = replyKey,
+                preview = Preview.Answer(heading, Summaries.compact(reply), reply), speaking = speaking)
         }
         return State(run, Mode.HIDDEN)
     }

@@ -1,6 +1,7 @@
 package com.tekyerema.ui.settings
 
 import android.os.SystemClock
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -96,7 +97,8 @@ internal fun PinPracticePage(onBack: () -> Unit) {
 @Composable
 private fun Key(label: String, spoken: String, onClick: () -> Unit) {
     Box(
-        Modifier.size(84.dp).clip(CircleShape).border(2.dp, Tk.Hairline, CircleShape)
+        // A soft filled key, no ring (DESIGN.md: no outline lines; the phone's own dialer keys have none) — redesign 2 Nov 2026.
+        Modifier.size(84.dp).clip(CircleShape).background(Tk.Ink2)
             .clickable(role = Role.Button, onClick = onClick)
             // The spoken name replaces the digit's text for TalkBack (else "five. 5. Button"); click and role stay (Gate G, 13 Oct 2026).
             .clearAndSetSemantics { contentDescription = spoken },
