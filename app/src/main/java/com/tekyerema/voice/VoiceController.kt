@@ -634,7 +634,7 @@ class VoiceController(
     private suspend fun runWelcome(host: WelcomeHost) {
         val io = TurnIo(host)
         try {
-            val end = Welcome.run(io, host.twiVoice)
+            val end = Welcome.run(io, host.twiVoice, askLanguage = com.tekyerema.core.config.AppConfig.bool("voice.welcome.askLanguage", false))
             Log.i("Tekyerema", "[WELCOME] ended: ${end::class.simpleName}")
             // A request said instead of an answer ends the welcome and runs like any other turn (never a gate).
             if (end is Welcome.Outcome.Command) { io.last?.let { runTurn(it, InputSource.ASR); return } }

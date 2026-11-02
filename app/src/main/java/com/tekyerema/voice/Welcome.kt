@@ -84,6 +84,10 @@ object Welcome {
     // ------------------------------------------------------------------ what is said
     const val INTRO = "Hello, I'm Nexus. Let me ask you a few quick things. Say skip to move on, or just ask me for something."
     const val CLOSING = "You can ask me to call someone, send a message, play music, or check your MoMo. Say 'what can you do' any time."
+    /** The basics, taught once before [CLOSING] (MASTER_STATUS #29): how to stop it, hear it again, find the place, and
+     *  the PIN rule — the four things a blind first-time user needs before anything else. No counts spoken (owner 28 Sep). */
+    const val BASICS = "Say stop any time to stop me, and again to hear me once more. Say where am I in the app to hear " +
+        "which screen you're on. And at a Mobile Money PIN I go quiet: you type the PIN yourself, and I never see it."
     const val SORRY = "Sorry, I didn't catch that. "
     const val OKAY = "Okay."
     const val KEEP_SPEED = "Okay, I'll keep this speed."
@@ -165,7 +169,9 @@ object Welcome {
      * Ask the questions through [io] until the end. Two silences in a row mean nobody is answering: the rest is skipped
      * and the closing line said, so the welcome never talks on at an empty room.
      */
-    suspend fun run(io: Io, twiVoice: Boolean = false, isCommand: (String) -> Boolean = ::looksLikeCommand): Outcome {
+    /** [askLanguage]: false skips "English or Twi?" (Nexus is English-only since 31 Oct; config `voice.welcome.askLanguage`). */
+    suspend fun run(io: Io, twiVoice: Boolean = false, askLanguage: Boolean = true,
+                    isCommand: (String) -> Boolean = ::looksLikeCommand): Outcome {   // isCommand last: callers pass a trailing lambda
         io.say(INTRO)
         var step: Step? = Step.NAME
         var question = question(Step.NAME)
@@ -189,9 +195,10 @@ object Welcome {
             turn.say.forEach { io.say(it) }
             turn.end?.let { return it }
             retried = false
-            step = turn.next
+            step = turn.next?.let { if (it == Step.LANGUAGE && !askLanguage) Step.RATE else it }
             step?.let { question = question(it) }
         }
+        io.say(BASICS)
         io.say(CLOSING)
         return Outcome.Finished
     }

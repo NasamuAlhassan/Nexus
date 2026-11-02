@@ -146,6 +146,15 @@ class WelcomeFlowTest {
             Welcome.question(Step.PRACTICE), Practice.ASK_MESSAGE), io.asked.take(5))
     }
 
+    @Test fun english_only_skips_the_language_question_and_teaches_the_basics_last() = runTest {
+        val io = FakeIo(t("Ama"), t("skip"), t("skip"))
+        assertEquals(Welcome.Outcome.Finished, Welcome.run(io, askLanguage = false))
+        assertEquals(listOf(Welcome.question(Step.NAME), Welcome.question(Step.RATE), Welcome.question(Step.PRACTICE)), io.asked)
+        assertFalse(io.applied.any { it is Welcome.Effect.SetLanguage })
+        assertEquals(listOf(Welcome.BASICS, Welcome.CLOSING), io.said.takeLast(2))
+        for (w in listOf("stop", "again", "where am I in the app", "PIN")) assertTrue(w, Welcome.BASICS.contains(w))
+    }
+
     @Test fun skipping_everything_changes_nothing() = runTest {
         val io = FakeIo(t("skip"), t("later"), t("not now"), t("no"))
         assertEquals(Welcome.Outcome.Finished, Welcome.run(io))
@@ -309,11 +318,12 @@ class WelcomeFlowTest {
 
     @Test fun the_welcome_runs_by_voice_and_never_touches_the_agent() = runTest {
         val agent = DoneAgent("unused"); val tts = LogTts(); val host = FakeHost()
-        val vc = controller(this, agent, tts, ScriptedInput(speech("Ama"), speech("English"), speech("okay"), speech("no")), host)
+        val vc = controller(this, agent, tts, ScriptedInput(speech("Ama"), speech("okay"), speech("no")), host)
         assertTrue(vc.startWelcome())
         advanceUntilIdle()
-        assertEquals(listOf(Welcome.Effect.SetName("Ama"), Welcome.Effect.SetLanguage(Settings.LANG_MODE_ENGLISH)), host.effects)
-        assertEquals(Verbalize.apply(Welcome.CLOSING), tts.spoken.last())
+        // English-only since 31 Oct (voice.welcome.askLanguage false): no language question, so no SetLanguage.
+        assertEquals(listOf(Welcome.Effect.SetName("Ama")), host.effects)
+        assertEquals(listOf(Verbalize.apply(Welcome.BASICS), Verbalize.apply(Welcome.CLOSING)), tts.spoken.takeLast(2))
         assertTrue(agent.goals.isEmpty())
         vc.shutdown()
     }
