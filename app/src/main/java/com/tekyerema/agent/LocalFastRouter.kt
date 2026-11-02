@@ -136,6 +136,8 @@ class LocalFastRouter(
         // Money safety round 2 (money/MoneyCommands): the user's Mobile Money limits by voice ("set my MoMo limit to 200 cedis",
         // "what is my MoMo limit") — the user's own controls, so like the ones above they always work.
         com.tekyerema.money.MoneyCommands.handle(text)?.let { return ownControl(it) }
+        // Button names by voice (memory/LabelCommands, #38): "that button is Search", "forget the button names for WhatsApp".
+        com.tekyerema.memory.LabelCommands.handle(appContext, text, controller())?.let { return ownControl(it) }
         // The user's memory by voice (memory/): "what do you remember about me", "forget everything" (asked first), "remember that I prefer slow speech".
         // Encrypted file behind it, so off the main thread; "forget everything" confirmed = the full forget below.
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

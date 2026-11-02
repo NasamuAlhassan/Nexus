@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "memory": {
+    "labels": {
+      "_note": "#38 label memory (memory/LabelStore): names for unlabelled icon buttons, kept per app on the phone only (encrypted), put on the screen the planner and the spoken readings see. Taught by voice or learned from a verified outcome; the Send confirmation is never lifted by a learned name. Off = no names are applied or learned (the user's voice 'forget' commands still work).",
+      "enabled": true
+    }
+  }
+}

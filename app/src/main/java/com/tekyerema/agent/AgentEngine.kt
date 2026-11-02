@@ -1900,6 +1900,7 @@ object AgentEngine {
                         futility.observed(afterSnap)
                         appSwitched = afterSnap?.appPackage != null && afterSnap.appPackage != before.appPackage
                         if (appSwitched) noteAppSwitch(afterSnap)   // voice/AppNote.kt: "In WhatsApp."
+                        com.tekyerema.memory.LabelStore.afterStep(appContext, decision.name, resolved?.element, before, afterSnap, vr.verified && result.success)   // #38
                         log(LogEntry.Kind.VERIFY, if (vr.verified) "verified — ${vr.detail}"
                             else if (verdict == Progress.Verdict.PARTIAL) "PARTIAL — ${vr.detail}; but the screen moved on to $novel new item(s)"
                             else "NOT verified — ${vr.detail}")

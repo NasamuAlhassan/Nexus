@@ -287,6 +287,12 @@ object ActionSemantics {
             }
             if (TargetSemantics.isSpendCaption(text, target)) return "$shown This may charge you money."
         }
+        // #38: a control whose name came from label memory is still, to the app, an unlabelled one — the gate stays, and the
+        // read-back says the name is the user's own ("the button you called Search"), not the app's.
+        if (primitive == "tap" && target?.learned == true && text.isNotBlank()) {
+            val msg = composerText(before)
+            if (msg != null) return "Tap the button you called “${text.take(30)}”, next to “${msg.take(60)}”? It may send it."
+        }
         // An UNLABELLED control can't be named, and "Tap element 5?" means nothing to someone who can't see the
         // screen — say what it may do instead (the gate only fires for one in a compose context).
         if (primitive == "tap" && text.isBlank()) {

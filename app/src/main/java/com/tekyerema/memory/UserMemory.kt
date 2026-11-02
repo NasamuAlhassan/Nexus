@@ -94,5 +94,6 @@ object UserMemory {
     /** "forget everything": the entries go and the file with them; the on/off switches the user chose stay. */
     fun clearAll(ctx: Context?) {
         update(ctx) { MemState(off = it.off) }
+        try { LabelStore.forget(ctx, null) } catch (_: Throwable) {}   // #38: the names given to unlabelled buttons go too
     }
 }
