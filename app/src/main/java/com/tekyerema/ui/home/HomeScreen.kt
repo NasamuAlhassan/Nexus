@@ -109,7 +109,6 @@ fun HomeContent(
     val orbCalm = LocalOrbCalm.current              // the orb alone ignores simple mode: it keeps moving (owner, 27 Oct)
     val speakAloud = remember(settingsVersion) { settings.speakAloud }
     val speechRate = remember(settingsVersion) { settings.speechRate }
-    val twi = remember(settingsVersion) { settings.languageMode == Settings.LANG_MODE_TWI }
     val name = remember(settingsVersion) { settings.preferredName }   // "Good morning, Ama" (voice/Welcome.kt)
     // First-run voice welcome: the first time Home opens after the permissions page, a few skippable questions by voice.
     // Never a gate — any request ends it — and marked done as it starts (VoiceEngine.startWelcome).
@@ -309,7 +308,7 @@ fun HomeContent(
                     transitionSpec = { fadeIn(tween(if (reduceMotion) 120 else 320)) togetherWith fadeOut(tween(160)) },
                     label = "greeting"
                 ) { showGreeting ->
-                    if (showGreeting) Greeting(twi, name)
+                    if (showGreeting) Greeting(name)
                     else AssistantLine(presence, phrase, announce = announce, calm = reduceMotion, speechRate = speechRate)
                 }
                 HintLine(
@@ -377,7 +376,7 @@ fun HomeContent(
         }
         // The whole screen, so a tap outside a finished result can dismiss it (the surface itself sits at the top).
         com.tekyerema.ui.assistant.AssistantSurfaceHost(
-            voice = voice, agent = agent, twi = twi,
+            voice = voice, agent = agent,
             onVisible = { surfaceVisible = it },
             hideListenCard = listeningFull,
             readsAloud = speakAloud,
@@ -404,21 +403,21 @@ private fun rememberTouchExploring(): Boolean {
 /** The ask field's mic button shows only at rest; then it, not the orb, is TalkBack's "Talk to Nexus". */
 private fun micShown(p: Presence) = p == Presence.IDLE || p == Presence.DONE || p == Presence.ERROR
 
-/** "Good morning" (Twi mode: "Maakye") — with the user's name from the welcome, "Good morning, Ama" — and what to do
+/** "Good morning" — with the user's name from the welcome, "Good morning, Ama" — and what to do
  *  next. A heading, so TalkBack can land on it. */
 @Composable
-private fun Greeting(twi: Boolean, name: String = "") {
+private fun Greeting(name: String = "") {
     val hour = remember { Calendar.getInstance().get(Calendar.HOUR_OF_DAY) }
-    val (en, tw) = when (hour) {
-        in 5..11 -> "Good morning" to "Maakye"
-        in 12..16 -> "Good afternoon" to "Maaha"
-        in 17..22 -> "Good evening" to "Maadwo"
-        else -> "Hello" to "Hello"   // the small hours: "Good evening" at 3 AM read wrong (emulator, 2 Nov 2026)
+    val en = when (hour) {
+        in 5..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        in 17..22 -> "Good evening"
+        else -> "Hello"   // the small hours: "Good evening" at 3 AM read wrong (emulator, 2 Nov 2026)
     }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(com.tekyerema.voice.Welcome.withName(if (twi) tw else en, name), style = MaterialTheme.typography.displaySmall, color = Tk.Text, textAlign = TextAlign.Center,
+        Text(com.tekyerema.voice.Welcome.withName(en, name), style = MaterialTheme.typography.displaySmall, color = Tk.Text, textAlign = TextAlign.Center,
             modifier = Modifier.semantics { heading() })
-        Text(if (twi) en else "How can I help?", style = MaterialTheme.typography.titleMedium, color = Tk.TextSecondary,
+        Text("How can I help?", style = MaterialTheme.typography.titleMedium, color = Tk.TextSecondary,
             textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
     }
 }

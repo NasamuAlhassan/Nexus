@@ -57,25 +57,24 @@ object VoiceReflect {
     enum class Decision { APPROVED, DECLINED, REVISED }
 
     /** The cue for a waiting surface. Hints appear only while the pipeline is truly listening. */
-    fun cue(kind: PromptSurface.Kind, voice: VoiceUiState, hasChoices: Boolean, twi: Boolean): Cue {
+    fun cue(kind: PromptSurface.Kind, voice: VoiceUiState, hasChoices: Boolean): Cue {
         if (kind == PromptSurface.Kind.SECURE) return Cue.None
         if (kind == PromptSurface.Kind.CONFIRM) {
             val again = when (voice.confirmRetry) {
-                ConfirmRetry.UNCLEAR -> if (twi) "Mante no." else "Didn't catch that."
-                ConfirmRetry.HOLD -> if (twi) "Yoo, twɛn." else "Take your time."
+                ConfirmRetry.UNCLEAR -> "Didn't catch that."
+                ConfirmRetry.HOLD -> "Take your time."
                 ConfirmRetry.NONE -> null
             }
             return when (voice.confirmPhase) {
                 ConfirmPhase.LISTENING -> Cue.Listening(listOfNotNull(again,
-                    if (twi) "Ka aane anaa daabi, anaa mia." else "Say yes or no, or tap.").joinToString(" "))
+                    "Say yes or no, or tap.").joinToString(" "))
                 ConfirmPhase.HEARD -> Cue.Heard
-                ConfirmPhase.ASKING -> if (again != null) Cue.AskingAgain(again + if (twi) " Mebisa bio." else " Asking again.") else Cue.None
+                ConfirmPhase.ASKING -> if (again != null) Cue.AskingAgain(again + " Asking again.") else Cue.None
                 ConfirmPhase.NONE -> Cue.None
             }
         }
         return when (voice.state) {
             VoiceState.LISTENING -> Cue.Listening(when {
-                twi -> if (hasChoices) "Ka wo mmuae, anaa mia baako." else "Ka wo mmuae."
                 hasChoices -> "Say your answer, or tap one."
                 else -> "Say your answer."
             })
@@ -117,7 +116,7 @@ object VoiceReflect {
  * answers would be heard by the recogniser.
  */
 @Composable
-fun VoiceCueRow(cue: VoiceReflect.Cue, level: () -> Float, twi: Boolean, modifier: Modifier = Modifier) {
+fun VoiceCueRow(cue: VoiceReflect.Cue, level: () -> Float, modifier: Modifier = Modifier) {
     val calm = LocalCalmMotion.current
     Crossfade(targetState = cue, animationSpec = tween(SurfaceMotion.FADE_MS), label = "voice cue", modifier = modifier) { c ->
         when (c) {
@@ -130,7 +129,7 @@ fun VoiceCueRow(cue: VoiceReflect.Cue, level: () -> Float, twi: Boolean, modifie
             VoiceReflect.Cue.Heard -> Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
                 Waveform(live = false, level = { 0f }, modifier = Modifier.size(width = 44.dp, height = 24.dp))
                 Spacer(Modifier.width(10.dp))
-                Text(if (twi) "Mete wo." else "Heard you.", style = MaterialTheme.typography.bodyMedium, color = GlassColors.TextSecondary)
+                Text("Heard you.", style = MaterialTheme.typography.bodyMedium, color = GlassColors.TextSecondary)
             }
             is VoiceReflect.Cue.AskingAgain -> Text(c.note, style = MaterialTheme.typography.bodyMedium, color = GlassColors.Warm,
                 modifier = Modifier.padding(top = 10.dp))

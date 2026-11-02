@@ -17,23 +17,22 @@ import org.junit.Test
 class TaskLiveTest {
     @Test fun aWorkingTaskShowsAndAWaitingOrFinishedOneDoesNot() {
         for (s in listOf(AgentStatus.THINKING, AgentStatus.ACTING, AgentStatus.PAUSED))
-            assertNotNull(s.name, TaskLive.of(AgentUiState(status = s, goal = "send hi to Ama on WhatsApp"), twi = false))
+            assertNotNull(s.name, TaskLive.of(AgentUiState(status = s, goal = "send hi to Ama on WhatsApp")))
         for (s in listOf(AgentStatus.IDLE, AgentStatus.WAITING_CONFIRMATION, AgentStatus.ASKING, AgentStatus.SECURE_INPUT,
                 AgentStatus.COMPLETED, AgentStatus.STOPPED, AgentStatus.FAILED))
-            assertNull(s.name, TaskLive.of(AgentUiState(status = s, goal = "x"), twi = false))
+            assertNull(s.name, TaskLive.of(AgentUiState(status = s, goal = "x")))
     }
 
     @Test fun itCarriesTheRequestAStopButtonAndATwiTitle() {
-        val a = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "send hi to Ama on WhatsApp"), twi = false)!!
+        val a = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "send hi to Ama on WhatsApp"))!!
         assertEquals(LiveKind.TASK, a.kind)
         assertEquals("send hi to Ama on WhatsApp", a.detail)
         assertEquals(TaskLive.STOP, a.actions.single().id)
-        assertTrue(TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "x"), twi = true)!!.title.contains("ɛ"))
     }
 
     @Test fun itLeadsARunningTimerButNotOneThatIsDone() {
         LiveActivities.clear()
-        val task = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "open settings"), twi = false)!!
+        val task = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "open settings"))!!
         LiveActivities.upsert(LiveActivity("timer-1", LiveKind.TIMER, "Timer", "4:32"))
         LiveActivities.upsert(task)
         assertEquals("the running timer keeps running, the task leads", TaskLive.ID, LiveActivities.lead()!!.id)
@@ -45,9 +44,9 @@ class TaskLiveTest {
 
     @Test fun betweenStepsItSaysTheLastStepDone() {
         val running = AgentStep(1, 1, "open_app", "Settings", AgentStep.State.RUNNING)
-        val now = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "open settings", runSeq = 1, steps = listOf(running)), twi = false)!!
+        val now = TaskLive.of(AgentUiState(status = AgentStatus.ACTING, goal = "open settings", runSeq = 1, steps = listOf(running)))!!
         val between = TaskLive.of(AgentUiState(status = AgentStatus.THINKING, goal = "open settings", runSeq = 1,
-            steps = listOf(running.copy(state = AgentStep.State.DONE))), twi = false)!!
+            steps = listOf(running.copy(state = AgentStep.State.DONE))))!!
         assertTrue("a step label while it runs: ${now.compact}", now.compact != "Working on it")
         assertTrue("the step done, not 'Working on it', while the planner thinks: ${between.compact}", between.compact != "Working on it")
     }

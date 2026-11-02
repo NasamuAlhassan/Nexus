@@ -602,7 +602,7 @@ object VoiceEngine {
         // …and while it WORKS in another app, the island says what it is doing (live/TaskLive; owner, 24 Oct 2026: no pop-up
         // showed while it acted in WhatsApp or the MoMo menus). Timers, music and directions keep their own activities.
         scope.launch(Dispatchers.Main) {
-            AgentEngine.state.map { com.tekyerema.live.TaskLive.of(it, twi = speaksTwi()) }
+            AgentEngine.state.map { com.tekyerema.live.TaskLive.of(it) }
                 .distinctUntilChanged { a, b -> a?.copy(updatedAt = 0L) == b?.copy(updatedAt = 0L) }
                 .collect { a ->
                     if (a == null) com.tekyerema.live.LiveActivities.end(com.tekyerema.live.TaskLive.ID)

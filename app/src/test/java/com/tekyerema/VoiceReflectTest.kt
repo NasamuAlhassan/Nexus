@@ -26,25 +26,25 @@ class VoiceReflectTest {
 
     @Test fun the_listening_hint_appears_only_while_the_pipeline_really_listens() {
         assertEquals(Cue.Listening("Say yes or no, or tap."),
-            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.LISTENING), hasChoices = false, twi = false))
+            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.LISTENING), hasChoices = false))
         assertEquals("speaking the question: no hint", Cue.None,
-            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.ASKING), hasChoices = false, twi = false))
-        assertEquals(Cue.Heard, VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.HEARD), false, false))
-        assertEquals(Cue.None, VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(), false, false))
+            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.ASKING), hasChoices = false))
+        assertEquals(Cue.Heard, VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.HEARD), false))
+        assertEquals(Cue.None, VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(), false))
         assertEquals("the PIN step listens for nothing on screen", Cue.None,
-            VoiceReflect.cue(Kind.SECURE, VoiceUiState(confirmPhase = ConfirmPhase.LISTENING), false, false))
+            VoiceReflect.cue(Kind.SECURE, VoiceUiState(confirmPhase = ConfirmPhase.LISTENING), false))
         assertEquals(Cue.Listening("Say your answer, or tap one."),
-            VoiceReflect.cue(Kind.QUESTION, VoiceUiState(state = VoiceState.LISTENING), hasChoices = true, twi = false))
-        assertEquals(Cue.None, VoiceReflect.cue(Kind.QUESTION, VoiceUiState(state = VoiceState.SPEAKING), true, false))
+            VoiceReflect.cue(Kind.QUESTION, VoiceUiState(state = VoiceState.LISTENING), hasChoices = true))
+        assertEquals(Cue.None, VoiceReflect.cue(Kind.QUESTION, VoiceUiState(state = VoiceState.SPEAKING), true))
     }
 
     @Test fun asking_again_says_why_from_the_pipelines_own_reason() {
         assertEquals(Cue.AskingAgain("Didn't catch that. Asking again."),
-            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.ASKING, confirmRetry = ConfirmRetry.UNCLEAR), false, false))
+            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.ASKING, confirmRetry = ConfirmRetry.UNCLEAR), false))
         assertEquals(Cue.Listening("Didn't catch that. Say yes or no, or tap."),
-            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.LISTENING, confirmRetry = ConfirmRetry.UNCLEAR), false, false))
+            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.LISTENING, confirmRetry = ConfirmRetry.UNCLEAR), false))
         assertEquals("a 'wait' is never shown as a miss", Cue.AskingAgain("Take your time. Asking again."),
-            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.ASKING, confirmRetry = ConfirmRetry.HOLD), false, false))
+            VoiceReflect.cue(Kind.CONFIRM, VoiceUiState(confirmPhase = ConfirmPhase.ASKING, confirmRetry = ConfirmRetry.HOLD), false))
     }
 
     @Test fun the_decision_shown_is_the_engines_own() {

@@ -66,7 +66,6 @@ import kotlinx.coroutines.delay
 @Composable
 internal fun PromptPanel(
     prompt: PromptSurface.Prompt,
-    twi: Boolean,
     typing: Boolean,
     notice: String?,
     typeHint: String,
@@ -89,7 +88,7 @@ internal fun PromptPanel(
     val hasChoices = remember(prompt.text) { prompt.kind == PromptSurface.Kind.QUESTION && QuestionChoices.of(prompt.text).isNotEmpty() }
 
     // The light follows the microphone only while the pipeline really listens for the answer; otherwise it rests.
-    val listening = VoiceReflect.cue(prompt.kind, voice, hasChoices, twi) is VoiceReflect.Cue.Listening
+    val listening = VoiceReflect.cue(prompt.kind, voice, hasChoices) is VoiceReflect.Cue.Listening
     val currentMood by rememberUpdatedState(if (listening) LightMood.LISTENING else LightMood.CALM)
     val micLevel = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(listening) {
@@ -121,8 +120,7 @@ internal fun PromptPanel(
     LaunchedEffect(Unit) { if (arrival.value < 1f) { delay(120); arrival.animateTo(1f, tween(760)) } }
 
     val tilt = com.tekyerema.ui.glass.rememberTiltLight(tier == GlassTier.FULL && !calm)
-    val title = if (twi) PromptSurface.header(prompt.kind, true).lowercase().replaceFirstChar { it.uppercase() }
-        else SurfaceModel.titleOfWaiting(prompt.kind, prompt.text)
+    val title = SurfaceModel.titleOfWaiting(prompt.kind, prompt.text)
     val radius = 34.dp
     // The words and choices may scroll at very large text; the panel never grows past the screen.
     val maxBody = (LocalConfiguration.current.screenHeightDp * 0.72f).dp
@@ -164,7 +162,7 @@ internal fun PromptPanel(
                         letterSpacing = (-0.2).sp), color = GlassColors.Text, modifier = Modifier.semantics { heading() })
                 }
                 Column(Modifier.heightIn(max = maxBody).verticalScroll(rememberScrollState())) {
-                    if (!typing) Waiting(waiting, voice, resolving = false, reaction = Reaction(), twi = twi, tier = tier,
+                    if (!typing) Waiting(waiting, voice, resolving = false, reaction = Reaction(), tier = tier,
                         onConfirm = onConfirm, onChoice = onChoice, onAnswerByVoice = onAnswerByVoice, onType = onType,
                         onSecureDone = onSecureDone, onStopTask = onStopTask,
                         onTypeConfirm = if (prompt.kind == PromptSurface.Kind.CONFIRM) onType else null)
@@ -177,7 +175,7 @@ internal fun PromptPanel(
                         Box(Modifier.onPreviewKeyEvent { e ->
                             if (e.key == Key.Back && e.type == KeyEventType.KeyUp) { onCloseTyping(); true } else false
                         }) {
-                            FollowUpField(placeholder = typeHint, twi = twi, tier = tier, onSubmit = onSubmitTyped,
+                            FollowUpField(placeholder = typeHint, tier = tier, onSubmit = onSubmitTyped,
                                 onSpeak = { onCloseTyping(); if (prompt.kind == PromptSurface.Kind.QUESTION) onAnswerByVoice() })
                         }
                     }

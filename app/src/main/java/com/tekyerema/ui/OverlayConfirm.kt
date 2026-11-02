@@ -140,16 +140,9 @@ object OverlayConfirm {
         val wm = host.getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val d = host.resources.displayMetrics.density
         fun dp(v: Int) = (v * d).toInt()
-        // ONE language, the user's (owner, 5 October 2026): in a Twi conversation the panel's own words are Twi too.
-        val twi = try { VoiceEngine.speaksTwi() } catch (_: Throwable) { false }
-        twiPanel = twi
-        val header = PromptSurface.header(kind, twi)
+        val header = PromptSurface.header(kind)
         // What TalkBack hears as the panel arrives (unless our own voice is already reading the question aloud).
-        val summary = if (twi) when (kind) {   // [owner: verify the Twi]
-            PromptSurface.Kind.CONFIRM -> "Tɛkyerɛma pɛ wo kwan. $prompt. Ka aane anaa daabi."
-            PromptSurface.Kind.QUESTION -> "Tɛkyerɛma rebisa. $prompt. Bua, anaa ka gyae."
-            PromptSurface.Kind.SECURE -> "Ahotoso adeyɛ. $prompt. Sɛ wowie a, ka sɛ 'awie'."
-        } else when (kind) {
+        val summary = when (kind) {
             PromptSurface.Kind.CONFIRM -> "Nexus needs your OK. $prompt. ${Confirmation.LISTEN_HINT}."
             PromptSurface.Kind.QUESTION -> "Nexus is asking. $prompt. Say your answer, or double-tap Speak. Say stop to cancel."
             PromptSurface.Kind.SECURE -> "Secure step. $prompt. When you've finished, say done or double-tap Done."
@@ -211,7 +204,7 @@ object OverlayConfirm {
         panel.setContent {
             TekyeremaTheme {
                 PromptPanel(
-                    prompt = p, twi = twi, typing = typing.value, notice = notice.value, typeHint = typeHint(kind),
+                    prompt = p, typing = typing.value, notice = notice.value, typeHint = typeHint(kind),
                     // J-02: the answers are for THIS confirmation's number (a panel not drawn for a pending confirmation has
                     // NO_CONFIRMATION, so its verb can approve nothing); the verb counts only once ConfirmGate has armed it.
                     onConfirm = { approved, s -> AgentEngine.confirm(approved, s); hideSoon() },
@@ -236,11 +229,7 @@ object OverlayConfirm {
         } catch (t: Throwable) { life.destroy(); view = null; wmUsed = null; owner = null }
     }
 
-    @Volatile private var twiPanel = false
-
-    private fun typeHint(kind: PromptSurface.Kind): String = if (twiPanel) {   // [owner: verify]
-        if (kind == PromptSurface.Kind.CONFIRM) "Twerɛ aane anaa daabi" else "Twerɛ wo mmuae"
-    } else if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer"
+    private fun typeHint(kind: PromptSurface.Kind): String = if (kind == PromptSurface.Kind.CONFIRM) "Type yes, no, or what to change" else "Type your answer"
 
     fun hide(ctx: Context) { main.post { hideNow() } }
 

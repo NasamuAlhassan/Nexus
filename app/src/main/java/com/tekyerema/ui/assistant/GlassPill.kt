@@ -173,7 +173,6 @@ fun GlassPill(
 fun ChoiceSet(
     choices: List<String>,
     chosen: String?,
-    twi: Boolean,
     onChoice: (String) -> Unit,
     tier: GlassTier,
     modifier: Modifier = Modifier
@@ -195,7 +194,7 @@ fun ChoiceSet(
                 chosen = chosen != null && chosen.equals(c, ignoreCase = true),
                 dimmed = chosen != null && !chosen.equals(c, ignoreCase = true),
                 available = chosen == null && tapped == null,
-                contentDescription = (if (twi) "Bua: " else "Answer: ") + c,
+                contentDescription = ("Answer: ") + c,
                 tier = tier
             )
         }

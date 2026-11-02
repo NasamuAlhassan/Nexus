@@ -24,8 +24,6 @@ object StopGuard {
         val twoTaps = try { com.tekyerema.core.config.AppConfig.bool("ui.stop.twoTaps", true) } catch (_: Throwable) { true }
         if (shouldStop(SystemClock.elapsedRealtime(), twoTaps)) { stop(); return }
         Log.i("Tekyerema", "[STOP] first tap on Stop — waiting for a second")
-        val twi = try { com.tekyerema.voice.VoiceEngine.language() == com.tekyerema.voice.Lang.TWI } catch (_: Throwable) { false }
-        // [owner to listen: the Twi line]
-        try { com.tekyerema.voice.VoiceEngine.announce(if (twi) "Mia bio na magyae." else "Tap again to stop.") } catch (_: Throwable) {}
+        try { com.tekyerema.voice.VoiceEngine.announce("Tap again to stop.") } catch (_: Throwable) {}
     }
 }

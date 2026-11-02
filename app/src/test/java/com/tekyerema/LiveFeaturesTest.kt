@@ -221,7 +221,7 @@ class LiveFeaturesTest {
         assertNull(ConfirmFacts.parse("Open WhatsApp?"))
         val calling = ConfirmFacts.parse("Calling Kofi Sample, ending 3 3 3 3. Say stop to cancel.")!!
         assertTrue(calling.announced); assertEquals("Kofi Sample", calling.name); assertEquals("•••• 3333", ConfirmFacts.shownNumber(calling))
-        assertEquals("Cancel" to "Call now", com.tekyerema.ui.assistant.ConfirmWords.buttons("Calling Kofi Sample, ending 3 3 3 3. Say stop to cancel.", false))
+        assertEquals("Cancel" to "Call now", com.tekyerema.ui.assistant.ConfirmWords.buttons("Calling Kofi Sample, ending 3 3 3 3. Say stop to cancel."))
     }
 
     @Test fun a_plain_call_is_announced_not_asked() {

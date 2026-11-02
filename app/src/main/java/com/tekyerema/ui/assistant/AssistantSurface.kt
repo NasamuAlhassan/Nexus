@@ -169,7 +169,6 @@ internal data class Reaction(val decision: VoiceReflect.Decision? = null, val ch
 fun AssistantSurfaceHost(
     voice: VoiceUiState,
     agent: AgentUiState,
-    twi: Boolean,
     modifier: Modifier = Modifier,
     /** The surface's visibility, for the host to quieten what would repeat it (the line under the orb). */
     onVisible: (Boolean) -> Unit = {},
@@ -209,7 +208,7 @@ fun AssistantSurfaceHost(
     // The panel can still be up for a moment (before the hand-over above lands): never draw the same prompt twice.
     val panelUp by OverlayConfirm.onScreen.collectAsState()
 
-    val reduced = SurfaceModel.reduce(voice, agent, local, now = maxOf(now, voice.spokenAt), twi = twi)
+    val reduced = SurfaceModel.reduce(voice, agent, local, now = maxOf(now, voice.spokenAt))
     // Resolving: the engine has its answer (prompt cleared) but hasn't moved on — the prompt stays, inactive, until the next
     // state says what was decided (so the reaction can be seen and the shape never blinks).
     val lastPrompt = last.state
@@ -268,7 +267,6 @@ fun AssistantSurfaceHost(
         voice = voice,
         resolving = resolving,
         reaction = reaction,
-        twi = twi,
         tier = tier,
         announce = announce,
         modifier = modifier,
@@ -308,7 +306,6 @@ private fun GlassSurface(
     voice: VoiceUiState,
     resolving: Boolean,
     reaction: Reaction,
-    twi: Boolean,
     tier: GlassTier,
     announce: Boolean,
     modifier: Modifier,
@@ -430,7 +427,7 @@ private fun GlassSurface(
     LaunchedEffect(orbPause) { onOrbPause(orbPause) }
 
     // ---------------------------------------------------------------- the light: real state only
-    val listening = (state.mode == Mode.WAITING && VoiceReflect.cue(state.waiting!!.kind, voice, false, twi) is VoiceReflect.Cue.Listening) ||
+    val listening = (state.mode == Mode.WAITING && VoiceReflect.cue(state.waiting!!.kind, voice, false) is VoiceReflect.Cue.Listening) ||
         (state.mode == Mode.PROCESSING && voice.state == com.tekyerema.voice.VoiceState.LISTENING)
     val mood = when {
         state.mode == Mode.WAITING -> if (listening) LightMood.LISTENING else LightMood.CALM
@@ -563,7 +560,7 @@ private fun GlassSurface(
                                 .graphicsLayer { translationY = -visualPx() * 0.05f }   // the content trails the glass a touch
                                 .padding(start = 20.dp, end = 16.dp, top = 16.dp, bottom = if (allow.followUp && rest == Rest.COMPACT) 22.dp else 18.dp)
                         ) {
-                            Header(state, resolving, summary, announce, twi, allow, expandable, rest,
+                            Header(state, resolving, summary, announce, allow, expandable, rest,
                                 onRest = { rest = it }, onDismiss = { dismiss() }, onStopTask = onStopTask, onStopSpeaking = onStopSpeaking, tier = tier)
                             val bodyScroll = remember(state.key, state.mode, rest) { ScrollState(0) }
                             AnimatedContent(
@@ -580,15 +577,15 @@ private fun GlassSurface(
                                 },
                                 label = "surface body"
                             ) { s ->
-                                Body(s, voice, resolving && s.key == state.key, reaction, rest, twi, tier,
+                                Body(s, voice, resolving && s.key == state.key, reaction, rest, tier,
                                     onToggle = { if (expandable && !s.mode.isPrompt()) rest = if (rest == Rest.COMPACT) Rest.EXPANDED else Rest.COMPACT },
                                     onConfirm = onConfirm, onChoice = onChoice, onAnswerByVoice = onAnswerByVoice,
                                     onType = { rest = Rest.INPUT }, onSecureDone = onSecureDone, onStopTask = onStopTask,
                                     onRetry = onRetry, onOpenUrl = onOpenUrl, onOpenMaps = onOpenMaps)
                             }
                             if (rest == Rest.INPUT && (allow.followUp || typingAnswer)) FollowUpField(
-                                placeholder = if (typingAnswer) (if (twi) "Twerɛ wo mmuae" else "Type your answer") else "Ask a follow-up",
-                                twi = twi, tier = tier,
+                                placeholder = if (typingAnswer) ("Type your answer") else "Ask a follow-up",
+                                tier = tier,
                                 onSubmit = { text -> onSubmitText(text).also { ok -> if (ok) rest = Rest.COMPACT } },
                                 onSpeak = { if (typingAnswer) onAnswerByVoice() else onSpeak() }
                             )
@@ -607,7 +604,7 @@ private fun Mode.isPrompt() = this == Mode.WAITING
 
 @Composable
 private fun Header(
-    s: SurfaceModel.State, resolving: Boolean, summary: String, announce: Boolean, twi: Boolean,
+    s: SurfaceModel.State, resolving: Boolean, summary: String, announce: Boolean,
     allow: SurfaceGesture.Allow, expandable: Boolean, rest: Rest,
     onRest: (Rest) -> Unit, onDismiss: () -> Unit, onStopTask: () -> Unit, onStopSpeaking: () -> Unit, tier: GlassTier
 ) {
@@ -639,8 +636,8 @@ private fun Header(
         )
     }
     val stop: @Composable () -> Unit = {
-        if (working && !resolving) GlassPill(if (twi) "Gyae" else "Stop", onClick = onStopTask, compact = true, tier = tier,
-            contentDescription = if (twi) "Gyae adwuma no" else "Stop the task", haptic = TkHaptic.REJECT)
+        if (working && !resolving) GlassPill("Stop", onClick = onStopTask, compact = true, tier = tier,
+            contentDescription = "Stop the task", haptic = TkHaptic.REJECT)
     }
     if (stacked) Column(Modifier.fillMaxWidth()) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -676,7 +673,7 @@ internal fun StateMark(s: SurfaceModel.State, modifier: Modifier) {
 
 @Composable
 private fun Body(
-    s: SurfaceModel.State, voice: VoiceUiState, resolving: Boolean, reaction: Reaction, rest: Rest, twi: Boolean, tier: GlassTier,
+    s: SurfaceModel.State, voice: VoiceUiState, resolving: Boolean, reaction: Reaction, rest: Rest, tier: GlassTier,
     onToggle: () -> Unit,
     onConfirm: (Boolean, Long) -> Unit, onChoice: (String) -> Unit, onAnswerByVoice: () -> Unit, onType: () -> Unit,
     onSecureDone: () -> Unit, onStopTask: () -> Unit,
@@ -687,9 +684,9 @@ private fun Body(
         when (s.mode) {
             // The step running now is the title; below it, the steps before it — a calm list, past tense once done.
             Mode.WORKING, Mode.PROCESSING -> Reveal(0, s.key) { Steps(s.steps.filterNot { it.active }, expanded) }
-            Mode.WAITING -> s.waiting?.let { Waiting(it, voice, resolving, reaction, twi, tier, onConfirm, onChoice, onAnswerByVoice, onType, onSecureDone, onStopTask) }
+            Mode.WAITING -> s.waiting?.let { Waiting(it, voice, resolving, reaction, tier, onConfirm, onChoice, onAnswerByVoice, onType, onSecureDone, onStopTask) }
             else -> when (val p = s.preview) {
-                is SurfaceModel.Preview.Answer -> AnswerBody(s.key, p, s.steps, expanded, tier, twi, onToggle, onOpenUrl, onOpenMaps, speaking = s.speaking)
+                is SurfaceModel.Preview.Answer -> AnswerBody(s.key, p, s.steps, expanded, tier, onToggle, onOpenUrl, onOpenMaps, speaking = s.speaking)
                 is SurfaceModel.Preview.Action -> ActionBody(s.key, p, s.steps, expanded, onToggle, speaking = s.speaking)
                 is SurfaceModel.Preview.Problem -> ProblemBody(s.key, p, s.mode == Mode.CANCELLED, tier, onRetry)
                 null -> {}
@@ -746,15 +743,15 @@ private fun StepLine(step: SurfaceModel.StepView) {
 
 @Composable
 internal fun Waiting(
-    w: SurfaceModel.Waiting, voice: VoiceUiState, resolving: Boolean, reaction: Reaction, twi: Boolean, tier: GlassTier,
+    w: SurfaceModel.Waiting, voice: VoiceUiState, resolving: Boolean, reaction: Reaction, tier: GlassTier,
     onConfirm: (Boolean, Long) -> Unit, onChoice: (String) -> Unit, onAnswerByVoice: () -> Unit, onType: () -> Unit,
     onSecureDone: () -> Unit, onStopTask: () -> Unit,
     /** The panel over other apps also lets a confirmation be typed (owner, 2 October 2026); null: no Type pill. */
     onTypeConfirm: (() -> Unit)? = null
 ) {
     val choices = remember(w.text) { if (w.kind == PromptSurface.Kind.QUESTION) QuestionChoices.of(w.text) else emptyList() }
-    val cue = if (resolving) VoiceReflect.Cue.None else VoiceReflect.cue(w.kind, voice, choices.isNotEmpty(), twi)
-    val stopWords = if (twi) "Gyae adwuma no" else "Stop the task"
+    val cue = if (resolving) VoiceReflect.Cue.None else VoiceReflect.cue(w.kind, voice, choices.isNotEmpty())
+    val stopWords = "Stop the task"
     Column(Modifier.padding(top = 10.dp)) {
         // A call, a text or a payment leads with the person (PersonPreview); the prompt's full words follow, smaller.
         val facts = remember(w.text) { if (w.kind == PromptSurface.Kind.CONFIRM) ConfirmFacts.parse(w.text) else null }
@@ -791,8 +788,8 @@ internal fun Waiting(
         Reveal(1, w.seq to w.text) {
             when (w.kind) {
                 PromptSurface.Kind.CONFIRM -> Column {
-                    val (no, _) = ConfirmWords.buttons(w.text, twi)
-                    val verb = ConfirmWords.label(w.text, twi)
+                    val (no, _) = ConfirmWords.buttons(w.text)
+                    val verb = ConfirmWords.label(w.text)
                     // The verb counts only once the confirmation has been up for ConfirmGate.armMs(): the pill fills as that
                     // real delay runs and is not tappable before (the same rule as the panel over other apps).
                     val shownAt = remember(w.seq) { android.os.SystemClock.uptimeMillis() }
@@ -806,44 +803,44 @@ internal fun Waiting(
                         if (i == 0) GlassPill(no, onClick = { onConfirm(false, w.seq) }, modifier = m, tone = PillTone.QUIET,
                             available = !resolving, chosen = reaction.decision == VoiceReflect.Decision.DECLINED,
                             dimmed = reaction.decision == VoiceReflect.Decision.APPROVED,
-                            contentDescription = if (twi) "Daabi, nnyɛ" else "$no — don't do it", haptic = TkHaptic.REJECT, tier = tier)
+                            contentDescription = "$no — don't do it", haptic = TkHaptic.REJECT, tier = tier)
                         else GlassPill(verb, onClick = { if (ConfirmGate.armed(shownAt, android.os.SystemClock.uptimeMillis())) onConfirm(true, w.seq) },
                             modifier = m, tone = PillTone.PRIMARY, arming = { arm.value }, available = armed && !resolving,
                             chosen = reaction.decision == VoiceReflect.Decision.APPROVED,
                             dimmed = reaction.decision == VoiceReflect.Decision.DECLINED,
-                            contentDescription = if (twi) "Aane, yɛ" else "$verb — do it", haptic = TkHaptic.CONFIRM, tier = tier)
+                            contentDescription = "$verb — do it", haptic = TkHaptic.CONFIRM, tier = tier)
                     }
                     // Over other apps the answer can also be typed: a small quiet pill under the two that decide.
                     // (not for an announced call: it goes ahead by itself; "stop" or Cancel is all it takes)
                     if (onTypeConfirm != null && facts?.announced != true) Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.End) {
-                        GlassPill(if (twi) "Twerɛ" else "Type", onClick = onTypeConfirm, compact = true, available = !resolving,
-                            contentDescription = if (twi) "Twerɛ wo mmuae" else "Type your answer instead of saying it", tier = tier)
+                        GlassPill("Type", onClick = onTypeConfirm, compact = true, available = !resolving,
+                            contentDescription = "Type your answer instead of saying it", tier = tier)
                     }
                 }
                 PromptSurface.Kind.QUESTION -> Column {
                     if (choices.isNotEmpty()) {
-                        ChoiceSet(choices, chosen = reaction.chosen, twi = twi, onChoice = onChoice, tier = tier)
+                        ChoiceSet(choices, chosen = reaction.chosen, onChoice = onChoice, tier = tier)
                         Spacer(Modifier.padding(top = 12.dp))
                     }
-                    val speakLabel = if (twi) "Kasa" else "Speak"
-                    val labels = buildList { add(if (twi) "Gyae" else "Stop"); add(if (twi) "Twerɛ" else "Type"); if (cue !is VoiceReflect.Cue.Listening) add(speakLabel) }
+                    val speakLabel = "Speak"
+                    val labels = buildList { add("Stop"); add("Type"); if (cue !is VoiceReflect.Cue.Listening) add(speakLabel) }
                     ButtonRow(labels, labels.map { 1f }) { i, m ->
                         when (i) {
                             0 -> GlassPill(labels[0], onClick = onStopTask, modifier = m, available = !resolving, contentDescription = stopWords,
                                 haptic = TkHaptic.REJECT, tier = tier)
                             1 -> GlassPill(labels[1], onClick = onType, modifier = m, available = !resolving,
-                                contentDescription = if (twi) "Twerɛ wo mmuae" else "Type your answer", tier = tier)
+                                contentDescription = "Type your answer", tier = tier)
                             else -> GlassPill(labels[2], onClick = onAnswerByVoice, modifier = m, tone = PillTone.PRIMARY, available = !resolving,
-                                contentDescription = if (twi) "Bua wɔ kasa mu" else "Answer by voice", tier = tier)
+                                contentDescription = "Answer by voice", tier = tier)
                         }
                     }
                 }
                 PromptSurface.Kind.SECURE -> {
-                    val (stop, done) = PromptSurface.buttons(PromptSurface.Kind.SECURE, twi)
+                    val (stop, done) = PromptSurface.buttons(PromptSurface.Kind.SECURE)
                     ButtonRow(listOf(stop, done), listOf(1f, 1.4f)) { i, m ->
                         if (i == 0) GlassPill(stop, onClick = onStopTask, modifier = m, contentDescription = stopWords, haptic = TkHaptic.REJECT, tier = tier)
                         else GlassPill(done, onClick = onSecureDone, modifier = m, tone = PillTone.PRIMARY,
-                            contentDescription = if (twi) "Mawie" else "I've finished entering it", tier = tier)
+                            contentDescription = "I've finished entering it", tier = tier)
                     }
                 }
             }
@@ -851,7 +848,7 @@ internal fun Waiting(
         // Listening, heard, asking again — only what the voice pipeline is really doing; voice and touch reach the same decision.
         // Below the pills, so they never move when the microphone opens or closes: a tap aimed at one must not land on its
         // neighbour (emulator, 14 Oct 2026 — the line appearing above pushed the pills down and a tap meant for Type hit Cancel).
-        VoiceCueRow(cue, level = { VoiceEngine.level.value }, twi = twi)
+        VoiceCueRow(cue, level = { VoiceEngine.level.value })
     }
 }
 
@@ -859,7 +856,7 @@ internal fun Waiting(
 
 @Composable
 private fun AnswerBody(
-    key: String, p: SurfaceModel.Preview.Answer, steps: List<SurfaceModel.StepView>, expanded: Boolean, tier: GlassTier, twi: Boolean,
+    key: String, p: SurfaceModel.Preview.Answer, steps: List<SurfaceModel.StepView>, expanded: Boolean, tier: GlassTier,
     onToggle: () -> Unit, onOpenUrl: (String) -> Unit, onOpenMaps: (String, String?) -> Unit, speaking: Boolean = false
 ) {
     // Messages read aloud with "Hide messages on screen" on: who and when only, never the words (ReadCover). "Say again" stays —
@@ -917,7 +914,7 @@ private fun AnswerBody(
         if (p.sources.isNotEmpty()) Reveal(1, key) { Sources(p.sources, onOpenUrl) }
         if (expanded && steps.isNotEmpty()) Reveal(2, key) { Column { WhatIDid(); Steps(steps, expanded = true) } }
         if (p.mapLink != null || p.mapQuery != null) Reveal(3, key) {
-            GlassPill(if (twi) "Kwan no" else "Open directions", onClick = { onOpenMaps(p.mapQuery ?: "", p.mapLink) },
+            GlassPill("Open directions", onClick = { onOpenMaps(p.mapQuery ?: "", p.mapLink) },
                 modifier = Modifier.padding(top = 12.dp), tone = PillTone.PRIMARY, tier = tier,
                 contentDescription = "Open ${p.mapQuery ?: "the place"} in your maps app")
         }
@@ -1015,7 +1012,7 @@ private fun ProblemBody(key: String, p: SurfaceModel.Preview.Problem, cancelled:
 /** Revealed by a pull down (or "Ask a follow-up" for TalkBack): a glass field and a mic. It submits through the same entry as
  *  the field at the foot of Home (VoiceEngine.submitTyped); an answer to the agent's question goes the same way. */
 @Composable
-internal fun FollowUpField(placeholder: String, twi: Boolean, tier: GlassTier, onSubmit: (String) -> Boolean, onSpeak: () -> Unit) {
+internal fun FollowUpField(placeholder: String, tier: GlassTier, onSubmit: (String) -> Boolean, onSpeak: () -> Unit) {
     var text by remember { mutableStateOf("") }
     val fieldColor = LocalGlass.current.field
     val focus = remember { FocusRequester() }
@@ -1040,9 +1037,9 @@ internal fun FollowUpField(placeholder: String, twi: Boolean, tier: GlassTier, o
             )
         }
         Spacer(Modifier.width(10.dp))
-        if (text.isNotBlank()) GlassPill(if (twi) "Soma" else "Send", onClick = { send() }, compact = true, tone = PillTone.PRIMARY, tier = tier,
+        if (text.isNotBlank()) GlassPill("Send", onClick = { send() }, compact = true, tone = PillTone.PRIMARY, tier = tier,
             contentDescription = "Send what you typed", haptic = TkHaptic.CONFIRM)
-        else GlassPill(if (twi) "Kasa" else "Speak", onClick = onSpeak, compact = true, tier = tier, contentDescription = "Ask by voice")
+        else GlassPill("Speak", onClick = onSpeak, compact = true, tier = tier, contentDescription = "Ask by voice")
     }
 }
 

@@ -73,13 +73,12 @@ object SurfaceModel {
     private val TERMINAL = setOf(AgentStatus.COMPLETED, AgentStatus.COMPLETED_UNVERIFIED, AgentStatus.CANNOT_DO,
         AgentStatus.FAILED, AgentStatus.STOPPED)
 
-    fun reduce(voice: VoiceUiState, agent: AgentUiState, local: Local = Local(), now: Long = System.currentTimeMillis(),
-               twi: Boolean = false): State {
+    fun reduce(voice: VoiceUiState, agent: AgentUiState, local: Local = Local(), now: Long = System.currentTimeMillis()): State {
         val run = agent.runSeq
         val steps = stepsOf(agent)
         // The agent waits on the user — its own prompt, whatever the voice is doing.
         PromptSurface.of(agent.status, PromptSurface.confirmationText(agent.pendingConfirmation, agent.pendingConfirmationTwi),
-            PromptSurface.confirmationText(agent.pendingQuestion, agent.pendingQuestionTwi), agent.confirmationSeq, twi)?.let { p ->
+            PromptSurface.confirmationText(agent.pendingQuestion, agent.pendingQuestionTwi), agent.confirmationSeq)?.let { p ->
             return State(run, Mode.WAITING, titleOfWaiting(p.kind, p.text), steps, waiting = Waiting(p.kind, p.text, p.seq))
         }
         // The engine has its answer (the prompt is cleared) but hasn't moved on yet: still working, never a blink to hidden.
@@ -94,7 +93,7 @@ object SurfaceModel {
         }
         // The microphone is open and nothing else is waiting (a follow-up after a reply, the icon pressed): say so — a beep alone
         // is easy to miss (owner, 19 Oct 2026: "always show that it is listening").
-        if (voice.state == VoiceState.LISTENING) return State(run, Mode.PROCESSING, if (twi) "Meretie…" else "Listening…", listenOnly = true)
+        if (voice.state == VoiceState.LISTENING) return State(run, Mode.PROCESSING, "Listening…", listenOnly = true)
         // Understanding what was said (no run yet): a quiet processing state, nothing more to claim.
         if (voice.state == VoiceState.CAPTURED || voice.state == VoiceState.TRANSCRIBING || voice.state == VoiceState.UNDERSTANDING)
             return State(run, Mode.PROCESSING, "Understanding")

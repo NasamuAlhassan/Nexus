@@ -74,8 +74,7 @@ object ConfirmWords {
     /** "… Send it?" / "… Call him?" — the verb of a closing question. */
     private val CLOSING = Regex("(?i)\\b([a-z]+(?: up)?)\\s+(?:it|this|that|them|him|her)\\s*\\?\\s*$")
 
-    fun buttons(text: String, twi: Boolean): Pair<String, String> {
-        if (twi) return PromptSurface.buttons(PromptSurface.Kind.CONFIRM, twi = true).let { it[0] to it[1] }
+    fun buttons(text: String): Pair<String, String> {
         val plain = ScreenText.of(text).trim()
         // An announced call (policy/ConfirmTiers) goes ahead by itself; the button only makes it go now.
         if (plain.startsWith("Calling ")) return "Cancel" to "Call now"
@@ -92,11 +91,11 @@ object ConfirmWords {
 
     /**
      * The primary pill's words: the verb, and the person when the read-back names one plainly — "Send to Ama", "Call Ama"
-     * (mission v2). A name with digits, a long one, or none found leaves the verb alone; never guessed. Twi: the Twi verb pill.
+     * (mission v2). A name with digits, a long one, or none found leaves the verb alone; never guessed.
      */
-    fun label(text: String, twi: Boolean): String {
-        val verb = buttons(text, twi).second
-        if (twi || verb == "Yes, do it") return verb
+    fun label(text: String): String {
+        val verb = buttons(text).second
+        if (verb == "Yes, do it") return verb
         val plain = ScreenText.of(text).trim().trimStart('“', '"')
         // "to <Name>" only in the action line (up to its "?"), and a name starts with a capital: "…stop at the PIN for you to
         // enter." further down made the pill "Send to enter" (emulator, 14 Oct 2026).

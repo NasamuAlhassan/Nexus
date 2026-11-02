@@ -32,30 +32,28 @@ class PromptChoicesTest {
     }
 
     @Test fun a_confirmation_names_what_will_happen() {
-        assertEquals("Cancel" to "Send", ConfirmWords.buttons("Send this message to Ama?\n“I'm on my way.”", twi = false))
-        assertEquals("Cancel" to "Buy", ConfirmWords.buttons("Buy 2 cedis of airtime for 0 5 0, 8 7 9, 7 3 2 3, a Telecel number?", twi = false))
-        assertEquals("Cancel" to "Call", ConfirmWords.buttons("Call Ama?", twi = false))
-        assertEquals("Cancel" to "Yes, do it", ConfirmWords.buttons("MTN says this sends ten pesewas. Go ahead?", twi = false))
-        assertEquals("Daabi" to "Aane, yɛ", ConfirmWords.buttons("Soma sika?", twi = true))
+        assertEquals("Cancel" to "Send", ConfirmWords.buttons("Send this message to Ama?\n“I'm on my way.”"))
+        assertEquals("Cancel" to "Buy", ConfirmWords.buttons("Buy 2 cedis of airtime for 0 5 0, 8 7 9, 7 3 2 3, a Telecel number?"))
+        assertEquals("Cancel" to "Call", ConfirmWords.buttons("Call Ama?"))
+        assertEquals("Cancel" to "Yes, do it", ConfirmWords.buttons("MTN says this sends ten pesewas. Go ahead?"))
         // The real read-back (emulator, 14 Oct 2026): the closing question names the act — "Send", not the first word "Text".
         val p = com.tekyerema.voice.SpokenText.PAUSE
-        assertEquals("Cancel" to "Send", ConfirmWords.buttons("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?", twi = false))
+        assertEquals("Cancel" to "Send", ConfirmWords.buttons("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?"))
     }
 
     @Test fun the_primary_pill_names_the_act_and_the_person_when_plainly_said() {
         val p = com.tekyerema.voice.SpokenText.PAUSE
-        assertEquals("Send to Prince Ice P", ConfirmWords.label("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?", twi = false))
-        assertEquals("Call Ama", ConfirmWords.label("Call Ama?", twi = false))
+        assertEquals("Send to Prince Ice P", ConfirmWords.label("Text Prince Ice P, ending 3 6 1 1.${p}The message: \"I will be late today.\"${p}Send it?"))
+        assertEquals("Call Ama", ConfirmWords.label("Call Ama?"))
         // Only the action line names the person (emulator, 14 Oct 2026: "…for you to enter." made it "Send to enter").
         assertEquals("Send", ConfirmWords.label("Send 1 cedi to 0 5 0, 8 7 9, 7 3 2 3, a Telecel number, with Mobile Money?\n" +
-            "Your SIM is on MTN, so check the number before you send. I'll go through the menu quietly and stop at the PIN for you to enter.", twi = false))
+            "Your SIM is on MTN, so check the number before you send. I'll go through the menu quietly and stop at the PIN for you to enter."))
         assertEquals("Send to Mom", ConfirmWords.label("Send 5 cedis to Mom, ending 4 1 1 1, an MTN number, with Mobile Money?\n" +
-            "You haven't sent money to this number before. I'll stop at the PIN for you to enter.", twi = false))
-        assertEquals("Send to Ama", ConfirmWords.label("Send this message to Ama?\n“I'm on my way.”", twi = false))
-        assertEquals("a number is not a name", "Buy", ConfirmWords.label("Buy 2 cedis of airtime for 0 5 0, 8 7 9, 7 3 2 3, a Telecel number?", twi = false))
-        assertEquals("Call", ConfirmWords.label("Call 0 2 4 4 1 2 3 4 5 6?", twi = false))
-        assertEquals("Yes, do it", ConfirmWords.label("MTN says this sends ten pesewas. Go ahead?", twi = false))
-        assertEquals("Aane, yɛ", ConfirmWords.label("Soma sika?", twi = true))
+            "You haven't sent money to this number before. I'll stop at the PIN for you to enter."))
+        assertEquals("Send to Ama", ConfirmWords.label("Send this message to Ama?\n“I'm on my way.”"))
+        assertEquals("a number is not a name", "Buy", ConfirmWords.label("Buy 2 cedis of airtime for 0 5 0, 8 7 9, 7 3 2 3, a Telecel number?"))
+        assertEquals("Call", ConfirmWords.label("Call 0 2 4 4 1 2 3 4 5 6?"))
+        assertEquals("Yes, do it", ConfirmWords.label("MTN says this sends ten pesewas. Go ahead?"))
     }
 
     @Test fun the_voices_pause_marks_are_line_breaks_on_screen() {

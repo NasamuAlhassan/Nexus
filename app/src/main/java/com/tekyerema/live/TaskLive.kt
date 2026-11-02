@@ -19,19 +19,19 @@ object TaskLive {
     private val WORKING = setOf(AgentStatus.THINKING, AgentStatus.ACTING, AgentStatus.PAUSED)
 
     /** The capsule for [st], or null when no task is working (waiting on the user has its own panel; done is the reply). */
-    fun of(st: AgentUiState, twi: Boolean): LiveActivity? {
+    fun of(st: AgentUiState): LiveActivity? {
         if (st.status !in WORKING) return null
         // The step running now; between steps (most of a task: the planner is thinking) the last one done — "Opened Settings"
         // says more than "Working on it" (emulator, 24 Oct 2026: the pill read "Working on it" the whole task).
         val steps = SurfaceModel.stepsOf(st)
         val label = (steps.lastOrNull { it.active }?.label ?: steps.lastOrNull()?.past?.takeIf { it.isNotBlank() })
-            ?: SurfaceModel.reduce(VoiceUiState(), st, twi = twi).title.ifBlank { if (twi) "Mereyɛ ho adwuma" else "Working on it" }
-        val title = if (twi) "Nexus reyɛ adwuma" else "Nexus is working"
+            ?: SurfaceModel.reduce(VoiceUiState(), st).title.ifBlank { "Working on it" }
+        val title = "Nexus is working"
         val request = (st.request ?: st.goal).orEmpty().trim().take(80)
         return LiveActivity(
             id = ID, kind = LiveKind.TASK, title = title, compact = label.take(28),
             detail = request.ifBlank { null }, glyph = if (st.status == AgentStatus.PAUSED) LiveGlyph.PAUSED else LiveGlyph.WALK,
-            actions = listOf(LiveAction(STOP, if (twi) "Gyae" else "Stop")),
+            actions = listOf(LiveAction(STOP, "Stop")),
             spoken = "$title: $label", priority = 1,   // leads a running timer or music while it works; an urgent one (done) still first
         )
     }
