@@ -40,6 +40,14 @@ class TekyeremaNotificationListener : NotificationListenerService() {
         try { com.tekyerema.agent.triggers.NotificationTriggers.onPosted(applicationContext, rec) } catch (_: Throwable) {}
         // Phone care: money-received / missed-call alerts the user switched on — live posts only, on its own thread.
         try { com.tekyerema.phonecare.PhoneAlerts.onPosted(applicationContext, rec, sbn?.notification) } catch (_: Throwable) {}
+        // #37: a one-time code while a code box waits — offered, typed only on "enter the code" (OtpRelay). The raw text is
+        // read once here and never kept; the record above already has the code hidden.
+        try {
+            val ex = sbn?.notification?.extras
+            val raw = (ex?.getCharSequence(android.app.Notification.EXTRA_BIG_TEXT) ?: ex?.getCharSequence(android.app.Notification.EXTRA_TEXT))?.toString()
+            val from = (rec.sender ?: rec.title)?.takeIf { !com.tekyerema.phonecare.MoneyAlerts.looksLikeNumber(it) }
+            OtpRelay.onPosted(applicationContext, rec.packageName, from, raw)
+        } catch (_: Throwable) {}
     }
 
     private fun put(sbn: StatusBarNotification): NotificationRecord? {

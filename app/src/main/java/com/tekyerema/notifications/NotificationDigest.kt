@@ -85,6 +85,49 @@ object NotificationDigest {
         return sinceLabel.replaceFirstChar { it.uppercaseChar() } + ": " + body + if (body.last() in ".!?…") "" else "."
     }
 
+    /**
+     * MASTER_STATUS #2 (2 Nov 2026): the catch-up that opens with what matters ([Importance]) — missed calls, then up to
+     * [maxQuoted] important messages by name with a few of their words ("Ama: are you coming at 4?"), then the rest as one
+     * count ("and 11 others, most in WhatsApp"). Kept to about 25 spoken words; "read my messages" reads everything.
+     * Private reading uses [build] with quoteNewest = false instead (counts and senders only).
+     */
+    fun buildPrioritised(messages: List<IndexedMessage>, calls: List<MissedCall>, sinceLabel: String,
+                         isContact: (String) -> Boolean = { false }, maxQuoted: Int = 2, wordsEach: Int = 7,
+                         noun: String = "notification"): String {
+        val items = messages.filter { it.pkg !in DIALERS }.sortedByDescending { it.t }
+        val missed = calls.sortedByDescending { it.t }
+        if (items.isEmpty() && missed.isEmpty()) return build(messages, calls, sinceLabel, noun = noun)
+        val rank = mapOf(Importance.Why.MONEY to 0, Importance.Why.WHEN to 1, Importance.Why.RELATION to 2, Importance.Why.PERSON to 3)
+        val marked = items.map { it to Importance.of(it, isContact) }
+        val important = marked.filter { it.second != null }.sortedWith(compareBy<Pair<IndexedMessage, Importance.Why?>> { rank[it.second] }
+            .thenByDescending { it.first.t }).map { it.first }
+        val others = items - important.toSet()
+        val parts = ArrayList<String>()
+        if (missed.isNotEmpty()) {
+            val who = missed.map { it.who }.distinct()
+            parts.add(count(missed.size, "missed call") + ", from " + joinAnd(who.take(2) + more(who.size - 2)))
+        }
+        // One line per person: the newest important message from each, so three texts from Ama aren't three lines.
+        val quoted = important.distinctBy { (it.sender ?: it.title ?: it.app ?: it.pkg).lowercase() }.take(maxQuoted)
+        for (m in quoted) {
+            val who = m.sender?.takeIf { it.isNotBlank() } ?: m.title?.takeIf { it.isNotBlank() } ?: m.app ?: "Someone"
+            val words = m.text?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }.orEmpty()
+            val said = if (words.size <= wordsEach) words.joinToString(" ") else words.take(wordsEach).joinToString(" ") + "…"
+            parts.add(if (said.isEmpty()) who else "$who: " + com.tekyerema.voice.SpokenText.forEar(said).trimEnd('.'))
+        }
+        val moreImportant = important.size - important.count { it in quoted }
+        val rest = others.size + moreImportant
+        if (rest > 0) {
+            val topApp = (others.ifEmpty { important }).groupBy { it.app?.takeIf { a -> a.isNotBlank() } ?: it.pkg }
+                .maxByOrNull { it.value.size }?.key
+            val lead = if (parts.isEmpty()) "" else "And "
+            parts.add(lead + count(rest, if (parts.isEmpty()) noun else "other") + (topApp?.let { ", most in $it" } ?: ""))
+        }
+        // A pause between the parts; a part that already ends a sentence ("…at 4?") gets no extra full stop.
+        val body = parts.joinToString(com.tekyerema.voice.SpokenText.BREAK.toString()) { p -> if (p.last() in ".!?…") p else "$p." }
+        return sinceLabel.replaceFirstChar { it.uppercaseChar() } + ": " + body + if (body.last() in ".!?…") "" else "."
+    }
+
     /** "3 from Ama, 2 in Family" — a person's chat says "from", a group chat (title ≠ sender) says "in". */
     private fun peopleLine(app: String, list: List<IndexedMessage>, maxPeople: Int): String {
         data class Convo(val name: String?, val group: Boolean)

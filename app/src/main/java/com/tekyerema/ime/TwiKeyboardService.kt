@@ -132,9 +132,29 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         autoCapitalize()
         render()
         refreshSuggestions()
+        // #37: a code box (OTP / verification — never a PIN, password or amount) — notifications/OtpRelay may type a code
+        // into it when the user says "enter the code". The code goes in only if this same box is still the current one.
+        val pkg = info.packageName.orEmpty()
+        val fieldId = info.fieldId
+        if (pkg.isNotEmpty() && com.tekyerema.notifications.OtpRelay.isCodeBox(info.inputType, info.hintText))
+            com.tekyerema.notifications.OtpRelay.focus(pkg, null) { t ->
+                // Asked from the voice thread: the commit runs on the keyboard's own (main) thread, and waits briefly for it.
+                val done = java.util.concurrent.CountDownLatch(1)
+                var ok = false
+                val work = Runnable {
+                    val now = currentInputEditorInfo
+                    ok = now != null && now.packageName == pkg && now.fieldId == fieldId && currentInputConnection?.commitText(t, 1) == true
+                    done.countDown()
+                }
+                if (android.os.Looper.myLooper() == mainLooper) work.run()
+                else { android.os.Handler(mainLooper).post(work); done.await(800, java.util.concurrent.TimeUnit.MILLISECONDS) }
+                ok
+            }
+        else com.tekyerema.notifications.OtpRelay.blur()
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
+        com.tekyerema.notifications.OtpRelay.blur()
         cancelPendingVoiceStart()
         voice?.cancel()
         Dictation.cancel()

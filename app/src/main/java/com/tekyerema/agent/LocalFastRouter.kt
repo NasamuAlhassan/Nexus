@@ -851,7 +851,15 @@ class LocalFastRouter(
         } else {
             com.tekyerema.notifications.MessageCursor.clear()
             // Private reading (2026-09-29): on the loudspeaker, who and how many — "read them" reads the words (PrivateReading).
-            com.tekyerema.notifications.PrivateReading.digest(appContext, digest.build(shown, calls, label, noun = noun), brief, shown).spoken
+            // #2: what matters first (money that moved, today's times, family, contacts), the rest as one count.
+            val known = HashMap<String, Boolean>()
+            val isContact = { name: String -> known.getOrPut(name.lowercase()) {
+                try { com.tekyerema.android.ContactResolver.resolve(appContext, name).any { com.tekyerema.android.ContactResolver.isSure(name, it) } }
+                catch (_: Throwable) { false }
+            } }
+            val full = if (com.tekyerema.core.config.AppConfig.bool("notifications.digest.importantFirst", true))
+                digest.buildPrioritised(shown, calls, label, isContact, noun = noun) else digest.build(shown, calls, label, noun = noun)
+            com.tekyerema.notifications.PrivateReading.digest(appContext, full, brief, shown).spoken
         }
         if (intent.messagesOnly && shown.isEmpty() && msgs.isNotEmpty())
             line += " There are ${msgs.size} other notifications — say \"what did I miss\" to hear them."

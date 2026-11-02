@@ -1460,6 +1460,14 @@ class VoiceController(
                 }
             }
 
+            // #37: "enter the code" while a one-time code is on offer (notifications/OtpRelay) — never at the PIN step.
+            if (!SecureStep.active() && com.tekyerema.notifications.OtpRelay.hasOffer() && com.tekyerema.notifications.OtpRelay.isEnter(tr.canonical)) {
+                val line = com.tekyerema.notifications.OtpRelay.enter() ?: "There's no code waiting."
+                set(VoiceState.SPEAKING, line)
+                try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
+                return
+            }
             // #36: the answer to the call shield's "did they ask you to send money?" (phone/CallShield) — warn-only.
             com.tekyerema.phone.CallShield.answer(tr.canonical)?.let { line ->
                 set(VoiceState.SPEAKING, line)
