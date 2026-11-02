@@ -66,7 +66,12 @@
     "recovery": { "maxConsecutiveFailures": 3, "maxEscalations": 1, "visionOnFailure": true }
   },
   "answers": {
-    "citations": { "freshMs": 1800000, "maxSpoken": 3 }
+    "citations": { "freshMs": 1800000, "maxSpoken": 3 },
+    "search": {
+      "_note": "web_search ladder, first usable provider with an answer wins. 'space' = OUR Hugging Face Space (POST /web/ask, free, plans + searches + reads pages + answers with a small model; only the query text is sent). Skipped when disabled, offline, or cooling after a failure/429. Move 'space' later in the list, or set space.enabled=false, to prefer Groq. space.url empty = the SPEECH_SPACE_URL host from local.properties; space.mode 'answer' (research + model) or 'results' (search only).",
+      "providers": ["space", "groq", "gemini", "tavily"],
+      "space": { "enabled": true, "url": "", "mode": "answer", "timeoutSec": 12 }
+    }
   },
   "cache": {
     "answers": {

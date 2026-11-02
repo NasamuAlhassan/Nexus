@@ -83,16 +83,20 @@ interface SearchProvider {
 
     /** A short speakable answer with sources, or null (no key, quota gone, HTTP error, empty answer…). */
     suspend fun search(query: String, ctx: Context): SearchResult?
+
+    /** This provider's own time limit in seconds, when it needs more than `answers.search.perProviderSec`. */
+    val timeoutSec: Long? get() = null
 }
 
 object WebSearch {
-    /** Groq first (the app's primary provider, no training on API data), then Gemini, then the optional Tavily. */
-    val DEFAULT_ORDER = listOf("groq", "gemini", "tavily")
+    /** Our own Space first (free, nothing to run out of; skipped when off/offline/cooling), then Groq (the app's primary
+     *  key-based provider, no training on API data), then Gemini, then the optional Tavily. */
+    val DEFAULT_ORDER = listOf("space", "groq", "gemini", "tavily")
     private const val TAG = "Tekyerema"
     private const val MAX_QUERY_CHARS = 300
 
     private val registry: Map<String, SearchProvider> by lazy {
-        listOf(GroqSearchProvider, GeminiSearchProvider, TavilySearchProvider).associateBy { it.name }
+        listOf(SpaceSearchProvider, GroqSearchProvider, GeminiSearchProvider, TavilySearchProvider).associateBy { it.name }
     }
 
     /** Usable providers in the configured order (unknown names and providers without a key are skipped). */
@@ -106,20 +110,29 @@ object WebSearch {
     suspend fun search(query: String, ctx: Context): SearchResult? {
         val q = query.trim().replace(Regex("\\s+"), " ").take(MAX_QUERY_CHARS)
         if (q.isEmpty()) return null
-        // 20 Oct 2026: 20 s a provider and 35 s in all made "how far..." take 88 s when one stalled; now 8 s each, 18 s in all
-        val budgetMs = AppConfig.long("answers.search.budgetSec", 18L) * 1000L
+        // 20 Oct 2026: 20 s a provider and 35 s in all made "how far..." take 88 s when one stalled; now 8 s each, 18 s in all.
+        // 2 Nov 2026: our Space may take up to 12 s (research + a small model) and a dead Space is skipped for a minute
+        // afterwards, so the total is 24 s; a Space that fails still leaves the other providers their 8 s each.
+        val budgetMs = AppConfig.long("answers.search.budgetSec", 24L) * 1000L
         val perProviderMs = AppConfig.long("answers.search.perProviderSec", 8L) * 1000L
-        return withTimeoutOrNull(budgetMs) {
-            for (p in providers(ctx)) {
-                val r = try { withTimeoutOrNull(perProviderMs) { p.search(q, ctx) } }
-                    catch (ce: CancellationException) { throw ce }
-                    catch (t: Throwable) { warn("${p.name} failed: ${t.javaClass.simpleName}"); null }
-                if (r != null && r.answer.isNotBlank())
-                    return@withTimeoutOrNull r.copy(answer = SearchText.shorten(r.answer, SearchText.maxAnswerChars()))
-                warn("${p.name}: no answer — trying the next provider")
-            }
-            null
+        return runLadder(providers(ctx), budgetMs, perProviderMs) { p -> p.search(q, ctx) }
+    }
+
+    /** The ladder itself, apart from Android: first non-blank answer wins; an error, timeout or empty answer moves on. */
+    internal suspend fun runLadder(
+        providers: List<SearchProvider>, budgetMs: Long, perProviderMs: Long,
+        call: suspend (SearchProvider) -> SearchResult?
+    ): SearchResult? = withTimeoutOrNull(budgetMs) {
+        for (p in providers) {
+            val ms = p.timeoutSec?.let { it * 1000L } ?: perProviderMs
+            val r = try { withTimeoutOrNull(ms) { call(p) } }
+                catch (ce: CancellationException) { throw ce }
+                catch (t: Throwable) { warn("${p.name} failed: ${t.javaClass.simpleName}"); null }
+            if (r != null && r.answer.isNotBlank())
+                return@withTimeoutOrNull r.copy(answer = SearchText.shorten(r.answer, SearchText.maxAnswerChars()))
+            warn("${p.name}: no answer — trying the next provider")
         }
+        null
     }
 
     /** System instructions shared by the LLM providers. `{date}` is today's date so "today"/"latest" resolve. */
