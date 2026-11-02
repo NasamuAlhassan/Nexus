@@ -8,6 +8,7 @@ import com.tekyerema.ime.EnterKeys
 import com.tekyerema.ime.FieldPolicy
 import com.tekyerema.ime.KeyKind
 import com.tekyerema.ime.KeyNames
+import com.tekyerema.ime.KeyboardPalette
 import com.tekyerema.ime.KeyboardLayout
 import com.tekyerema.ime.KeyboardLayouts
 import com.tekyerema.ime.KeyboardSetupLogic
@@ -108,6 +109,35 @@ class TwiKeyboardTest {
         assertEquals("k", KeyNames.spoken("k"))
         assertEquals("full stop", KeyNames.spoken("."))
         assertEquals("Shift, caps lock on", KeyNames.shift(ShiftState.LOCKED))
+    }
+
+    // ------------------------------------------------------------------------------------------ colours
+
+    private fun lum(c: Int): Double {
+        fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else Math.pow((x + 0.055) / 1.055, 2.4) }
+        return 0.2126 * ch((c shr 16) and 0xFF) + 0.7152 * ch((c shr 8) and 0xFF) + 0.0722 * ch(c and 0xFF)
+    }
+    private fun contrast(a: Int, b: Int): Double { val x = lum(a); val y = lum(b); return (maxOf(x, y) + 0.05) / (minOf(x, y) + 0.05) }
+
+    @Test fun the_keyboard_follows_light_or_dark_and_a_colour_pair() {
+        assertEquals(KeyboardPalette.LIGHT, KeyboardPalette.choose("light", phoneDark = true, pair = null))
+        assertEquals(KeyboardPalette.DARK, KeyboardPalette.choose("dark", phoneDark = false, pair = null))
+        assertEquals(KeyboardPalette.DARK, KeyboardPalette.choose("system", phoneDark = true, pair = null))
+        assertEquals(KeyboardPalette.LIGHT, KeyboardPalette.choose("system", phoneDark = false, pair = null))
+        val yellow = com.tekyerema.ui.theme.ColourPairs.of("yellow_black") ?: com.tekyerema.ui.theme.ColourPairs.all.first()
+        val p = KeyboardPalette.choose("light", phoneDark = false, pair = yellow)
+        assertEquals("a pair wins over light or dark", yellow.dark, p.dark)
+        assertTrue(contrast(p.text, p.key) >= 7.0 && contrast(p.text, p.pressed) >= 4.5)
+    }
+
+    @Test fun every_palette_keeps_the_letters_readable() {
+        for (p in listOf(KeyboardPalette.LIGHT, KeyboardPalette.DARK)) {
+            assertTrue("text on a key", contrast(p.text, p.key) >= 7.0)
+            assertTrue("text on a function key", contrast(p.text, p.fnKey) >= 7.0)
+            assertTrue("text on a pressed key", contrast(p.text, p.pressed) >= 4.5)
+            assertTrue("secondary on a key", contrast(p.textSecondary, p.key) >= 4.5)
+            assertTrue("the action key's label", contrast(p.onAccent, p.accent) >= 4.5)
+        }
     }
 
     // ------------------------------------------------------------------------------------------ typing

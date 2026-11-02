@@ -88,6 +88,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
         setPadding(dp(3), dp(4), dp(3), dp(6))
         strip.addView(stripContent, LayoutParams(0, LayoutParams.MATCH_PARENT, 1f))
         voiceKey.setImageResource(com.tekyerema.R.drawable.ic_ime_mic)
+        voiceKey.imageTintList = android.content.res.ColorStateList.valueOf(TEXT)   // the icon is drawn white; light keys need ink
         voiceKey.scaleType = ImageView.ScaleType.CENTER
         voiceKey.background = keyBackground(FN_KEY)
         voiceKey.isFocusable = true
@@ -111,6 +112,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
             VoiceKeyState.OFF -> "Voice typing, off in this box"
         }
         voiceKey.background = keyBackground(if (state == VoiceKeyState.LISTENING) ACCENT else FN_KEY)
+        voiceKey.imageTintList = android.content.res.ColorStateList.valueOf(if (state == VoiceKeyState.LISTENING) ON_ACCENT else TEXT)
         voiceKey.imageAlpha = if (state == VoiceKeyState.OFF) 90 else 255
     }
 
@@ -174,7 +176,7 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
             else -> FN_KEY
         }
         v.background = keyBackground(face)
-        v.setTextColor(if (face == ACCENT) BG else TEXT)
+        v.setTextColor(if (face == ACCENT) ON_ACCENT else TEXT)
         if (v is KeyView) { v.hint = hint; v.hintSize = sp(if (bigKeys) 13f else 11f); v.hintColor = TEXT_SECONDARY }
         // Custom actions: every long-press option, reachable from TalkBack's actions menu.
         @Suppress("UNCHECKED_CAST")
@@ -478,17 +480,19 @@ class TwiKeyboardView(context: Context, private val listener: Listener) : Linear
     private fun sp(v: Float) = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, v, resources.displayMetrics)
 
     companion object {
-        // The app's palette (ui/theme Tk, 13 Oct 2026): green-ink surfaces, near-white text, deep teal for a pressed key and
-        // the mark's teal for "on" (caps lock, listening, an action enter key). Text on keys is 14:1+ against the key face.
-        private const val BG = 0xFF050B0D.toInt()
-        private const val KEY = 0xFF14262A.toInt()
-        private const val FN_KEY = 0xFF0C1A1D.toInt()
-        private const val STRIP_KEY = 0xFF0A1518.toInt()
-        private const val PRESSED = 0xFF0E6F66.toInt()
-        private const val ACCENT = 0xFF1ED1BB.toInt()
-        private const val TRAIL = 0xB31ED1BB.toInt()
-        private const val TEXT = 0xFFF1F7F4.toInt()
-        private const val TEXT_SECONDARY = 0xFF9DBDB5.toInt()
+        /** The colours (KeyboardPalette: light, dark or a reading-colour pair, as the app is set), chosen by the service
+         *  before it makes the view. */
+        @Volatile var palette: KeyboardPalette = KeyboardPalette.DARK
+        private val BG get() = palette.bg
+        private val KEY get() = palette.key
+        private val FN_KEY get() = palette.fnKey
+        private val STRIP_KEY get() = palette.stripKey
+        private val PRESSED get() = palette.pressed
+        private val ACCENT get() = palette.accent
+        private val ON_ACCENT get() = palette.onAccent
+        private val TRAIL get() = palette.trail
+        private val TEXT get() = palette.text
+        private val TEXT_SECONDARY get() = palette.textSecondary
         private const val REPEAT_START_MS = 400L
         private const val REPEAT_EVERY_MS = 60L
         private val TAG_ACTIONS = com.tekyerema.R.id.ime_key_actions

@@ -80,6 +80,8 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
     }
 
     override fun onCreateInputView(): View {
+        // Light, dark or a reading-colour pair, as the app is set (KeyboardPalette).
+        TwiKeyboardView.palette = KeyboardPalette.choose(this)
         val v = TwiKeyboardView(this, this)
         view = v
         v.bigKeys = prefs.bigKeys
@@ -110,6 +112,8 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         policy = FieldPolicy.of(info.inputType, info.imeOptions, hint, Privacy.secureStep)
         enter = EnterKeys.of(info.imeOptions, info.inputType)
         page = policy.startPage
+        // The app's light/dark (or colours) changed since the view was made: make it again in the new colours.
+        if (KeyboardPalette.choose(this) != TwiKeyboardView.palette) setInputView(onCreateInputView())
         shift.reset()
         variantsOpen = false
         lastSpaceMs = 0L
