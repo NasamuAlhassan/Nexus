@@ -139,6 +139,20 @@ internal object TriggerRunner {
     private suspend fun runReadOnly(app: Context, s: Schedule, release: () -> Unit): Boolean {
         val goal = s.goal.trim()
         if (!TriggerSafety.isReadOnlyGoal(goal)) { TriggerGate.speak(app, TriggerSafety.itsTime(goal)); return true }
+        // Phone data (texts, the catch-up, the call log, today's calendar) is read by the fast path's own handler — no engine
+        // task, so the user's screen is not stepped aside for it (ReadOnlyDoor). Anything else, or a handler that declines,
+        // is submitted to the agent exactly as before.
+        if (com.tekyerema.agent.ReadOnlyDoor.intentFor(goal) != null) {
+            if (withContext(Dispatchers.Main) { TriggerGate.userBusy(app) }) return false
+            com.tekyerema.agent.ReadOnlyDoor.run(app, goal)?.let { out ->
+                Log.i(TriggerGate.TAG, "[TRIGGER] A-13 ${s.id} read by the fast path (no engine task)")
+                if (out.spoken.isNotBlank()) {
+                    TriggerGate.speak(app, out.spoken, post = false)
+                    try { VoiceSessionService.postResult(app, com.tekyerema.agent.ReadOnlyDoor.shadeText(out)) } catch (_: Throwable) {}
+                }
+                return true
+            }
+        }
         // Busy-check and submit in ONE main-thread step: voice/UI submit on the main thread too, so nothing can slip in.
         val accepted = withContext(Dispatchers.Main) {
             if (TriggerGate.userBusy(app)) false

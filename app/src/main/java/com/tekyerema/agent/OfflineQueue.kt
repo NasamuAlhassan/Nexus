@@ -136,6 +136,22 @@ object OfflineQueue {
                 val item = store.next() ?: return
                 if (!com.tekyerema.core.NetworkMonitor.isOnline()) return
                 if (com.tekyerema.core.LinkProbe.check() == false) return
+                // A kept request that only READS phone data runs its fast-path handler, not an engine task (ReadOnlyDoor): our own
+                // screen is not stepped aside for it. A handler that declines leaves it to the engine as before.
+                if (ReadOnlyDoor.intentFor(item.goal) != null) {
+                    if (withContext(Dispatchers.Main) { com.tekyerema.agent.triggers.TriggerGate.userBusy(app) }) {
+                        delay(AppConfig.long("router.offlineQueue.busyRetryMs", 30_000L)); continue
+                    }
+                    val out = ReadOnlyDoor.run(app, item.goal)
+                    if (out != null) {
+                        Log.i("Tekyerema", "[OFFLINE_QUEUE] a kept phone-data request read by the fast path (no engine task)")
+                        store.remove(item)
+                        if (out.spoken.isNotBlank()) com.tekyerema.agent.triggers.TriggerGate.speak(app, AppConfig.phrase(
+                            "router.offlineQueue.phrases.answer", "The internet is back. Earlier you asked: {goal}. {answer}",
+                            "goal" to item.goal.trim().trimEnd('?', '.', '!'), "answer" to com.tekyerema.voice.SpokenText.plain(out.spoken)))
+                        continue
+                    }
+                }
                 val accepted = withContext(Dispatchers.Main) {
                     if (com.tekyerema.agent.triggers.TriggerGate.userBusy(app)) false
                     else { AgentEngine.submitGoal(item.goal, unattended = true); AgentEngine.state.value.goal == item.goal }

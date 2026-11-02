@@ -218,6 +218,17 @@ class LocalFastRouter(
         return out
     }
 
+    /**
+     * A goal from a door that skipped the fast path (a schedule, the offline queue): when it only READS phone data
+     * ([ReadOnlyDoor.allows]) run its handler here, else null (the caller submits it to the engine as before). No operator /
+     * memory / routine commands and no meaning matcher — only the classified read, under the same mode and capability gate.
+     */
+    suspend fun runReadOnly(goal: String): FastOutcome? {
+        val intent = ReadOnlyDoor.intentFor(goal) ?: return null
+        Log.i(TAG, "[LOCAL_FAST_PATH] unattended door → ${intent.name}")
+        return run(intent)
+    }
+
     /** One classified command: the user's execution mode, the undo snapshot, the command itself, the log line. */
     private suspend fun run(intent: FastIntent): FastOutcome? {
         // WS-C: the execution mode and switched-off capabilities bind the fast path too — Ask every step / Guide only hand an
