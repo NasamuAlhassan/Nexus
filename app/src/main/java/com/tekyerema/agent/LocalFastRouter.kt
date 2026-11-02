@@ -421,6 +421,8 @@ class LocalFastRouter(
         FastIntent.CalendarToday -> runTool("calendar", org.json.JSONObject().put("action", "today"))
         FastIntent.ShowAlarms -> runTool("show_alarms", org.json.JSONObject(), action = true, acted = false)   // its answer is a list
         FastIntent.StopTimer -> stopTimer(intent)
+        // The same set_timer tool the agent uses, behind runTool's gates (manifest, local caller, PolicyEngine ALLOW).
+        is FastIntent.SetTimer -> runTool("set_timer", org.json.JSONObject().put("seconds", intent.seconds), action = true)
         FastIntent.Connectivity -> connectivity()
         FastIntent.NowPlaying -> nowPlaying()
         is FastIntent.Ringer -> ringer(intent.mode)

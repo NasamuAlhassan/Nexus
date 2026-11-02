@@ -75,6 +75,9 @@ sealed class FastIntent(val name: String) {
     object ShowAlarms : FastIntent("SHOW_ALARMS")
     /** "stop the timer" — the Clock's own dismiss request, no model (A20e 2026-09-29: it went to a spent cloud AI). */
     object StopTimer : FastIntent("STOP_TIMER")
+    /** "set a timer for 5 minutes" — the set_timer tool straight from the fast path (2 Nov 2026: it went to the agent, which set it
+     *  correctly but slowly — step aside, observe, a turn). Digits only; spelled-out numbers still reach the agent's own parser. */
+    data class SetTimer(val seconds: Int) : FastIntent("SET_TIMER")
     object Screenshot : FastIntent("SCREENSHOT")
     object PowerMenu : FastIntent("POWER_MENU")
     /** E-21: take a photo now with the back camera (the camera app saves it). */
@@ -344,6 +347,7 @@ object FastIntentClassifier {
             RE_NOW_PLAYING.containsMatchIn(g) -> FastIntent.NowPlaying
             RE_SHOW_ALARMS.containsMatchIn(g) -> FastIntent.ShowAlarms
             RE_STOP_TIMER.matches(g) -> FastIntent.StopTimer
+            RE_SET_TIMER.matchEntire(g) != null -> timerSeconds(RE_SET_TIMER.matchEntire(g)!!)?.let { FastIntent.SetTimer(it) }
             RE_SCREENSHOT.containsMatchIn(g) -> FastIntent.Screenshot
             RE_POWER_MENU.containsMatchIn(g) -> FastIntent.PowerMenu
             RE_SELFIE.containsMatchIn(g) -> FastIntent.TakeSelfie
@@ -758,6 +762,23 @@ object FastIntentClassifier {
         "why is (?:the |my )?(?:internet|network|data|wi-?fi) (?:so )?slow|is (?:the |my )?(?:internet|network|connection|data) (?:slow|working|good)|" +
         "is my connection good enough)\\b")
     private val RE_NOW_PLAYING = Regex("\\b(?:what(?:'s| is) (?:playing|this song)|what song is (?:this|playing)|who (?:sings|is singing) this)\\b")
+    /** Whole utterance: "set a timer for 5 minutes", "start a 10 minute timer", "timer for 30 seconds", "5 minute timer please". */
+    private val RE_SET_TIMER = Regex("^(?:please |can you |could you )?(?:(?:set|start|put|make)(?: me)?(?: an?| the| my)? )?" +
+        "(?:timer (?:for |of )?(\\d{1,4}) ?(hours?|hrs?|minutes?|mins?|seconds?|secs?)|(\\d{1,4})[ -]?(hours?|hrs?|minutes?|mins?|seconds?|secs?) timer)" +
+        "(?: please| now)?$")
+
+    /** The timer length in seconds (1 s – 24 h), or null. */
+    private fun timerSeconds(m: MatchResult): Int? {
+        val n = (m.groupValues[1].ifEmpty { m.groupValues[3] }).toIntOrNull() ?: return null
+        val unit = m.groupValues[2].ifEmpty { m.groupValues[4] }
+        val secs = when {
+            unit.startsWith("h") -> n * 3600
+            unit.startsWith("m") -> n * 60
+            else -> n
+        }
+        return secs.takeIf { it in 1..86_400 }
+    }
+
     private val RE_STOP_TIMER = Regex("^(?:please |can you )?(?:stop|cancel|dismiss|end|turn off|switch off) (?:the |my |that )?timer(?: please| now)?$")
     private val RE_SHOW_ALARMS = Regex("\\b(?:show|open|list|check)\\b.*\\balarms\\b|^(?:my )?alarms$|\\bwhat alarms\\b")
     private val RE_SCREENSHOT = Regex("\\b(?:take|capture|grab|save)\\b.*\\bscreenshot\\b|^screenshot$")
