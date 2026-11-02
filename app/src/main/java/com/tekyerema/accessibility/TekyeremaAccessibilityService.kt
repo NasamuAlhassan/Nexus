@@ -529,7 +529,10 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
     /** One walk of the tree, and whether it met a web container that gave nothing back (see [buildSnapshot]). */
     private class SnapshotPass(val snapshot: UiSnapshot, val bareWeb: Boolean)
 
-    override suspend fun buildSnapshot(): UiSnapshot {
+    /** #38 label memory: every reader of the screen (planner, policy, spoken readings) gets remembered names on unlabelled buttons. */
+    override suspend fun buildSnapshot(): UiSnapshot = com.tekyerema.memory.LabelStore.apply(applicationContext, buildSnapshotRaw())
+
+    private suspend fun buildSnapshotRaw(): UiSnapshot {
         val first = snapshotOnce()
         // P1-07 (13 October 2026): a WebView hands out its page tree lazily — five seconds after a cold start, Chrome on the
         // emulator showed a bare "Web View" with nothing inside while uiautomator, asking a moment later, got the page's

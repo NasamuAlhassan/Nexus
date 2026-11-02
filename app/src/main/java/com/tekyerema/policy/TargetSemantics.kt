@@ -330,7 +330,9 @@ object TargetSemantics {
         val composing = screen?.elements?.any { f ->
             f.editable && (f.focused || communicationField.containsMatchIn(f.label ?: "")) && !isQueryBox(f)
         } == true
-        if (primitive == "tap" && label.isNullOrBlank() && target?.clickable == true && composing)
+        // A name from label memory (UiElement.learned) is the user's own guess about the control, not the app's: it never
+        // lifts this confirmation (#38).
+        if (primitive == "tap" && (label.isNullOrBlank() || target?.learned == true) && target?.clickable == true && composing)
             return Classification(RiskTier.TIER2, null, "an unlabelled control tapped while composing a message may send it")
 
         // J-02: committing a filled form (Save / Create / Update) is a write the user confirms, like create_contact.

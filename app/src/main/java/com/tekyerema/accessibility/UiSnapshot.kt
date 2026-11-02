@@ -59,7 +59,11 @@ data class UiElement(
      *  or null. A flagged element is never the target of a consequential action ([com.tekyerema.policy.StepGate]). */
     val unseen: String? = null,
     /** The app this node belongs to, when it is NOT the window's own app (content embedded from another app). */
-    val pkg: String? = null
+    val pkg: String? = null,
+    /** #38 label memory: [label] was filled in from what the user (or a verified outcome) taught us about this unlabelled
+     *  control — the app itself gave it no name. A learned name never counts as the app's own wording: policy still treats
+     *  the control as an unlabelled one (an unlabelled tap while composing may be Send). */
+    val learned: Boolean = false
 ) {
     val interactive: Boolean
         get() = clickable || longClickable || editable || scrollable || checkable || range != null
@@ -151,6 +155,7 @@ data class UiSnapshot(
             if (e.password) flags.add("password")
             if (e.heading) flags.add("heading")   // F-14
             if (e.link) flags.add("link")         // F-14
+            if (e.learned) flags.add("learned_name")   // #38: the app gave it no name; this one came from the user's memory
             e.unseen?.let { flags.add(it) }       // hidden_text / a11y_mismatch: not what a person sees or hears
             if (flags.isNotEmpty()) o.put("flags", JSONArray(flags))
             if (e.customActions.isNotEmpty()) o.put("custom_actions", JSONArray(e.customActions.take(6)))   // G-03
