@@ -44,15 +44,11 @@ data class ModelSpec(
         /** A wav2vec2-style CTC model on raw samples — the omniASR-300M Twi fine-tune (EXP-101), run by sherpa's
          *  omnilingual runner; its tokens.txt names the blank `<blk>` and uses `|` between words. */
         const val OMNILINGUAL_CTC = "omnilingual_ctc"
-        /** Our Space's Twi hearing model (tekyerema-asr-ctc-twi-v2, w2v-BERT 2.0 CTC) as ONNX, run by ONNX Runtime
-         *  ([OrtCtcAsr]); its tokens file is the model's vocab.json (blank "[PAD]", "|" between words). 20 Oct 2026. */
-        const val W2VBERT_CTC = "w2vbert_ctc"
         private val ROLES = mapOf(
             WHISPER to listOf("encoder", "decoder"),
             NEMO_TRANSDUCER to listOf("encoder", "decoder", "joiner"),
             NEMO_CTC to listOf("model"),
-            OMNILINGUAL_CTC to listOf("model"),
-            W2VBERT_CTC to listOf("model")
+            OMNILINGUAL_CTC to listOf("model")
         )
 
         val LEGACY_WHISPER = ModelSpec(WHISPER, mapOf("encoder" to "tiny-encoder.onnx", "decoder" to "tiny-decoder.int8.onnx"),
