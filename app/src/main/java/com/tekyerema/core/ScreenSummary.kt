@@ -51,6 +51,9 @@ object ScreenSummary {
         return null
     }
 
+    /** The screen's short title for the after-switch note ("In WhatsApp, Chats."); null on a private screen. */
+    fun title(s: UiSnapshot?): String? = s?.takeUnless { isPrivate(it) }?.let { titleOf(it, nameOf(it)) }
+
     // ------------------------------------------------------------------ pieces
 
     private fun isPrivate(s: UiSnapshot): Boolean =

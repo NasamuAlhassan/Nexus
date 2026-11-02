@@ -2759,7 +2759,7 @@ object AgentEngine {
      *  Outside runTask on purpose — that method sits near the JVM's 64 KB limit. */
     private fun noteAppSwitch(snap: UiSnapshot?) {
         val pkg = snap?.appPackage ?: return
-        _state.update { it.copy(appSwitch = AppSwitch(pkg, snap.appName, it.runSeq)) }
+        _state.update { it.copy(appSwitch = AppSwitch(pkg, snap.appName, it.runSeq, com.tekyerema.core.ScreenSummary.title(snap))) }
     }
 
     private fun setStatus(s: AgentStatus) = _state.update { it.copy(status = s) }

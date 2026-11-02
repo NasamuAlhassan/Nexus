@@ -36,6 +36,12 @@ class AppNoteTest {
     private fun m(pkg: String, name: String? = "WhatsApp", taskMs: Long = 3_000, nowMs: Long = 3_000, working: Boolean = true,
                   micFree: Boolean = true, secure: Boolean = false) = AppNote.Moment(pkg, name, taskMs, nowMs, working, micFree, secure)
 
+    @Test fun the_screen_title_follows_the_app_in_english_only() {
+        assertEquals("In WhatsApp, Chats.", AppNote().next(m("com.whatsapp").copy(title = "Chats"), twi = false))
+        assertEquals("In WhatsApp.", AppNote().next(m("com.whatsapp").copy(title = null), twi = false))
+        assertEquals("In WhatsApp.", AppNote.line("WhatsApp", twi = false, title = " "))
+    }
+
     @Test fun says_the_app_once_per_task() {
         val n = AppNote()
         assertEquals("In WhatsApp.", n.next(m("com.whatsapp"), twi = false))

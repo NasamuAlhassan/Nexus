@@ -100,4 +100,4 @@ data class AgentUiState(
 )
 
 /** An app a task brought to the front: [pkg], its launcher label [name], and the run ([AgentUiState.runSeq]) that did it. */
-data class AppSwitch(val pkg: String, val name: String?, val runSeq: Long)
+data class AppSwitch(val pkg: String, val name: String?, val runSeq: Long, val title: String? = null)

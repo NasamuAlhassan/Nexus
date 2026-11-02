@@ -21,7 +21,7 @@ class AppNote(private val minTaskMs: Long = MIN_TASK_MS, private val maxLateMs: 
      */
     data class Moment(
         val pkg: String, val name: String?, val taskMs: Long, val nowMs: Long,
-        val agentWorking: Boolean, val micFree: Boolean, val secureStep: Boolean
+        val agentWorking: Boolean, val micFree: Boolean, val secureStep: Boolean, val title: String? = null
     )
 
     private val said = HashSet<String>()
@@ -38,7 +38,7 @@ class AppNote(private val minTaskMs: Long = MIN_TASK_MS, private val maxLateMs: 
         // The microphone is taking the user's words (an interjection): hold it for a moment.
         if (!m.micFree || m.taskMs < minTaskMs) return null
         said += m.pkg
-        return line(label, twi)
+        return line(label, twi, m.title)
     }
 
     companion object {
@@ -53,7 +53,9 @@ class AppNote(private val minTaskMs: Long = MIN_TASK_MS, private val maxLateMs: 
             com.tekyerema.accessibility.TelephonyWindows.matches(pkg)
 
         /** "In WhatsApp." — Twi "Mewɔ WhatsApp mu." [owner: verify Twi]; both editable in locales.json (`appNote`). */
-        fun line(label: String, twi: Boolean): String =
-            Phrases.get("appNote", twi, if (twi) "Mewɔ {app} mu." else "In {app}.", "app" to label)
+        fun line(label: String, twi: Boolean, title: String? = null): String =
+            if (title.isNullOrBlank() || twi) Phrases.get("appNote", twi, if (twi) "Mewɔ {app} mu." else "In {app}.", "app" to label)
+            // The screen's title when it adds something (ScreenSummary.title: short, no codes, never a private screen).
+            else Phrases.get("appNoteAt", false, "In {app}, {title}.", "app" to label, "title" to title)
     }
 }

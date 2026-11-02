@@ -1897,7 +1897,7 @@ class VoiceController(
                 agentWorking = now.status == AgentStatus.THINKING || now.status == AgentStatus.ACTING,
                 micFree = _state.value.state == VoiceState.EXECUTING && interjectJob?.isActive != true &&
                     askJob?.isActive != true && confirmJob?.isActive != true && secureJob?.isActive != true,
-                secureStep = SecureStep.active()), lang == Lang.TWI) ?: return@collect
+                secureStep = SecureStep.active(), title = sw.title), lang == Lang.TWI) ?: return@collect
             fillers?.stop()
             try { tts.speak(Verbalize.apply(line), lang) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
         }

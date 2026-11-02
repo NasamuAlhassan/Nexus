@@ -67,6 +67,14 @@ class ScreenSummaryTest {
         assertEquals("You're in Bank.", ScreenSummary.sentence(snap("Bank", "Account 0241234567", el(1, "Button", "OK"))))
     }
 
+    @Test fun the_after_switch_title_is_short_and_never_private() {
+        assertEquals("Chats", ScreenSummary.title(snap("WhatsApp", "Chats", el(1, "Button", "New chat"))))
+        assertEquals(null, ScreenSummary.title(snap("Settings", "Settings", el(1, "Button", "Network"))))
+        assertEquals(null, ScreenSummary.title(snap("MoMo", "Balance GHS 1,240.50", el(1, "Button", "OK"))))
+        assertEquals(null, ScreenSummary.title(snap("MTN MoMo", "Enter PIN", el(1, "EditText", null, editable = true, focused = true, password = true), secure = true)))
+        assertEquals(null, ScreenSummary.title(null))
+    }
+
     @Test fun no_screen_is_honest() {
         assertEquals("I can't see the screen right now.", ScreenSummary.sentence(null))
     }
