@@ -234,6 +234,14 @@ class RoutingBrain(
             null -> {}
         }
         com.tekyerema.money.MoneyPlan.decide(ctx.goal, ctx.history)?.let { return it }
+        // A device fact (time, date, battery…) is answered on the phone whatever door the goal came through and whichever
+        // brain is set first: the cloud brain, asked the time, invented one (2 Nov 2026), and with cloud-first or the
+        // on-device planner first this check used to come too late. Only for a first step, so a mid-task "what time is it"
+        // still belongs to the task's brain.
+        if (ctx.history.isEmpty() && !stickyCloud && !stickyLocalModel) LocalFastRouter.facts?.invoke(ctx.goal)?.let {
+            android.util.Log.i("Tekyerema", "[ROUTE] device fact answered on the phone")
+            return AgentDecision.Done(it)
+        }
         if (stickyLocalModel && localModel != null) return localModel.decide(ctx)
         // Offline-first (31 Oct 2026): with router.localModel.first the on-device planner takes every new task the money flow
         // didn't, online or not — the cloud only when it can't answer. Default off: nothing changes until it is switched on.
@@ -301,13 +309,6 @@ class RoutingBrain(
         // H-11: the same question was answered a moment ago — say it again now (no round trip, no quota).
         if (ctx.simple && ctx.history.isEmpty()) answers?.fresh(ctx.goal)?.let {
             android.util.Log.i("Tekyerema", "[ROUTE] answered from the recent-answer cache")
-            return AgentDecision.Done(it)
-        }
-        // A device fact (time, date, battery…) is answered on the phone whatever door the goal came through; the cloud
-        // brain, asked the time, invented one (2 Nov 2026). Only for a first step, so a mid-task "what time is it" still
-        // belongs to the task's brain.
-        if (ctx.history.isEmpty() && !stickyCloud) LocalFastRouter.facts?.invoke(ctx.goal)?.let {
-            android.util.Log.i("Tekyerema", "[ROUTE] device fact answered on the phone")
             return AgentDecision.Done(it)
         }
         if (cloud != null && isOnline() && linkAnswers()) {

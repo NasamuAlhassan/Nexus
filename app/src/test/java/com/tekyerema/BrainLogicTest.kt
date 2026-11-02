@@ -454,6 +454,11 @@ class BrainLogicTest {
             assertEquals("the cloud is never asked the time", 0, cloud.calls)
             val offline = RoutingBrain(LocalBrain(), cloud) { false }
             assertTrue(offline.decide(ctx("what time is it")) is AgentDecision.Done)
+            // …and with cloud-first switched on (the developer page): still the phone's answer, the cloud never asked.
+            val cloudFirst = RoutingBrain(LocalBrain(), cloud, cloudFirst = { true }) { true }
+            val d1 = cloudFirst.decide(ctx("what time is it"))
+            assertTrue("cloud-first got $d1", d1 is AgentDecision.Done && (d1 as AgentDecision.Done).summary == "The time is 3:36 AM.")
+            assertEquals("cloud-first never asks the cloud the time", 0, cloud.calls)
             // not a fact → the usual route (the goal the sticky test proves defers to the cloud; the shared cache was cleared above)
             // a fresh router + LocalBrain, as the engine builds per task (LocalBrain keeps per-task state)
             com.tekyerema.agent.AnswerCache.shared.clear()
