@@ -126,6 +126,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 "src.click=${src?.isClickable} src.children=${src?.childCount}")
         }
         event?.let { noteAnnouncement(it) }   // F-17: "Message sent", toasts — evidence for verification
+        event?.let { com.tekyerema.teach.TeachCommands.onAccessibilityEvent(this, it) }   // teach mode: records the user's own steps while it is on
         // Any app's PIN screen: the volume keys become its keypad (money/PinWatch, owner 28 Oct 2026).
         event?.let { com.tekyerema.money.PinWatch.onEvent(this, it.eventType) }
         // The user pressed Cancel on the network's dialog while the PIN step was open: nothing is sent — say so and drop the

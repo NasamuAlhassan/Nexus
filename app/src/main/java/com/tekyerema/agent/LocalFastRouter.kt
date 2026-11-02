@@ -150,6 +150,12 @@ class LocalFastRouter(
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             com.tekyerema.learning.FailureCommands.handle(appContext, text)
         }?.let { return ownControl(it) }
+        // Teach mode, "show me once" (teach/): "watch me", "stop, call it data bundle", a taught skill's name. A replay that cannot
+        // go on hands the rest to the agent as a goal (handOff), which asks before anything that sends, pays or saves.
+        com.tekyerema.teach.TeachCommands.handle(appContext, text, controller())?.let { t ->
+            t.agentGoal?.let { handOff = text to it; return null }
+            return ownControl(t.outcome ?: return null)
+        }
         if (!RouterTiers.enabled(RouterTiers.FAST_PATH)) return null   // C-01
         // "continue" / "next" / "more" in the middle of reading messages reads the next ones (MessageReading).
         if (com.tekyerema.notifications.MessageCursor.pending && ScreenReadIntent.isContinue(text))

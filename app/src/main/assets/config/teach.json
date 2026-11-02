@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "teach": {
+    "_note": "Teach mode, 'show me once' (teach/): the user shows a sequence of steps by hand, names it, and later says the name to have it replayed. enabled=false switches the whole feature off. Nothing private is ever recorded (PIN / password / code screens and the phone's own dialogs stop the recording); typed words are kept only when the user says they are not private; replay checks every step's screen and element, and a step that sends, pays, saves or consents is handed to the agent for its usual read-back.",
+    "enabled": true,
+    "maxSteps": 30,
+    "maxRecordMs": 600000,
+    "readScreenAfter": true
+  }
+}
