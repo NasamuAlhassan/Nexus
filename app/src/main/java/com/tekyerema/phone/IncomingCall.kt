@@ -73,6 +73,8 @@ object IncomingCall {
                 name?.let { com.tekyerema.agent.References.notePerson(it) }
                 com.tekyerema.agent.References.noteNumber(number)
                 Log.i(TAG, "[CALL] ringing — caller ${if (name != null) "is a contact" else "unknown"}")   // no name or number in the log
+                // #36 call shield: a number never seen before is said to be one (warn-only; hashes only — phone/CallShield).
+                val firstTime = try { CallShield.onRinging(ctx, number, isContact = name != null) } catch (_: Throwable) { false }
                 if (cfg("phone.announceCaller")) {
                     val who = name ?: com.tekyerema.agent.NumberSpeech.spoken(com.tekyerema.agent.NumberSpeech.normalize(number)).ifBlank { "Someone" }
                     val hint = if (cfg("phone.volumeUpAnswers")) " Press volume up to answer." else ""
@@ -80,11 +82,12 @@ object IncomingCall {
                     // [owner: verify the Twi] "<name> refrɛ wo. Mia volume up na gye."
                     val twi = "$en refrɛ wo." + if (hint.isNotEmpty()) " Mia volume up na gye." else ""
                     // A moment after the ring starts: the ringtone takes the audio first, then the name is said over it.
-                    main.postDelayed({ if (isRinging) com.tekyerema.voice.VoiceEngine.announceAnswer("$who is calling.$hint", twi, urgent = true) }, 900)
+                    main.postDelayed({ if (isRinging) com.tekyerema.voice.VoiceEngine.announceAnswer("$who is calling.${if (firstTime) CallShield.FIRST_TIME else ""}$hint", twi, urgent = true) }, 900)
                 }
             }
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 ringingNumber = null
+                CallShield.onOffHook()
                 if (speakerNext) {
                     speakerNext = false
                     // Routing settles a moment after the call connects; set it then, and once more in case the dialler reset it.
@@ -92,7 +95,7 @@ object IncomingCall {
                     main.postDelayed({ speaker(ctx, true) }, 2_000)
                 }
             }
-            TelephonyManager.EXTRA_STATE_IDLE -> { ringingNumber = null; speakerNext = false }
+            TelephonyManager.EXTRA_STATE_IDLE -> { ringingNumber = null; speakerNext = false; try { CallShield.onIdle(ctx) } catch (_: Throwable) {} }
         }
     }
 

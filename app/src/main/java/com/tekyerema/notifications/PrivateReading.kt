@@ -122,7 +122,8 @@ object PrivateReading {
 
     // ---------------------------------------------------------------- Android
 
-    fun enabled(ctx: Context): Boolean = try { com.tekyerema.settings.Settings(ctx).privateReading } catch (_: Throwable) { false }
+    fun enabled(ctx: Context): Boolean = com.tekyerema.voice.NoisyPlace.active ||   // #40: on by itself in a noisy place
+        try { com.tekyerema.settings.Settings(ctx).privateReading } catch (_: Throwable) { false }
 
     /** A headset / Bluetooth audio output is connected (AudioManager.getDevices — no permission). Unknown → false, which
      *  keeps the reading private: the stricter answer. */

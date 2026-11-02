@@ -275,6 +275,9 @@ class VoiceController(
     /** Mic button: start a fresh utterance, or cancel the running one (§25). */
     fun toggle() { if (isRunning) cancel() else start() }
 
+    /** Free to offer something unasked (phone/CallShield's question): no turn, no task, no prompt, not the PIN step. */
+    fun canOffer(): Boolean = !isRunning && !agent.busy && agent.state.value.status !in PROMPTS && !SecureStep.active() && speakAloud()
+
     /**
      * C-12 / C-19 — the user speaks WHILE a task runs (wake word, voice button): "stop", "pause", "continue",
      * "what are you doing?", or a correction ("make it 50", "send it to Kofi instead") that the running task folds
@@ -1455,6 +1458,38 @@ class VoiceController(
                     _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
                     return
                 }
+            }
+
+            // #36: the answer to the call shield's "did they ask you to send money?" (phone/CallShield) — warn-only.
+            com.tekyerema.phone.CallShield.answer(tr.canonical)?.let { line ->
+                set(VoiceState.SPEAKING, line)
+                try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                _state.update { it.copy(state = VoiceState.IDLE, spoken = line, spokenAt = System.currentTimeMillis()) }
+                return
+            }
+            // #39 speech controls on the last line (voice/SpeechControl): "again", "slower" (one step slower, kept until "normal
+            // speed"), "spell it". Never over a waiting prompt — a read-back repeats itself in its own loop.
+            val control = SpeechControl.classify(tr.canonical)?.takeIf { agent.state.value.status !in PROMPTS }
+            if (control != null) {
+                val lastLine = _state.value.spoken
+                val line = when {
+                    lastLine.isBlank() -> "I haven't said anything yet."
+                    control == SpeechControl.Kind.SPELL -> SpeechControl.spellLast(lastLine) ?: "There's no name or number in what I just said."
+                    else -> lastLine
+                }
+                if (control == SpeechControl.Kind.SLOWER && lastLine.isNotBlank()) {
+                    com.tekyerema.agent.AgentEngine.appContext()?.let { ctx ->
+                        val s = com.tekyerema.settings.Settings(ctx)
+                        s.speechRate = (s.speechRate - 1).coerceAtLeast(0)
+                    }
+                    kotlinx.coroutines.delay(200)   // the voices take the new rate from the settings flow (VoiceEngine)
+                }
+                Log.i("Tekyerema", "[VOICE] speech control ${control.name}")
+                set(VoiceState.SPEAKING, line)
+                try { if (speakAloud()) tts.speak(Verbalize.apply(line), tr.language) } catch (c: CancellationException) { throw c } catch (_: Exception) {}
+                // The last line stays what it was, so "spell it" twice or "again" after a spelling still has it.
+                _state.update { it.copy(state = VoiceState.IDLE, spoken = lastLine.ifBlank { line }, spokenAt = System.currentTimeMillis()) }
+                return
             }
 
             // "Say that again." — the last reply is spoken again, exactly, never re-run (a blind user's reflex when a

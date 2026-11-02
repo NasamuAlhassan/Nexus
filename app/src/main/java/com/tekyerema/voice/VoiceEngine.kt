@@ -774,6 +774,9 @@ object VoiceEngine {
         }
     }
 
+    /** Nothing running, nothing waiting: a moment to offer something unasked (phone/CallShield). */
+    fun canOffer(): Boolean = initialized && settings.speakAloud && try { controller.canOffer() } catch (_: Throwable) { false }
+
     fun announce(text: String, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || text.isBlank()) return
         // Registered before it is dispatched (audit, 22 Oct 2026): a line asked for from a background thread (PushedPin, AfterPin,

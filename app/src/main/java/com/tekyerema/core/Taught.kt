@@ -11,6 +11,7 @@ object Taught {
     /** True while [key] should still be taught in full (and counts this telling). */
     fun teach(key: String, times: Int = 3): Boolean {
         if (android.os.Build.VERSION.SDK_INT == 0) return true   // JVM unit tests (stubbed Android): always the full words
+        if (com.tekyerema.voice.NoisyPlace.active) return false   // #40 noisy place: the short form, without counting a telling
         val ctx = try { com.tekyerema.agent.AgentEngine.appContext() } catch (_: Throwable) { null } ?: return true
         val p = ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
         val n = p.getInt(key, 0)

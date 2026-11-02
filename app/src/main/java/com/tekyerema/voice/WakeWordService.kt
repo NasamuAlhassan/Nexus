@@ -173,6 +173,8 @@ class WakeWordService : Service() {
         fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null; liveRec = null; micOpen = false }
         var hb = 0L; var top = 0f
         var busySince = 0L; var zeroFrames = 0; var dangerRun = 0
+        // #40 noisy-place profile: the same frame loudness, watched for a background that stays loud (voice/NoisyPlace).
+        val noisy = if (NoisyPlace.enabled()) NoisyPlace.Detector() else null
         try {
             while (currentCoroutineContext().isActive) {
                 val now = System.currentTimeMillis()
@@ -221,6 +223,7 @@ class WakeWordService : Service() {
                 var e = 0f
                 for (j in 0 until got) e += frame[j] * frame[j]
                 val rms = sqrt(e / got)
+                noisy?.feed(rms, android.os.SystemClock.elapsedRealtime())?.let { NoisyPlace.switchTo(it, applicationContext) }
                 // Exact digital silence for 20 s: the system silenced this capture (a call, another app) and may never give
                 // it back — close and reopen it instead of listening to nothing.
                 if (e == 0f) { if (WakeGuards.silentTooLong(++zeroFrames)) { Log.i(TAG, "[WAKE] watchdog: restarted (mic silent for 20 s — reopening)"); restarts++; lastRestart = "mic silent"; release(); delay(300); continue } }
@@ -419,6 +422,7 @@ class WakeWordService : Service() {
     }
 
     override fun onDestroy() {
+        try { NoisyPlace.switchTo(false, applicationContext) } catch (_: Throwable) {}   // no listening, no measurement: back to normal
         screenReceiver?.let { try { unregisterReceiver(it) } catch (_: Throwable) {} }
         running = false
         tickJob?.cancel()
