@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "companion": {
+    "_doc": "Companion mode (companion/, MASTER_STATUS #21): chat when bored, the daily brief, small lessons, warm replies to distress. enabled = the whole feature. moneyNotes = the gentle spending note in the day brief (the user can switch it by voice: 'stop the spending notes'; asking 'how am I doing with money' is always answered). chatIdleMs = how long a chat stays on with no turn. brief.messageHours = how far back 'new messages' looks.",
+    "enabled": true,
+    "moneyNotes": true,
+    "chatIdleMs": 600000,
+    "brief": {
+      "messageHours": 12
+    },
+    "helpline": {
+      "_doc": "TODO(owner): put a VERIFIED Ghana mental-health helpline here (digits only) and its name. Left empty on purpose: no number is invented. When set, the crisis reply adds 'You can also call <name> on <number>'.",
+      "number": "",
+      "name": ""
+    }
+  }
+}

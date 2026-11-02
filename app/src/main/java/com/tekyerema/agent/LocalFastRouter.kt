@@ -221,7 +221,8 @@ class LocalFastRouter(
         // (ReadMore scrolls and reads the app underneath, so our own screen must be out of the way for it too.)
         if (StepAside.enabled() && (StepAside.forFast(intent) || intent == FastIntent.ReadMore)) com.tekyerema.ui.OwnUi.leave()
         // J-13: snapshot what this command could change, so "undo" can put it back (not for the memory/audit commands).
-        val reversible = intent !in NOT_UNDOABLE && intent !is FastIntent.WhatDidYouDo && intent !is FastIntent.Forget
+        val reversible = intent !in NOT_UNDOABLE && intent !is FastIntent.WhatDidYouDo && intent !is FastIntent.Forget &&
+            intent !is FastIntent.CompanionTalk
         val before = if (reversible) try { com.tekyerema.audit.DeviceState.capture(appContext) } catch (_: Throwable) { null } else null
         extraInverses.clear()
         val outcome = try { execute(intent) } catch (t: Throwable) {
@@ -448,6 +449,9 @@ class LocalFastRouter(
         is FastIntent.SaveHelp -> saveHelp(intent)
         // Phone care (com.tekyerema.phonecare): the self-test, alert switches and "read it" — no model.
         FastIntent.CheckPhone, FastIntent.ReadAlert, is FastIntent.AlertSwitch -> com.tekyerema.phonecare.PhoneCareIntents.execute(appContext, intent)
+        // Companion mode (companion/): the brief, a lesson, a warm word are answered here; null = the brain carries the chat (English only).
+        is FastIntent.CompanionTalk -> if (turnLanguage == Lang.TWI) null
+            else com.tekyerema.companion.CompanionRuntime.handle(appContext, controller(), intent.kind, intent.said)
     }
 
     private suspend fun <T> io(block: () -> T): T = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { block() }

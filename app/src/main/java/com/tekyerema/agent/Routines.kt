@@ -115,6 +115,8 @@ object Routines {
         FastIntent.Connectivity, FastIntent.NowPlaying, FastIntent.ShowAlarms, FastIntent.CalendarToday, FastIntent.ListSchedules -> true
         is FastIntent.BrightnessSet, is FastIntent.QuickToggle, is FastIntent.Ringer, is FastIntent.OpenApp, is FastIntent.PlayMusic,
         is FastIntent.CallHistory, is FastIntent.Digest, is FastIntent.ChatMessages, is FastIntent.SaverQuery -> true
+        // Companion mode: "when I say good morning, brief me" — the day brief reads and says, nothing more.
+        is FastIntent.CompanionTalk -> i.kind == com.tekyerema.companion.CompanionIntents.Kind.BRIEF.id
         else -> false
     }
 

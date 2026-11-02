@@ -163,7 +163,8 @@ object BrainPrompts {
     /** Every rule in [GOAL_RULES] whose pattern matches [goal], joined; null when none does. Pure. */
     internal fun goalRules(goal: String): String? =
         (GOAL_RULES.filter { (re, _) -> re.containsMatchIn(goal) }.map { it.second } +
-            listOfNotNull(com.tekyerema.money.MtnApp.ruleFor(goal))).joinToString("\n").ifEmpty { null }
+            // Companion mode: while a chat is on ("let's talk", "I'm bored"), the cloud brain answers as a brief, honest friend.
+            listOfNotNull(com.tekyerema.money.MtnApp.ruleFor(goal), com.tekyerema.companion.CompanionSession.rulesFor(goal))).joinToString("\n").ifEmpty { null }
 
     // ---------------------------------------------------------------- context compaction
     // Each request is stateless (system + tools + one message), so only the step record carries memory between steps.
