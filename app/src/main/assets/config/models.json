@@ -56,10 +56,18 @@
    "weakModels": [
     "openai/gpt-oss-20b"
    ],
+   "_chainNote": "2 Nov 2026 (owner: no paid or third-party cloud brains, 'not funded'): the default planner chain is OUR OWN fine-tuned agent model served free from our Hugging Face Space ('space', agent/llm/SpaceLlm, POST <SPEECH_SPACE_URL>/agent/chat). Groq and Gemini code stays: a developer can put \"groq\" and/or \"gemini\" back in this list (they also need their keys). Offline the rules (LocalBrain) and, on phones with the memory, the on-phone model take over.",
    "chain": [
-    "groq",
-    "gemini"
+    "space"
    ],
+   "space": {
+    "enabled": true,
+    "url": "",
+    "timeoutSec": 25,
+    "maxTokens": 200,
+    "maxContextTokens": 6000,
+    "_note": "url empty = the SPEECH_SPACE_URL host from local.properties (https only). The request carries only the planner's own messages and max_tokens; the user's saved memory and failure hints are added to those messages only when Settings.shareMemoryWithCloud is on (default off). A 429 / 503 / timeout makes the planner answer 'no decision' and the Space is skipped for a while."
+   },
    "_extraNote": "P1-15 (R-A6): extra OpenAI-compatible rungs. Each exists at run time only when local.properties has PLANNER_KEY_<ID> (debug builds). A keyed rung joins the chain after the named ones; name it in `chain` to place it earlier. Request-shape fields: toolChoice (some providers accept only auto), parallelToolCalls (false = one tool call per reply where the default is several), reasoningEffort (false for a provider that rejects the field), maxTokensField (max_completion_tokens | max_tokens | empty = none).",
    "extra": {
     "order": [

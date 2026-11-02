@@ -61,7 +61,14 @@ class LocalModelBrain(
     private val hints: (String) -> List<String> = { goal -> com.tekyerema.learning.FailureLearning.hintsFor(goal) },
     /** The user's own memory for this goal ("my wife" is the contact Pearl, usual app, told facts; memory/PlannerMemory): at most 10 short
      *  lines in the same "What I know" block as [hints]. On-phone planner only — a cloud brain never gets them unless the user shares. */
-    private val memory: (String) -> List<String> = { goal -> com.tekyerema.memory.PlannerMemory.forGoal(goal) }
+    private val memory: (String) -> List<String> = { goal -> com.tekyerema.memory.PlannerMemory.forGoal(goal) },
+    /** What to answer when the model gave none. Default: "can't decide" (CannotDo DEFER → the router falls back). The Space-backed
+     *  planner ([com.tekyerema.agent.llm.SpaceLlm]) answers Fail instead, so the cloud chain classes it as a timeout or a quota. */
+    private val noAnswer: (() -> AgentDecision)? = null,
+    /** Per-step limits for a planner that isn't the on-phone model (the Space); null = the `router.localModel.*` config. */
+    private val timeoutMs: Long? = null,
+    private val maxTokens: Int? = null,
+    private val maxContextTokens: Int? = null
 ) : AgentBrain {
 
     // The task's conversation: its tool list is fixed when it opens (the KV the runtime reuses depends on an unchanged
@@ -91,8 +98,8 @@ class LocalModelBrain(
         // model never saw in training; it then named the nearest tool with EMPTY arguments or looped — 5/75 on the
         // benchmark against 85.7 % unconstrained). ToolReply + the `names` check below validate the reply instead.
         val schema = if (AppConfig.bool("router.localModel.constrainReply", false)) com.tekyerema.agent.llm.PlannerPrompt.replySchema(offered) else null
-        val maxTokens = AppConfig.int("router.localModel.maxTokens", 200)
-        val timeout = AppConfig.long("router.localModel.timeoutMs", 60_000L)
+        val maxTokens = this.maxTokens ?: AppConfig.int("router.localModel.maxTokens", 200)
+        val timeout = timeoutMs ?: AppConfig.long("router.localModel.timeoutMs", 60_000L)
         val t0 = System.currentTimeMillis()
         var user: String
         val out: String?
@@ -116,7 +123,7 @@ class LocalModelBrain(
             out = s.send(user, schema, timeout)
             turns++
             sentHistory = ctx.history.size
-            if (out == null || s.tokens > AppConfig.int("router.localModel.maxContextTokens", 3_000)) closeSession()
+            if (out == null || s.tokens > (maxContextTokens ?: AppConfig.int("router.localModel.maxContextTokens", 3_000))) closeSession()
         } else {
             user = com.tekyerema.agent.llm.PlannerPrompt.userTurn(ctx.goal, ctx.history, ctx.screen, ctx.conversation, learned)
             out = llm.chat(system, user, schema, maxTokens, timeout)
@@ -124,7 +131,7 @@ class LocalModelBrain(
         val ms = System.currentTimeMillis() - t0
         if (out == null) {
             log("[LLM] ${llm.id} no answer after $ms ms")
-            return AgentDecision.CannotDo(LocalBrain.DEFER, "on-device model gave no answer")
+            return noAnswer?.invoke() ?: AgentDecision.CannotDo(LocalBrain.DEFER, "on-device model gave no answer")
         }
         val call = com.tekyerema.agent.llm.ToolReply.parse(out)
         log("[LLM] ${llm.id} ${ms} ms, turn ${user.length} chars, held ${session?.tokens ?: 0} tokens → ${call?.tool ?: "unparsed"}")

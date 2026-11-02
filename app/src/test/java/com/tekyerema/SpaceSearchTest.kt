@@ -168,8 +168,8 @@ class SpaceSearchTest {
 
     private val groqAnswer = SearchResult("Groq says fifteen cedis.", listOf(Source("BBC", "https://bbc.com/x")), "groq")
 
-    @Test fun space_is_first_in_the_default_ladder_and_has_a_longer_timeout() {
-        assertEquals(listOf("space", "groq", "gemini", "tavily"), WebSearch.DEFAULT_ORDER)
+    @Test fun space_is_the_only_default_search_provider_and_has_a_longer_timeout() {
+        assertEquals(listOf("space"), WebSearch.DEFAULT_ORDER)   // 2 Nov 2026: Groq / Gemini / Tavily search are off by default
         assertEquals(13L, SpaceSearchProvider.timeoutSec)   // 12 s default + 1 s: ask() times out (and cools) first
     }
 

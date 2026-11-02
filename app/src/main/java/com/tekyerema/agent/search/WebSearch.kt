@@ -91,7 +91,7 @@ interface SearchProvider {
 object WebSearch {
     /** Our own Space first (free, nothing to run out of; skipped when off/offline/cooling), then Groq (the app's primary
      *  key-based provider, no training on API data), then Gemini, then the optional Tavily. */
-    val DEFAULT_ORDER = listOf("space", "groq", "gemini", "tavily")
+    val DEFAULT_ORDER = listOf("space")   // 2 Nov 2026 (owner): our own Space only; groq / gemini / tavily come back by config
     private const val TAG = "Tekyerema"
     private const val MAX_QUERY_CHARS = 300
 

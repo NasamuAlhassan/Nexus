@@ -102,8 +102,22 @@ class ModelRoutingTest {
         OperatorPolicy.cloudAllowed = false
         assertTrue(ModelRoles.plannerChainAllowed().isEmpty())
         OperatorPolicy.cloudAllowed = true
-        OperatorPolicy.providers = listOf("groq")
-        assertEquals(listOf("groq"), ModelRoles.plannerChainAllowed())
+        // The default chain is OUR Space planner only (2 Nov 2026); a developer re-adds Groq / Gemini in config.
+        assertEquals(listOf("space"), ModelRoles.plannerChainAllowed())
+        com.tekyerema.core.config.AppConfig.loadFrom(listOf("config/models.json" to """{"models":{"planner":{"chain":["groq","gemini"]}}}"""))
+        try {
+            OperatorPolicy.providers = listOf("groq")
+            assertEquals(listOf("groq"), ModelRoles.plannerChainAllowed())
+        } finally { com.tekyerema.core.config.AppConfig.loadFrom(emptyList()) }
+    }
+
+    @Test fun the_space_planner_is_not_something_the_provider_list_can_remove() {
+        // The user's list holds only the providers they can choose between; "space" stays unless the cloud is off.
+        OperatorPolicy.providers = emptyList()
+        assertEquals(listOf("space"), ModelRoles.plannerChainAllowed())
+        assertEquals(listOf("space"), ModelRouting.allowedChain(listOf("space"), listOf("groq"), true))
+        assertEquals(listOf("space"), ModelRouting.allowedChain(listOf("groq", "space"), listOf("gemini"), true))
+        assertTrue(ModelRouting.allowedChain(listOf("space"), listOf("groq"), false).isEmpty())
     }
 
     @Test fun the_capable_models_never_include_the_weak_one() {

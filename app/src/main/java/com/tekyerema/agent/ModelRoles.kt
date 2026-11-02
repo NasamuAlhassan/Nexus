@@ -15,18 +15,24 @@ import com.tekyerema.core.config.AppConfig
  *   vision   camera descriptions (P-01)             models.vision.model (default: the Gemini model)
  *
  * [plannerChain] is the order cloud providers are tried for the planner role (`models.planner.chain`,
- * default groq → gemini); a provider without a key, or without the user's consent (J-18), is skipped.
+ * default ["space"], 2 Nov 2026: no paid or third-party cloud brain by default — OUR fine-tuned agent model served from our
+ * Hugging Face Space, [com.tekyerema.agent.llm.SpaceLlm]; a developer can name "groq" / "gemini" in config to bring them back);
+ * a provider without a key, or without the user's consent (J-18), is skipped.
  */
 object ModelRoles {
+    const val SPACE = "space"
     const val GROQ = "groq"
     const val GEMINI = "gemini"
 
     /** WS-C: the user's provider choice (Settings › Control, OperatorPolicy.providers) orders the configured chain and can
      *  only remove providers from it; a configured provider the user can't choose yet stays at the end. */
     fun plannerChain(): List<String> {
-        val configured = AppConfig.stringList("models.planner.chain", listOf(GROQ, GEMINI)).map { it.trim().lowercase() }.distinct()
-        val user = com.tekyerema.operator.OperatorPolicy.providers
-        return user.filter { it in configured } + configured.filter { it !in com.tekyerema.operator.OperatorPolicy.KNOWN_PROVIDERS }
+        val configured = AppConfig.stringList("models.planner.chain", listOf(SPACE)).map { it.trim().lowercase() }.distinct()
+        val known = com.tekyerema.operator.OperatorPolicy.KNOWN_PROVIDERS
+        // The configured order stands (a developer's ["space", "groq"] asks the Space first); the providers the user can choose
+        // between fill their slots in the user's order, and the ones they removed leave no slot.
+        val chosen = com.tekyerema.operator.OperatorPolicy.providers.filter { it in configured }.iterator()
+        return configured.mapNotNull { id -> if (id in known) (if (chosen.hasNext()) chosen.next() else null) else id }
     }
 
     /** B / sovereignty: the chain the operator allows — none when the cloud is off, only the providers they permit. */

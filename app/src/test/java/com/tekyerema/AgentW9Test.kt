@@ -55,8 +55,8 @@ class AgentW9Test {
         assertEquals("same screen ⇒ same id", snap.snapshotId, snap.copy(timestampMs = 99L).snapshotId)
     }
 
-    @Test fun planner_chain_defaults_to_groq_then_gemini() {
-        assertEquals(listOf(ModelRoles.GROQ, ModelRoles.GEMINI), ModelRoles.plannerChain())
+    @Test fun planner_chain_defaults_to_our_own_space_planner_only() {
+        assertEquals(listOf(ModelRoles.SPACE), ModelRoles.plannerChain())
         assertEquals("fallback-model", ModelRoles.model("nonexistent-role", "fallback-model"))
     }
 

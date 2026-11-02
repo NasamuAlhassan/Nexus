@@ -262,12 +262,13 @@ object AgentEngine {
         val s = settings
         val brain = when {
             s == null -> "not configured"
+            ModelRoles.SPACE in ModelRoles.plannerChainAllowed() && com.tekyerema.agent.llm.SpaceLlm.configured() -> "Nexus agent (our Space)"
             s.hasGroqKey -> "OpenAI-compat (${hostOf(s.groqBaseUrl)}, ${s.groqModel})"
             s.geminiApiKey.isNotBlank() -> "Gemini (${s.model})"
             else -> "not configured (no key)"
         }
         _state.update {
-            it.copy(serviceReady = controller?.ready == true, hasApiKey = s?.hasAnyBrain == true, brain = brain)
+            it.copy(serviceReady = controller?.ready == true, hasApiKey = s?.hasAnyBrain == true || com.tekyerema.agent.llm.SpaceLlm.configured(), brain = brain)
         }
     }
 
@@ -512,6 +513,40 @@ object AgentEngine {
         log(LogEntry.Kind.INFO, "Stopped by user.")
     }
 
+    /**
+     * The cloud planner chain for one task, in `models.planner.chain` order (default: our own Space agent only, 2 Nov 2026 —
+     * no paid or third-party brain unless a developer names "groq" / "gemini" in config). Only what the operator allows
+     * (OperatorPolicy.cloudAllowed / providers — cloud off means on-device only). Kept out of [runTask] (JVM method-size limit).
+     */
+    private fun buildCloudChain(set: Settings, route: com.tekyerema.agent.routing.TaskRoute): List<AgentBrain> =
+        if (!RouterTiers.enabled(RouterTiers.CLOUD)) emptyList() else buildList {   // C-01
+            // N-06: provider order for the planner role from config (models.planner.chain).
+            for (id in ModelRoles.plannerChainAllowed()) when (id) {
+                // Our fine-tuned agent model on our Hugging Face Space: free, the trained prompt format (llm/SpaceLlm).
+                ModelRoles.SPACE -> com.tekyerema.agent.llm.SpaceLlm.forPhone()?.let { add(it) }
+                    ?: Log.w(TAG, "[BRAIN] models.planner.chain: 'space' has no https Space address (SPEECH_SPACE_URL) or is switched off — skipped")
+                // Groq (keys rotated inside OpenAiCompatBrain): only when a developer names it in the chain.
+                ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set, route))
+                // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
+                ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
+                // P1-15: an extra OpenAI-compatible rung named in the chain (config + a key in local.properties).
+                else -> PlannerProvider.extra(id) { set.plannerKeys[it] }?.let { add(OpenAiCompatBrain(set, route, it)) }
+                    ?: Log.w(TAG, "[BRAIN] models.planner.chain: provider '$id' has no config or no key — skipped")
+            }
+            // …and every keyed extra rung the chain didn't name, after the named ones (a key is the opt-in).
+            for (id in PlannerProvider.extraIds()) if (id !in ModelRoles.plannerChainAllowed() && set.plannerKeys.containsKey(id))
+                PlannerProvider.extra(id) { set.plannerKeys[it] }?.let { add(OpenAiCompatBrain(set, route, it)) }
+        }
+
+    /** The chain's brains by name for the "Brain:" log line ("none" when there is no cloud brain). */
+    private fun cloudBrainNames(set: Settings): String = buildList {
+        for (id in ModelRoles.plannerChainAllowed()) when (id) {
+            ModelRoles.SPACE -> if (com.tekyerema.agent.llm.SpaceLlm.configured()) add("Space/agent")
+            ModelRoles.GROQ -> if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
+            ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
+        }
+    }.joinToString(" → ").ifEmpty { "none" }
+
     /** @param resume WS-A: a paused/interrupted task to pick up from its checkpoint ([request] = the words, "carry on").
      *  @param journal WS-A: record this run in the task journal (default: attended, the phone user's, non-test, not a
      *  screen-free question).
@@ -545,23 +580,7 @@ object AgentEngine {
         // B: quota-aware routing — one route per task: the pinned model, the weak-model policy and budgets (OperatorPolicy).
         val route = com.tekyerema.agent.routing.TaskRoute(unattended = unattended)
         val brain: AgentBrain = forcedBrain ?: run {
-            // Cloud fallback CHAIN — use every credential: Groq (keys rotated inside OpenAiCompatBrain)
-            // first, then Gemini, so a drained free-tier quota isn't a dead end (demo-readiness fix).
-            val cloudChain = if (!RouterTiers.enabled(RouterTiers.CLOUD)) emptyList() else buildList {   // C-01
-                // N-06: provider order for the planner role from config (models.planner.chain); B: only what the operator
-                // allows (OperatorPolicy.cloudAllowed / providers — cloud off means on-device only).
-                for (id in ModelRoles.plannerChainAllowed()) when (id) {
-                    ModelRoles.GROQ -> if (set.hasGroqKey) add(OpenAiCompatBrain(set, route))
-                    // J-18: the user can keep their requests off Gemini's free tier (which may train on them).
-                    ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add(GeminiBrain(set))
-                    // P1-15: an extra OpenAI-compatible rung named in the chain (config + a key in local.properties).
-                    else -> PlannerProvider.extra(id) { set.plannerKeys[it] }?.let { add(OpenAiCompatBrain(set, route, it)) }
-                        ?: Log.w(TAG, "[BRAIN] models.planner.chain: provider '$id' has no config or no key — skipped")
-                }
-                // …and every keyed extra rung the chain didn't name, after the named ones (a key is the opt-in).
-                for (id in PlannerProvider.extraIds()) if (id !in ModelRoles.plannerChainAllowed() && set.plannerKeys.containsKey(id))
-                    PlannerProvider.extra(id) { set.plannerKeys[it] }?.let { add(OpenAiCompatBrain(set, route, it)) }
-            }
+            val cloudChain = buildCloudChain(set, route)
             val cloud: AgentBrain? = when (cloudChain.size) {
                 0 -> null; else -> FallbackBrain(cloudChain, route = route)   // even one brain gets the network-blip retry
             }
@@ -583,12 +602,7 @@ object AgentEngine {
                 com.tekyerema.core.NetworkMonitor.isOnline()
             }
         }
-        val cloudName = buildList {
-            for (id in ModelRoles.plannerChainAllowed()) when (id) {
-                ModelRoles.GROQ -> if (set.hasGroqKey) add("Groq/${set.groqModel}×${set.groqApiKeys.size}keys")
-                ModelRoles.GEMINI -> if (set.geminiApiKey.isNotBlank() && set.allowGeminiBackup) add("Gemini/${set.model}")
-            }
-        }.joinToString(" → ").ifEmpty { "none" }
+        val cloudName = cloudBrainNames(set)
         val brainLabel = forcedLabel ?: "Hybrid on-device" +
             (if (online && cloudName != "none") " + cloud:$cloudName" else " (offline${if (cloudName == "none") ", no cloud key" else ""})")
         log(LogEntry.Kind.INFO, "Brain: $brainLabel")

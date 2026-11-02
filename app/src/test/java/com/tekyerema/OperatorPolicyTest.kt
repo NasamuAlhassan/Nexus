@@ -181,6 +181,9 @@ class OperatorPolicyTest {
     }
 
     @Test fun the_users_provider_order_is_the_planner_chain_and_can_only_narrow_it() {
+        // Default chain (2 Nov 2026) = our own Space planner; Groq / Gemini come back only when config names them.
+        assertEquals(listOf("space"), com.tekyerema.agent.ModelRoles.plannerChain())
+        AppConfig.loadFrom(listOf("config/models.json" to """{"models":{"planner":{"chain":["groq","gemini"]}}}"""))
         assertEquals(listOf("groq", "gemini"), com.tekyerema.agent.ModelRoles.plannerChain())
         OperatorPolicy.providers = listOf("gemini", "groq")
         assertEquals(listOf("gemini", "groq"), com.tekyerema.agent.ModelRoles.plannerChain())

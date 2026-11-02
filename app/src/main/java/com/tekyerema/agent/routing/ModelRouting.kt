@@ -175,10 +175,12 @@ object ModelRouting {
     /** Is this a complex step (the planner doing phone work) rather than a direct knowledge answer? */
     fun complex(ctx: BrainContext): Boolean = !ctx.simple
 
-    /** The planner chain the operator allows: [configured] order, filtered to [allowed] providers. Pure. */
+    /** The planner chain the operator allows: [configured] order, filtered to [allowed] providers. Pure.
+     *  A provider the user can't choose between (not in [OperatorPolicy.KNOWN_PROVIDERS]: our own "space" planner, a keyed
+     *  extra rung) is not theirs to remove one by one — only "cloud off" removes it. */
     fun allowedChain(configured: List<String>, allowed: List<String>, cloudAllowed: Boolean): List<String> {
         if (!cloudAllowed) return emptyList()
         val ok = allowed.map { it.trim().lowercase() }.toSet()
-        return configured.filter { it in ok }
+        return configured.filter { it in ok || it !in OperatorPolicy.KNOWN_PROVIDERS }
     }
 }
