@@ -247,12 +247,11 @@ class OperatorPolicyTest {
             override fun stop() {}
         }
         val r = com.tekyerema.language.LanguageLayer.build(AppConfig.obj("providers.speech.clients"),
-            mapOf("SPEECH_HCILAB_TOKEN" to "speech_live_x", "SPEECH_KHAYA_WEB_KEY" to "k-test"), transport, { sink })   // Twi = Khaya since 16 Oct
-        val twi = com.tekyerema.voice.Lang.TWI
-        assertTrue(com.tekyerema.language.LanguageLayer.onlineAsr(twi, r.asr, cloudAllowed = true) != null)
+            mapOf("SPEECH_SPACE_URL" to "https://example.hf.space"), transport, { sink })
+        val english = com.tekyerema.voice.Lang.GH_EN
         OperatorPolicy.cloudAllowed = false
-        assertNull(com.tekyerema.language.LanguageLayer.onlineAsr(twi, r.asr, cloudAllowed = true))
-        assertFalse(r.tts.getValue("hcilab_tts").speak("Mema wo akye", twi))   // the phone's own voice says it instead
+        assertNull(com.tekyerema.language.LanguageLayer.onlineAsr(english, r.asr, cloudAllowed = true))
+        assertFalse(r.tts.getValue("space_tts_eng").speak("Mema wo akye", english))   // the phone's own voice says it instead
         assertEquals(0, sent)
         AppConfig.loadFrom(emptyList())
     }

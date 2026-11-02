@@ -131,11 +131,6 @@ class RunGoalReceiver : BroadcastReceiver() {
         }
         // Phase 5 ASR diagnostic: per-stage timings + proxy/raw/normalized/final. No goal submitted.
         //   adb ... --es asr_diag twi_C01.wav --es lang twi
-        // The online recogniser on a pushed WAV (the Space for Twi), no goal: --es online_asr C10.wav --es lang twi
-        intent.getStringExtra("online_asr")?.let { name ->
-            com.tekyerema.voice.VoiceDebug.onlineAsr(context.applicationContext, name, intent.getStringExtra("lang"))
-            return
-        }
         intent.getStringExtra("asr_diag")?.let { name ->
             com.tekyerema.voice.VoiceDebug.asrDiag(context.applicationContext, name, intent.getStringExtra("lang"))
             return
@@ -261,13 +256,6 @@ class RunGoalReceiver : BroadcastReceiver() {
                 "ok=$ok cls=${target.className?.toString()?.substringAfterLast('.')} desc='${target.contentDescription}' text='${target.text}'")
             return
         }
-        // Twi lines into the phone voice's cache ahead of time:  --es tts_prerender "line one|line two"  (or "default")
-        intent.getStringExtra("tts_prerender")?.let { v ->
-            val lines = if (v == "default") emptyList() else v.split('|').map { it.trim() }.filter { it.isNotEmpty() }
-            com.tekyerema.voice.VoiceEngine.prerenderTwi(lines)
-            Log.i("Tekyerema", "[TTS] pre-render asked for ${lines.size} extra line(s)")
-            return
-        }
         // One buzz with a chosen usage (core/Haptics):  --es haptic_test accessibility|notification|alarm|touch
         intent.getStringExtra("haptic_test")?.let { u ->
             if (android.os.Build.VERSION.SDK_INT >= 26) com.tekyerema.core.Haptics.play(context.applicationContext,
@@ -335,14 +323,7 @@ class RunGoalReceiver : BroadcastReceiver() {
             }
             return
         }
-        // The offline student translator on its golden lines: --es student_mt smt --es smt_variant int8|q4 --es smt_prepack 1|0
-        intent.getStringExtra("student_mt")?.let { folder ->
-            StudentMtDebug.run(context.applicationContext, folder, intent.getStringExtra("smt_variant") ?: "int8",
-                intent.getStringExtra("smt_prepack") == "1")
-            return
-        }
         intent.getStringExtra("tts_ab")?.let { TtsAbDebug.run(context.applicationContext); return }
-        intent.getStringExtra("student_reply")?.let { text -> StudentMtDebug.reply(context.applicationContext, text); return }
         intent.getStringExtra("tts_test")?.let { text ->
             com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"),
                 save = intent.getStringExtra("tts_save") == "1")

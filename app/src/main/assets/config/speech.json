@@ -4,31 +4,7 @@
   "twi": {
    "_note": "20 Oct 2026 (owner: everything said in Twi is Twi, the fallback too): an English reply in a Twi conversation is translated whole (messages, answers) and spoken by the Twi voice; if it cannot be translated, cannotTranslate is said in Twi and the words stay on screen. noEnglishFallback false = the English voice reads it. [native speaker to verify cannotTranslate]",
    "noEnglishFallback": true,
-   "cannotTranslate": "Mintumi nkyerɛ eyi ase seesei. San bisa bio.",
-   "respell": {
-    "_note": "21 Oct 2026: English words in Twi lines respelled for the Twi voices (voice/TwiRespell). OWNER PICKED BY EAR (21 Oct, build/listen/twi_respell): the last candidate for each word, wife the first; MTN = candidate 1 without the pause before the T (ɛmti ɛn, build/listen/mtn). Other not-Twi words go through the letter rules.",
-    "mobile money": "mobaayl mɔni",
-    "momo": "moomoo",
-    "wife": "waif",
-    "phone": "fown",
-    "airtime": "ɛrtaim",
-    "reference": "rɛfrɛnsi",
-    "network": "nɛtiwɔɔki",
-    "mtn": "ɛmti ɛn",
-    "m t n": "ɛmti ɛn",
-    "data": "dɛɛta",
-    "money": "mɔni",
-    "mobile": "mobaayl",
-    "time": "taim",
-    "transport": "transpɔɔt",
-    "whatsapp": "wɔsap",
-    "pin": "piin",
-    "free": "fri",
-    "balance": "balans",
-    "cedis": "sidi",
-    "cedi": "sidi",
-    "ghana cedis": "Ghana sidi"
-   }
+   "cannotTranslate": "Mintumi nkyerɛ eyi ase seesei. San bisa bio."
   },
   "ghEnglish": {
    "enabled": true,

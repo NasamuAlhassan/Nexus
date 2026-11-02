@@ -40,19 +40,6 @@ class LiveRunsNineOctTest {
         assertTrue(en, en.startsWith("Enter your PIN now, and I'll read your Mobile Money balance"))
     }
 
-    @Test fun `the Twi PIN line reaches the lab voice unchanged and its recorded clip is in the app`() {
-        // the turn's path: brief → SpeechLint → Verbalize → RoutingTts (TwiSpeechText) → the lab voice's key
-        val spoken = Verbalize.apply(SpeechLint.apply(SpeechLint.firstSentence(Boundary.TWI_BALANCE_PIN)))
-        assertEquals(Boundary.TWI_BALANCE_PIN, spoken)
-        assertEquals(spoken, TwiSpeechText.prepare(spoken))
-        val keys = HttpSpeech.parts(TwiText.canonical(SpokenText.plain(TwiText.canonical(EntityTags.display(spoken)))).trim(), 250)
-            .map { "twi|$it" }
-        assertEquals(1, keys.size)
-        val dir = listOf(java.io.File("src/main/assets/voice/twi_lab"), java.io.File("app/src/main/assets/voice/twi_lab"))
-            .first { it.isDirectory }
-        assertTrue("no lab clip for the line — run campaign/twi_lab_clips.py", java.io.File(dir, TtsDiskCache.name(keys[0]) + ".wav").isFile)
-    }
-
     @Test fun `the balance figure is found in the network's answer, the available one first`() {
         assertEquals("115.50", UssdSpeech.momoBalance("Current Balance: GHS 120.00. Available Balance: GHS 115.50. "))
         assertEquals("1234.00", UssdSpeech.momoBalance("Your MoMo balance is GHS 1,234.00"))
@@ -76,11 +63,6 @@ class LiveRunsNineOctTest {
         assertEquals(com.tekyerema.voice.Closers.TWI_NOT_HEARD, com.tekyerema.voice.Closers.noInput(1, twi = true))
         assertNull(com.tekyerema.voice.Closers.noInput(2, twi = true))
         assertEquals("I didn't hear anything. Tap and try again.", com.tekyerema.voice.Closers.noInput(1))
-        // said directly (no Verbalize): the lab voice's key is the line itself, and its clip ships in the app
-        val key = "twi|" + TwiText.canonical(com.tekyerema.voice.Closers.TWI_NOT_HEARD)
-        val dir = listOf(java.io.File("src/main/assets/voice/twi_lab"), java.io.File("app/src/main/assets/voice/twi_lab"))
-            .first { it.isDirectory }
-        assertTrue(java.io.File(dir, TtsDiskCache.name(key) + ".wav").isFile)
     }
 
     @Test fun `the log names the voice that actually spoke`() = runBlocking {

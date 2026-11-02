@@ -45,7 +45,7 @@ class LocalFastRouter(
     }
 
     /** @return a spoken outcome when handled locally, or null to fall through to the agent (unchanged). */
-    /** The language of the turn being handled (the quick answers have fixed Twi lines: [TwiInfoLines]). */
+    /** The language of the turn being handled. */
     @Volatile private var turnLanguage: String = ""
 
     suspend fun tryHandle(text: String, language: String): FastOutcome? {
@@ -338,11 +338,10 @@ class LocalFastRouter(
     }
 
     private suspend fun execute(intent: FastIntent): FastOutcome? = when (intent) {
-        FastIntent.Time -> handled(intent, if (turnLanguage == Lang.TWI) java.util.Calendar.getInstance().let {
-            TwiInfoLines.time(it.get(java.util.Calendar.HOUR_OF_DAY), it.get(java.util.Calendar.MINUTE)) } else timeText())
+        FastIntent.Time -> handled(intent, timeText())
         FastIntent.Date -> handled(intent, dateText())
         FastIntent.Day -> handled(intent, dayText())
-        FastIntent.Battery -> handled(intent, if (turnLanguage == Lang.TWI) batteryTwi() ?: batteryText() else batteryText())
+        FastIntent.Battery -> handled(intent, batteryText())
         FastIntent.Storage -> handled(intent, storageText())
         FastIntent.DeviceInfo -> handled(intent, deviceText())
 
@@ -356,7 +355,6 @@ class LocalFastRouter(
         FastIntent.BrightnessDown -> stepBrightness(up = false) ?: brightnessViaSlider(null, -0.2f)
         is FastIntent.BrightnessSet -> setBrightness(intent.fraction)
         is FastIntent.Calculate -> handled(intent, intent.answer)
-        is FastIntent.TwiPhrase -> handled(intent, intent.answer)
         is FastIntent.DateAnswer -> handled(intent, intent.answer)
         is FastIntent.Convert -> handled(intent, intent.answer)
         is FastIntent.Spell -> handled(intent, intent.answer)
@@ -1423,16 +1421,6 @@ class LocalFastRouter(
 
     /** The level, whether it is charging and — when the phone can estimate it — how long until it's full; when low
      *  and not charging ([lowHint]), the one thing to say to make it last. */
-    /** The battery in Twi ([TwiInfoLines]), or null when the level can't be read. */
-    private fun batteryTwi(): String? {
-        val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-        val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        if (pct < 0 || pct > 100) return null
-        val status = appContext.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-            ?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-        return TwiInfoLines.battery(pct, status == BatteryManager.BATTERY_STATUS_CHARGING || status == BatteryManager.BATTERY_STATUS_FULL)
-    }
-
     private fun batteryText(lowHint: Boolean = true): String {
         val bm = appContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
         val pct = bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1

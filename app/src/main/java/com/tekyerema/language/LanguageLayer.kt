@@ -84,8 +84,7 @@ object LanguageLayer {
             when (spec.kind) {
                 HttpSpeechSpec.Kind.ASR -> asr[id] = HttpAsrProvider(spec, s, transport, guard, ledger)
                 HttpSpeechSpec.Kind.TTS -> tts[id] = HttpTtsProvider(spec, s, transport, guard, sink(), ledger)
-                HttpSpeechSpec.Kind.MT -> mt[id] = if (spec.dialect == "gradio") GradioTranslationProvider(spec, s, transport, guard)
-                    else HttpTranslationProvider(spec, s, transport, guard)
+                HttpSpeechSpec.Kind.MT -> skipped[id] = "translation clients were removed (English only)"
             }
         }
         return Registries(asr, tts, mt, skipped)

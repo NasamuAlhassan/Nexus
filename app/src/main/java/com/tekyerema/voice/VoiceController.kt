@@ -1033,14 +1033,7 @@ class VoiceController(
                             return
                         }
                         if (wantsRepeat) { repeatAsked = true; Confirmation.Answer.UNCLEAR }
-                        else com.tekyerema.voice.io.YesNo.decide(heard, alternatives).let { a ->
-                            // A Kusaal answer heard by the English recogniser could come back as a "yes"-like English word
-                            // ("okay", "yeah"); in a Kusaal session only a plain English yes approves (KusaalYes).
-                            if (kus && a == Confirmation.Answer.YES && !KusaalYes.strict(heard)) {
-                                Log.i("Tekyerema", "[VOICE] Kusaal session: not a plain English yes — asked again")
-                                Confirmation.Answer.UNCLEAR
-                            } else a
-                        }
+                        else com.tekyerema.voice.io.YesNo.decide(heard, alternatives)
                     }
                     com.tekyerema.voice.io.Heard.Cancelled -> throw CancellationException("confirmation cancelled")
                     else -> Confirmation.Answer.UNCLEAR
@@ -1567,18 +1560,7 @@ class VoiceController(
                     else if (fast.intent == "PREFERENCE" && fast.spoken.startsWith("Yoo, mɛsesa")) Lang.TWI
                     else tr.language
                 tel.mark("reply_start")
-                // Offline in Twi an action's English line has no Twi (the translator is online only, no fixed line): the Twi voice then said
-                // "Mintumi nkyerɛ eyi ase seesei. San bisa bio." AFTER the action had worked, and the user asked again — a short Twi
-                // done / not-done line instead; never "done" for a guide-only refusal (audit, 22 Oct 2026). [owner: verify the Twi]
-                val sayLine = when (TwiOfflineLine.pick(twi = tr.language == Lang.TWI, systemVoice = fast.systemVoice,
-                    hasTwiLine = localSaid != null, online = com.tekyerema.core.NetworkMonitor.isOnline(),
-                    englishOnly = com.tekyerema.language.ReplyLocalizer.englishForVoice(SpokenText.plain(fast.spoken)),
-                    acted = fast.acted, ok = fast.ok, listenAfter = fast.listenAfter, spoken = SpokenText.plain(fast.spoken),
-                    guide = fast.spoken.startsWith(com.tekyerema.operator.Capabilities.GUIDE_PREFIX))) {
-                    TwiOfflineLine.Pick.DONE -> Phrases.get("twiActionDone", true, "Yoo, mayɛ.")
-                    TwiOfflineLine.Pick.FAILED -> Phrases.get("twiActionFailed", true, "Mantumi anyɛ.")
-                    null -> fast.spoken
-                }
+                val sayLine = fast.spoken
                 val spoke = if (!speakAloud() || fast.spoken.isBlank()) false
                     else try { engine.speak(Verbalize.apply(sayLine), lang) }
                     catch (c: CancellationException) { throw c } catch (e: Exception) { false }
