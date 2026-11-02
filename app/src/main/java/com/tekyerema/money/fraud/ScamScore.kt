@@ -30,6 +30,10 @@ object ScamScore {
     enum class Cue(val reason: String) {
         ASKS_PIN("It asks for your PIN or a code. MTN and banks never ask for your PIN or a code by text."),
         WRONG_SEND("Someone says they sent you money by mistake. Check your balance with MTN before sending anything back."),
+        // Fraud step 2 (links, LinkRisk): the reason names what is wrong with the link, never the link itself.
+        LINK_LOOKALIKE("It has a link that pretends to be a company you trust, but it isn't their real website. Don't open it."),
+        LINK_UNSAFE("It has a link that hides where it really goes. Don't open it."),
+        LINK_HIDDEN("It has a shortened link asking you to act, so you can't see where it goes. Don't open it."),
         LINK_ACTION("It wants you to open a link to fix or claim something. Don't open it."),
         PRIZE_FEE("It says you won a prize but must pay a fee first. Real prizes don't ask for a fee."),
         AUTHORITY_PAY("Someone says they're police or an official and wants money now. Call the person or the office yourself.")
@@ -88,7 +92,19 @@ object ScamScore {
         // "Never share your PIN" (MTN's own advice) is not a request: a verb right after a negation doesn't count ([NEG]).
         if (ASKS_PIN.containsMatchIn(text)) add(Cue.ASKS_PIN)
         if (WRONG.containsMatchIn(text) && SEND_BACK.containsMatchIn(text)) add(Cue.WRONG_SEND)
-        if (LINK.containsMatchIn(text) && LINK_VERB.containsMatchIn(text)) add(Cue.LINK_ACTION)
+        // Links (fraud step 2): a look-alike or a disguised address warns on its own; a shortened, http or odd-ending link
+        // only with words that ask the reader to act; otherwise the old link + "verify/claim" cue.
+        val links = LinkRisk.links(text)
+        val acts = LinkRisk.asksToAct(text) || LINK_VERB.containsMatchIn(text)
+        when {
+            links.any { LinkRisk.Signal.LOOKALIKE in it.signals } -> add(Cue.LINK_LOOKALIKE)
+            links.any { LinkRisk.Signal.UNSAFE in it.signals } -> add(Cue.LINK_UNSAFE)
+            acts && links.any { LinkRisk.Signal.HIDDEN in it.signals } -> add(Cue.LINK_HIDDEN)
+            // as before step 2, except a link to the brand's own site ("verify your SIM at mtn.com.gh") is not a scam cue
+            LINK.containsMatchIn(text) && LINK_VERB.containsMatchIn(text) && !(links.isNotEmpty() && links.all { it.official }) ->
+                add(Cue.LINK_ACTION)
+            acts && links.any { LinkRisk.Signal.WEAK in it.signals } -> add(Cue.LINK_ACTION)
+        }
         if (PRIZE.containsMatchIn(text) && FEE.containsMatchIn(text)) add(Cue.PRIZE_FEE)
         if (AUTHORITY.containsMatchIn(text) && PAY.containsMatchIn(text)) add(Cue.AUTHORITY_PAY)
     }

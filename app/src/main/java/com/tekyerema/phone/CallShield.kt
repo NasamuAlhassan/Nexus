@@ -73,7 +73,26 @@ object CallShield {
 
     fun onOffHook() { if (flagged) answered = true }
 
+    // ------------------------------------------------------------------ fraud step 2: a call, then money (MASTER_STATUS #13)
+    // The scam pattern: an unknown caller talks, then a "sent to you by mistake" SMS or a money flow follows. For
+    // [CALL_WINDOW_MS] after an ANSWERED first-time unknown call, ScamWarning adds [CALL_THEN_MONEY] before a money message,
+    // and a money flow can ask [recentUnknownCall]. Only the time is kept — never the number.
+    const val CALL_THEN_MONEY = "Careful: an unknown number called you just now, and now there's a money message. That's how " +
+        "the commonest MoMo scam works. Check your balance with MTN yourself before you send anything back."
+    private const val CALL_WINDOW_MS = 30 * 60_000L
+    @Volatile private var unknownCallEndedAt = 0L
+
+    /** Pure: is [now] within the window after an answered first-time unknown call that ended at [endedAt]? */
+    fun withinCallWindow(endedAt: Long, now: Long, windowMs: Long = AppConfig.long("phone.callShield.moneyWindowMs", CALL_WINDOW_MS)): Boolean =
+        endedAt > 0L && now >= endedAt && now - endedAt <= windowMs
+
+    /** True for a while after an answered call from a first-time unknown number (money flows may warn on it). */
+    fun recentUnknownCall(now: Long = System.currentTimeMillis()): Boolean = enabled() && withinCallWindow(unknownCallEndedAt, now)
+
+    internal fun callEndedForTest(at: Long) { unknownCallEndedAt = at }
+
     fun onIdle(ctx: Context) {
+        if (flagged && answered) unknownCallEndedAt = System.currentTimeMillis()
         val ask = shouldAsk(flagged, answered,
             quiet = try { com.tekyerema.agent.triggers.QuietHours.isQuiet(System.currentTimeMillis()) } catch (_: Throwable) { false },
             busy = !com.tekyerema.voice.VoiceEngine.canOffer())

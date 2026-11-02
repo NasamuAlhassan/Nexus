@@ -40,7 +40,8 @@ class ScamScoreTest {
             "Your account will be BLOCKED today. Reply with your PIN and the code we sent to verify" to ScamScore.Cue.ASKS_PIN,
             "MTN PROMO: You have won GHS 10,000 in the Mega Draw. Send GHS 50 processing fee to claim" to ScamScore.Cue.PRIZE_FEE,
             "Police CID: your son is in custody. Pay bail GHS 800 to MoMo 0245 550 188 now" to ScamScore.Cue.AUTHORITY_PAY,
-            "Your MoMo wallet is suspended. Verify at www.momo-gh.xyz today" to ScamScore.Cue.LINK_ACTION)
+            "Your MoMo wallet is suspended. Verify at www.momo-gh.xyz today" to ScamScore.Cue.LINK_LOOKALIKE,   // step 2: a MoMo look-alike
+            "Your wallet is suspended. Verify at www.wallet-gh.xyz today" to ScamScore.Cue.LINK_ACTION)
         for ((text, cue) in scams) {
             val v = ScamScore.check(text, model)
             assertTrue(text, v.warn)

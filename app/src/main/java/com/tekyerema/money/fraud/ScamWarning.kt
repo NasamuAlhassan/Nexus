@@ -20,11 +20,24 @@ object ScamWarning {
     fun before(sender: String?, text: String?): String? {
         if (!enabled() || text.isNullOrBlank()) return null
         if (trusted(sender)) return null
+        // Fraud step 2 (calls): a money message soon after an answered call from a first-time unknown number.
+        val recentCall = try { com.tekyerema.phone.CallShield.recentUnknownCall() } catch (_: Throwable) { false }
+        if (callThenMoney(recentCall, text)) {
+            try { Log.i("Tekyerema", "[FRAUD] warned cue=CALL_THEN_MONEY") } catch (_: Throwable) {}
+            return com.tekyerema.phone.CallShield.CALL_THEN_MONEY
+        }
         val v = try { ScamScore.check(text, ScamScore.cached()) } catch (_: Throwable) { return null }
         if (!v.warn) return null
         try { Log.i("Tekyerema", "[FRAUD] warned cue=${v.cues.firstOrNull()?.name ?: "model"} score=${"%.2f".format(java.util.Locale.US, v.score)}") } catch (_: Throwable) {}
         return v.line
     }
+
+    private val MONEY_TALK = Regex("(?i)\\b(?:by mistake|mistakenly|wrong(?:ly)? (?:number|account|send)|reverse|reversal|" +
+        "refund|send (?:it )?back|pay (?:it )?back|received|cash ?out|momo|mobile money|transaction|transfer(?:red)?|ghs|gh₵|cedis?)\\b|₵")
+
+    /** Pure: a recent unknown call plus a message about money (a send, a reversal, an amount). */
+    fun callThenMoney(recentUnknownCall: Boolean, text: String?): Boolean =
+        recentUnknownCall && !text.isNullOrBlank() && MONEY_TALK.containsMatchIn(text)
 
     fun trusted(sender: String?): Boolean {
         if (sender.isNullOrBlank()) return false
