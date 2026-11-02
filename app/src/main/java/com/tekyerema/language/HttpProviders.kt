@@ -89,26 +89,6 @@ class HttpAsrProvider(
         val t0 = SystemClock.elapsedRealtime()
         val reply = try {
             guard.run {
-                if (spec.dialect == "gradio") {
-                    // Our own Twi hearing model on the language Space (asr_b64: base64 WAV + language → text).
-                    // Less to send: the words only, as Ogg/Opus (SpaceOpus, `speech.asr.uploadCodec` "opus"), else μ-law (SpaceAudio)
-                    // — `speech.asr.compactUpload` = false sends the WAV as recorded.
-                    val audio = if (!com.tekyerema.core.config.AppConfig.bool("speech.asr.compactUpload", true)) wav
-                        else (if (com.tekyerema.core.config.AppConfig.string("speech.asr.uploadCodec", "opus") == "opus")
-                            SpaceOpus.encode(wav, com.tekyerema.core.config.AppConfig.int("speech.asr.opusBitrate", 24_000)) else null)
-                            ?: SpaceAudio.compact(wav)
-                    val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
-                        org.json.JSONArray().put(java.util.Base64.getEncoder().encodeToString(audio)).put(code ?: "twi")),
-                        spec.connectMs, spec.callMs)
-                    HttpSpeech.failureOf(spec, call)?.let { throw it }
-                    val tSent = SystemClock.elapsedRealtime()
-                    val result = transport.send(HttpSpeech.gradioResultRequest(spec, secrets(), HttpSpeech.gradioEventId(spec, call)),
-                        spec.connectMs, spec.callMs)
-                    HttpSpeech.failureOf(spec, result)?.let { throw it }
-                    // Where the time goes — sending the audio, or the Space's queue and model (judge's latency audit, 21 Oct 2026).
-                    Log.i("Tekyerema", "[ASR] $name: audio ${audio.size / 1024} KB (recorded ${wav.size / 1024} KB) sent in ${tSent - t0} ms, answer ${SystemClock.elapsedRealtime() - tSent} ms later")
-                    return@run (HttpSpeech.parseGradio(spec, result.text()) ?: "") to null
-                }
                 val r = LabRetry.send(com.tekyerema.core.config.AppConfig.long("speech.lab.retryBudgetMs.asr", 14_000L)) {
                     transport.send(HttpSpeech.asrRequest(spec, secrets(), wav, code), spec.connectMs, spec.callMs) }
                 // It reached the gateway's counter — except a rejected key (401), which is refused before any counting.
@@ -204,11 +184,10 @@ class HttpTtsProvider(
         val flat = com.tekyerema.voice.SpokenText.plain(text)
         val say = if (language == Lang.TWI) TwiText.canonical(flat).trim() else flat.trim()
         if (say.isEmpty()) return null
-        // A line already on the phone — a lab clip recorded in advance and shipped in the app (LabClips), or one cached
-        // earlier — plays at once: no network, no daily quota, and none of the lab's ~14 s wait (3 October 2026).
+        // A line already on the phone — one cached earlier — plays at once: no network, no daily quota.
         val ready = HttpSpeech.parts(say, spec.maxChars).map { p ->
             val key = clipKey(code, p, language)
-            cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)
+            cache[key] ?: TtsDiskCache.get(spec.id, key)
         }
         if (ready.isNotEmpty() && ready.all { it != null }) { Log.i("Tekyerema", "[TTS] $name: from the phone's cache"); return ready.map { it!! } }
         if (!available()) { Log.i("Tekyerema", "[TTS] $name not asked — ${whyUnavailable() ?: "unavailable"}"); return null }
@@ -222,7 +201,7 @@ class HttpTtsProvider(
         val clips = ArrayList<ByteArray>(parts.size)
         for (p in parts) {
             val key = clipKey(code, p, language)
-            clips += cache[key] ?: LabClips.get(spec.id, key) ?: TtsDiskCache.get(spec.id, key)?.also { if (spec.cacheEntries > 0) cache[key] = it } ?: run {
+            clips += cache[key] ?: TtsDiskCache.get(spec.id, key)?.also { if (spec.cacheEntries > 0) cache[key] = it } ?: run {
                 val units = QuotaLedger.Units(chars = p.length)
                 // DEBUG builds: the line that has no recorded clip yet, so a rehearsal can list what to pre-record when the
                 // lab is up (owner's overnight mission, 14 Oct 2026). Never in a release build.
@@ -231,12 +210,10 @@ class HttpTtsProvider(
                 try {
                     guard.run {
                         if (spec.dialect == "gradio") {
-                            // Our own Twi voice on the language Space (api tts: text + language → a WAV file to download).
+                            // Our language Space's voice (api tts: text + language → a WAV file to download).
                             val call = transport.send(HttpSpeech.gradioCallRequest(spec, secrets(),
-                                // Our Space voice reads Twi letters only: English words respelled first (voice/TwiRespell). The
-                                // Kafui English voice gets the owner's spellings of our own words (voice/KafuiSay).
+                                // The Kafui English voice gets the owner's spellings of our own words (voice/KafuiSay).
                                 org.json.JSONArray().put(when (language) {
-                                    Lang.TWI -> com.tekyerema.voice.TwiRespell.apply(p)
                                     Lang.GH_EN -> com.tekyerema.voice.KafuiSay.apply(p)
                                     else -> p
                                 }).put(code)), spec.connectMs, spec.callMs)
@@ -289,14 +266,10 @@ class HttpTtsProvider(
     }
 
     /**
-     * The cache key of one part. Our Space's Twi voice is SENT the line with a kin name put into Twi ("My wife" → "wo yere",
-     * voice/TwiRespell.kinNames, 21 Oct 2026), so the key carries that too: keyed by the line alone, a clip cached on the phone's
-     * disk before that change (kept across installs) went on saying "My wife" (audit, 22 Oct 2026). A line with no kin name keeps
-     * its key, so every other cached clip still plays at once. The Kafui English voice's key carries its respelling the same
-     * way (24 Oct 2026): a fixed line cached on disk with the old "Tɛkyerɛma" or "cedis" is fetched again, once.
+     * The cache key of one part. The Kafui English voice's key carries its respelling (24 Oct 2026): a fixed line cached on
+     * disk with the old "Tɛkyerɛma" or "cedis" is fetched again, once.
      */
     private fun clipKey(code: String, p: String, language: String): String = when {
-        spec.dialect == "gradio" && language == Lang.TWI -> "$code|${com.tekyerema.voice.TwiRespell.kinNames(p)}"
         spec.dialect == "gradio" && language == Lang.GH_EN -> "$code|${com.tekyerema.voice.KafuiSay.apply(p)}"
         else -> "$code|$p"
     }
@@ -341,30 +314,6 @@ class HttpTranslationProvider(
             }
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { ProviderGuard.log("MT", spec.id, e); null }
-    }
-}
-
-/**
- * The HCI Lab's own voice, recorded IN ADVANCE for the app's fixed Twi lines (confirmation frames, questions, "Mante. San
- * ka bio."…) and shipped in the APK under assets/voice/twi_lab/ — named like [TtsDiskCache] (the SHA-256 of "twi|<text>").
- * Owner, 3 October 2026: the lab voice is "very, very good" but takes ~14 s a new line and 15 lines a day; names, amounts
- * and numbers are the English voice's (voice/ConfirmTemplates), so these frames never change and play at once.
- * Recorded with campaign/twi_lab_clips.py from the list TwiLabLinesTest writes. Only for the lab voice ([ID]).
- */
-object LabClips {
-    const val ID = "hcilab_tts"
-    const val DIR = "voice/twi_lab"
-    @Volatile private var names: Set<String>? = null
-
-    private fun index(): Set<String> = names ?: try {
-        com.tekyerema.agent.AgentEngine.appContext()?.assets?.list(DIR)?.toSet().orEmpty()
-    } catch (_: Throwable) { emptySet() }.also { names = it }
-
-    fun get(id: String, key: String): ByteArray? {
-        if (id != ID) return null
-        val file = TtsDiskCache.name(key) + ".wav"
-        if (file !in index()) return null
-        return try { com.tekyerema.agent.AgentEngine.appContext()?.assets?.open("$DIR/$file")?.use { it.readBytes() } } catch (_: Throwable) { null }
     }
 }
 

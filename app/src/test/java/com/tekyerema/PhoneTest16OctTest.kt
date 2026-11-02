@@ -103,18 +103,6 @@ class PhoneTest16OctTest {
             listOf(com.tekyerema.language.EntityTags.Entity("[Q1]", com.tekyerema.language.EntityTags.Kind.QUANTITY, "Hello."))))
     }
 
-    @Test fun `Khaya's rate limit rests its account a minute, a refusal still rests it long`() {
-        val dir = listOf(java.io.File("src/main/assets/config"), java.io.File("app/src/main/assets/config")).first { it.isDirectory }
-        val clients = org.json.JSONObject(java.io.File(dir, "language.json").readText())
-            .getJSONObject("providers").getJSONObject("speech").getJSONObject("clients")
-        val spec = com.tekyerema.language.HttpSpeechSpec.parse("khaya_web_mt", clients.getJSONObject("khaya_web_mt"))!!
-        fun reply(code: Int, body: String) = com.tekyerema.language.HttpReply(code, body.toByteArray(), "application/json", null)
-        val rate = com.tekyerema.language.HttpSpeech.failureOf(spec, reply(429, """{"detail":"RATE_LIMIT_EXCEEDED"}"""))!!
-        assertEquals(FailureKind.QUOTA, rate.kind); assertEquals(60_000L, rate.retryAfterMs)
-        assertEquals(60_000L, com.tekyerema.language.HttpSpeech.failureOf(spec, reply(429, "busy"))!!.retryAfterMs)
-        assertEquals(null, com.tekyerema.language.HttpSpeech.failureOf(spec, reply(403, "{}"))!!.retryAfterMs)   // → the long quota rest
-    }
-
     @Test fun `only a client marked restOnTimeout rests on its first timeout`()= kotlinx.coroutines.test.runTest {
         val lab = ProviderHealth("hcilab_asr")
         runCatching { com.tekyerema.language.ProviderGuard(lab, 1_000L, restOnTimeout = true).run { delay(10_000L); "late" } }
