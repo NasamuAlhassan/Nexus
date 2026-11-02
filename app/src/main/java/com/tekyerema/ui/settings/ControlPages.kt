@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Call
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Lightbulb
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Computer
@@ -166,7 +167,14 @@ internal fun ControlPage(settings: Settings, onBack: () -> Unit, open: (Page) ->
             val hideMessages = remember(version) { settings.hideReadMessages }
             SwitchRow("Hide messages on screen",
                 "While I read your messages aloud, the screen shows who sent them and when, not what they say.",
-                hideMessages, divider = false, icon = Icons.Outlined.ChatBubbleOutline, iconTint = Spectrum.Coral) { settings.hideReadMessages = it }
+                hideMessages, icon = Icons.Outlined.ChatBubbleOutline, iconTint = Spectrum.Coral) { settings.hideReadMessages = it }
+            // Learning from mistakes (brain session, learning/, 2 Nov 2026; off by default): private notes of tasks that went wrong.
+            // "Forget my mistakes" and "share my mistakes for training" work by voice.
+            val learn = remember(version) { settings.learnFromMistakes }
+            SwitchRow("Learn from my mistakes",
+                "Keeps private notes of tasks that went wrong, on this phone only, to avoid repeating them. Nothing is uploaded; " +
+                    "you can share them by voice.",
+                learn, divider = false, icon = Icons.Outlined.Lightbulb, iconTint = Spectrum.Green) { settings.learnFromMistakes = it }
         }
         GlassGroup("Runs by itself") {
             SwitchRow("Schedules", "Reminders and read-outs at times you set.", schedules,
