@@ -83,6 +83,20 @@ class CameraReadActivity : ComponentActivity() {
         const val MODE_CURRENCY = "currency"
         /** Offline "what is this" (WhatIsThis): the thing in front of the camera named on the phone. */
         const val MODE_IDENTIFY = "identify"
+        /** Obstacle warnings while walking (camera/obstacle/WalkWatch): a prototype, opt-in, a supplement to the cane. */
+        const val MODE_WALK = "walk"
+
+        /** The open walk-mode screen, if any - "stop" / "stop watching" by voice ends it (LocalFastRouter). */
+        private var walkRef: java.lang.ref.WeakReference<CameraReadActivity>? = null
+
+        /** Ends the obstacle watch if it is running; true when it was. The caller says the stop line (the screen stays silent). */
+        fun stopWalkIfActive(): Boolean {
+            val a = walkRef?.get() ?: return false
+            if (a.isFinishing || a.isDestroyed || a.mode != MODE_WALK) return false
+            a.walkStopSaid = true
+            a.runOnUiThread { a.close() }
+            return true
+        }
 
         private const val TAG = "Tekyerema"
         /** Finish even if the TTS engine never reports the last line done (engine died, no voice). */
@@ -203,7 +217,26 @@ class CameraReadActivity : ComponentActivity() {
     private var lastVerdict: Verdict? = null
     private var lastGuidanceAt = 0L
 
-    private val idleTimeout = Runnable { close() }
+    // --- walk (obstacle warnings) ---
+    private var walk: com.tekyerema.camera.obstacle.WalkWatch? = null
+    private var walkCfg: com.tekyerema.camera.obstacle.ObstacleConfig? = null
+    /** False while the "I may miss things" disclaimer is being said: a hazard line must not cut it off, and the watch starts after it. */
+    @Volatile private var walkArmed = false
+    private var walkBegan = false
+    /** The stop line was said (or is being said by the caller); otherwise leaving the screen says it through the app's voice. */
+    private var walkStopSaid = false
+    private val walkSink = object : com.tekyerema.camera.obstacle.WalkWatch.Sink {
+        override fun speak(line: String) {
+            main.post { if (!closing && mode == MODE_WALK) { showCaption(line, CameraPhase.ANSWER); systemUtter(Verbalize.apply(line), true, null) } }
+        }
+        override fun stopped(line: String) {
+            main.post { if (!closing) { walkStopSaid = true; speakThenFinish(line) } }
+        }
+    }
+
+    private val idleTimeout = Runnable {
+        if (mode == MODE_WALK) { walkStopSaid = true; speakThenFinish(walkCfg?.phrases?.timeout ?: "Stopped watching. I may have missed things.") } else close()
+    }
     private val noTextHint = Runnable {
         if (!closing && mode == MODE_TEXT && !spokeResult && !isSpeaking()) {
             speak(phrase("noTextYet", "No text yet. Move the phone slowly."))
@@ -224,9 +257,10 @@ class CameraReadActivity : ComponentActivity() {
             MODE_COLOR -> MODE_COLOR
             MODE_DESCRIBE -> MODE_DESCRIBE
             MODE_CURRENCY -> MODE_CURRENCY
+            MODE_WALK -> MODE_WALK
             else -> MODE_TEXT
         }
-        question = intent?.getStringExtra(EXTRA_QUESTION)?.trim()?.takeIf { it.isNotEmpty() }
+        question =intent?.getStringExtra(EXTRA_QUESTION)?.trim()?.takeIf { it.isNotEmpty() }
         // "How much am I holding": online, the vision model counts every note and the phone adds them up; offline (or with
         // `camera.currency.vision` off) the on-phone classifier names one note at a time.
         if ((mode == MODE_CURRENCY || (mode == MODE_DESCRIBE && VisionPrompts.isMoneyQuestion(question))) &&
@@ -371,6 +405,12 @@ class CameraReadActivity : ComponentActivity() {
         } catch (_: Throwable) {}
     }
 
+    /** Walking: leaving the screen (Home, screen off, another app) ends the watch - CameraX stops delivering frames then, and a silent watch must never look like a working one. */
+    override fun onStop() {
+        super.onStop()
+        if (mode == MODE_WALK && walkBegan && !closing && !isChangingConfigurations) close()   // onDestroy says "stopped" in the app's voice
+    }
+
     override fun onDestroy() {
         closing = true
         main.removeCallbacksAndMessages(null)
@@ -378,6 +418,12 @@ class CameraReadActivity : ComponentActivity() {
         afterSpeech.clear()
         // The held photo must not outlive the camera screen (VisionQa: a follow-up only makes sense in the moment).
         LastCapture.clear()
+        // Leaving the obstacle watch by Back or a tap: the user is told it has stopped (the app's voice outlives this screen).
+        if (mode == MODE_WALK) {
+            if (walkBegan && !walkStopSaid) try { com.tekyerema.voice.VoiceEngine.announce(walkCfg?.phrases?.stopped ?: "Stopped watching. I may have missed things.") } catch (_: Throwable) {}
+            walk?.close(); walk = null
+            if (walkRef?.get() === this) walkRef = null
+        }
         // Unbinding puts the torch out too; explicit, so a light we lit can never be left burning.
         if (torchOn) try { camera?.cameraControl?.enableTorch(false) } catch (_: Throwable) {}
         // Use cases are unbound by the lifecycle (ON_DESTROY runs before this); make sure no frame is still routed here.
@@ -433,6 +479,8 @@ class CameraReadActivity : ComponentActivity() {
                 return
             }
             announce(phrase("modeCurrency", "Checking money. Hold the note flat, about a hand away."))
+        } else if (mode == MODE_WALK) {
+            if (!beginWalk()) return
         } else if (mode == MODE_COLOR) {
             announce(phrase("modeColor", "Checking colour and light."))
         } else {
@@ -444,6 +492,29 @@ class CameraReadActivity : ComponentActivity() {
         startCamera()
     }
 
+    /**
+     * Obstacle watch: refuses honestly when it is switched off or the model is not on the phone, else says the disclaimer ONCE (the watch
+     * starts after it) and lets the camera open. False = the screen is already leaving.
+     */
+    private fun beginWalk(): Boolean {
+        val cfg = com.tekyerema.camera.obstacle.WalkWatch.config().also { walkCfg = it }
+        val why = when {
+            !cfg.enabled -> cfg.phrases.disabled
+            !com.tekyerema.camera.obstacle.ObstacleDetector.installed(this, cfg.model.file) -> cfg.phrases.notInstalled
+            else -> null
+        }
+        if (why != null) { speakThenFinish(why); return false }
+        walk = com.tekyerema.camera.obstacle.WalkWatch(this, cfg, walkSink)
+        walkRef = java.lang.ref.WeakReference(this)
+        walkBegan = true
+        // The same words are on screen and spoken, by the phone's own engine (instant, no network): a warning must never wait for a cloud voice.
+        ui.label = modeLabel()
+        showCaption(cfg.phrases.disclaimer)
+        systemUtter(Verbalize.apply(cfg.phrases.disclaimer), true) { walkArmed = true }
+        main.postDelayed({ walkArmed = true }, 6_000L)   // never stay deaf to hazards if the disclaimer's end is never reported
+        return true
+    }
+
     /** A tap, the idle timeout, or a finished final line. Says nothing extra on the way out. */
     private fun close() {
         closing = true
@@ -452,7 +523,9 @@ class CameraReadActivity : ComponentActivity() {
 
     private fun resetIdleTimer() {
         main.removeCallbacks(idleTimeout)
-        main.postDelayed(idleTimeout, AppConfig.long("camera.sessionTimeoutMs", 90_000L))
+        // Walking: a hard cap (default 10 min, spoken when it ends), not "nothing new to say" - an empty pavement is not a reason to go silent and quit.
+        val ms = if (mode == MODE_WALK) walkCfg?.watch?.sessionMs ?: 600_000L else AppConfig.long("camera.sessionTimeoutMs", 90_000L)
+        main.postDelayed(idleTimeout, ms)
     }
 
     /** One honest cue if nothing readable shows up — silence is ambiguous to someone who can't see the screen. */
@@ -516,10 +589,15 @@ class CameraReadActivity : ComponentActivity() {
     /** Analyser thread. At most one frame per [intervalMs]; every path closes the ImageProxy exactly once. */
     private fun analyze(image: ImageProxy) {
         val now = SystemClock.elapsedRealtime()
-        val every = if (mode == MODE_DESCRIBE && instantCapture) minOf(intervalMs, AppConfig.long("camera.capture.frameEveryMs", 120L)) else intervalMs
+        val every = when {
+            mode == MODE_WALK -> walk?.intervalMs(now) ?: intervalMs   // 150 ms while something is near, 400 ms when nothing is
+            mode == MODE_DESCRIBE && instantCapture -> minOf(intervalMs, AppConfig.long("camera.capture.frameEveryMs", 120L))
+            else -> intervalMs
+        }
         if (closing || now - lastAnalysedAt < every) { image.close(); return }
         lastAnalysedAt = now
         when (mode) {
+            MODE_WALK -> try { if (walkArmed) walk?.analyse(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
             MODE_TEXT -> readText(image)   // closes the image when OCR completes
             MODE_COLOR -> try { checkColour(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
             MODE_IDENTIFY -> try { checkIdentify(image) } catch (t: Throwable) { logFrameError(t) } finally { image.close() }
@@ -1210,6 +1288,7 @@ class CameraReadActivity : ComponentActivity() {
         mode == MODE_CURRENCY -> phrase("labelCurrency", "Checking money")
         mode == MODE_COLOR -> phrase("labelColor", "Colour and light")
         mode == MODE_IDENTIFY -> phrase("labelIdentify", "Naming it, offline")
+        mode == MODE_WALK -> walkCfg?.phrases?.label ?: "Watching ahead"
         else -> phrase("labelText", "Reading text")
     }
 

@@ -364,7 +364,10 @@ class LocalFastRouter(
 
         FastIntent.MediaPlay -> media(KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, intent, "Playing.")
         FastIntent.MediaPause -> media(KeyEvent.KEYCODE_MEDIA_PAUSE, intent, "Paused.")
-        FastIntent.MediaStop -> media(KeyEvent.KEYCODE_MEDIA_STOP, intent, "Stopped.")
+        // "stop" while the obstacle watch is open ends the watch (and says so) before it is read as the music's stop key.
+        FastIntent.MediaStop -> if (com.tekyerema.camera.CameraReadActivity.stopWalkIfActive())
+            FastOutcome("CAMERA_WALK_STOP", "Stopped watching. I may have missed things.", systemVoice = true)
+            else media(KeyEvent.KEYCODE_MEDIA_STOP, intent, "Stopped.")
         // E-14: the play_music tool skips AND says what plays now ("Skipped. Now playing …"); the bare key is the fallback.
         FastIntent.MediaNext -> runTool("play_music", org.json.JSONObject().put("action", "next"), action = true)
             ?: media(KeyEvent.KEYCODE_MEDIA_NEXT, intent, "Next.")
@@ -700,6 +703,13 @@ class LocalFastRouter(
     // ---------------------------------------------------------------- W6
     /** P-03 / P-06 / P-01: the camera reader, opened in front (CameraX needs a visible activity). */
     private fun openCameraReader(mode: String, question: String? = null): FastOutcome? {
+        // Obstacle warnings while walking (camera/obstacle): opt-in prototype. Switched off = say so, never silently open a plain camera.
+        if (mode == "walk_stop") {
+            val stopped = com.tekyerema.camera.CameraReadActivity.stopWalkIfActive()
+            return FastOutcome("CAMERA_WALK_STOP", if (stopped) "Stopped watching. I may have missed things." else "I wasn't watching for obstacles.", systemVoice = true)
+        }
+        if (mode == "walk" && !com.tekyerema.camera.obstacle.WalkWatch.enabled())
+            return FastOutcome("CAMERA_WALK", com.tekyerema.camera.obstacle.WalkWatch.config().phrases.disabled, systemVoice = true)
         if (!com.tekyerema.core.config.FeatureFlags.isEnabled(when (mode) { "color" -> "P-06"; "describe" -> "P-01"; "currency" -> "P-11"; else -> "P-03" }, true)) return null
         return try {
             appContext.startActivity(com.tekyerema.camera.CameraReadActivity.intent(appContext, mode, question))

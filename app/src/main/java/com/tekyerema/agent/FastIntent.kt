@@ -251,6 +251,10 @@ object FastIntentClassifier {
         if (RE_MULTISTEP.containsMatchIn(g)) return null
 
         return when {
+            // Obstacle warnings while walking (camera/obstacle; prototype, off until switched on in config): whole-utterance phrases only,
+            // first, so "turn on obstacle warnings" is never read as a Quick Settings tile and "in front of me" never as the describe camera.
+            RE_WALK_STOP.matches(g) -> FastIntent.Camera("walk_stop")
+            RE_WALK.matches(g) -> FastIntent.Camera("walk")
             // FIRST: an explicit "turn on/off / enable X" naming a Quick Settings tile — before the topic regexes,
             // or "enable battery saver" is read as a battery-LEVEL question.
             quickToggle(g) != null -> quickToggle(g)
@@ -588,6 +592,13 @@ object FastIntentClassifier {
     private val RE_BRIGHT_DOWN = Regex("\\b(?:screen|display|brightness)\\b[^.]*\\btoo\\s+(?:bright|high)\\b|\\b(?:decrease|lower|reduce|turn\\s+down|dim)\\b[^.]*\\bbright(?:ness|er)?\\b|\\bbrightness\\b[^.]*\\b(?:down|lower)\\b|\\bmake\\s+(?:the\\s+)?screen\\s+(?:darker|dimmer)\\b|\\b(?:darker|dimmer)\\b|\\bdim\\s+the\\s+screen\\b")
 
     private val RE_TORCH_OFF = Regex("\\b(?:flashlight|torch|flash\\s*light)\\b[^.]*\\boff\\b|\\boff\\b[^.]*\\b(?:flashlight|torch|flash\\s*light)\\b")
+    // ---- obstacle warnings while walking ("walk with me", "warn me about obstacles", "watch ahead") ----
+    private const val WALKING_TAIL = "(?: (?:for me|please))?(?: while i(?:'m| am)? walk(?:ing)?)?"
+    private val RE_WALK = Regex("^(?:please |can you |could you )?(?:walk with me|watch (?:the )?(?:way|path|road|ahead)|watch where i(?:'m| am) (?:going|walking)|" +
+        "watch (?:out )?for (?:any )?(?:obstacles|hazards)|(?:warn|alert) me (?:about|of|to) (?:any )?(?:obstacles|hazards|things in my way)|" +
+        "tell me about (?:any )?(?:obstacles|hazards) (?:ahead|in my way)|(?:turn on|start|switch on|use|open) (?:the )?(?:obstacle (?:warnings?|detection|mode)|walking mode|walk mode)|" +
+        "obstacle (?:warnings?|detection|mode)|walking mode)$WALKING_TAIL$")
+    private val RE_WALK_STOP = Regex("^(?:please )?(?:stop|end|cancel|turn off|switch off) (?:the )?(?:watching|watch|watching ahead|obstacle (?:warnings?|detection|mode)|walking mode|walk mode|warning me|warnings)(?: now)?$")
     // ---- W6 camera / screen / magnification / emergency ----
     // Camera phrases name a physical object or the camera, so "read my screen" never opens the camera.
     private val RE_CAMERA_TEXT = Regex("\\bwhat does (?:this|the|that) (?:label|sign|paper|letter|document|note|package|box|bottle|card|receipt|medicine|book) say\\b|" +
