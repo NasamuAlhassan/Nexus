@@ -781,7 +781,8 @@ object VoiceEngine {
      * balance in English (A20e, 9 October 2026). Whatever is still being said is stopped first: once the network has
      * answered, the PIN line is stale (that day the Twi PIN line played AFTER the balance).
      */
-    fun announceAnswer(english: String, twi: String?, urgent: Boolean = false, listenAfter: Boolean = false) {
+    // [twi] defaults to null (English-only since 31 Oct 2026); callers may drop it — removal of the param is a follow-up.
+    fun announceAnswer(english: String, twi: String? = null, urgent: Boolean = false, listenAfter: Boolean = false) {
         if (!initialized || !settings.speakAloud || english.isBlank()) return
         hush()
         scope.launch {
