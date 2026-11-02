@@ -33,6 +33,15 @@ class TeachRecorderTest {
         assertEquals(app, c.pkg); assertEquals("MyMTN", c.appName); assertEquals("Home", c.screenTitle)
     }
 
+    @Test fun a_system_dialog_tap_is_never_a_step() {
+        // Emulator, 2 Nov 2026: tapping "Wait" on "System UI isn't responding" became step 1 of a taught skill.
+        val r = rec()
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(click("Wait", 500L, pkg = "android")))
+        assertEquals(TeachRecorder.Result.Ignored, r.onEvent(click("Allow", 700L, pkg = "com.google.android.permissioncontroller")))
+        assertTrue(r.onEvent(click("Data", 1000L, "$app:id/data_tile")) is TeachRecorder.Result.Recorded)
+        assertTrue(r.steps().none { it.label == "Wait" || it.label == "Allow" })
+    }
+
     @Test fun the_same_press_reported_twice_is_one_step() {
         val r = rec()
         r.onEvent(click("Data", 1000L)); r.onEvent(click("Data", 1100L))

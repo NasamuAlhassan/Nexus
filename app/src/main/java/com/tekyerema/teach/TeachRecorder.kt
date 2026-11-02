@@ -136,6 +136,9 @@ class TeachRecorder(
         if (!recording) return Result.Ignored
         val pkg = e.pkg ?: return Result.Ignored
         if (pkg == ownPackage) return Result.Ignored
+        // The phone's own system dialogs ("isn't responding" / crash, the permission and install prompts) are not the skill's:
+        // a tap on an ANR dialog's "Wait" became step 1 on the emulator (2 Nov 2026).
+        if (pkg in SYSTEM_DIALOGS) return Result.Ignored
         if (e.timeMs - startedAt > maxMs) { stopTimeout(); return Result.Stopped(StopReason.TIMEOUT) }
         // Privacy first — before the event can become a step or its text can be held.
         privateReason(e, secureNow)?.let { r -> recording = false; stopReason = r; drafts.lastOrNull()?.let { d -> if (d.step.kind == StepKind.TYPE) d.typed = null }; return Result.Stopped(r) }
@@ -147,6 +150,9 @@ class TeachRecorder(
             RawEvent.Type.SCROLLED -> scrolled(e, pkg)
         }
     }
+
+    private val SYSTEM_DIALOGS = setOf("android", "com.google.android.permissioncontroller", "com.android.permissioncontroller",
+        "com.google.android.packageinstaller", "com.android.packageinstaller")
 
     private fun stopTimeout() { recording = false; stopReason = StopReason.TIMEOUT }
 
