@@ -20,7 +20,11 @@ object CompanionSession {
     /** The phone's clock; tests replace it. */
     @Volatile var clock: () -> Long = { System.currentTimeMillis() }
 
-    fun enabled(): Boolean = AppConfig.bool("companion.enabled", true)
+    /** The user's own switch (Settings.companionEnabled), set at start-up (TekyeremaApp) and whenever it changes; null = the
+     *  config default `companion.enabled`. Kept here so the pure classifier (FastIntent) needs no Context. */
+    @Volatile var userEnabled: Boolean? = null
+
+    fun enabled(): Boolean = userEnabled ?: AppConfig.bool("companion.enabled", true)
 
     fun idleMs(): Long = AppConfig.long("companion.chatIdleMs", 10 * 60_000L).coerceAtLeast(30_000L)
 

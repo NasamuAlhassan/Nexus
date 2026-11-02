@@ -46,7 +46,7 @@ object CompanionRuntime {
     fun moneyNotes(app: Context): Boolean =
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(K_MONEY_NOTES, AppConfig.bool("companion.moneyNotes", true))
 
-    private fun setMoneyNotes(app: Context, on: Boolean) {
+    fun setMoneyNotes(app: Context, on: Boolean) {
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(K_MONEY_NOTES, on).apply()
     }
 

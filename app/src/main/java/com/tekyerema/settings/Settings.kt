@@ -5,6 +5,7 @@ import com.tekyerema.BuildConfig
 
 /** Simple, synchronous settings backed by SharedPreferences. The API key stays on device. */
 class Settings(context: Context) {
+    private val appCtx: Context = context.applicationContext
     private val prefs = context.applicationContext
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
@@ -368,6 +369,18 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("field_log", false)
         set(v) = put { putBoolean("field_log", v) }
 
+    /** Companion mode (companion/, #21): "let's talk", "brief me", lessons. Prefs over the config default `companion.enabled`;
+     *  the setter also tells the voice classifier at once ([com.tekyerema.companion.CompanionSession.userEnabled]). */
+    var companionEnabled: Boolean
+        get() = prefs.getBoolean(KEY_COMPANION, com.tekyerema.core.config.AppConfig.bool("companion.enabled", true))
+        set(v) { put { putBoolean(KEY_COMPANION, v) }; com.tekyerema.companion.CompanionSession.userEnabled = v }
+
+    /** The gentle money note in the daily brief. The same switch the user flips by voice ("stop the spending notes"), kept by
+     *  [com.tekyerema.companion.CompanionRuntime]; this is only its accessor. */
+    var companionMoneyNotes: Boolean
+        get() = com.tekyerema.companion.CompanionRuntime.moneyNotes(appCtx)
+        set(v) = com.tekyerema.companion.CompanionRuntime.setMoneyNotes(appCtx, v)
+
     /** Learning from mistakes (learning/, MASTER_STATUS #25): keep a private note, on this phone only, of tasks that went wrong
      *  (names, numbers, amounts, codes and message text taken out), so the on-phone planner avoids the same slip, and so the
      *  user may share the notes to help train the next model. Off by default; nothing is ever uploaded by itself. */
@@ -412,6 +425,7 @@ class Settings(context: Context) {
         private const val KEY_SPEAK = "speak_aloud"
         private const val KEY_RATE = "speech_rate"
         private const val KEY_MONEY_CURTAIN = "money_curtain"
+        private const val KEY_COMPANION = "companion_enabled"
         private const val KEY_HIDE_READ_MESSAGES = "hide_read_messages"
         private const val KEY_TTS_ACCENT = "tts_accent"
         private const val KEY_HAPTICS = "haptics"

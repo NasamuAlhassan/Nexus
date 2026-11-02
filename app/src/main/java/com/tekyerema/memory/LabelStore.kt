@@ -137,6 +137,14 @@ object LabelStore {
         return before - entries.size
     }
 
+    /** Forget one remembered control (Settings › What Nexus has learned). True when it was there. */
+    fun forgetSig(ctx: Context?, sig: LabelSig): Boolean {
+        ensureLoaded(ctx)
+        val before = entries.size
+        update(ctx) { LabelCore.remove(it, sig) }
+        return entries.size < before
+    }
+
     // ---------------------------------------------------------------- learning from use
 
     /**
