@@ -84,6 +84,36 @@ class InvariantsTest {
             as AgentDecision.CallTool).name)
     }
 
+    @Test fun a_message_goes_through_the_app_the_user_named() {
+        fun send(via: String?) = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Kofi").put("message", "The meeting has moved to 3")
+            .apply { if (via != null) put("via", via) }, null)
+        fun via(d: AgentDecision) = (d as AgentDecision.CallTool).args.optString("via")
+        // the v5 bench miss: "WhatsApp Kofi …" planned as a plain SMS
+        assertEquals("whatsapp", via(Invariants.apply(send(null), "WhatsApp Kofi that the meeting has moved to 3", emptyList(), null)))
+        assertEquals("whatsapp", via(Invariants.apply(send("sms"), "on whats app tell Kofi the meeting moved to three", emptyList(), null)))
+        assertEquals("sms", via(Invariants.apply(send("whatsapp"), "send Kofi an SMS saying the meeting has moved to 3", emptyList(), null)))
+        // no channel said: the brain's choice stands
+        assertEquals("", via(Invariants.apply(send(null), "tell Kofi the meeting has moved to 3", emptyList(), null)))
+        assertEquals("whatsapp", via(Invariants.apply(send("whatsapp"), "tell Kofi the meeting has moved to 3", emptyList(), null)))
+    }
+
+    @Test fun never_says_sent_while_the_screen_says_not_sent() {
+        // the v5 bench miss (done-failed-02): WhatsApp shows "Not sent. Tap to retry." under the typed message
+        val history = listOf("type({\"element_id\":9,\"text\":\"I'll send it tomorrow.\"}) → success", "tap({\"element_id\":9}) → success: pressed Send")
+        val failed = screen("com.whatsapp", "Richmond", "Richmond: Bro, when are you sending the 50? 9:15 AM",
+            "You: I'll send it tomorrow. 9:31 AM Not sent. Tap to retry.", "Retry", "Message")
+        val d = Invariants.apply(AgentDecision.Done("I sent your message to Richmond."), "tell Richmond I'll send it tomorrow", history, failed)
+        assertTrue(d is AgentDecision.CannotDo)
+        assertTrue((d as AgentDecision.CannotDo).detail, "did not go" in d.detail)
+        // an honest reply stands
+        val honest = AgentDecision.Done("The message didn't go through; it says not sent.")
+        assertEquals(honest, Invariants.apply(honest, "tell Richmond I'll send it tomorrow", history, failed))
+        // an older failed message in the chat doesn't block today's sent one
+        val oldFail = screen("com.whatsapp", "You: see you at 6 Not sent. Tap to retry.", "You: I'll send it tomorrow. 9:31 AM")
+        val ok = AgentDecision.Done("I sent your message to Richmond.")
+        assertEquals(ok, Invariants.apply(ok, "tell Richmond I'll send it tomorrow", history, oldFail))
+    }
+
     @Test fun a_short_command_said_again_or_a_new_topic_is_not_a_rephrase() {
         Rephrase.observe("volume up", listOf("quick_volume_up() → done"), "Volume 8.", now = 1_000)
         assertNull(Rephrase.noteFor("volume up", now = 3_000))

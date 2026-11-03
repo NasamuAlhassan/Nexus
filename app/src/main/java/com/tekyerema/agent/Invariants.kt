@@ -14,6 +14,10 @@ import org.json.JSONObject
  *     opened a public broadcast channel (A20e, 2 Nov 2026, audit/real-requests-2026-11-03 r41/r43).
  *  3. In a chat app, on a request to talk to someone, the agent never opens a chat with a person the user didn't name
  *     (not said, not by sound, not found by a look-up): it asks "I found “X”. Is that who you mean?" once.
+ *  4. A redo of the last request never starts with the action the user just corrected (agent/Rephrase).
+ *  5. A money request is never turned into a text, a call or a dial.
+ *  6. A message goes through the app the user named ("WhatsApp Kofi …" never leaves as an SMS, nor the other way).
+ *  7. A reply never says a message was sent while the screen says it was not ("Not sent. Tap to retry.").
  *
  * A rule that asks is asked at most once per target; the user's answer decides (yes → go on; anything else → ask who, then
  * stop honestly). Pure but for config → InvariantsTest.
@@ -35,6 +39,17 @@ object Invariants {
         val guarded = if (!grounding) decision else try {
             FinalActionGuard.apply(decision, goal, history, screen?.toString().orEmpty(), app)
         } catch (_: Throwable) { decision }
+        // 7. never "I sent it" while the screen says it was not sent (v5 2B bench, 3 Nov 2026: "I sent your message to Richmond."
+        //    over "Not sent. Tap to retry."). A blind user can't see the red mark; the reply is the only report they get.
+        if (guarded is AgentDecision.Done) {
+            val failed = notSentOnScreen(screen, com.tekyerema.policy.ActionSemantics.lastTyped(history))
+            if (failed != null && claimsSent(guarded.summary)) {
+                log("[INVARIANT] a done that claims sent while the screen says not sent — refused")
+                return AgentDecision.CannotDo("failed", "The message did not go: the screen says “$failed”. Nothing was sent. " +
+                    "Ask me to try again when you're ready.")
+            }
+            return guarded
+        }
         val c = guarded as? AgentDecision.CallTool ?: return guarded
         // 5. a request to send money is never turned into a text, a call or a dial by a brain (A20e, 3 Nov 2026: the 2B planned
         //    an SMS composer and a dial of 130 for "send 1 cedi to Prince"). Money goes through Mobile Money's own menu only.
@@ -42,6 +57,21 @@ object Invariants {
             log("[INVARIANT] a money request turned into ${c.name} — refused")
             return AgentDecision.CannotDo("unsafe", "That's a money request, and I only send money through Mobile Money's own menu, " +
                 "which reads it back for your yes and stops at your PIN. Say it again as: send, the amount, to, the name.")
+        }
+        // 6. a message goes through the app the user named: "WhatsApp Kofi …" is never sent as an SMS (v5 2B bench, 3 Nov 2026:
+        //    it dropped via=whatsapp on 4 of 6 WhatsApp sends). Only when the user said one channel and not the other.
+        if (c.name == "send_sms") {
+            val said = TaskFacts(goal, history, "").said
+            val wa = WHATSAPP.containsMatchIn(said); val sms = SMS.containsMatchIn(said)
+            val via = c.args.optString("via").lowercase()
+            if (wa && !sms && !via.contains("whatsapp")) {
+                log("[INVARIANT] the user named WhatsApp — send_sms via whatsapp")
+                return c.copy(args = JSONObject(c.args.toString()).put("via", "whatsapp"))
+            }
+            if (sms && !wa && via.contains("whatsapp")) {
+                log("[INVARIANT] the user asked for a text message — send_sms via sms")
+                return c.copy(args = JSONObject(c.args.toString()).put("via", "sms"))
+            }
         }
         // 4. a redo of the last request never starts with the same action that was wrong (agent/Rephrase)
         if (Rephrase.repeats(goal, c.name, c.args))
@@ -65,7 +95,29 @@ object Invariants {
         return guarded
     }
 
-    private val NOT_MONEY_CHANNELS = setOf("send_sms", "make_call", "open_intent", "reply_to_notification", "run_ussd_unchecked")
+    private val NOT_SENT = Regex("(?i)\\b(not sent|message failed|failed to send|sending failed|send failed|couldn.t send|could not send|not delivered|tap to (?:retry|try again))\\b")
+    private val SENT_CLAIM = Regex("(?i)\\b(sent|delivered|texted|messaged|went through)\\b")
+    private val NOT_CLAIM = Regex("(?i)\\b(not|n.t|never|couldn.t|failed|unable)\\b[^.]{0,20}\\b(sent|send|deliver|go|went)")
+
+    /** The failure marker on screen ("Not sent"), on the message just typed when it is known; null when nothing failed. */
+    internal fun notSentOnScreen(screen: JSONObject?, typed: String?): String? {
+        val els = screen?.optJSONArray("elements") ?: return null
+        val head = typed?.trim()?.take(24)?.lowercase()
+        for (i in 0 until els.length()) {
+            val label = els.optJSONObject(i)?.optString("label").orEmpty()
+            val m = NOT_SENT.find(label) ?: continue
+            if (head != null && head.length >= 4 && !label.lowercase().contains(head)) continue
+            return m.value.replaceFirstChar { it.uppercase() }
+        }
+        return null
+    }
+
+    internal fun claimsSent(summary: String): Boolean = SENT_CLAIM.containsMatchIn(summary) && !NOT_CLAIM.containsMatchIn(summary)
+
+    private val WHATSAPP =Regex("(?i)\\bwhats\\s?app\\b")
+    private val SMS = Regex("(?i)\\b(sms|text message|normal text|by text)\\b")
+
+    private val NOT_MONEY_CHANNELS =setOf("send_sms", "make_call", "open_intent", "reply_to_notification", "run_ussd_unchecked")
 
     internal fun isMoneySend(goal: String): Boolean = try {
         com.tekyerema.money.MoneyAsk.parse(goal)?.kind == com.tekyerema.money.MoneyAsk.Kind.SEND
