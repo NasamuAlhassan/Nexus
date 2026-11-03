@@ -27,7 +27,7 @@ import com.tekyerema.core.OfflineReason
  * Pure of Android (connectivity is injected as [isOnline]) → unit-tested with fake brains.
  */
 class RoutingBrain(
-    private val local: AgentBrain,
+    private var local: AgentBrain,
     private val cloud: AgentBrain?,
     /** Optional goal rewrite BEFORE handing to the cloud operator — used to translate a natural Twi
      *  request to English, since the cloud brain can't plan from Twi. Returns null to keep the goal as-is
@@ -57,6 +57,8 @@ class RoutingBrain(
     private val queued: (String) -> Boolean = { OfflineQueue.store.contains(it) },
     /** C-04: optional on-device model for requests the rules don't match, used only without the cloud. */
     private val localModel: AgentBrain? = LocalModelBrain.ifEnabled(),
+    /** The pocket brain (agent/pocket): a small offline encoder that proposes one first action. Null = off / model absent. */
+    private val pocket: com.tekyerema.agent.pocket.PocketProposer? = com.tekyerema.agent.pocket.PocketBrain.ifEnabled(),
     private val isOnline: () -> Boolean
 ) : AgentBrain {
 
@@ -192,6 +194,10 @@ class RoutingBrain(
     @Volatile private var offered: String? = null
     /** C-04: the on-device model took this task — later steps finish with it. */
     @Volatile private var stickyLocalModel = false
+    /** The question the pocket brain just asked (its answer is understood afresh — see decide). */
+    @Volatile private var pocketQuestion: String? = null
+    /** The tool the pocket brain's proposal ran: its result is what the user hears next (see decide). */
+    @Volatile private var pocketActed: String? = null
 
     private fun cloudCtx(ctx: BrainContext): BrainContext =
         cloudGoal?.takeIf { it != ctx.goal }?.let { ctx.copy(goal = it) } ?: ctx
@@ -203,6 +209,33 @@ class RoutingBrain(
     override suspend fun decide(ctx: BrainContext): AgentDecision {
         // N-09: the user answered our "should I find out when the internet is back?" offer.
         offered?.let { return answerOffer(ctx, it) }
+        // The pocket brain asked something ("Did you mean to send a message, or to make a call?"): the answer is the request
+        // made clearer, so it is understood afresh — rules first, then the pocket brain — as a first step. Before this, the
+        // answer reached LocalBrain mid-task, which knew nothing of the question and said "Done." with nothing done (A20e,
+        // 3 Nov 2026). Once per question; never a loop.
+        // The pocket brain's proposal has run: say what it found or did — the tool's own result line — and finish. (A20e, 3 Nov
+        // 2026: a read it proposed ended with a bare "Done." — the rules' finishing step knew nothing of it.)
+        pocketActed?.let { name ->
+            pocketActed = null
+            val last = LocalBrain.lastStep(ctx.history)
+            if (last.startsWith("$name(")) {
+                val msg = LocalBrain.resultMessage(last).trim()
+                val failed = last.contains("→ fail") || last.contains("→ error")
+                return if (failed) AgentDecision.CannotDo("tool_failed", msg.ifBlank { "That didn't work." })
+                    else AgentDecision.Done(msg.ifBlank { "Done." })
+            }
+        }
+        pocketQuestion?.let { q ->
+            val ans = com.tekyerema.money.MoneyFlow.answers(ctx.history).lastOrNull { it.first == q }?.second
+            pocketQuestion = null
+            if (ans != null && ans.isNotBlank()) {
+                val clearer = if (ans.trim().split(Regex("\\s+")).size >= 3) ans.trim() else "${ctx.goal.trim()} — ${ans.trim()}"
+                android.util.Log.i("Tekyerema", "[ROUTE] the answer to the pocket brain's question is understood afresh")
+                // The rules start this request afresh too (LocalBrain counts its own steps: on step 2 it only says its done line).
+                if (local is LocalBrain) local = LocalBrain()
+                return decide(ctx.copy(goal = clearer, history = emptyList()))
+            }
+        }
         // (Trust 2026-09-29: the task stopped at the PIN — the helper can't be brought in now; agent/helper/HelperGate.)
         pinHandoff(ctx.history)?.let { com.tekyerema.agent.helper.HelperGate.atPin(); return AgentDecision.Done(it) }
         // Trust (2026-09-29): "call my helper" / "tell my helper what you did" are planned on the phone, online or offline,
@@ -342,6 +375,19 @@ class RoutingBrain(
                 android.util.Log.i("Tekyerema", "[ROUTE] offline → on-device model chose ${m.name}")
                 stickyLocalModel = true
                 return m
+            }
+        }
+        // Pocket brain (3 Nov 2026): the rules (LocalBrain DEFER above) found nothing and no cloud brain can be used, so a small
+        // offline encoder gets one try at the FIRST step. Only a tool call (incl. its own ask_user question) or an "unsafe" refusal is
+        // taken; anything else falls through to offlineReply below. Never reached for money plans, device facts or a request the
+        // rules already handled (those returned earlier); the engine still runs Invariants over whatever it proposes.
+        if (!needsNet && pocket != null && ctx.history.isEmpty()) {
+            val p = try { pocket.propose(ctx) } catch (_: Throwable) { null }
+            if (p is AgentDecision.CallTool || (p is AgentDecision.CannotDo && p.reasonClass == com.tekyerema.agent.pocket.PocketDecoder.UNSAFE)) {
+                android.util.Log.i("Tekyerema", "[ROUTE] offline → pocket brain proposed ${(p as? AgentDecision.CallTool)?.name ?: "a refusal"}")
+                if (p is AgentDecision.CallTool && p.name == "ask_user") pocketQuestion = p.args.optString("question").takeIf { it.isNotBlank() }
+                else if (p is AgentDecision.CallTool) pocketActed = p.name
+                return p
             }
         }
         // offline or no cloud brain configured — never silently do nothing (§A.4), and this is a FAILURE,

@@ -45,6 +45,16 @@
       "runTimeoutMs": 90000,
       "phrases": { "answer": "The internet is back. Earlier you asked: {goal}. {answer}" }
     },
+    "pocket": {
+      "_note": "The pocket brain (agent/pocket, 3 Nov 2026): a small int8 ONNX encoder that proposes ONE first action offline (a tool, a question, or an honest can't) when no rule matched and no cloud brain can be used. Files model.onnx + spec.json + tokenizer.json in <files>/<dir>/ (adb push) or assets/<dir>/; absent = off. tauRisk/tauOther: -1 = the thresholds in spec.json; below the threshold it asks, never acts. tauOther 0.4 (3 Nov 2026, A20e): the spec's 0.0 acted on a 0.25 guess (read every notification for: did Prince send me anything).",
+      "enabled": true,
+      "dir": "pocket",
+      "model": "model.onnx",
+      "spec": "spec.json",
+      "vocab": "tokenizer.json",
+      "tauRisk": -1,
+      "tauOther": 0.4
+    },
     "localModel": {
       "_note": "The on-device planner (LocalModelBrain + LiteRtLlm, 1 Nov 2026): a downloaded .litertlm in the app's files (never the APK), the benchmark's conversation prompt, one conversation per task. OFF until a model file is present; 'first' = local before the cloud. constrainReply: grammar-constrained decoding, OFF (it emptied the arguments, Kaggle 1 Nov). freshEnginePerTask: a new engine per task, ON while LiteRT-LM #3165 (recurrent-state leak between conversations on Qwen3.5) is open.",
       "enabled": false,
