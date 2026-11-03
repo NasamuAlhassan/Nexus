@@ -343,6 +343,8 @@ class EngineLoopTest {
         val brain = ScriptedBrain(
             { tool("tap", JSONObject().put("element_id", Screens.ROW_ID), expects = "element_present: Message") },
             { never.await() })   // the model is thinking when the process dies
+        // (the test clock races ahead; the decide time limit must not end the task before the "death")
+        loadAppConfig("""{"agent":{"decideTimeoutMs":0}}""")
         val job = launch { AgentEngine.runForTest("send Ama see you at 6", brain) }
         advanceUntilIdle()
         // The process dies HERE: what is on disk at this instant is all the next process gets.

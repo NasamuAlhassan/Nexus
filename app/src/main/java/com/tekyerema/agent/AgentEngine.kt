@@ -1009,11 +1009,18 @@ object AgentEngine {
                 val screenNow = before.toCompactJson()
                 // Every brain's decision passes the hard rules before it is acted on (agent/Invariants; owner, 3 Nov 2026).
                 val ownStep = planned.removeFirstOrNull() ?: chainStep   // the engine's own step (a corrected read-back, a chain): already grounded
-                val decision = Invariants.apply(ownStep ?: brain.decide(BrainContext(goal, screenNow, history, geminiTools, openAiTools, convo,
+                // No single thinking step may leave the user waiting without end (A20e, 2 Nov 2026: four minutes, then a stop by hand):
+                // past agent.decideTimeoutMs it ends honestly. (research: liveness spec, agent_invariants_deep_2026-11-03.md)
+                val decideLimit = com.tekyerema.core.config.AppConfig.long("agent.decideTimeoutMs", 60_000L)   // 0 = no limit
+                val think: suspend () -> AgentDecision = { brain.decide(BrainContext(goal, screenNow, history, geminiTools, openAiTools, convo,
                     progress = (retrievalHint?.let { "$it\n" } ?: "") + taskMemory.render(), effort = effort,
                     // A question that needs a fresh fact is never answered from the small model's memory ("the president of
                     // Ghana is Nana Addo Samuel Kufuor", audit R01): it goes to the capable model, which is told to search.
-                    simple = directStep && retrievalNeed == RetrievalNeed.Need.NONE)), goal, history, screenNow, grounding = ownStep == null)
+                    simple = directStep && retrievalNeed == RetrievalNeed.Need.NONE)) }
+                val decision = Invariants.apply(ownStep ?: (if (decideLimit <= 0) think() else kotlinx.coroutines.withTimeoutOrNull(decideLimit) { think() }
+                        ?: AgentDecision.CannotDo("timeout", "Working that out took too long, so I stopped. Nothing was done. " +
+                            "Try again, or say it a different way.").also { log(LogEntry.Kind.INFO, "[LIVENESS] the brain took too long — stopped honestly") }),
+                    goal, history, screenNow, grounding = ownStep == null)
                 Rephrase.observe(goal, history, (decision as? AgentDecision.Done)?.summary)
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
                 com.tekyerema.core.telemetry.Telemetry.mark("first_decision")   // Q-01 (only the first is kept)
