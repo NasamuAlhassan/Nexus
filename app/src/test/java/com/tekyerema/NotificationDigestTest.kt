@@ -78,4 +78,35 @@ class NotificationDigestTest {
             emptyList(), "today")
         assertTrue(s, s.startsWith("Today: 1 notification. Play Store: 1 notification."))
     }
+
+    // A20e, 2 Nov 2026: the digest summarised a look-alike MoMo link with no warning. Made-up messages.
+    @Test fun a_scam_link_in_the_newest_message_is_warned_before_its_words() {
+        val msgs = listOf(m(10, "com.google.android.apps.messaging", "Messages", "0241112222", "0241112222",
+            "Your MoMo wallet is suspended. Verify now at mtn-gh-reward.xyz"))
+        val s = com.tekyerema.voice.SpokenText.plain(NotificationDigest.build(msgs, emptyList(), "today"))
+        val warn = s.indexOf("Careful: this may be a scam.")
+        assertTrue(s, warn > 0)
+        assertTrue(s, warn < s.indexOf("Your MoMo wallet"))
+        assertFalse("the reason never repeats the link", s.substring(warn, s.indexOf("Your MoMo wallet")).contains("mtn-gh-reward"))
+    }
+
+    @Test fun a_scam_link_in_a_prioritised_line_is_warned_and_ordinary_lines_are_not() {
+        val msgs = listOf(
+            m(10, "com.google.android.apps.messaging", "Messages", "0241112222", "0241112222",
+                "Pay GHS 5 now to unlock your MoMo at mtn-gh-reward.xyz"),
+            m(9, "com.whatsapp", "WhatsApp", "Ama", "Ama", "I will pay you back 50 cedis tomorrow"))
+        val s = com.tekyerema.voice.SpokenText.plain(NotificationDigest.buildPrioritised(msgs, emptyList(), "today", maxQuoted = 2))
+        assertEquals(s, 1, Regex("Careful: this may be a scam").findAll(s).count())
+        assertTrue(s, s.indexOf("Careful") < s.indexOf("Pay GHS") || s.indexOf("Careful") < s.indexOf("Pay"))
+    }
+
+    @Test fun a_sender_is_a_contact_by_whole_name_or_first_name_only() {
+        val names = setOf("ama mensah", "kofi", "mtn mobile money").map { NotificationDigest.normName(it) }.toSet()
+        assertTrue(NotificationDigest.isContactName("Ama Mensah", names))
+        assertTrue(NotificationDigest.isContactName("Ama", names))
+        assertTrue(NotificationDigest.isContactName("KOFI", names))
+        assertFalse(NotificationDigest.isContactName("DSATuz", names))
+        assertFalse(NotificationDigest.isContactName("Amah", names))          // no fuzzy matching
+        assertFalse(NotificationDigest.isContactName("", names))
+    }
 }

@@ -99,7 +99,11 @@ object NotificationDigest {
         if (items.isEmpty() && missed.isEmpty()) return build(messages, calls, sinceLabel, noun = noun)
         val rank = mapOf(Importance.Why.MONEY to 0, Importance.Why.WHEN to 1, Importance.Why.RELATION to 2, Importance.Why.PERSON to 3)
         val marked = items.map { it to Importance.of(it, isContact) }
-        val important = marked.filter { it.second != null }.sortedWith(compareBy<Pair<IndexedMessage, Importance.Why?>> { rank[it.second] }
+        // A message that earns a scam warning is always quoted, first, so the warning is heard — an unknown number's
+        // "verify at mtn-gh-reward.xyz" is otherwise just "2 notifications, most in Messages" (fraud step 2, 3 Nov 2026).
+        val scams = items.filter { scamWarning(it) != null }.toSet()
+        val important = marked.filter { it.second != null || it.first in scams }
+            .sortedWith(compareBy<Pair<IndexedMessage, Importance.Why?>> { if (it.first in scams) -1 else rank[it.second] ?: 4 }
             .thenByDescending { it.first.t }).map { it.first }
         val others = items - important.toSet()
         val parts = ArrayList<String>()
@@ -113,7 +117,9 @@ object NotificationDigest {
             val who = m.sender?.takeIf { it.isNotBlank() } ?: m.title?.takeIf { it.isNotBlank() } ?: m.app ?: "Someone"
             val words = m.text?.trim()?.split(Regex("\\s+"))?.filter { it.isNotEmpty() }.orEmpty()
             val said = if (words.size <= wordsEach) words.joinToString(" ") else words.take(wordsEach).joinToString(" ") + "…"
-            parts.add(if (said.isEmpty()) who else "$who: " + com.tekyerema.voice.SpokenText.forEar(said).trimEnd('.'))
+            val warn = scamWarning(m)
+            parts.add(if (said.isEmpty()) who else (warn?.let { "$who. $it Their message: " } ?: "$who: ") +
+                com.tekyerema.voice.SpokenText.forEar(said).trimEnd('.'))
         }
         val moreImportant = important.size - important.count { it in quoted }
         val rest = others.size + moreImportant
@@ -160,7 +166,27 @@ object NotificationDigest {
             else -> "The newest says"
         }
         // Who, a breath, then the words as they'd be said — not "…on WhatsApp: are you coming" in one run.
-        return "$head." + com.tekyerema.voice.SpokenText.PAUSE + com.tekyerema.voice.SpokenText.forEar(clip(m.text!!.trim(), 100))
+        val warn = scamWarning(m)?.let { it + com.tekyerema.voice.SpokenText.PAUSE } ?: ""
+        return "$head." + com.tekyerema.voice.SpokenText.PAUSE + warn + com.tekyerema.voice.SpokenText.forEar(clip(m.text!!.trim(), 100))
+    }
+
+    /** The scam warning for a quoted message, checked on its FULL text (a link cut off by the clip still counts), or null.
+     * Same rules as MessageReading (ScamWarning: never on the network's own senders, the reason never quotes the link).
+     * A20e, 2 Nov 2026: the digest summarised a look-alike MoMo link with no warning. */
+    private fun scamWarning(m: IndexedMessage): String? = try {
+        com.tekyerema.money.fraud.ScamWarning.before(m.sender ?: m.title, m.text)
+    } catch (_: Throwable) { null }
+
+    /** A contact name made comparable: lower case, letters/digits/spaces only. */
+    fun normName(s: String): String = s.lowercase().replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /** The digest's "is this sender a contact?" against [names] (all display names, [normName]ed, read once): the whole
+     *  name, or a saved name's first word ("Ama" for "Ama Mensah"). No fuzzy matching — A20e 2 Nov 2026: fuzzy-ranking
+     *  the whole contacts table for each promo sender took the digest to 35.9 s. Pure. */
+    fun isContactName(name: String, names: Set<String>): Boolean {
+        val n = normName(name)
+        if (n.isEmpty()) return false
+        return n in names || names.any { it.substringBefore(' ') == n }
     }
 
     private fun clip(s: String, max: Int): String {

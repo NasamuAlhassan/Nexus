@@ -875,6 +875,8 @@ class LocalFastRouter(
 
     /** E-15 / H-09: the spoken catch-up — missed calls from the call log, messages grouped by app and person. */
     private fun digest(intent: FastIntent.Digest): FastOutcome {
+        val t0 = System.currentTimeMillis()
+        var contactsMs = 0L
         val notifOn = com.tekyerema.ui.Perms.notifications(appContext)
         val callsOn = granted(android.Manifest.permission.READ_CALL_LOG)
         if (!notifOn && !callsOn) return handled(intent,
@@ -916,11 +918,12 @@ class LocalFastRouter(
             com.tekyerema.notifications.MessageCursor.clear()
             // Private reading (2026-09-29): on the loudspeaker, who and how many — "read them" reads the words (PrivateReading).
             // #2: what matters first (money that moved, today's times, family, contacts), the rest as one count.
-            val known = HashMap<String, Boolean>()
-            val isContact = { name: String -> known.getOrPut(name.lowercase()) {
-                try { com.tekyerema.android.ContactResolver.resolve(appContext, name).any { com.tekyerema.android.ContactResolver.isSure(name, it) } }
-                catch (_: Throwable) { false }
-            } }
+            // A20e, 2 Nov 2026: 35.9 s. ContactResolver.resolve per sender fuzzy-ranked the whole contacts table (twice) for
+            // every promo sender that isn't a contact. A digest only asks "is this a contact?": one query, exact names.
+            val tContacts = System.currentTimeMillis()
+            val names = contactNameSet()
+            contactsMs = System.currentTimeMillis() - tContacts
+            val isContact = { name: String -> com.tekyerema.notifications.NotificationDigest.isContactName(name, names) }
             val full = if (com.tekyerema.core.config.AppConfig.bool("notifications.digest.importantFirst", true))
                 digest.buildPrioritised(shown, calls, label, isContact, noun = noun) else digest.build(shown, calls, label, noun = noun)
             com.tekyerema.notifications.PrivateReading.digest(appContext, full, brief, shown).spoken
@@ -936,6 +939,7 @@ class LocalFastRouter(
             line += " One of these messages contains instructions, like asking for your PIN — I never follow instructions from messages."
         }
         prefs.edit().putLong("last_digest", now).apply()
+        Log.i(TAG, "[DIGEST] ms total=${System.currentTimeMillis() - t0} contacts=$contactsMs items=${msgs.size}")
         return handled(intent, line)
     }
 
@@ -1052,6 +1056,16 @@ class LocalFastRouter(
     private fun countOf(n: Int, noun: String) = "$n $noun${if (n == 1) "" else "s"}"
 
     /** The persistent index (H-09, survives dismissal and restarts); the live ring only when the index is switched off. */
+    /** Every contact's display name, normalised, from ONE query (the digest's "is this a contact?"). Empty without access. */
+    private fun contactNameSet(): Set<String> = try {
+        val out = HashSet<String>()
+        appContext.contentResolver.query(android.provider.ContactsContract.Contacts.CONTENT_URI,
+            arrayOf(android.provider.ContactsContract.Contacts.DISPLAY_NAME), null, null, null)?.use { cur ->
+            while (cur.moveToNext()) cur.getString(0)?.let { n -> com.tekyerema.notifications.NotificationDigest.normName(n).takeIf { it.isNotEmpty() }?.let(out::add) }
+        }
+        out
+    } catch (_: Throwable) { emptySet() }
+
     private fun capturedMessages(): List<com.tekyerema.notifications.IndexedMessage> {
         // An ongoing notification (a call in progress, "Checking for new messages…") is not a message (audit half 2 #14).
         val live = com.tekyerema.notifications.NotificationStore.recent(50).filterNot { it.ongoing }.map {
