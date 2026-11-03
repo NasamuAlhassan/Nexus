@@ -109,7 +109,9 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
         cancelPendingVoiceStart()
         voice?.cancel()
         Dictation.cancel()   // the field changed: never carry a dictation into it
-        local?.cancel()
+        // A local-language turn survives the SAME field restarting its input (the app's own field does that while the mic is
+        // open — emulator, 2 Nov 2026: the strip went idle mid-recording); a different field always ends it.
+        if (!restarting) local?.cancel() else if (local?.active == true) listeningShown = true
         optSuggest = prefs.suggestions; optLearn = prefs.learnWords; voiceLang = prefs.voiceLanguage
         view?.voiceLanguageName = voiceLang?.name
         optVibrate = prefs.vibrate; optSound = prefs.sound; optSwipe = prefs.swipeTyping
@@ -511,7 +513,10 @@ class TwiKeyboardService : InputMethodService(), TwiKeyboardView.Listener, Voice
             view?.say(LocalVoiceLines.ask(lang))
         }
         override fun type(text: String) { commitDictation(text) }
-        override fun tell(message: String) { view?.showMessage(message); view?.say(message) }
+        override fun tell(message: String) {
+            listeningShown = false   // so onIdle afterwards leaves this honest line on the strip
+            view?.showMessage(message); view?.say(message)
+        }
         override fun fallBack(line: String) {
             view?.showMessage(line); view?.say(line)
             listeningShown = false
