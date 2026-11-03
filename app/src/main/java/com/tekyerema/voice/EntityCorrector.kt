@@ -84,13 +84,16 @@ object EntityCorrector {
     }
 
     /** What the phone knows, prepared once ([of]) and reused for every utterance. */
-    class Vocab(val entries: List<Entry>) {
+    /** [common]: the most frequent English words (lower case). A heard common word is never turned into a name unless a
+     *  contact verb opened the slot right before it ("call price" → Prince is fine; "…the type of car to buy" → "Boy" is not:
+     *  owner's A20e, 3 Nov 2026, r20/o05). Empty = no guard (unit tests that don't pass one). */
+    class Vocab(val entries: List<Entry>, val common: Set<String> = emptySet()) {
         val exactCompacts: Set<String> = entries.map { it.compact }.toHashSet()
         val isEmpty get() = entries.isEmpty()
         companion object {
             val EMPTY = Vocab(emptyList())
             /** Contact display names contribute the whole name AND each part ("Kofi Mensah" → "Kofi", "Mensah"). */
-            fun of(contacts: Collection<String>, apps: Collection<String>): Vocab {
+            fun of(contacts: Collection<String>, apps: Collection<String>, common: Set<String> = emptySet()): Vocab {
                 val out = LinkedHashMap<String, Entry>()
                 fun add(t: String, k: Kind) {
                     val e = Entry(t.trim(), k)
@@ -109,7 +112,7 @@ object EntityCorrector {
                     val words = a.trim().split(Regex("\\s+"))
                     if (words.size > 1 && words[0].lowercase() in VENDOR) add(words.drop(1).joinToString(" "), Kind.APP)
                 }
-                return Vocab(out.values.toList())
+                return Vocab(out.values.toList(), common)
             }
         }
     }
@@ -171,6 +174,9 @@ object EntityCorrector {
             if (c in SEND_VERBS) sendSeen = true
             if (c in ACCOUNT_WORDS) accountSeen = true
             if (kind == null) { i++; continue }
+            // A STRONG slot: a contact or app verb names who/what comes next. A weak one: "to/for/from" after a send verb
+            // somewhere earlier — often just "to buy", "for me" (research note 3 Nov 2026 §1 rec. 3: a recipient-slot prior).
+            val strong = c in CONTACT_VERBS || c in APP_VERBS
             // the slot starts after fillers ("open THE app …", "send it TO MY …")
             var s = i + 1
             while (s < words.size && cores[s] in FILLER && !(cores[s] == "to" && kind == Kind.APP)) s++
@@ -182,7 +188,7 @@ object EntityCorrector {
                 if (words[e - 1].last() in ".,!?;:") break
             }
             if (e == s) { i = s; continue }
-            val span = matchSpan(words.subList(s, e).toList(), cores.subList(s, e), kind, vocab)
+            val span = matchSpan(words.subList(s, e).toList(), cores.subList(s, e), kind, vocab, strong)
             if (span != null) {
                 val (used, entry) = span
                 val lead = words[s].takeWhile { !it.isLetterOrDigit() }
@@ -200,7 +206,7 @@ object EntityCorrector {
 
     /** The longest span (3 → 1 words) that names exactly one entry; null when the words are fine as they are or
      *  nothing fits well enough. */
-    private fun matchSpan(words: List<String>, cores: List<String>, kind: Kind, vocab: Vocab): Pair<Int, Entry>? {
+    private fun matchSpan(words: List<String>, cores: List<String>, kind: Kind, vocab: Vocab, strong: Boolean = true): Pair<Int, Entry>? {
         val pool = vocab.entries.filter { it.kind == kind }
         if (pool.isEmpty()) return null
         for (n in words.size downTo 1) {
@@ -208,6 +214,8 @@ object EntityCorrector {
             // a protected word on its own is never a name ("call her"); inside a joined span it may be ("you tube")
             // nor a relation word ("call my maame" must reach Relations, not become the contact "Mame Esi")
             if (n == 1 && (part[0] in PROTECTED || isRelation(part[0]))) continue
+            // a common English word in a weak slot stays a word ("to buy" never becomes the contact "Boy")
+            if (n == 1 && !strong && part[0] in vocab.common) continue
             val compact = PhoneticKey.compact(part.joinToString(""))
             if (compact.length < 3) continue
             // Already right (a real name, or a known label split by the recogniser in the same way): leave it.
@@ -243,7 +251,8 @@ object EntityCorrector {
             if (best.first.compact == compact) return null
             return 1 to best.first
         }
-        return null
+        // the same words the letter matcher never touches: "her", "agya"/"maame" (Relations), … (AsrAccuracyTest review #7)
+        return if (kind == Kind.CONTACT) SoundWindow.match(words, cores, vocab, strong) { w -> w in PROTECTED || isRelation(w) } else null
     }
 
     /** A contact's full name and one of its parts are the same person (both in the vocab). */
@@ -292,10 +301,22 @@ object SpeechVocabulary {
         val t0 = android.os.SystemClock.uptimeMillis()
         val contacts = contactNames(ctx)
         val apps = try { com.tekyerema.android.AppResolver.launchable(ctx).map { it.label } } catch (_: Throwable) { emptyList() }
-        snapshot = EntityCorrector.Vocab.of(contacts, apps)
+        snapshot = EntityCorrector.Vocab.of(contacts, apps, commonWords(ctx))
         loadedAt = System.currentTimeMillis()
         Log.i("Tekyerema", "[ASR] vocabulary: ${contacts.size} contacts, ${apps.size} apps (${android.os.SystemClock.uptimeMillis() - t0} ms)")
     }
+
+    @Volatile private var common: Set<String>? = null
+
+    /** The top `speech.entityCorrection.commonWords` (default 3,000) words of the keyboard's English list (assets/ime/
+     *  en_words.tsv, OpenSubtitles frequency, MIT). Loaded once. */
+    private fun commonWords(ctx: Context): Set<String> = common ?: try {
+        val n = AppConfig.int("speech.entityCorrection.commonWords", 3000)
+        ctx.assets.open("ime/en_words.tsv").bufferedReader().useLines { lines ->
+            lines.filter { it.isNotBlank() && !it.startsWith("#") }.map { it.substringBefore('\t').trim().lowercase() }
+                .take(n).toHashSet()
+        }.also { common = it }
+    } catch (_: Throwable) { emptySet() }
 
     private fun contactNames(ctx: Context): List<String> {
         if (ctx.checkSelfPermission(android.Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return emptyList()
@@ -312,5 +333,56 @@ object SpeechVocabulary {
             }
         } catch (_: Throwable) {}
         return out.toList()
+    }
+}
+
+/**
+ * Speech repair #3 (research note speech_repair_deep_2026-11-03 §2b; owner's A20e 3 Nov 2026): a contact name heard as
+ * other words — "reach money" for Richmond (r41), "bam" for Balme. The letter matcher above compares word by word and
+ * spelling by spelling, so a name split across words, or with a silent letter, never matches.
+ *
+ * Here a window of 1–3 heard words is joined and compared to each contact word by SOUND: the consonant skeleton of
+ * [PhoneticKey.of] (vowels dropped; "lm" → "m" as in palm/Balme; a final "y" is a vowel) must be ≥ 0.8 alike and start
+ * with the same sound, and the full keys must also be ≥ 0.5 alike. Conservative: a weak slot ("to" after "send") needs
+ * a multi-word window AND a skeleton of ≥ 5 sounds (long names are rarely matched by chance); one common word never
+ * becomes a name there (EntityCorrector's guard). Two contacts within 0.05 of each other → no change (the tools ask).
+ * The send flow reads the name back before anything is sent. Pure → unit-tested.
+ */
+internal object SoundWindow {
+    fun skeleton(s: String): String {
+        val k = PhoneticKey.of(s).replace(Regex("y$"), "i").replace("lm", "m")
+        val out = StringBuilder()
+        for (c in k) if (c !in "aiu" && (out.isEmpty() || out.last() != c)) out.append(c)
+        return out.toString()
+    }
+
+    fun match(words: List<String>, cores: List<String>, vocab: EntityCorrector.Vocab, strong: Boolean,
+              keep: (String) -> Boolean = { false }): Pair<Int, EntityCorrector.Entry>? {
+        val pool = vocab.entries.filter { it.kind == EntityCorrector.Kind.CONTACT && it.compact.length >= 3 }
+        if (pool.isEmpty()) return null
+        for (n in minOf(3, words.size) downTo 1) {
+            val part = cores.subList(0, n)
+            if (n == 1 && !strong) continue                                  // weak slot: never one word by sound alone
+            if (n == 1 && (part[0] in vocab.common || keep(part[0]))) continue
+            val joined = PhoneticKey.compact(part.joinToString(""))
+            if (joined.length < 3 || joined in vocab.exactCompacts) continue
+            val sk = skeleton(joined)
+            if (sk.length < 2 || (!strong && sk.length < 5)) continue
+            val key = PhoneticKey.of(joined)
+            val scored = pool.mapNotNull { en ->
+                val esk = skeleton(en.compact)
+                if (esk.isEmpty() || esk[0] != sk[0]) return@mapNotNull null
+                val skSim = PhoneticKey.similarity(sk, esk)
+                val keySim = PhoneticKey.similarity(key, en.key)
+                if (skSim < 0.8 || keySim < 0.5) null else en to (skSim + keySim) / 2
+            }.sortedByDescending { it.second }
+            if (scored.isEmpty()) continue
+            val best = scored[0]
+            val rival = scored.drop(1).firstOrNull { it.first.compact != best.first.compact &&
+                !(it.first.compact.contains(best.first.compact) || best.first.compact.contains(it.first.compact)) }
+            if (rival != null && best.second - rival.second < 0.05) return null
+            return n to best.first
+        }
+        return null
     }
 }

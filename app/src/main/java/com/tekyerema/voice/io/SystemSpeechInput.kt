@@ -200,7 +200,9 @@ class SystemSpeechInput(
     private var sessions = 0L
 
     internal sealed class Outcome {
-        class Results(val hypotheses: List<String>, val confidences: FloatArray?, val speechBegan: Boolean) : Outcome()
+        /** [fromPartial]: the recogniser gave up (no match / timeout) after speech, and its last partial is used instead. */
+        class Results(val hypotheses: List<String>, val confidences: FloatArray?, val speechBegan: Boolean,
+                      val fromPartial: Boolean = false) : Outcome()
         class Error(val code: Int, val speechBegan: Boolean) : Outcome()
         object Cancelled : Outcome()
     }
@@ -300,6 +302,7 @@ class SystemSpeechInput(
             var began = false
             var ended = false
             var ready = false
+            var lastPartial: String? = null   // speech repair #4: the words seen so far, in case the recogniser gives up
             // Timing only, never words: where a listen that "heard nothing" actually broke (the owner's repeated "I say it, it
             // restarts, I say it again", A20e 26 Oct 2026) — mic open → speech began → speech ended → result or error.
             val t0 = System.currentTimeMillis()
@@ -320,12 +323,21 @@ class SystemSpeechInput(
                         override fun onRms(db: Float) { if (live()) levelOf(db).let { _level.value = it; events.onLevel(it) } }
                         override fun onEndOfSpeech() { if (live() && !ended) { ended = true; tEnded = System.currentTimeMillis() - t0; _level.value = 0f; events.onCaptured() } }
                         override fun onPartial(best: String?) {
-                            if (live() && request.partials && !best.isNullOrBlank()) events.onPartial(best)   // UI only; never logged
+                            if (live() && request.partials && !best.isNullOrBlank()) { lastPartial = best; events.onPartial(best) }   // UI + rescue; never logged
                         }
                         override fun onResults(hypotheses: List<String>, confidences: FloatArray?) {
                             if (live()) { timing("results"); end(Outcome.Results(hypotheses, confidences, began)) }
                         }
-                        override fun onError(code: Int) { if (live()) { timing("error $code"); end(Outcome.Error(code, began)) } }
+                        override fun onError(code: Int) {
+                            if (!live()) return
+                            timing("error $code")
+                            // Speech repair #4 (owner's A20e, 3 Nov 2026: 4 real requests ended in error 7 and "tap again"): after
+                            // speech, a "no match" or timeout with a usable partial is that partial, not a failure.
+                            val p = lastPartial
+                            if (began && (code == RecognizerErrors.NO_MATCH || code == RecognizerErrors.SPEECH_TIMEOUT) && PartialRescue.usable(p))
+                                end(Outcome.Results(listOf(p!!), null, true, fromPartial = true))
+                            else end(Outcome.Error(code, began))
+                        }
                     }
                     current = cb
                     currentCont = cont
@@ -357,11 +369,18 @@ class SystemSpeechInput(
         val hyps = out.hypotheses.map { it.trim() }.filter { it.isNotEmpty() }
         if (hyps.isEmpty()) return if (out.speechBegan) Heard.TooShort else Heard.NoSpeech
         val all = hyps.mapIndexed { i, h -> Hypothesis(h, out.confidences?.getOrNull(i)?.takeIf { it >= 0f }) }
-        val pick = if (cfg.nbestRerank && spec.purpose in NAME_PURPOSES) NBest.pick(all, vocabulary()) else 0
+        var pick = if (cfg.nbestRerank && spec.purpose in NAME_PURPOSES) NBest.pick(all, vocabulary()) else 0
+        // Speech repair #2: the top guess means nothing to the rule layer but an alternative does ("follow me the highest" /
+        // "volume the highest"): take the alternative — short commands only.
+        if (pick == 0 && cfg.nbestRerank && spec.purpose in COMMAND_PURPOSES) pick = NBest.pickByGrammar(all) { h ->
+            try { com.tekyerema.agent.FastIntentClassifier.classify(com.tekyerema.voice.Normalizer.normalize(h, "en")) != null } catch (_: Throwable) { false }
+        }
         val backend = "android-speech/${engine.name}"
         val t = process(hyps[pick], backend)
         // raw stays exactly as heard (the top hypothesis); only the canonical goal may come from an alternative.
-        val tr = if (pick == 0) t else t.copy(raw = hyps[0], reason = t.reason + "+nbest")
+        val tr0 = if (pick == 0) t else t.copy(raw = hyps[0], reason = t.reason + "+nbest")
+        val tr = if (out.fromPartial) tr0.copy(reason = tr0.reason + "+partial") else tr0
+        if (out.fromPartial) log("[VOICE] system speech: the recogniser gave up after speech — using its last partial")
         if (logContent()) log("[VOICE] system speech: '${tr.raw}' → '${tr.canonical}' n=${hyps.size} conf=${all[0].confidence} pick=$pick")
         else log("[VOICE] system speech: len=${tr.canonical.length} n=${hyps.size} conf=${all[0].confidence} pick=$pick")
         return Heard.Speech(tr, all)
@@ -387,6 +406,9 @@ class SystemSpeechInput(
         /** Purposes whose words can name a contact or an app. */
         private val NAME_PURPOSES = setOf(ListenPurpose.REQUEST, ListenPurpose.FOLLOW_UP, ListenPurpose.CONTINUATION,
             ListenPurpose.PATIENT, ListenPurpose.ANSWER)
+
+        /** Purposes where the words are a command for the rule layer (not an answer, a yes/no or a dictation). */
+        private val COMMAND_PURPOSES = setOf(ListenPurpose.REQUEST, ListenPurpose.FOLLOW_UP, ListenPurpose.PATIENT)
 
         /** onRmsChanged dB (about -2 in silence to 10 when speaking) → 0..1 for the visual. */
         fun levelOf(db: Float): Float = ((db + 2f) / 12f).coerceIn(0f, 1f)
@@ -443,6 +465,33 @@ object NBest {
         return 0
     }
 
+    /**
+     * Speech repair #2 (research note speech_repair_deep_2026-11-03 §3, "grammar rerank"): when the top hypothesis is not a
+     * command the rule layer knows ([parses] false) but an alternative (≤ 3rd) is, take it. Guarded so a real sentence for
+     * the brain is never swapped for a command: short utterances only (≤ [maxWords]); the alternative shares at least half
+     * its words with the top (same audio, a word or two misheard); its confidence isn't under half the top's. Pure.
+     */
+    fun pickByGrammar(hyps: List<Hypothesis>, maxRank: Int = 3, maxWords: Int = 6, parses: (String) -> Boolean): Int {
+        if (hyps.size < 2) return 0
+        val topWords = words(hyps[0].text)
+        if (topWords.isEmpty() || topWords.size > maxWords) return 0
+        if (parses(hyps[0].text)) return 0
+        val top = hyps[0].confidence
+        for (k in 1 until minOf(hyps.size, maxRank + 1)) {
+            val h = hyps[k]
+            val c = h.confidence
+            if (top != null && c != null && c < 0.5f * top) continue
+            val w = words(h.text)
+            if (w.isEmpty() || w.size > maxWords) continue
+            val shared = w.count { it in topWords }.toDouble() / maxOf(w.size, topWords.size)
+            if (shared < 0.5) continue
+            if (parses(h.text)) return k
+        }
+        return 0
+    }
+
+    private fun words(s: String) = s.lowercase().split(Regex("\\s+")).map { it.trim('.', ',', '?', '!') }.filter { it.isNotEmpty() }
+
     private fun firstWord(s: String) = s.trim().lowercase().substringBefore(' ')
 
     /** A word (or two neighbouring words) of [text] is exactly a contact or app name on this phone. */
@@ -453,5 +502,15 @@ object NBest {
             if (i > 0 && i + 1 < words.size && (words[i] + words[i + 1]) in vocab.exactCompacts) return true
         }
         return false
+    }
+}
+
+/** Speech repair #4: is the last partial worth acting on when the recogniser gives up? Pure → unit-tested. */
+object PartialRescue {
+    private val FILLER = setOf("um", "uh", "er", "erm", "hmm", "mm", "ah", "eh", "oh")
+    fun usable(partial: String?): Boolean {
+        val words = partial?.trim()?.lowercase()?.split(Regex("\\s+"))?.map { it.trim('.', ',', '?', '!') }
+            ?.filter { it.isNotEmpty() && it !in FILLER }.orEmpty()
+        return words.isNotEmpty() && words.sumOf { w -> w.count { it.isLetterOrDigit() } } >= 3
     }
 }

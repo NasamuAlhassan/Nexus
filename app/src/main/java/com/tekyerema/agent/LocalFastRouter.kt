@@ -216,7 +216,13 @@ class LocalFastRouter(
             Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} deferred → brain (more than a command)")
             return null
         }
+        // Said again right after a quick answer that missed (agent/Rephrase): a brain reads it this time, not the same rule.
+        if (brainReachable() && Rephrase.isRedo(text)) {
+            Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} said again after the last try → brain")
+            return null
+        }
         val out = run(intent)
+        if (out != null) Rephrase.observe(text, listOf("quick_${intent.name.lowercase()}() → done"), out.spoken)
         // Memory (memory/UserMemory): a request that ran well is counted by how the user worded it (only safe wordings are kept).
         if (out != null && out.ok) com.tekyerema.memory.UserMemory.noteTask(appContext, text, intent.name)
         // "close X" where X turned out not to be an installed app: the words were not ours after all — the offline

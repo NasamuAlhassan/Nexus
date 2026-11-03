@@ -465,6 +465,22 @@ object AgentEngine {
         return "$where, working on: ${st.goal ?: "your request"}."
     }
 
+    /** "I'm still searching the web." / "Still thinking it over." — the current action, for a progress line. */
+    fun doingLine(): String {
+        if (!isBusy) return ""
+        val st = _state.value
+        if (st.status == AgentStatus.PAUSED) return "I'm paused."
+        val plan = st.log.lastOrNull { it.kind == LogEntry.Kind.PLAN }?.text.orEmpty()
+        return when (Regex("^Step \\d+: ([a-z_]+)\\(").find(plan)?.groupValues?.get(1)) {
+            null -> "Still thinking it over."
+            "tap", "long_press", "type", "scroll", "swipe", "key_event" -> "Still working in ${st.appSwitch?.name ?: "the app"}."
+            "open_app" -> "Still opening the app."; "read_state", "read_screen" -> "Still reading the screen."
+            "wait" -> "Waiting for the phone."; "web_search" -> "Still searching the web."
+            "look_with_camera", "describe_screen" -> "Still looking."
+            else -> "Still working on it."
+        }
+    }
+
     /** N-04: warm the cloud brain's connection while the user is still speaking (called when the mic opens). */
     fun prewarm() {
         val s = settings ?: return
@@ -740,6 +756,12 @@ object AgentEngine {
             untrustedRead += resumedFrom.untrustedRead; injectionSource = resumedFrom.injectionSource
             history.add(taskRun.resumeNote())
         }
+        // A redo of the last request ("no, I said…", or the same thing in other words): the brain is told what was done and
+        // that it wasn't right (agent/Rephrase). Never for a resumed task or a trigger's request.
+        if (resumedFrom == null && source != "trigger") Rephrase.noteFor(goal)?.let { note ->
+            history.add(note)
+            log(LogEntry.Kind.INFO, "[REPHRASE] said again: the last try is marked as not what was wanted")
+        }
         // WS-A: a checkpoint of what the loop needs to pick this task up again (after every executed step, and at a pause).
         fun checkpointNow(step: Int) = taskRun?.save(step, history, taskMemory.toJson(), mutatingCount, mutatingVerified,
             partialCount, lastMutatingVerified, failStreak, usedRead, usedTools, discoveredTools, untrustedRead, injectionSource)
@@ -984,11 +1006,15 @@ object AgentEngine {
                     taskMemory.plan.clearSettled()   // one chance per settled subgoal
                 }
                 val t0 = SystemClock.uptimeMillis()
-                val decision = planned.removeFirstOrNull() ?: chainStep ?: brain.decide(BrainContext(goal, before.toCompactJson(), history, geminiTools, openAiTools, convo,
+                val screenNow = before.toCompactJson()
+                // Every brain's decision passes the hard rules before it is acted on (agent/Invariants; owner, 3 Nov 2026).
+                val ownStep = planned.removeFirstOrNull() ?: chainStep   // the engine's own step (a corrected read-back, a chain): already grounded
+                val decision = Invariants.apply(ownStep ?: brain.decide(BrainContext(goal, screenNow, history, geminiTools, openAiTools, convo,
                     progress = (retrievalHint?.let { "$it\n" } ?: "") + taskMemory.render(), effort = effort,
                     // A question that needs a fresh fact is never answered from the small model's memory ("the president of
                     // Ghana is Nana Addo Samuel Kufuor", audit R01): it goes to the capable model, which is told to search.
-                    simple = directStep && retrievalNeed == RetrievalNeed.Need.NONE))
+                    simple = directStep && retrievalNeed == RetrievalNeed.Need.NONE)), goal, history, screenNow, grounding = ownStep == null)
+                Rephrase.observe(goal, history, (decision as? AgentDecision.Done)?.summary)
                 stats = stats.copy(decideLatencyMs = stats.decideLatencyMs + (SystemClock.uptimeMillis() - t0))
                 com.tekyerema.core.telemetry.Telemetry.mark("first_decision")   // Q-01 (only the first is kept)
 

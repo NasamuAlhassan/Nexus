@@ -331,6 +331,7 @@ object Normalizer {
         val out = ArrayList<String>()
         var i = 0
         while (i < toks.size) {
+            if (pronounOne(toks, i)) { out.add(toks[i]); i += 1; continue }
             val (span, used) = englishNumberSpan(toks.subList(i, toks.size))
             if (used > 0 && span != null) { out.add(span); i += used } else { out.add(toks[i]); i += 1 }
         }
@@ -341,6 +342,29 @@ object Normalizer {
                 out[j] = CURRENCY_MISHEAR[base]!!
         }
         return out.joinToString(" ")
+    }
+
+    // Owner's A20e, 3 Nov 2026 (r45, r47): "one time events" → "1 time events", "please use that one" → "that 1"; the rule
+    // layer then read a digit where the owner meant a thing. A lone "one" is a pronoun after these words or before
+    // these, unless a unit or money word follows ("that one cedi"). The research note (speech_repair_deep §1 rec. 1):
+    // rewrite a number word only with numeric evidence; this is the bounded, auditable version of that.
+    private val ONE_AFTER = setOf("that", "this", "which", "the", "any", "no", "every", "each", "another", "other", "some",
+        "same", "last", "first", "next", "right", "wrong", "only", "new", "old", "big", "small", "little", "best", "good",
+        "nice", "red", "blue", "green", "black", "white", "younger", "older", "second", "third", "middle", "previous")
+    private val ONE_BEFORE = setOf("of", "time", "another", "by", "day", "thing", "way", "more", "less", "is", "was",
+        "are", "please", "instead", "too", "either", "or", "then")
+    private val NUMERIC_NEXT = setOf("cedi", "cedis", "ghana", "gh", "ghs", "pesewa", "pesewas", "minute", "minutes",
+        "hour", "hours", "second", "seconds", "percent", "o'clock", "am", "pm", "kilo", "kilos", "dollar", "dollars")
+
+    /** Pure: toks[i] is a lone "one" used as a pronoun ("that one", "no one", "one of them", "one time"). */
+    internal fun pronounOne(toks: List<String>, i: Int): Boolean {
+        fun w(k: Int) = toks.getOrNull(k)?.lowercase()?.trim('.', ',', ';', '?', '!')
+        if (w(i) != "one") return false
+        val next = w(i + 1)
+        if (next != null && (next in NUMERIC_NEXT || next in EN_UNITS || next in EN_TENS || next in EN_SCALES)) return false
+        if (w(i - 1) in ONE_AFTER) return true
+        return next == null && i > 0 && w(i - 1) in setOf("use", "pick", "choose", "take", "want", "need", "like", "try") ||
+            next in ONE_BEFORE
     }
 
     /** Parse a leading run of English number words → (text, tokensConsumed). Distinguishes a spoken

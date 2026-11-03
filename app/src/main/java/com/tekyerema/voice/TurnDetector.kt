@@ -16,6 +16,9 @@ object TurnDetector {
     private val DEFAULT_TRAILING = listOf(
         "and", "or", "but", "to", "the", "a", "an", "my", "your", "their", "for", "with", "of", "from", "if",
         "because", "is", "are", "was", "um", "uh", "er",
+        // speech repair #5 (research note 3 Nov 2026 §4): more words a sentence can't end on. Not "so"/"then" ("I think so",
+        // "okay then"), "on"/"in" ("turn it on", "log in") or "call" ("I missed a call"): those end real requests.
+        "at", "about", "into", "than", "saying", "tell", "ask", "whether", "when", "where", "which",
         // Twi: na (and/then), ne (and/with), ma (to/for)
         "na", "ne", "ma"
     )

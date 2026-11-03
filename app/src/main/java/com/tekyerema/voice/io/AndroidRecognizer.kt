@@ -77,7 +77,22 @@ class AndroidRecognizerEngine(
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possibly)
                 if (minimum > 0) putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minimum)
             }
+            // Speech repair #6 (research note 3 Nov 2026 §2a): bias the recogniser towards this phone's contact and app
+            // names ("Richmond", not "reach money"). EXTRA_BIASING_STRINGS is API 33; whether Google's recogniser reads it on
+            // Android 11 is unknown — this is for the A/B on the A20e. OFF by default: it sends contact NAMES to the
+            // recogniser's service (the audio goes there already; the list would not). `speech.system.biasing`.
+            if (com.tekyerema.core.config.AppConfig.bool("speech.system.biasing", false)) biasingNames().takeIf { it.isNotEmpty() }?.let {
+                putStringArrayListExtra(EXTRA_BIASING_STRINGS, ArrayList(it))
+                Log.i("Tekyerema", "[VOICE] recogniser biasing: ${it.size} names")
+            }
         }
+
+    private fun biasingNames(): List<String> {
+        val max = com.tekyerema.core.config.AppConfig.int("speech.system.biasingMax", 100)
+        return com.tekyerema.voice.SpeechVocabulary.current().entries
+            .sortedBy { if (it.kind == com.tekyerema.voice.EntityCorrector.Kind.CONTACT) 0 else 1 }
+            .map { it.text }.filter { it.length >= 3 }.distinct().take(max)
+    }
 
     private class Listener(private val cb: RecognizerCallbacks) : RecognitionListener {
         override fun onReadyForSpeech(params: Bundle?) = cb.onReady()
@@ -95,6 +110,8 @@ class AndroidRecognizerEngine(
     }
 
     companion object {
+        /** RecognizerIntent.EXTRA_BIASING_STRINGS (API 33), by name so it compiles and is simply ignored below. */
+        private const val EXTRA_BIASING_STRINGS = "android.speech.extra.BIASING_STRINGS"
         private const val TAG = "Tekyerema"
         /** The Google app's recognition service (Android 11 phones); Pixels default to it. */
         const val GOOGLE_RECOGNIZER_PKG = "com.google.android.googlequicksearchbox"

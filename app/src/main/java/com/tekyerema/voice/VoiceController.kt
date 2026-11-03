@@ -42,6 +42,8 @@ interface AgentBridge {
     fun steer(text: String) {}
     fun answer(text: String?) {}
     fun statusLine(): String = ""
+    /** "I'm still searching the web." — what the task is doing now, without its goal (progress lines). */
+    fun doingLine(): String = ""
 }
 
 /** Production bridge → the real [AgentEngine] singleton. */
@@ -60,6 +62,7 @@ object AgentEngineBridge : AgentBridge {
     override fun steer(text: String) = AgentEngine.steer(text)
     override fun answer(text: String?) = AgentEngine.answer(text)
     override fun statusLine(): String = AgentEngine.statusLine()
+    override fun doingLine(): String = AgentEngine.doingLine()
 }
 
 /** Offline, a Twi request the phone's Twi commands didn't take — in Twi, for the phone's own Twi voice (20 Oct 2026). "No internet.
@@ -1904,8 +1907,16 @@ class VoiceController(
                 val lang = forceLanguage() ?: sessionLanguage()
                 val twi = lang == Lang.TWI
                 // B-13 "detailed": say what it's doing right now ("I'm opening an app…"), not just "still working".
-                val line = if (verbosity() == "detailed" && !twi) agent.statusLine()
-                    else Phrases.get("progress", twi, if (twi) "Mereyɛ ho adwuma da." else "Still working on it.")
+                // Never the same empty line again and again (A20e, 2 Nov 2026: "Still working on it" eight times while nothing
+                // happened): what it is doing now, and once — on the second line — how to stop it (research: liveness spec,
+                // docs/agent/research/agent_invariants_deep_2026-11-03.md).
+                val doing = if (twi) "" else agent.doingLine()
+                val base = when {
+                    verbosity() == "detailed" && !twi -> agent.statusLine()
+                    doing.isNotBlank() -> doing
+                    else -> Phrases.get("progress", twi, if (twi) "Mereyɛ ho adwuma da." else "Still working on it.")
+                }
+                val line = if (lines == 1 && !twi) "$base Say stop if you want me to stop." else base
                 cues.progress()
                 // B-13: "brief" users get the progress tick only — no spoken line.
                 if (verbosity() != "brief")

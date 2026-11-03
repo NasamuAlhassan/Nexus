@@ -63,6 +63,14 @@ Rules:
         return out.values.toList()
     }
 
+    /** The request (or the conversation it continues) is about a day or a time — the v5 data carries the clock line on those
+     *  rows only, so the prompt does the same. */
+    internal fun aboutTime(goal: String, conversation: List<String>): Boolean =
+        TIME_WORDS.containsMatchIn(goal) || conversation.takeLast(2).any { TIME_WORDS.containsMatchIn(it) }
+    private val TIME_WORDS = Regex("(?i)\\b(today|tonight|tomorrow|yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday|" +
+        "week|weekend|month|year|date|day|days|morning|afternoon|evening|night|noon|midnight|o'?clock|[ap]\\.?m\\.?|hours?|minutes?|" +
+        "calendar|remind|reminder|alarm|timer|schedule|appointment|meeting|class|lecture|deadline|due|until|next|this coming|when)\\b")
+
     fun system(offered: List<JSONObject>): String =
         SYSTEM + "\n\nTools:\n" + offered.joinToString("\n") { signature(it) } + "\n\n" + COMPACT_TAIL
 
@@ -95,6 +103,8 @@ Rules:
         if (conversation.isNotEmpty()) parts.add("Earlier in this conversation:\n" + conversation.joinToString("\n"))
         if (memory.isNotEmpty()) parts.add("What I know (the user's own saved memory: use it; actions still get the usual confirmation):\n" +
             memory.joinToString("\n") { "- $it" })
+        // The phone's clock, one line before the goal (v5 training data): a date is computed, never asked or guessed.
+        if (aboutTime(goal, conversation)) try { parts.add(com.tekyerema.agent.BrainPrompts.nowLine()) } catch (_: Throwable) {}
         parts.add("Goal: " + com.tekyerema.agent.HeardWords.goalForBrain(goal))
         parts.add("Done so far:\n" + if (history.isEmpty()) "nothing yet" else history.withIndex().joinToString("\n") { "${it.index + 1}. ${it.value}" })
         parts.add(renderScreen(screen))
@@ -114,6 +124,8 @@ Rules:
         if (conversation.isNotEmpty()) parts.add("Earlier in this conversation:\n" + conversation.joinToString("\n"))
         if (memory.isNotEmpty()) parts.add("What I know (the user's own saved memory: use it; actions still get the usual confirmation):\n" +
             memory.joinToString("\n") { "- $it" })
+        // The phone's clock, one line before the goal (v5 training data): a date is computed, never asked or guessed.
+        if (aboutTime(goal, conversation)) try { parts.add(com.tekyerema.agent.BrainPrompts.nowLine()) } catch (_: Throwable) {}
         parts.add("Goal: " + com.tekyerema.agent.HeardWords.goalForBrain(goal))
         parts.add(renderScreen(screen))
         parts.add("Next action?")

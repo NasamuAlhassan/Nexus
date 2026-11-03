@@ -17,9 +17,11 @@ class HeardWordsTest {
     @After fun reset() = HeardWords.clear()
 
     @Test fun the_pipeline_keeps_the_words_as_said_beside_the_digits() {
-        val t = LanguagePipeline.process("please use that one", Lang.GH_EN, Lang.GH_EN)
-        assertEquals("please use that 1", t.canonical)          // the rule layer's reading, unchanged
-        assertEquals("please use that one", t.asSaid)
+        val t = LanguagePipeline.process("send five cedis to Ama", Lang.GH_EN, Lang.GH_EN)
+        assertEquals("send 5 cedis to Ama", t.canonical)        // the rule layer's reading (digits for the money parser)
+        assertEquals("send five cedis to Ama", t.asSaid)         // the brains read the words as said
+        // a pronoun "one" stays a word in both (voice/Normalizer, 3 Nov 2026) → nothing extra to carry
+        assertEquals("", LanguagePipeline.process("please use that one", Lang.GH_EN, Lang.GH_EN).asSaid)
         val same = LanguagePipeline.process("open settings", Lang.GH_EN, Lang.GH_EN)
         assertEquals("", same.asSaid)                            // nothing rewritten → nothing extra
     }
