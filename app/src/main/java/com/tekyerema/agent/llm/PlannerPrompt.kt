@@ -95,7 +95,7 @@ Rules:
         if (conversation.isNotEmpty()) parts.add("Earlier in this conversation:\n" + conversation.joinToString("\n"))
         if (memory.isNotEmpty()) parts.add("What I know (the user's own saved memory: use it; actions still get the usual confirmation):\n" +
             memory.joinToString("\n") { "- $it" })
-        parts.add("Goal: $goal")
+        parts.add("Goal: " + com.tekyerema.agent.HeardWords.goalForBrain(goal))
         parts.add("Done so far:\n" + if (history.isEmpty()) "nothing yet" else history.withIndex().joinToString("\n") { "${it.index + 1}. ${it.value}" })
         parts.add(renderScreen(screen))
         parts.add("Next action?")
@@ -114,7 +114,7 @@ Rules:
         if (conversation.isNotEmpty()) parts.add("Earlier in this conversation:\n" + conversation.joinToString("\n"))
         if (memory.isNotEmpty()) parts.add("What I know (the user's own saved memory: use it; actions still get the usual confirmation):\n" +
             memory.joinToString("\n") { "- $it" })
-        parts.add("Goal: $goal")
+        parts.add("Goal: " + com.tekyerema.agent.HeardWords.goalForBrain(goal))
         parts.add(renderScreen(screen))
         parts.add("Next action?")
         return parts.joinToString("\n\n")

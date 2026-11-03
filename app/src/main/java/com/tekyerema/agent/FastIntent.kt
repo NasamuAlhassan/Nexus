@@ -632,8 +632,12 @@ object FastIntentClassifier {
         "\\bwhat(?:'s| is| does) (?:in|on|written in|written on|it say in) (?:the |my )?(?:last|latest|most recent|newest) $PICK_PIC\\b")
     private val RE_DESCRIBE_WORD = Regex("\\b(?:describe|what(?:'s| is) (?:in|on)|what does it show)\\b")
     private val RE_CAMERA_COLOR = Regex("\\bwhat colou?r is (?:this|that|it|my \\w+)\\b|\\bwhat colou?r are (?:these|those|they)\\b|\\bis the light on\\b")
+    // A20e, 2 Nov 2026 (owner, typed): "What's on my hand" went to the agent (13.5 s), and the second time the cloud brain answered
+    // from the earlier description without looking again — a hand question is always a fresh look.
     private val RE_CAMERA_DESCRIBE = Regex("\\bwhat(?:'s| is) in front of me\\b|\\bwhat am i holding\\b|\\bdescribe what (?:you see|is in front of me)\\b|" +
-        "\\blook at this for me\\b|\\bwhat is this (?:thing|object)\\b")
+        "\\blook at this for me\\b|\\bwhat is this (?:thing|object)\\b|" +
+        "^(?:please |tell me )?what(?:'s| is| are)(?: this| these)? (?:in|on|inside) my hands?\\b|\\bwhat do i have in my hands?\\b|" +
+        "\\bwhat(?:'s| is) this i(?:'m| am) holding\\b")
     /** A question about something physical: the hand, "in front of me", the camera, "look at / can you see". Never the
      *  screen ("what's on my screen" is the screen reader's). */
     private val RE_CAMERA_ASK = Regex("(?i)\\b(?:in my hands?|i(?:'m| am) holding|am i holding|i(?:'m| am) (?:looking at|pointing at|seeing)|" +

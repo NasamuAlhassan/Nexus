@@ -16,8 +16,18 @@ object Confirmation {
      */
     fun asksToRepeat(vararg said: String?): Boolean = said.any { t ->
         val s = t?.trim()?.lowercase()?.replace(Regex("[.!?,]"), " ")?.replace(Regex("\\s+"), " ")?.trim().orEmpty()
-        s.isNotEmpty() && REPEAT_ASK.matches(s)
+        s.isNotEmpty() && (REPEAT_ASK.matches(s) || asksAboutPending(s))
     }
+
+    /** Any QUESTION about the waiting action is answered by the read-back itself, then asked again — never a re-plan. A20e,
+     *  3 Nov 2026: "what's the message you sent" at "Send this message to Richmond?" was read as a correction, re-planned, and
+     *  the confirmation was lost ("I couldn't confirm actions"). General: a question form, with no correction words in it. */
+    internal fun asksAboutPending(s: String): Boolean = QUESTION_FORM.containsMatchIn(s) && !CORRECTION_CUE.containsMatchIn(s)
+    private val QUESTION_FORM = Regex("^(?:(?:please|sorry|so|okay|ok|eh|ei|but|and|wait)\\s+)*(?:what|which|who|whom|whose|how much|how many|" +
+        "where|when|is (?:it|that|this)|was (?:it|that)|are you sure|did you|have you|can you (?:read|tell|say|repeat)|" +
+        "could you (?:read|tell|say|repeat)|tell me|read (?:it|me|the|that|back))\\b")
+    private val CORRECTION_CUE = Regex("\\b(?:instead|change|make it|send it to|send to|call|rather|actually|replace|add|remove|" +
+        "not |don'?t|cancel|stop)\\b")
     private val REPEAT_ASK = Regex("^(?:(?:please|sorry|eh|ei|hey)\\s+)*(?:repeat(?: (?:it|that))?|say (?:it|that) again|again|come again|pardon(?: me)?|" +
         "what did you say|i didn'?t (?:hear|get|catch) (?:it|that|you)|(?:san )?ka (?:no )?bio|san ka|mante(?: no| ase)?|mente ase|" +
         // a question about the read-back itself is a request to hear it again (owner's live test, 22 Oct 2026: "what is the

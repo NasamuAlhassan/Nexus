@@ -209,6 +209,13 @@ class LocalFastRouter(
             Log.i(TAG, "[LOCAL_FAST_PATH] no_match → agent  text='${com.tekyerema.core.Privacy.content(text.take(60))}'")   // J-15
             return null
         }
+        // Brain first (agent/BrainFirst, owner 3 Nov 2026): with a brain reachable, a sentence that carries more than a command goes to it
+        // whole — the quick layer had matched "where I am" inside "how can I move from where I am to the Great Hall".
+        if (com.tekyerema.core.config.AppConfig.bool("fast.brainFirst.enabled", true) &&
+            BrainFirst.deferToBrain(text, brainReachable(), com.tekyerema.core.config.AppConfig.int("fast.brainFirst.maxWords", 6))) {
+            Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} deferred → brain (more than a command)")
+            return null
+        }
         val out = run(intent)
         // Memory (memory/UserMemory): a request that ran well is counted by how the user worded it (only safe wordings are kept).
         if (out != null && out.ok) com.tekyerema.memory.UserMemory.noteTask(appContext, text, intent.name)
@@ -1747,6 +1754,12 @@ class LocalFastRouter(
             return handled(i, com.tekyerema.live.nav.WalkGuide.start(appContext, i.place))
         return runTool("open_intent", org.json.JSONObject().put("template", "maps_search").put("query", i.place), action = true, acted = false)
     }
+
+    /** A brain that can read a whole sentence is reachable: our Space planner while online, or the on-phone model where it fits. */
+    private fun brainReachable(): Boolean = try {
+        (com.tekyerema.core.NetworkMonitor.isOnline() && com.tekyerema.agent.llm.SpaceLlm.configured()) ||
+            (com.tekyerema.core.config.AppConfig.bool("router.localModel.enabled", false) && LocalModelBrain.modelPath() != null)
+    } catch (_: Throwable) { false }
 
     private fun recentScreenRead(): Boolean =
         screenReadAt > 0L && SystemClock.elapsedRealtime() - screenReadAt <= 120_000L && !ScreenReadCursor.pending

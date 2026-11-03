@@ -183,6 +183,11 @@ class FastIntentClassifierTest {
         for (s in listOf("stop the timer", "Stop the timer.", "cancel my timer", "turn off the timer please"))
             assertEquals(s, FastIntent.StopTimer, c(s))
         assertNotEquals(FastIntent.StopTimer, c("set a timer for 3 minutes"))
+        // A20e, 2 Nov 2026 (owner): "What's on my hand" went to the agent, and the second time the cloud answered from memory.
+        for (s in listOf("What's on my hand", "what is in my hand", "what's in my hands", "what do I have in my hand",
+                "what is this in my hand", "what's this I'm holding", "what am I holding"))
+            assertEquals(s, FastIntent.Camera("describe"), c(s))
+        assertNotEquals(FastIntent.Camera("describe"), c("what's on my screen"))
         // 2 Nov 2026: "set a timer for 5 minutes" reached the agent (right, but slow) — now the fast path's set_timer.
         assertEquals(FastIntent.SetTimer(180), c("set a timer for 3 minutes"))
         assertEquals(FastIntent.SetTimer(300), c("Set a timer for 5 minutes."))

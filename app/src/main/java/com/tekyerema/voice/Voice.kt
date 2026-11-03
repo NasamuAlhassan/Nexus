@@ -40,7 +40,11 @@ data class Transcript(
     val fallbackUsed: Boolean = false,
     val asrMs: Long = 0,
     /** B-19: names [EntityCorrector] changed in [canonical] ("contact:coffee→Kofi"). Diagnostic; content — debug logs only. */
-    val corrections: List<String> = emptyList()
+    val corrections: List<String> = emptyList(),
+    /** The words as SAID, with only contact names corrected — no numbers turned into digits, no money/network rewrites. The
+     *  thinking brains read this (agent/HeardWords): "please use that one" is not "please use that 1" (owner, 3 Nov 2026).
+     *  Blank when it is the same as [canonical]. The rule layer (fast path, money parsing) keeps [canonical]. */
+    val asSaid: String = ""
 ) {
     val isBlank: Boolean get() = canonical.isBlank()
 }

@@ -158,6 +158,19 @@ object ActionSemantics {
 
     /** What an earlier step of THIS task handed to an app to send, from its history lines: "photo" or "screenshot". The step's
      *  own result is the source, so the Send read-back needs no app's wording to say what is going. */
+    /** What this task last typed into a field (history "type({…"text":"…"}) → success"). For a Send whose box hides its own text
+     *  (Telegram on the A20e, 3 Nov 2026: "Send this message to Richmond?" with no words — the owner had to ask "what's the
+     *  message?", the confirmation was lost and nothing could be confirmed). Said as "I typed: …" — honest about where it came from. */
+    fun lastTyped(history: List<String>): String? {
+        val l = history.lastOrNull { it.startsWith("type(") && "→ success" in it } ?: return null
+        val json = l.removePrefix("type(").substringBeforeLast(") →", "")
+        return try { org.json.JSONObject(json).optString("text").trim().takeIf { it.isNotEmpty() } } catch (_: Throwable) {
+            // The step line keeps only the first 160 characters of the arguments: read the text field up to where it was cut.
+            TYPED_TEXT.find(l)?.groupValues?.get(1)?.replace("\\\"", "\"")?.trim()?.takeIf { it.isNotEmpty() }
+        }
+    }
+    private val TYPED_TEXT = Regex("\"text\":\"((?:[^\"\\\\]|\\\\.)*)")
+
     fun handedOver(history: List<String>): String? = history.lastOrNull { l -> HANDS_OVER.keys.any { l.startsWith("$it(") } && "→ success" in l }
         ?.let { l -> HANDS_OVER.entries.first { l.startsWith("${it.key}(") }.value }
     private val HANDS_OVER = mapOf("send_photo" to "photo", "share_screenshot" to "screenshot")
@@ -186,7 +199,9 @@ object ActionSemantics {
         submit: Boolean = false, typedText: String? = null, nameOfNumber: ((String) -> String?)? = null,
         /** The user's request, so a Send whose composer holds OTHER words than the ones dictated says so (S-05). */
         goal: String? = null,
-        handedOver: String? = null
+        handedOver: String? = null,
+        /** [lastTyped]: what this task typed last, used only when the composer's own text can't be read. */
+        lastTyped: String? = null
     ): String? {
         val text = (target?.label ?: requestedLabel)?.trim().orEmpty()
         if (primitive == "tap" && TargetSemantics.mtnCommit(before, text)) mtnReadBack(before, goal, nameOfNumber)?.let { return it }
@@ -215,6 +230,8 @@ object ActionSemantics {
                 !msg.isNullOrBlank() && differs != null -> "$differs Send it$who anyway?"
                 !msg.isNullOrBlank() -> "Send this message$who?\n“$msg”"
                 shared != null -> shared
+                // The box hides its text but this task typed into it: say those words, and say they are what I typed.
+                isTapSend && !lastTyped.isNullOrBlank() -> "Send this message$who? I typed: “${lastTyped.take(300)}”"
                 // nothing composed — don't claim "this message": name the control as it reads ("Send to 5554?")
                 isTapSend && labelRecipient != null -> "${text.trim().take(60).trimEnd('?', '.')}?"
                 else -> "Send this message$who?"

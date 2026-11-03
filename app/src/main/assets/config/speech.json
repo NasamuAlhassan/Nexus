@@ -14,7 +14,10 @@
    "nextWaitMs": 150,
    "_waitMsNote": "29 Oct 2026: a network English voice can have its own waits (first sentence / each next one). Gemini's Kore MAKES every line: one short sentence took 4.3-4.8 s from the laptop at the camp (the shared 150 ms cancelled it every time on the Infinix). Kafui on the Space keeps 150 ms (cached lines only). With Kore the reply starts ~4.5 s later than the phone's own Kafui voice; lines the app says every time are kept on the phone after the first fetch and play at once.",
    "waitMs": {
-    "gemini_tts": {"first": 5500, "next": 8000}
+    "gemini_tts": {
+     "first": 5500,
+     "next": 8000
+    }
    }
   },
   "voiceLayer": {
@@ -60,17 +63,16 @@
    "maxChain": 1,
    "gapMs": 3500,
    "en": [
+    "One moment.",
+    "Just a moment.",
+    "Okay, one moment.",
+    "Give me a second.",
     "One moment please.",
-    "Let me check that for you.",
-    "Alright, let me take a look.",
-    "Okay, I'm on it.",
-    "Just a moment please.",
-    "Let me find that for you.",
-    "Hold on a moment.",
-    "Sure, working on that now."
+    "Alright, one moment."
    ],
    "twi": [],
-   "_note": "Spoken in the reply voice (the phone's engine). Twi is empty on purpose: the old Twi phrasings were never verified by a native speaker and the English engine reads Twi badly, so a Twi session plays the progress tone. Add verified phrases here."
+   "_note": "Spoken in the reply voice (the phone's engine). Twi is empty on purpose: the old Twi phrasings were never verified by a native speaker and the English engine reads Twi badly, so a Twi session plays the progress tone. Add verified phrases here.",
+   "_en_note": "Owner, 3 Nov 2026: 'some of them don't fit where they're kept at all' — 'Let me check/find that for you' and 'let me take a look' assumed a lookup and were said before jokes, chat, 'yes' and sends. Every line here must fit ANY request."
   }
  },
  "wake": {

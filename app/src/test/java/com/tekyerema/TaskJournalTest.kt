@@ -113,7 +113,7 @@ class TaskJournalTest {
         TaskJournal.load(tasks)
         val a = TaskJournal.begin("send Ama a message", "agent")
         TaskJournal.pause(a.id, PauseReason.NETWORK)
-        assertEquals("Earlier I paused “send Ama a message” because the internet dropped. Say “carry on” when you want me to continue.",
+        assertEquals("Earlier I paused “send Ama a message” because it needs the internet, and the phone is offline. Say “carry on” when you want me to continue.",
             ResumeOffer.take()!!.second)   // e.g. when the app is next opened
         TaskJournal.resetForTest(); TaskJournal.load(tasks)
         assertNull("already offered before the restart", ResumeOffer.take())
@@ -245,7 +245,7 @@ class TaskJournalTest {
         assertEquals(1_000L + 450_500L, PauseRules.resumeAfter("Please try again in 7m30.5s.", 1_000L))
         assertEquals(1_000L + 45_000L, PauseRules.resumeAfter("retry in 45s", 1_000L))
         assertNull(PauseRules.resumeAfter("rate limited", 1_000L))
-        assertEquals("I've paused this because the internet dropped. Say “carry on” when you want me to continue.",
+        assertEquals("I've paused this because it needs the internet, and the phone is offline. Say “carry on” when you want me to continue.",
             PauseRules.pausedLine(PauseReason.NETWORK))
         assertEquals("I've paused this because I've used up my AI allowance for now. It should be back around 10:30. " +
             "Say “carry on” when you want me to continue.", PauseRules.pausedLine(PauseReason.QUOTA, 5L) { "10:30" })
@@ -295,7 +295,7 @@ class TaskJournalTest {
         val a = TaskJournal.begin("send Ama a message", "agent")
         TaskJournal.checkpoint(a.copy(progress = "opened WhatsApp"))
         TaskJournal.pause(a.id, PauseReason.NETWORK)
-        assertEquals("“send Ama a message” is paused because the internet dropped. So far I opened WhatsApp. Say “carry on” to continue it.",
+        assertEquals("“send Ama a message” is paused because it needs the internet, and the phone is offline. So far I opened WhatsApp. Say “carry on” to continue it.",
             ResumeOffer.leftOffLine())
     }
 }

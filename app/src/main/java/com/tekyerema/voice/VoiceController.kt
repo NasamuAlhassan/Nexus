@@ -455,7 +455,12 @@ class VoiceController(
                         Log.i("Tekyerema", "[ANSWER] read as ${com.tekyerema.voice.understand.AnswerContext.expect(question)}")
                         com.tekyerema.voice.understand.AnswerContext.noteInference(said, read, question)
                     }
-                    agent.answer(read); return
+                    // An answer that isn't a number or an amount reaches the brain as SAID (agent/HeardWords): "one time
+                    // events" is not "1 time events" (owner's A20e, 3 Nov 2026). A number asked for keeps its digits.
+                    val tr = (heard as? com.tekyerema.voice.io.Heard.Speech)?.transcript
+                    val asSaid = tr?.asSaid?.takeIf { it.isNotBlank() && !digits && read == said && said == text && tr.canonical == text &&
+                        tr.language == Lang.GH_EN }
+                    agent.answer(asSaid?.let { com.tekyerema.core.Privacy.maskCredentials(it) } ?: read); return
                 }
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) {}
@@ -1408,6 +1413,10 @@ class VoiceController(
         }
         if (kusEnglish != null) Log.i("Tekyerema", "[KUS] understood through the translator → '${com.tekyerema.core.Privacy.content(kusEnglish)}'")
         val tr = heard.copy(raw = com.tekyerema.core.Privacy.maskCredentials(heard.raw), canonical = kusEnglish ?: glossed ?: com.tekyerema.agent.SpokenRepeat.clean(repaired))
+        // The brains read the words as SAID (agent/HeardWords); the rules keep the canonical goal.
+        com.tekyerema.agent.HeardWords.note(tr.canonical,
+            if (kusEnglish != null || glossed != null || source != InputSource.ASR || heard.asSaid.isBlank()) null
+            else com.tekyerema.agent.SpokenRepeat.clean(EdgeFillers.strip(com.tekyerema.core.Privacy.maskCredentials(heard.asSaid))))
         try {
             hideAsking()   // a new turn (e.g. the answer to a question) clears any "asking" card
             com.tekyerema.ui.ReplyCard.hide()

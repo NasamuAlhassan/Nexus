@@ -318,7 +318,7 @@ class EngineLoopTest {
         val job = launch { AgentEngine.runForTest("send Ama see you at 6",
             ScriptedBrain({ AgentDecision.CannotDo("network_lost", "The internet isn't working.") })) }
         advanceUntilIdle(); job.join()
-        assertEquals("I've paused this because the internet dropped. Say “carry on” when you want me to continue.", result())
+        assertEquals("I've paused this because it needs the internet, and the phone is offline. Say “carry on” when you want me to continue.", result())
         assertEquals(PauseReason.NETWORK, TaskJournal.resumable()!!.pauseReason)
     }
 

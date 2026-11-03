@@ -27,6 +27,9 @@ class OnlineFallback(private val keys: List<String>) {
 
 
     suspend fun choose(intent: TxIntent, rows: List<Pair<String, String>>): String? {
+        // Owner, 2 Nov 2026: no paid / third-party cloud brains. This Groq fallback is off unless switched on in config; the
+        // navigator then asks the user to pick the row (MenuBrain's own pick runs first, on the phone, as before).
+        if (!AppConfig.bool("ussd.navigator.onlineFallback", false)) return null
         if (rows.isEmpty() || keys.isEmpty()) return null
         if (!com.tekyerema.core.NetworkMonitor.isOnline()) return null
         val menu = rows.joinToString("\n") { (n, w) -> "$n. $w" }

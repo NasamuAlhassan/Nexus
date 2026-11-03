@@ -49,7 +49,8 @@ object PauseRules {
 
     /** Why, in words a person understands (never an error code). */
     fun because(r: PauseReason?): String = when (r) {
-        PauseReason.NETWORK -> AppConfig.string("agent.resume.phrases.network", "the internet dropped")
+        // A20e, 2 Nov 2026: said with no connection at all ("the internet dropped" was wrong when there never was one).
+        PauseReason.NETWORK -> AppConfig.string("agent.resume.phrases.network", "it needs the internet, and the phone is offline")
         PauseReason.QUOTA -> AppConfig.string("agent.resume.phrases.quota", "I've used up my AI allowance for now")
         PauseReason.NO_CAPABLE_MODEL -> AppConfig.string("agent.resume.phrases.noModel", "no AI that can do this safely is free right now")
         // (merge A+B: B's budget_exhausted is the operator's DAILY cloud budget — OperatorPolicy.dailyCloudCallCap/dailyTokenCap.)

@@ -1581,7 +1581,8 @@ object AgentEngine {
                                     // a chat titled by a bare number is read with the saved name (QA M01, 3 October 2026)
                                     nameOfNumber = { n -> appContext()?.let { c -> com.tekyerema.android.ContactResolver.lookupByNumber(c, n).firstOrNull()?.name } },
                                     goal = goal,   // S-05: a composer holding other words than the user dictated is read with both
-                                    handedOver = com.tekyerema.policy.ActionSemantics.handedOver(history)   // a picture handed over earlier in this task
+                                    handedOver = com.tekyerema.policy.ActionSemantics.handedOver(history),   // a picture handed over earlier in this task
+                                    lastTyped = com.tekyerema.policy.ActionSemantics.lastTyped(history)
                                 )
                                 var semantic = readBack(readBackScreen)
                                 // A bare "Send this message?" (no recipient, no text) usually means the screen is still

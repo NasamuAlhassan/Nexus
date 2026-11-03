@@ -525,9 +525,20 @@ object LanguagePipeline {
         // once in the read-back ("I heard 'prints' — taking it as Prince.") — voice/HeardAs.
         HeardAs.note(canonical, fixed.fixes)
         val entities = try { Entities.derive(canonical, lang) } catch (t: Throwable) { emptyList() }
+        // For the brains: the same words with only the names put right (numbers and money words stay as said).
+        val asSaid = if (lang != Lang.GH_EN) "" else namesOnly(raw, vocab).takeIf { it.isNotBlank() && it != canonical }.orEmpty()
         return Transcript(raw = raw, canonical = canonical, language = lang, reason = reason, entities = entities, backend = backend,
-            asrMs = asrMs, corrections = fixed.fixes.map { "${it.kind.name.lowercase()}:${it.from}→${it.to}" })
+            asrMs = asrMs, corrections = fixed.fixes.map { "${it.kind.name.lowercase()}:${it.from}→${it.to}" }, asSaid = asSaid)
     }
+
+    /** [raw] with only contact / app names corrected, never inside a message's own words (see [process]). Pure but for [vocab]. */
+    private fun namesOnly(raw: String, vocab: EntityCorrector.Vocab): String = try {
+        val said = raw.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
+        val messaging = com.tekyerema.voice.understand.MessageBody.isMessaging(said)
+        val (head, body) = if (messaging) com.tekyerema.voice.understand.MessageBody.split(said) else said to ""
+        val r = EntityCorrector.correct(head, vocab)
+        if (body.isEmpty()) r.text else r.text.trimEnd() + (if (head.endsWith(" ")) " " else "") + body
+    } catch (_: Throwable) { raw.trim() }
 
     /** The names to correct against — [SpeechVocabulary]'s in-memory snapshot (empty in unit tests unless set). */
     @Volatile var vocabulary: () -> EntityCorrector.Vocab = { SpeechVocabulary.current() }

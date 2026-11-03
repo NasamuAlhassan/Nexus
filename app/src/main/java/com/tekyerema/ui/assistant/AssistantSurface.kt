@@ -35,6 +35,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -349,6 +350,12 @@ private fun GlassSurface(
     // The follow-up field also opens for typing an answer to the agent's question (Type), never by a gesture on a prompt.
     val typingAnswer = state.mode == Mode.WAITING && state.waiting?.kind == PromptSurface.Kind.QUESTION && rest == Rest.INPUT
 
+    // A20e, 2 Nov 2026 (owner: "the keyboard closes automatically when I try to type"): when the keyboard rises the window shrinks and
+    // the glass moves under a touch, which read as a fast downward swipe (-116 dp, -1658 dp/s) → COLLAPSE → the field and the keyboard
+    // went. While the keyboard is up in the typing rest, a release never collapses or dismisses: Back or a tap outside does that.
+    val keyboardUp = androidx.compose.foundation.layout.WindowInsets.ime.getBottom(density) > 0
+    val keyboardUpNow = androidx.compose.runtime.rememberUpdatedState(keyboardUp)
+
     fun toDp(px: Float) = px / density.density
     fun visualPx(): Float = with(density) {
         SurfaceGesture.visualOffset(toDp(dragPx.floatValue), allowUp = allow.dismiss || rest != Rest.COMPACT,
@@ -386,7 +393,11 @@ private fun GlassSurface(
         crossed = false
         if (!gestureLive) return
         gestureLive = false
-        val s = SurfaceGesture.settle(rest, toDp(dragPx.floatValue), toDp(velocity), toDp(heightPx), allow)
+        val read = SurfaceGesture.settle(rest, toDp(dragPx.floatValue), toDp(velocity), toDp(heightPx), allow)
+        val s = if (rest == Rest.INPUT && keyboardUpNow.value && (read == Settle.COLLAPSE || read == Settle.DISMISS)) {
+            android.util.Log.i("Tekyerema", "[SURFACE] release while typing (keyboard up): kept open, read was $read")
+            Settle.STAY
+        } else read
         // Numbers only (no words): how a release was read — the emulator and phone tests check gestures against it.
         android.util.Log.i("Tekyerema", "[SURFACE] release drag=${toDp(dragPx.floatValue).toInt()}dp v=${toDp(velocity).toInt()}dp/s " +
             "h=${toDp(heightPx).toInt()}dp rest=$rest dismiss=${allow.dismiss} → $s")
