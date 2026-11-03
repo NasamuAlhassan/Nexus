@@ -36,6 +36,13 @@ object Invariants {
             FinalActionGuard.apply(decision, goal, history, screen?.toString().orEmpty(), app)
         } catch (_: Throwable) { decision }
         val c = guarded as? AgentDecision.CallTool ?: return guarded
+        // 5. a request to send money is never turned into a text, a call or a dial by a brain (A20e, 3 Nov 2026: the 2B planned
+        //    an SMS composer and a dial of 130 for "send 1 cedi to Prince"). Money goes through Mobile Money's own menu only.
+        if (grounding && c.name in NOT_MONEY_CHANNELS && isMoneySend(goal)) {
+            log("[INVARIANT] a money request turned into ${c.name} — refused")
+            return AgentDecision.CannotDo("unsafe", "That's a money request, and I only send money through Mobile Money's own menu, " +
+                "which reads it back for your yes and stops at your PIN. Say it again as: send, the amount, to, the name.")
+        }
         // 4. a redo of the last request never starts with the same action that was wrong (agent/Rephrase)
         if (Rephrase.repeats(goal, c.name, c.args))
             return askOnce(history, guarded, "Last time I did that, and it wasn't what you wanted. What should I do instead?",
@@ -57,6 +64,12 @@ object Invariants {
         }
         return guarded
     }
+
+    private val NOT_MONEY_CHANNELS = setOf("send_sms", "make_call", "open_intent", "reply_to_notification", "run_ussd_unchecked")
+
+    internal fun isMoneySend(goal: String): Boolean = try {
+        com.tekyerema.money.MoneyAsk.parse(goal)?.kind == com.tekyerema.money.MoneyAsk.Kind.SEND
+    } catch (_: Throwable) { false }
 
     /** The request is to send to, call or reply to someone (not to read or check messages). */
     internal fun reachesSomeone(goal: String): Boolean =

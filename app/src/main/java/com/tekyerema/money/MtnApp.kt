@@ -37,9 +37,14 @@ object MtnApp {
     internal fun matches(pkg: String, pattern: String): Boolean =
         if (pattern.endsWith("*")) pkg.startsWith(pattern.dropLast(1)) else pkg == pattern
 
-    /** Online, app mode on, the app installed: MoMo transactions go to the app. Offline → USSD, always. */
+    /**
+     * Online, app mode on, the app installed: MoMo transactions go to the app. Offline → USSD, always.
+     * Default "ussd" since 3 Nov 2026: app mode needs a planner able to drive MTN's app (the finale's paid cloud brain); the
+     * online brain is now our own 2B, which on the A20e turned "send 1 cedi to Prince" into an SMS composer and a dial of 130.
+     * The phone's own guided USSD walk is deterministic, reads back, and stops at the PIN — online and offline alike.
+     */
     fun useApp(ctx: Context? = com.tekyerema.agent.AgentEngine.appContext()): Boolean {
-        if (AppConfig.string("money.onlineChannel", "app") != "app") return false
+        if (AppConfig.string("money.onlineChannel", "ussd") != "app") return false
         if (!com.tekyerema.core.NetworkMonitor.isOnline()) return false
         return ctx != null && installed(ctx) != null
     }

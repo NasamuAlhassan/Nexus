@@ -73,6 +73,17 @@ class InvariantsTest {
             as AgentDecision.CallTool).name)
     }
 
+    @Test fun a_money_request_is_never_turned_into_a_text_or_a_call() {
+        val sms = AgentDecision.CallTool("open_intent", JSONObject().put("intent", "sms_compose").put("to", "Prince"), null)
+        assertTrue(Invariants.apply(sms, "send 1 cedi to Prince", emptyList(), null) is AgentDecision.CannotDo)
+        val dial = AgentDecision.CallTool("make_call", JSONObject().put("number", "130"), null)
+        assertFalse((Invariants.apply(dial, "send 1 cedi to Prince", emptyList(), null) as? AgentDecision.CallTool)?.name == "make_call")
+        // a message that only talks about money is a message
+        val text = AgentDecision.CallTool("send_sms", JSONObject().put("contact", "Kofi").put("message", "I'll send you 5 cedis tomorrow"), null)
+        assertEquals("send_sms", (Invariants.apply(text, "text Kofi saying I'll send you 5 cedis tomorrow", emptyList(), null)
+            as AgentDecision.CallTool).name)
+    }
+
     @Test fun a_short_command_said_again_or_a_new_topic_is_not_a_rephrase() {
         Rephrase.observe("volume up", listOf("quick_volume_up() → done"), "Volume 8.", now = 1_000)
         assertNull(Rephrase.noteFor("volume up", now = 3_000))
