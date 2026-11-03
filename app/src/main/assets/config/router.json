@@ -46,13 +46,13 @@
       "phrases": { "answer": "The internet is back. Earlier you asked: {goal}. {answer}" }
     },
     "pocket": {
-      "_note": "The pocket brain (agent/pocket, 3 Nov 2026): a small int8 ONNX encoder that proposes ONE first action offline (a tool, a question, or an honest can't) when no rule matched and no cloud brain can be used. Files model.onnx + spec.json + tokenizer.json in <files>/<dir>/ (adb push) or assets/<dir>/; absent = off. tauRisk/tauOther: -1 = the thresholds in spec.json; below the threshold it asks, never acts. tauOther 0.4 (3 Nov 2026, A20e): the spec's 0.0 acted on a 0.25 guess (read every notification for: did Prince send me anything).",
+      "_note": "The pocket brain (agent/pocket, 3 Nov 2026): a small int8 ONNX encoder that proposes ONE first action offline (a tool, a question, or an honest can't) when no rule matched and no cloud brain can be used. Files model.onnx + spec.json + tokenizer.json in <files>/<dir>/ (adb push) or assets/<dir>/; absent = off. tauRisk/tauOther: -1 = the thresholds in spec.json; below the threshold it asks, never acts. tauRisk 0.95 for v3b (0.0% risky wrong-acts on the test split; its own 0.84 let 4.7% through). tauOther 0.4 (3 Nov 2026, A20e): the spec's 0.0 acted on a 0.25 guess (read every notification for: did Prince send me anything).",
       "enabled": true,
       "dir": "pocket",
       "model": "model.onnx",
       "spec": "spec.json",
       "vocab": "tokenizer.json",
-      "tauRisk": -1,
+      "tauRisk": 0.95,
       "tauOther": 0.4
     },
     "localModel": {
