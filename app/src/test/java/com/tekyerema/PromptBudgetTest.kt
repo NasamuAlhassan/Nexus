@@ -47,7 +47,7 @@ class PromptBudgetTest {
         // hands it to a chat app; loads per step only in the "apps" group) measured 31,369. Cap = measured + ~100.
         // Owner, 29 Oct 2026 (a judge's "read the recent message from X on WhatsApp" read the notifications): + read_chat (opens the
         // chat, reads their latest bubbles; loads per step only in the "chat" group) measured 31,808. Cap = measured + ~100.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 31_910)
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 32_000)   // 32.0k (3 Nov 2026): calendar repeat + until (weekly classes)
         // Owner, 21 Oct 2026 ("the brain should understand"): one line telling the brain it has eyes (look_with_camera, now a
         // core tool) — measured 5,935. Cap = measured + ~60.
         // Owner, 26 Oct 2026 (Uber: the brain picked UberX without reading out the options): one sentence — a priced choice is

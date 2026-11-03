@@ -860,6 +860,7 @@ class VoiceController(
 
     /** Cancel safely at any point; if the agent is mid-task, stop it too. No consequential action leaks. */
     fun cancel() {
+        carried = null; stoppedAt = System.currentTimeMillis()   // a deliberate stop drops a half-heard sentence too
         hideAsking()
         job?.cancel()
         confirmJob?.cancel()
@@ -1167,6 +1168,18 @@ class VoiceController(
 
     /** One more capture + transcription with [strategy] (a continuation or a patient wait); null when nothing usable
      *  was said. Cancellation propagates. */
+    /**
+     * A sentence that stopped mid-phrase ("…behind the Aqua for") while the phone listened for the rest, and that listen
+     * was cut by a new talk press: the words already heard are kept for the next turn instead of thrown away (owner's A20e,
+     * 3 Nov 2026, audit/real-requests-2026-11-03 r31 — the owner had to say it all again). Joined to what is said next, or
+     * acted on alone if nothing is; gone after [CARRY_MS] or on a deliberate stop.
+     */
+    @Volatile private var carried: Pair<Transcript, Long>? = null
+    @Volatile private var stoppedAt = 0L
+    private val CARRY_MS = 30_000L
+    private fun takeCarried(): Transcript? = carried?.takeIf { System.currentTimeMillis() - it.second <= CARRY_MS }?.first
+        .also { carried = null }
+
     private suspend fun listenMore(strategy: VadStrategy): Transcript? {
         val purpose = if (strategy.name == VadStrategy.PATIENT.name) com.tekyerema.voice.io.ListenPurpose.PATIENT
             else com.tekyerema.voice.io.ListenPurpose.CONTINUATION
@@ -1249,11 +1262,14 @@ class VoiceController(
                 // voice/io: the recognizer's live words, for the screen only — never acted on, never logged, never spoken.
                 partial = { p -> _state.update { it.copy(livePartial = p) } }
             ))
+            val before = takeCarried()
             var tr = when (heard) {
                 is com.tekyerema.voice.io.Heard.Speech -> heard.transcript.also { com.tekyerema.core.telemetry.Telemetry.mark("asr_final"); noSpeechRun = 0 }
+                    .let { now -> if (before == null) now else { Log.i("Tekyerema", "[VOICE] joined to the half-heard sentence from before"); TurnDetector.join(before, now) } }
                 // In a follow-up, silence just ends the conversation quietly (the screen then closes);
                 // on a deliberate tap-to-talk it's worth telling the user we heard nothing.
                 com.tekyerema.voice.io.Heard.NoSpeech, com.tekyerema.voice.io.Heard.TooShort -> {
+                    if (before != null) { Log.i("Tekyerema", "[VOICE] nothing more said: acting on the half-heard sentence"); runTurn(before, InputSource.ASR); return }
                     // A QUESTION is waiting and the phone's recognizer came back empty (error 7 on the A20e, twice,
                     // on spoken digits — 2026-09-30): one more listen through OUR OWN recognizer (the keyboard's
                     // dictation core — offline-capable, tuned on Ghanaian speech) before the ask is allowed to die.
@@ -1300,7 +1316,14 @@ class VoiceController(
             // and join the parts, instead of acting on half a request.
             if (TurnDetector.looksUnfinished(tr.canonical)) {
                 set(VoiceState.LISTENING, ack)
-                listenMore(VadStrategy.CONTINUE)?.let { tr = TurnDetector.join(tr, it) }
+                try { listenMore(VadStrategy.CONTINUE)?.let { tr = TurnDetector.join(tr, it) } }
+                catch (c: CancellationException) {
+                    if (System.currentTimeMillis() - stoppedAt > 2_000L) {
+                        carried = tr to System.currentTimeMillis()
+                        Log.i("Tekyerema", "[VOICE] continuation cut short: the words heard are kept for the next turn")
+                    }
+                    throw c
+                }
                 set(VoiceState.TRANSCRIBING, "Transcribing…")
             }
             // Right after a reply (a reading part, a question, a tap to interrupt), "stop" / "that's enough" ends the

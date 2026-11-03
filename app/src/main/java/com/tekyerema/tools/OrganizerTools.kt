@@ -120,6 +120,41 @@ object CalendarFormat {
         }
     }
 
+    /**
+     * The repeat rule for a new event (RFC 5545 RRULE, which the calendar app's editor reads): [repeat] = daily, weekly,
+     * weekdays or monthly; [until] = the last date ("2026-12-12", inclusive, local) or [count] occurrences. Weekly repeats on
+     * the start's own weekday. null = a one-time event (or an unknown repeat — never a guess). Owner's A20e, 3 Nov 2026: a
+     * class timetable could not be put in the calendar as weekly classes.
+     */
+    fun rrule(repeat: String?, until: String?, count: Int?, zone: TimeZone): String? {
+        val freq = when (repeat?.trim()?.lowercase()) {
+            "daily", "every day" -> "FREQ=DAILY"
+            "weekly", "every week" -> "FREQ=WEEKLY"
+            "weekdays", "every weekday" -> "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"
+            "monthly", "every month" -> "FREQ=MONTHLY"
+            else -> return null
+        }
+        val end = until?.trim()?.takeIf { it.isNotEmpty() }?.let { u ->
+            try {
+                val d = LocalDate.parse(u.take(10))
+                val last = d.plusDays(1).atStartOfDay(zone.toZoneId()).toInstant().minusSeconds(1)
+                ";UNTIL=" + DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC).format(last)
+            } catch (_: Throwable) { null }
+        } ?: count?.takeIf { it in 1..500 }?.let { ";COUNT=$it" } ?: ""
+        return freq + end
+    }
+
+    /** "every week until Saturday 12 December" — the repeat said in words, for the result line. */
+    fun repeatWords(repeat: String?, until: String?, count: Int?): String? {
+        val r = when (repeat?.trim()?.lowercase()) {
+            "daily", "every day" -> "every day"; "weekly", "every week" -> "every week"
+            "weekdays", "every weekday" -> "every weekday"; "monthly", "every month" -> "every month"
+            else -> return null
+        }
+        val u = until?.let { try { LocalDate.parse(it.trim().take(10)).format(DAY_DATE) } catch (_: Throwable) { null } }
+        return r + (u?.let { " until $it" } ?: count?.takeIf { it in 1..500 }?.let { ", $it times" } ?: "")
+    }
+
     /** [start, end) of the local calendar day containing [nowMs] — the "today" query window. */
     fun dayBounds(nowMs: Long, zone: TimeZone): Pair<Long, Long> {
         val zid = zone.toZoneId()
@@ -145,7 +180,10 @@ object CalendarTool : Tool {
         ToolParam("action", "string", "add, today, or upcoming (next 7 days).", enumValues = listOf("add", "today", "upcoming")),
         ToolParam("title", "string", "Event title (add).", required = false),
         ToolParam("start", "string", "Local start time, e.g. 2026-09-29T10:00 (add).", required = false),
-        ToolParam("duration_minutes", "integer", "Length in minutes (add; default 60).", required = false)
+        ToolParam("duration_minutes", "integer", "Length in minutes (add; default 60).", required = false),
+        ToolParam("repeat", "string", "Repeat (add); omit = once.", required = false,
+            enumValues = listOf("daily", "weekly", "weekdays", "monthly")),
+        ToolParam("until", "string", "Last date of the repeat, YYYY-MM-DD.", required = false)
     )
 
     private const val MAX_EVENTS = 8
@@ -178,6 +216,9 @@ object CalendarTool : Tool {
             intent.putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
             intent.putExtra(CalendarContract.EXTRA_EVENT_END_TIME, begin + minutes * 60_000L)
         }
+        val repeat = args.str("repeat"); val until = args.str("until"); val count = args.intOrNull("count")
+        val rule = CalendarFormat.rrule(repeat, until, count, zone)
+        if (rule != null) intent.putExtra(CalendarContract.Events.RRULE, rule)
         if (intent.resolveActivity(ctx.appContext.packageManager) == null)
             return ToolResult(false, "No calendar app on this phone can add events.")
         return try {
@@ -191,7 +232,8 @@ object CalendarTool : Tool {
             // Opening the editor is NOT saving: the calendar app owns the Save button.
             ToolResult(
                 true,
-                "The calendar's new-event screen is open" + (filled?.let { ", filled in as: $it." } ?: ".") + past +
+                "The calendar's new-event screen is open" + (filled?.let { ", filled in as: $it" } ?: "") +
+                    (if (rule != null) CalendarFormat.repeatWords(repeat, until, count)?.let { ", repeating $it." } ?: "." else ".") + past +
                     " It is NOT saved until you tap Save.",
                 data = JSONObject().put("saved", false).apply { if (begin != null) put("begin", begin) },
                 channel = "intent"

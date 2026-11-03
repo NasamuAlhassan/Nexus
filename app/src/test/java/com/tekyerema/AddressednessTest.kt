@@ -129,6 +129,11 @@ class AddressednessTest {
         assertFalse("a request said twice is not a loop",
             Addressedness.isLoop(Addressedness.tokens("send money to 055 send money to 0553238")))
         assertFalse(Addressedness.isLoop(Addressedness.tokens("call call mum")))
+        // A long, natural answer repeats phrases far apart — not a loop (A20e, 2 Nov 2026: 28 s of an answer were dropped).
+        val answer = "okay so for me I want a small car I want something cheap because I am a student and the car should be " +
+            "good on fuel and I want a car that is easy to repair around here and if it is not too old then I want it"
+        assertFalse(Addressedness.isLoop(Addressedness.tokens(answer)))
+        assertTrue(Addressedness.judge(answer, follow, questionPending = true).addressed)
     }
 
     // ------------------------------------------------------------------ a wake that only just cleared the bar

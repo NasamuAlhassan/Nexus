@@ -130,8 +130,11 @@ object Addressedness {
      *  so a short request said twice ("send money to 055 send money to 0553238") is never one. */
     internal fun isLoop(w: List<String>): Boolean {
         if (w.size < 10) return false
-        if (w.windowed(2).groupingBy { it }.eachCount().values.any { it >= 3 }) return true
-        return w.windowed(3).groupingBy { it }.eachCount().values.any { it >= 2 } && w.toSet().size.toDouble() / w.size < 0.6
+        // A recogniser loop repeats CLOSE TOGETHER: a two-word run three times within a dozen words. Spread through a long
+        // answer ("I want…", "a car…" three times in 28 s of speech) it is just how people talk — the owner's answer to
+        // Nexus's own question was dropped as a "repetition" (A20e, 2 Nov 2026, audit/real-requests-2026-11-03 r21).
+        if (w.windowed(minOf(12, w.size)).any { win -> win.windowed(2).groupingBy { it }.eachCount().values.any { it >= 3 } }) return true
+        return w.windowed(3).groupingBy { it }.eachCount().values.any { it >= 2 } && w.toSet().size.toDouble() / w.size < 0.45
     }
 
     /** Drop leading fillers and discourse words ("okay so please …", "and then …", "I mean …") — what follows is the request. */

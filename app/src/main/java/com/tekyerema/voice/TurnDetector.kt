@@ -56,6 +56,8 @@ object TurnDetector {
         raw = (first.raw.trimEnd(',', ' ') + " " + rest.raw).trim(),
         canonical = (first.canonical.trimEnd(',', ' ') + " " + rest.canonical).trim(),
         asrMs = first.asrMs + rest.asrMs,
-        reason = first.reason + "+continued"
+        reason = first.reason + "+continued",
+        asSaid = if (first.asSaid.isBlank() && rest.asSaid.isBlank()) "" else
+            (first.asSaid.ifBlank { first.canonical }.trimEnd(',', ' ') + " " + rest.asSaid.ifBlank { rest.canonical }).trim()
     )
 }

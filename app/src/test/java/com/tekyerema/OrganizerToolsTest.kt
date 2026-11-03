@@ -159,4 +159,14 @@ class OrganizerToolsTest {
         assertEquals(1, doc.getInt("schema_version"))
         assertEquals(templates, IntentTemplates.parse(doc.getJSONObject("intents").getJSONObject("templates")))
     }
+
+    @Test fun a_repeating_event_carries_its_rule() {
+        val gmt = TimeZone.getTimeZone("GMT")
+        assertEquals("FREQ=WEEKLY;UNTIL=20261212T235959Z", CalendarFormat.rrule("weekly", "2026-12-12", null, gmt))
+        assertEquals("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR;COUNT=10", CalendarFormat.rrule("weekdays", null, 10, gmt))
+        assertEquals("FREQ=DAILY", CalendarFormat.rrule("daily", null, null, gmt))
+        assertNull(CalendarFormat.rrule(null, "2026-12-12", null, gmt))          // no repeat named → a one-time event
+        assertNull(CalendarFormat.rrule("fortnightly", null, null, gmt))         // unknown → never a guess
+        assertEquals("every week until Saturday 12 December", CalendarFormat.repeatWords("weekly", "2026-12-12", null))
+    }
 }
