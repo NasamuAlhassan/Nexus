@@ -105,3 +105,7 @@ phase2/train/sherpa/ggml*/*.bin
 
 # offline naming model and label vectors (campaign/kaggle/whatis-v1 output, ~372 MB)
 app/src/main/assets/whatis/
+
+# three-brain evaluation: raw evidence (logs/screens) stays local; records and reports are committed
+evaluations/evidence/
+evaluations/DRYRUN/
