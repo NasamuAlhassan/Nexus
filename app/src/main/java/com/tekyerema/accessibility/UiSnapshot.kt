@@ -110,7 +110,9 @@ data class UiSnapshot(
     val announcements: List<String> = emptyList(),
     /** P2b: a web container (Chrome's "Web View", a WebView) is on screen but its page content never reached the tree,
      *  even after a second look. What was read is the app's chrome only; the page may hold anything (a login form). */
-    val webContentMissing: Boolean = false
+    val webContentMissing: Boolean = false,
+    /** List rows the app draws itself and names to nobody ([BlindRows]): where they are, for OCR to read. */
+    val blindRows: List<Box> = emptyList()
 ) {
     fun element(id: Int): UiElement? = elements.firstOrNull { it.id == id }
 

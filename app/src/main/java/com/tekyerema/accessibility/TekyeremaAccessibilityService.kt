@@ -588,6 +588,7 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
         // P1-07: the first web container met, and how many elements its subtree yielded (0 = a bare page, see buildSnapshot).
         var webSeen = false; var insideWeb = false; var webDepth = 0; var webCount = 0
         var overBudget = false
+        val blindRows = ArrayList<Box>()
         while (stack.isNotEmpty() && visited < maxVisited && elements.size < maxCollected) {
             if (SystemClock.uptimeMillis() - walkStart > budgetMs) { overBudget = true; break }
             val (node, depth, ancestorClickable) = stack.removeLast()
@@ -652,6 +653,11 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
                 } else if (label != null) {
                     stripped++ // labelled but invisible/off-screen: treated as a hidden channel
                 }
+            } else if (node.isFocusable && node.isVisibleToUser) {
+                // A row that names itself to nobody (BlindRows). The parent look is an IPC, so only for a row-sized blank node.
+                val r = Rect(); node.getBoundsInScreen(r)
+                val b = Box(r.left, r.top, r.right, r.bottom)
+                if (BlindRows.isRow(b, sw, sh) && try { node.parent?.isScrollable == true } catch (_: Throwable) { false }) blindRows.add(b)
             }
             // Depth 60, not 25: Compose apps nest deeply — ChatGPT's message box sits 35 levels down (A20e 2026-09-29),
             // so the app looked like it had no text box at all. The visit budget above still bounds the walk; and an
@@ -686,7 +692,8 @@ class TekyeremaAccessibilityService : AccessibilityService(), AccessibilityContr
             appName = pkg?.let { appNameOf(it) },
             windowType = wtype,
             truncated = visited >= maxVisited || elements.size >= maxCollected || overBudget,   // F-01
-            announcements = recentAnnouncements()                                  // F-17
+            announcements = recentAnnouncements(),                                 // F-17
+            blindRows = blindRows
         ), bareWeb = webSeen && webCount == 0)
     }
 

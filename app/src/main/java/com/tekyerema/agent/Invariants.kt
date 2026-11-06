@@ -92,6 +92,13 @@ object Invariants {
         if (reachesSomeone(goal) && looksLikeName(name) && !facts.personGrounded(name)) {
             return askOnce(history, guarded, "I found “$name”. Is that who you mean?", "a person the user didn't name")
         }
+        // 3b. reading what a NAMED person sent, but the tapped chat is someone (or something) else — A20e 6 Nov 2026: asked for
+        //     Richmond's last Telegram message, the brain opened "Learn Python Coding" and reported its post as his.
+        if (!reachesSomeone(goal) && readsFromSomeone(goal)) {
+            val chat = SeenTarget.nameOf(label)
+            if (looksLikeName(chat) && !facts.personGrounded(chat))
+                return askOnce(history, guarded, "I found “$chat”. Is that whose messages you mean?", "a chat that isn't the person named")
+        }
         return guarded
     }
 
@@ -129,6 +136,12 @@ object Invariants {
     private val REACH = Regex("(?i)\\b(send|text|tell(?!\\s+me\\b)|reply|call|ring|dial|forward|share|message\\s+\\w|dm)\\b")
     private val READING = Regex("(?i)\\b(read|check|what|any new|show me|did|who sent|latest from)\\b")
 
+    /** The request is to read what a particular person sent ("the last message Richmond sent me", "messages from Ama",
+     *  "what did Kofi say", "did Prince text me"). */
+    internal fun readsFromSomeone(goal: String): Boolean = READS_FROM.containsMatchIn(goal)
+    private val READS_FROM = Regex("(?i)\\b(?:message|messages|text|texts|chat|voice notes?|photos?|videos?|links?)\\b.{0,40}\\b(?:from|sent|by)\\b|" +
+        "\\bsent me\\b|\\bwhat did \\w+ (?:say|send|write)\\b|\\bdid \\w+ (?:send|text|message|write|reply)\\b")
+
     /** The label of what a tap would touch: the element by id, or the label the planner gave. */
     internal fun targetLabel(args: JSONObject, screen: JSONObject?): String? {
         val id = if (args.has("element_id")) args.optInt("element_id", -1) else -1
@@ -142,7 +155,11 @@ object Invariants {
         return args.optString("label").takeIf { it.isNotBlank() && it != "null" }
     }
 
-    internal fun looksGroupish(label: String): Boolean = SUBSCRIBERS.containsMatchIn(label) ||
+    /** A chat-list row whose preview is the chat's own name doing something ("Learn Python Coding pinned a photo"): a group or
+     *  channel's system line, never a person's message (Telegram, A20e 6 Nov 2026). */
+    private val PINNED = Regex("(?i)^([^,\\n]{2,60}),.*\\b\\1 (?:pinned|posted|added|removed|changed)\\b")
+
+    internal fun looksGroupish(label: String): Boolean = SUBSCRIBERS.containsMatchIn(label) || PINNED.containsMatchIn(label) ||
         label.lines().any { l -> BOTISH.containsMatchIn(l.trim()) }
 
     /** One to four words of letters, not one of the chat apps' own controls: a person's (or a chat's) name. */

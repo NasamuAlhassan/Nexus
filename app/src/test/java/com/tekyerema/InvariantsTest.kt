@@ -50,6 +50,21 @@ class InvariantsTest {
         assertTrue(Invariants.apply(tap(2), goal, again, s) is AgentDecision.CannotDo)
     }
 
+    @Test fun reading_a_named_persons_messages_never_opens_another_chat_unasked() {
+        // A20e 6 Nov 2026: asked for Richmond's last Telegram message, the brain opened the group "Learn Python Coding" and
+        // reported its pinned post as Richmond's. Rows here are as the OCR names them (one line: name, time, preview).
+        val s = screen("org.telegram.messenger", "Search", "Learn Python Coding, Thu, Learn Python Coding pinned a photo",
+            "Richmond Apenensu, Ok see you, 10:42", "Ama Owusu, see you, 09:10")
+        val goal = "what was the last message Richmond sent me on telegram"
+        val group = question(Invariants.apply(tap(2), goal, emptyList(), s))
+        assertNotNull(group); assertTrue(group!!, "Learn Python Coding" in group && "channel or a group" in group)
+        val other = question(Invariants.apply(tap(4), goal, emptyList(), s))
+        assertEquals("I found “Ama Owusu”. Is that whose messages you mean?", other)
+        assertEquals("tap", (Invariants.apply(tap(3), goal, emptyList(), s) as AgentDecision.CallTool).name)
+        assertTrue(Invariants.readsFromSomeone("read my messages from Ama")); assertTrue(Invariants.readsFromSomeone("did Prince text me"))
+        assertFalse(Invariants.readsFromSomeone("read my latest WhatsApp message")); assertFalse(Invariants.readsFromSomeone("send Ama a message"))
+    }
+
     @Test fun reading_messages_and_app_controls_are_not_slowed_down() {
         val s = screen("com.whatsapp", "Chats", "Ama Owusu", "Search")
         assertEquals("tap", (Invariants.apply(tap(2), "read my latest WhatsApp message", emptyList(), s) as AgentDecision.CallTool).name)
