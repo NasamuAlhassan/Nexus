@@ -199,6 +199,10 @@ class RoutingBrain(
     /** The tool the pocket brain's proposal ran: its result is what the user hears next (see decide). */
     @Volatile private var pocketActed: String? = null
 
+    /** No tool has run yet in this task: the history holds no "tool(args) → result" line (notes don't count). */
+    private fun noStepsYet(history: List<String>): Boolean = history.none { STEP_LINE.containsMatchIn(it) }
+    private val STEP_LINE = Regex("^[a-z_]+\\(")   // LocalBrain.lastStep's notion of a step line
+
     private fun cloudCtx(ctx: BrainContext): BrainContext =
         cloudGoal?.takeIf { it != ctx.goal }?.let { ctx.copy(goal = it) } ?: ctx
 
@@ -207,6 +211,14 @@ class RoutingBrain(
         s.any { it in "ɛɔŋʋɩ" } || Regex("\\b(frɛ\\w*|bue\\w*|kɔ|sɛ|mepɛ|kenkan|nkra|aane|daabi|wopɛ)\\b", RegexOption.IGNORE_CASE).containsMatchIn(s)
 
     override suspend fun decide(ctx: BrainContext): AgentDecision {
+        // "No thanks" / "never mind" as the whole request: nothing to do, no brain (A20e 6 Nov 2026: it went to the cloud brain,
+        // which opened Calendar and tapped "6" three times).
+        // (noStepsYet, not history.isEmpty(): the engine may put a note — a resume, a research line — in the history before the
+        // first step; A20e 6 Nov 2026, "no thanks" still reached the cloud brain with the isEmpty test.)
+        if (noStepsYet(ctx.history) && Dismissal.isDismissal(ctx.goal)) {
+            pocketQuestion = null; pocketActed = null
+            return AgentDecision.Done(Dismissal.REPLY)
+        }
         // N-09: the user answered our "should I find out when the internet is back?" offer.
         offered?.let { return answerOffer(ctx, it) }
         // The pocket brain asked something ("Did you mean to send a message, or to make a call?"): the answer is the request
@@ -229,6 +241,9 @@ class RoutingBrain(
             val ans = com.tekyerema.money.MoneyFlow.answers(ctx.history).lastOrNull { it.first == q }?.second
             pocketQuestion = null
             if (ans != null && ans.isNotBlank()) {
+                // "no" / "no, it's fine" to the pocket's question: the user wants nothing — end here (A20e 6 Nov 2026: re-read as a
+                // request, it was asked again and again until the 30-step limit, 18 s of silence).
+                if (Dismissal.isDismissal(ans)) return AgentDecision.Done(Dismissal.REPLY)
                 val clearer = if (ans.trim().split(Regex("\\s+")).size >= 3) ans.trim() else "${ctx.goal.trim()} — ${ans.trim()}"
                 android.util.Log.i("Tekyerema", "[ROUTE] the answer to the pocket brain's question is understood afresh")
                 // The rules start this request afresh too (LocalBrain counts its own steps: on step 2 it only says its done line).
@@ -346,7 +361,8 @@ class RoutingBrain(
         }
         if (cloud != null && isOnline() && linkAnswers()) {
             // Step one of a task about a named app: open it here — deterministic, ~0 ms instead of a round-trip.
-            if (!stickyCloud && ctx.history.isEmpty()) appForGoal?.invoke(ctx.goal)?.let { (label, pkg) ->
+            // The dictated body of a message is not part of the route ("text Prince: … on WhatsApp …" opened WhatsApp, A20e 6 Nov 2026).
+            if (!stickyCloud && ctx.history.isEmpty()) appForGoal?.invoke(DictatedBody.head(ctx.goal))?.let { (label, pkg) ->
                 if (ctx.screen.optString("app") != pkg) {
                     stickyCloud = true
                     if (cloudGoal == null) cloudGoal = cloudGoalFor(ctx.goal)

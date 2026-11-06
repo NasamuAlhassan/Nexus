@@ -344,6 +344,16 @@ class SpeechRobustnessTest {
         assertEquals(ContactMatcher.Confidence.CHOOSE, ContactMatcher.confidence(rank("mensah")))
     }
 
+    @Test fun `the whole saved name said in full is that contact alone`() {
+        // A20e 6 Nov 2026: the owner saved his other number as just "Prince"; "text Prince" must not ask "which Prince?"
+        val phone = listOf("Prince", "Prince Tesano AG youth Sec", "Prince Ice P", "Prince Alhassan", "Princess Adjei")
+            .mapIndexed { i, n -> ContactResolver.Contact(n, "02411111%02d".format(i)) }
+        assertEquals(listOf("Prince"), ContactMatcher.pick("Prince", ContactMatcher.rank("Prince", phone)).map { it.name })
+        assertEquals(listOf("Prince"), ContactMatcher.pick("prince", ContactMatcher.rank("prince", phone)).map { it.name })
+        // with nobody saved as just "Prince", every Prince is still offered (and not Princess)
+        assertEquals(3, ContactMatcher.pick("Prince", ContactMatcher.rank("Prince", phone.drop(1))).size)
+    }
+
     @Test fun `found on the A20e - a changed consonant or a possessive is someone else`() {
         val phone = listOf("Osei Kwame", "Kwesi Dain", "Qweku Marvin", "Richmond's Dad", "Prince Melanin")
             .mapIndexed { i, n -> ContactResolver.Contact(n, "02400000%02d".format(i)) }

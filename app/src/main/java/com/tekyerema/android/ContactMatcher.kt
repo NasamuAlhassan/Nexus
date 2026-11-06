@@ -137,6 +137,9 @@ object ContactMatcher {
      */
     fun pick(heard: String, ranked: List<Scored>): List<ContactResolver.Contact> {
         val best = ranked.firstOrNull() ?: return emptyList()
+        // The whole saved name, said in full: that contact. A20e 6 Nov 2026: the owner saved his other number as just "Prince"
+        // and "text Prince" was still asked "Which Prince: Prince, Prince Tesano…, Prince Ice P?" — then no answer could end it.
+        if (best.score >= 1.0) return ranked.filter { it.score >= 1.0 }.map { it.contact }
         return if (best.score >= STRONG) ranked.filter { it.score >= STRONG - 0.001 && best.score - it.score <= 0.1 }.map { it.contact }
         else ranked.filter { best.score - it.score <= 0.3 }.map { it.contact }
     }
