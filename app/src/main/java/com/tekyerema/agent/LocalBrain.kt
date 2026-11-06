@@ -1307,7 +1307,9 @@ class LocalBrain : AgentBrain {
         // After "open <app>": "check my chats", "read the latest conversation".
         private val RE_IN_APP_READ = Regex("^(?:read|check)\\s+(?:it|them|(?:the|my)\\s+(?:(?:last|latest|new|newest|recent|first|top)\\s+)?(?:chats?|messages?|conversations?))$", RegexOption.IGNORE_CASE)
         private val RE_BACK = Regex("^back\\b|\\b(go back|previous|san\\s+(kɔ|ko))\\b", RegexOption.IGNORE_CASE)
-        private val RE_HOME = Regex("^home\\b|\\b(home screen|go home|home button|kɔ\\s+fie|san\\s+kɔ\\s+fie|fie)\\b", RegexOption.IGNORE_CASE)  // §P2.7 Twi "fie" = home [owner: verify]
+        // English only since the 31 Oct pivot. The Twi "fie" (home) used to be here and matched INSIDE English: "sat an alarm four
+        // fie fifteen" (a garbled alarm request) pressed Home (A20e, 6 Nov 2026).
+        private val RE_HOME = Regex("^home\\b|\\b(home screen|go home|home button)\\b", RegexOption.IGNORE_CASE)
         private val RE_RECENTS = Regex("\\b(recent apps|recents|switch apps|app switcher)\\b", RegexOption.IGNORE_CASE)
         private val RE_SCROLL = Regex("\\bscroll(\\s+(up|down|left|right))?\\b", RegexOption.IGNORE_CASE)
         private val RE_SWIPE = Regex("\\bswipe(\\s+(up|down|left|right))?\\b", RegexOption.IGNORE_CASE)
