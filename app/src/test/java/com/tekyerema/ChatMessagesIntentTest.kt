@@ -20,6 +20,17 @@ class ChatMessagesIntentTest {
         assertEquals(FastIntent.ChatMessages("Telegram", latestOnly = true), c("read my last Telegram message"))
     }
 
+    /** A20e 6 Nov 2026: "anything new on WhatsApp for me" had no rule online, so the app was opened and the brain wandered. */
+    @Test fun the_same_read_said_without_the_word_messages() {
+        for (s in listOf("anything new on WhatsApp for me", "Anything new on WhatsApp?", "what's new on WhatsApp", "any news from WhatsApp today",
+            "is there anything new on whatsapp", "do I have anything new on WhatsApp"))
+            assertEquals(s, FastIntent.ChatMessages("WhatsApp", latestOnly = false), c(s))
+        assertEquals(FastIntent.ChatMessages("Telegram", latestOnly = false), c("anything new on Telegram"))
+        // a send, or another app, is not a read
+        assertFalse(c("send a WhatsApp message to Ama saying anything new") is FastIntent.ChatMessages)
+        assertFalse(c("anything new on YouTube") is FastIntent.ChatMessages)
+    }
+
     /** The two-way beat: read the last message, then "reply saying …" answers that person, on the same app. */
     @Test fun a_bare_reply_answers_the_person_just_read() {
         val r = com.tekyerema.agent.References

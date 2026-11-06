@@ -117,6 +117,21 @@ sealed class FastIntent(val name: String) {
     object ClearSchedules : FastIntent("CLEAR_SCHEDULES")
     /** A-12: "tell me when Ama messages me" / "stop telling me when Ama messages". */
     data class WatchSender(val who: String, val on: Boolean) : FastIntent("WATCH_SENDER")
+    /** "when Lydia sends a voice note, send it to my saved messages on Telegram": remembered and done whenever it happens. */
+    data class SetStandingOrder(val order: com.tekyerema.agent.triggers.StandingOrder) : FastIntent("SET_STANDING_ORDER")
+    data class StopStandingOrder(val who: String, val kind: String) : FastIntent("STOP_STANDING_ORDER")
+    object ListStandingOrders : FastIntent("LIST_STANDING_ORDERS")
+
+    companion object {
+        /**
+         * Intents the classifier gives only when the WHOLE sentence has their shape (StandingOrderWords parses the full order,
+         * not a phrase inside it), so the brain-first size test and the said-again redo never take them from the quick layer.
+         * A20e 6 Nov 2026: "when Prince sends a voice note, send it to my saved messages on Telegram" was deferred as "more than a
+         * command"; the brain opened telegram.org and no order was stored. An order is long by nature.
+         */
+        fun ownsWholeSentence(intent: FastIntent): Boolean =
+            intent is SetStandingOrder || intent is StopStandingOrder || intent is ListStandingOrders
+    }
     /** I-07: where the last web answer came from; [links] = read the web addresses, not just the site names. */
     data class Sources(val links: Boolean) : FastIntent("SOURCES")
     // ---- W8 ----
@@ -210,6 +225,12 @@ object FastIntentClassifier {
     fun classify(raw: String, routines: Boolean = true): FastIntent? {
         val g = raw.trim().lowercase().replace('’', '\'').replace(Regex("\\s+"), " ").trim().trimEnd('.', '!', '?').trim()
         if (g.isEmpty()) return null
+        // A standing order holds a send ("forward it to …"), and it is for LATER: it must never reach the send rules below.
+        if (com.tekyerema.core.config.FeatureFlags.isEnabled(com.tekyerema.agent.triggers.StandingOrders.FEATURE, true)) {
+            com.tekyerema.agent.triggers.StandingOrderWords.parse(raw)?.let { return FastIntent.SetStandingOrder(it) }
+            com.tekyerema.agent.triggers.StandingOrderWords.parseStop(raw)?.let { return FastIntent.StopStandingOrder(it.first, it.second) }
+            if (com.tekyerema.agent.triggers.StandingOrderWords.isListRequest(raw)) return FastIntent.ListStandingOrders
+        }
         // A message FOR someone ("tell Ama my battery is dead", "tell Kofi to go back to the shop"): its words are not commands
         // for the phone, whatever keywords they hold — the brain understands it (agent/MessageToSomeone).
         if (MessageToSomeone.matches(g)) return null
@@ -340,6 +361,10 @@ object FastIntentClassifier {
             RE_CHAT_MESSAGES.matchEntire(g) != null -> RE_CHAT_MESSAGES.matchEntire(g)!!.let { m ->
                 val app = when (m.groupValues[1]) { "telegram" -> "Telegram"; "messenger" -> "Messenger"; else -> "WhatsApp" }
                 FastIntent.ChatMessages(app, latestOnly = !m.groupValues[2].endsWith("s"), from = m.groupValues[3].trim().ifEmpty { null })
+            }
+            RE_CHAT_NEWS.matchEntire(g) != null -> RE_CHAT_NEWS.matchEntire(g)!!.let { m ->
+                val app = when (m.groupValues[1]) { "telegram" -> "Telegram"; "messenger" -> "Messenger"; else -> "WhatsApp" }
+                FastIntent.ChatMessages(app, latestOnly = false)
             }
             RE_LAST_SMS.containsMatchIn(g) -> smsCount(g)?.let { FastIntent.LastSmsN(it) } ?: FastIntent.LastSms
             RE_WHERE_AM_I.containsMatchIn(g) -> FastIntent.WhereAmI
@@ -728,6 +753,11 @@ object FastIntentClassifier {
     private val RE_CHAT_MESSAGES = Regex("^(?:please )?(?:(?:can|could) you )?(?:read|check|tell me|any|do i have(?: any)?|" +
         "have i got(?: any)?|are there(?: any)?|did i get(?: any)?)(?: me)?(?: (?:my|the))?(?: (?:last|latest|newest|new|recent|unread))?" +
         " (whatsapp|whats app|telegram|messenger) (messages?|chats?)(?: from (.+?))?(?: please)?$")
+    /** "anything new on WhatsApp for me", "what's new on Telegram", "any news from WhatsApp today": the same read, said without the
+     *  word "messages" (A20e 6 Nov 2026: online it fell to "goal names WhatsApp → open it", the app was opened and the brain
+     *  wandered; offline it had been answered by the rules in 105 ms). Group 1 = app. */
+    private val RE_CHAT_NEWS = Regex("^(?:please )?(?:(?:is|was) there |do i have |have i got |did i get )?(?:anything|anything new|something new|any news|any new (?:messages?|chats?)|" +
+        "what'?s new|news|new stuff|any updates?)(?: new)?(?: (?:on|in|from|for me on|for me in)) (whatsapp|whats app|telegram|messenger)(?: for me| today| now)?(?: please)?$")
     private val RE_LAST_SMS = Regex("\\b(?:read|check|what(?:'s| is| was)|any)\\b.*\\b(?:text messages?|texts|sms|my (?:last |latest |new )?text)\\b|^(?:my )?(?:last|latest|new) (?:text|sms|text message)s?$")
     /** Whole utterances only: "where am I" alone stays the street (GPS); these name the phone, the app or the screen. */
     private val RE_WHERE_ON_SCREEN = Regex("(?:(?:hey )?nexus,? )?(?:which|what) app (?:am i (?:in|on|using)(?: now| right now)?|is (?:this|open|on(?: the)? screen)(?: now)?)|" +
