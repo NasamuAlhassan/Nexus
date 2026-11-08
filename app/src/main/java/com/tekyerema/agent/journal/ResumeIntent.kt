@@ -11,7 +11,7 @@ package com.tekyerema.agent.journal
  */
 object ResumeIntent {
     private val PHRASE = Regex(
-        "^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:please |yes,? |yes please,? )?" +
+        "^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:please |yes,? |yes please,? )?" +
             "(?:carry on|continue|resume|keep going|go on|pick up|pick it up|finish it|finish the task|toa so|k[ɔo] so)" +
             "(?: (?:with )?(?:the |my |that |this )?(?:task|job|request|errand|what you were doing|it))?" +
             "(?: (?:from )?where (?:i|we|you) (?:left off|stopped))?(?: please)?$")

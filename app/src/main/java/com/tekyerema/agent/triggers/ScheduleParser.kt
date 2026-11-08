@@ -43,7 +43,7 @@ object ScheduleParser {
     )
     private val NEEDS_DATE = Regex("\\b(?:tomorrow|next week|next month|on the \\d{1,2}(?:st|nd|rd|th)?)\\b", I)
     private val SET_REMINDER = Regex("^(?:set|create|add|make)\\s+(?:a|an|me a)\\s+reminder\\s+(to|about|for|that)\\s+", I)
-    private val LEADING_JUNK = Regex("^(?:[,;:.!?\\-–—]+|(?:and|then|please|kindly|also|hey tekyerema|tekyerema|tɛkyerɛma)\\b)\\s*", I)
+    private val LEADING_JUNK = Regex("^(?:[,;:.!?\\-–—]+|(?:and|then|please|kindly|also|hey tekyerema|tekyerema|tɛkyerɛma|(?:hey|okay|ok) nexus|nexus)\\b)\\s*", I)
     private val TRAILING_JUNK = Regex("\\s*(?:[,;:\\-–—]+|\\b(?:and|then|please))$", I)
 
     fun parse(text: String): Schedule? {

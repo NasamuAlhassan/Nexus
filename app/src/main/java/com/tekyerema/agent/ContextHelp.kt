@@ -86,7 +86,7 @@ object ContextHelp {
     // ---------------------------------------------------------------- phrasing (pure)
 
     /** "what can I say here", "what can you do in this app", "help me with this app" → true (this app). */
-    private val HERE = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:" +
+    private val HERE = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:" +
         "what can (?:i|you) (?:say|do|ask(?: for)?) (?:here|in (?:this|the) app|on this screen|with this app|in here)" +
         "|what (?:can|do) i say here|help(?: me)? (?:with|in) this app" +
         "|how do i use this app|what are my options here|what(?:'s| is) possible here" +
@@ -94,7 +94,7 @@ object ContextHelp {
     /** "what can you do", "what can I say", "what are your features" → the general tour. Twi "wobɛtumi ayɛ dɛn"
      *  (what can you do) is PENDING NATIVE REVIEW. A bare "help" / "help me" is deliberately NOT here: said in distress
      *  it is the emergency path (LocalBrain.RE_EMERGENCY → the confirmed emergency tool), never a feature tour. */
-    private val GENERAL_RE = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:" +
+    private val GENERAL_RE = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:" +
         "what can you do|what can you do for me|what else can you do|what can i say|what can i ask(?: you)?|" +
         "what do you do|what are your (?:features|commands|skills)|what commands (?:do you know|can i use)|how do i use you|" +
         "how can you help(?: me)?|wobɛtumi ayɛ dɛn|wobetumi aye den" +

@@ -155,9 +155,9 @@ object PhoneCheck {
         if (!f.smsGranted) add("sms", 55, "I can't send text messages for you.", "$OPEN_SETTINGS Text messages.")
 
         // ---- staying awake (Samsung puts unused apps to sleep: the wake word and alerts stop)
-        if (f.backgroundRestricted) add("sleep", 50, "Android is restricting me in the background, so “Hey Tɛkyerɛma” and alerts can stop.",
+        if (f.backgroundRestricted) add("sleep", 50, "Android is restricting me in the background, so “${com.tekyerema.ui.Brand.WAKE}” and alerts can stop.",
             "To fix it: Settings, Apps, Nexus, Battery, and allow background activity.")
-        else if (!f.batteryUnrestricted) add("sleep", 50, "Android may put me to sleep, so “Hey Tɛkyerɛma” and alerts can stop working.",
+        else if (!f.batteryUnrestricted) add("sleep", 50, "Android may put me to sleep, so “${com.tekyerema.ui.Brand.WAKE}” and alerts can stop working.",
             "To fix it: in Nexus, open Settings, Accessibility, Keep Nexus running.")
 
         // ---- small things
@@ -167,7 +167,7 @@ object PhoneCheck {
             "To switch it on: in Nexus, open Settings, Voice, Read replies aloud.")
         if (f.a11yShortcut == false && !f.wakeWordOn && !f.floatingButtonOn)
             add("start", 20, "There's no quick way to start me from other apps.",
-                "To add one: in Nexus, open Settings, Accessibility, and switch on “Hey Tɛkyerɛma” or the floating Talk button.")
+                "To add one: in Nexus, open Settings, Accessibility, and switch on “${com.tekyerema.ui.Brand.WAKE}” or the floating Talk button.")
         return out.sortedByDescending { it.rank }
     }
 
@@ -248,7 +248,7 @@ object PhoneCheck {
             "Online AI calls today: ${f.aiCallsToday}",
             "Speech in: " + when (f.speechIn) { true -> if (f.onDeviceSpeech) "on-device model" else "phone's recognizer"; false -> "not available"; null -> "unknown" },
             "Speech out: " + when (f.speechOut) { true -> "phone's voice"; false -> "not available"; null -> "unknown" },
-            "“Hey Tɛkyerɛma”: ${onOff(f.wakeWordOn)}",
+            "“${com.tekyerema.ui.Brand.WAKE}”: ${onOff(f.wakeWordOn)}",
             f.batteryPct?.let { "Battery: $it%" + if (f.charging) ", charging" else "" }
         )
     }

@@ -612,7 +612,7 @@ object MoneyAsk {
     private val MONEY_CUE = Regex("\\b(?:money|momo|mobile money|cash|cedis?|pesewas?|ghs|ghc)\\b|[₵¢]")
     private val NOT_WORD = Regex("[^a-z' ]")
     private val PUNCT = Regex("[?.!,]")
-    private val WAKE = Regex("^(?:(?:hey|hi|ok|okay)[ ,]+)?t[ɛeƐE]kyer[ɛeƐE]ma[ ,:.!]*", RegexOption.IGNORE_CASE)
+    private val WAKE = Regex("^(?:(?:hey|hi|ok|okay)[ ,]+)?(?:t[ɛeƐE]kyer[ɛeƐE]ma|nexus)[ ,:.!]*", RegexOption.IGNORE_CASE)
     private val TWI_WORD = Regex("\\b(?:fa|ma|sika)\\b")
     private val CODE = Regex("[*#]\\s?\\d|\\bstar\\s+\\d|\\bhash\\b")
     /** A second command joined on — the planner's. "one hundred and twenty" has no verb after its "and". */

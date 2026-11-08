@@ -87,7 +87,7 @@ object Routines {
     }
 
     private fun cleanName(s: String) = s.trim().trim('"', '“', '”', '\'', '‘', '’', ',', ':').replace(Regex("\\s+"), " ")
-        .replace(Regex("[, ]+(?:tekyerema|tɛkyerɛma)$"), "").replace(Regex("^(?:tekyerema|tɛkyerɛma)[, ]+"), "").trim()
+        .replace(Regex("[, ]+(?:tekyerema|tɛkyerɛma|nexus)$"), "").replace(Regex("^(?:tekyerema|tɛkyerɛma|nexus)[, ]+"), "").trim()
 
     fun validName(name: String): Boolean {
         val n = name.trim()
@@ -151,12 +151,12 @@ object Routines {
 
     // ---------------------------------------------------------------- running by name (pure)
 
-    private val RUN_LEAD = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:please )?(?:(?:run|start|do|begin|launch|play) (?:my |the )?)?")
+    private val RUN_LEAD = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:please )?(?:(?:run|start|do|begin|launch|play) (?:my |the )?)?")
     // "play", "start" and "launch" are also the phone's own commands: "play music" / "launch camera" must not be taken
     // over by a routine called "music" / "camera". With them the word "routine" must be said ("start my music routine").
-    private val PHONE_LEAD = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:please )?(?:start|launch|play) ")
-    private val SAID_ROUTINE = Regex(" routine(?:[, ]+(?:tekyerema|tɛkyerɛma))?(?: please)?$")
-    private val RUN_TAIL = Regex("(?: routine)?(?:[, ]+(?:tekyerema|tɛkyerɛma))?(?: please)?$")
+    private val PHONE_LEAD = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:please )?(?:start|launch|play) ")
+    private val SAID_ROUTINE = Regex(" routine(?:[, ]+(?:tekyerema|tɛkyerɛma|nexus))?(?: please)?$")
+    private val RUN_TAIL = Regex("(?: routine)?(?:[, ]+(?:tekyerema|tɛkyerɛma|nexus))?(?: please)?$")
 
     /** The routine named by the whole utterance [g] ("good morning", "run my good morning routine"), or null. */
     fun match(g: String, names: Collection<String>): String? {

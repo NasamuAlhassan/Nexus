@@ -29,7 +29,7 @@ object TriggerSafety {
 
     /** Courtesy / wake words in front of a goal ("please", "hey Tɛkyerɛma, can you …"). */
     private val COURTESY = Regex(
-        "^(?:(?:please|kindly|hey|hi|ok|okay|tekyerema|tɛkyerɛma|can you|could you|would you|will you)[,\\s]+)+",
+        "^(?:(?:please|kindly|hey|hi|ok|okay|tekyerema|tɛkyerɛma|nexus|can you|could you|would you|will you)[,\\s]+)+",
         RegexOption.IGNORE_CASE
     )
 

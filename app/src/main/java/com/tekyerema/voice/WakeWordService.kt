@@ -37,7 +37,8 @@ import java.util.Locale
 import kotlin.math.sqrt
 
 /**
- * Hands-free WAKE WORD ("Hey Tɛkyerɛma") — free, no account, fully on-device. A foreground (microphone)
+ * Hands-free WAKE WORD ("Nexus" / "Hey Nexus" via [NexusSpotter] since 8 Nov 2026; speech.json wake.engine "oww" = the
+ * trained "Hey Tɛkyerɛma" head) — free, no account, fully on-device. A foreground (microphone)
  * service streams the mic in 80 ms frames through [WakeScorer] (openWakeWord features + our heads trained on
  * the owner's recordings) and [WakeGate] (3 consecutive hits, then a ~2 s refractory). On a fire we open the
  * normal voice turn; the wake phrase itself is never transcribed or sent to the model — nothing is recorded,
@@ -116,6 +117,22 @@ class WakeWordService : Service() {
             var attempt = 0
             var loadFails = 0
             while (isActive) {
+                // "Nexus" (8 Nov 2026): the keyword spotter unless speech.json wake.engine says "oww"; a spotter that will
+                // not load falls back to the trained "Hey Tɛkyerɛma" head rather than leave the phone deaf.
+                if (NexusSpotter.engine() == KwsWake.ENGINE_KWS) {
+                    val spotter = NexusSpotter(applicationContext)
+                    if (spotter.load()) {
+                        Log.i(TAG, "[WAKE] armed — say 'Nexus'")
+                        val t0 = android.os.SystemClock.uptimeMillis()
+                        try { listen(null, spotter) } finally { spotter.close() }
+                        if (!isActive) break
+                        attempt = WakeBackoff.nextAttempt(attempt, android.os.SystemClock.uptimeMillis() - t0)
+                        noteRestart("listen loop ended")
+                        delay(WakeBackoff.delayMs(attempt))
+                        continue
+                    }
+                    Log.w(TAG, "[WAKE] the Nexus keyword spotter did not load — using the trained 'Hey Tɛkyerɛma' head")
+                }
                 val scorer = WakeScorer(applicationContext)
                 if (!scorer.load()) {
                     if (++loadFails >= MAX_LOAD_FAILS) {
@@ -126,7 +143,7 @@ class WakeWordService : Service() {
                 }
                 Log.i(TAG, "[WAKE] armed — say 'Hey Tɛkyerɛma'")
                 val t0 = android.os.SystemClock.uptimeMillis()
-                try { listen(scorer) } finally { scorer.close() }
+                try { listen(scorer, null) } finally { scorer.close() }
                 if (!isActive) break
                 // listen() only returns while active after an error it logged: restart it.
                 attempt = WakeBackoff.nextAttempt(attempt, android.os.SystemClock.uptimeMillis() - t0)
@@ -165,8 +182,10 @@ class WakeWordService : Service() {
     }
 
     @SuppressLint("MissingPermission")   // RECORD_AUDIO checked in onStartCommand
-    private suspend fun listen(scorer: WakeScorer) {
+    /** Exactly one of [scorer] (the trained "Hey Tɛkyerɛma" head) and [spotter] (the "Nexus" keyword spotter) is given. */
+    private suspend fun listen(scorer: WakeScorer?, spotter: NexusSpotter?) {
         val gate = WakeGate()
+        val kwsGate = KwsGate()
         val frame = FloatArray(WakeScorer.FRAME)
         val minBuf = AudioRecord.getMinBufferSize(WakeScorer.SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_FLOAT)
         var rec: AudioRecord? = null
@@ -182,9 +201,14 @@ class WakeWordService : Service() {
                 if (now - hb >= 10_000) {                          // heartbeat: the tuning window into live scores
                     // frames = 80 ms frames scored in these ~10 s (125 = keeping up with real time); ms = scorer time
                     // per frame (must stay under 80); full = frames that needed the full recompute (the peak changed).
-                    val st = scorer.takeStats()
-                    if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} why='$why' top=${"%.2f".format(top)} bar=${WakeGate.bar()} " +
-                        "frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} full=${st[3]} incremental=${scorer.incremental} ${scorer.takeReasons()}")
+                    if (scorer != null) {
+                        val st = scorer.takeStats()
+                        if (hb != 0L) Log.i(TAG, "[WAKE] hb mic=${rec != null} why='$why' top=${"%.2f".format(top)} bar=${WakeGate.bar()} " +
+                            "frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} full=${st[3]} incremental=${scorer.incremental} ${scorer.takeReasons()}")
+                    } else if (spotter != null) {
+                        val st = spotter.takeStats()
+                        if (hb != 0L) Log.i(TAG, "[WAKE] hb kws mic=${rec != null} why='$why' frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]}")
+                    }
                     hb = now; top = 0f
                 }
                 // A turn owns the mic — except while a task is working with the mic free, when the wake word keeps
@@ -213,7 +237,7 @@ class WakeWordService : Service() {
                     rec = openMic(maxOf(minBuf, WakeScorer.FRAME * 4 * 32))
                     if (rec == null) { delay(1000); continue }
                     micOpen = true; liveRec = rec; zeroFrames = 0
-                    gate.reset(); scorer.reset()                     // fresh listen: no audio from before the pause
+                    gate.reset(); kwsGate.reset(); scorer?.reset(); spotter?.reset()   // fresh listen: no audio from before the pause
                 }
                 val got = rec!!.read(frame, 0, WakeScorer.FRAME, AudioRecord.READ_BLOCKING)
                 if (got < 0) {                                       // DEAD_OBJECT etc. are RETURNED, not thrown
@@ -228,18 +252,25 @@ class WakeWordService : Service() {
                 // it back — close and reopen it instead of listening to nothing.
                 if (e == 0f) { if (WakeGuards.silentTooLong(++zeroFrames)) { Log.i(TAG, "[WAKE] watchdog: restarted (mic silent for 20 s — reopening)"); restarts++; lastRestart = "mic silent"; release(); delay(300); continue } }
                 else zeroFrames = 0
-                val scores = scorer.feed(if (got == frame.size) frame else frame.copyOf(got))
-                scores[WakeScorer.FIRE_HEAD]?.let { if (it > top) top = it }
-                val fired = gate.feed(rms, scores)
-                // The danger code word's own head (only when this build carries one): several frames in a row, then the cancel window.
-                scores[WakeScorer.DANGER_HEAD]?.let { p ->
-                    dangerRun = if (p >= WakeScorer.DANGER_BAR) dangerRun + 1 else 0
-                    if (dangerRun >= WakeScorer.DANGER_FRAMES) {
-                        dangerRun = 0; scorer.reset()
-                        com.tekyerema.safety.DangerAlert.trigger(applicationContext, "always-on code word head")
+                val pcm = if (got == frame.size) frame else frame.copyOf(got)
+                val fired: Boolean
+                if (spotter != null) {
+                    fired = kwsGate.feed(rms, spotter.feed(pcm))
+                } else {
+                    val sc = scorer!!
+                    val scores = sc.feed(pcm)
+                    scores[WakeScorer.FIRE_HEAD]?.let { if (it > top) top = it }
+                    fired = gate.feed(rms, scores)
+                    // The danger code word's own head (only when this build carries one): several frames in a row, then the cancel window.
+                    scores[WakeScorer.DANGER_HEAD]?.let { p ->
+                        dangerRun = if (p >= WakeScorer.DANGER_BAR) dangerRun + 1 else 0
+                        if (dangerRun >= WakeScorer.DANGER_FRAMES) {
+                            dangerRun = 0; sc.reset()
+                            com.tekyerema.safety.DangerAlert.trigger(applicationContext, "always-on code word head")
+                        }
                     }
+                    if (monitor) mon.frame(rms, scores, fired, sc)
                 }
-                if (monitor) mon.frame(rms, scores, fired, scorer)
                 if (fired && SecureStep.active()) {
                     // The user is typing a PIN and TalkBack is speaking the keys — never open the mic by ourselves now.
                     Log.i(TAG, "[WAKE] detection ignored: a PIN is being entered")
@@ -249,10 +280,16 @@ class WakeWordService : Service() {
                     // in a row). While we are speaking, and for the length of the scorer's window after, a detection is
                     // our own voice. The volume-key gesture still interrupts.
                     Log.i(TAG, "[WAKE] detection ignored: it was our own voice speaking")
-                    gate.reset(); scorer.reset()
+                    gate.reset(); kwsGate.reset(); scorer?.reset(); spotter?.reset()
+                } else if (fired && spotter != null) {
+                    Log.i(TAG, "[WAKE] 'Nexus' detected (keyword spotter) → activating")
+                    // The spotter has no graded score: a detection is a clear wake (WakeSignal 1.0, never "marginal").
+                    WakeSignal.fired(1.0f)
+                    release()                                        // hand the mic over before the turn opens it
+                    onWake()
                 } else if (fired) {
-                    Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (hey=${"%.3f".format(scores[WakeScorer.FIRE_HEAD])}, " +
-                        "peak=${"%.4f".format(gate.lastFirePeak)}${if (gate.lastFirePeak < WakeSignal.marginalBelow()) " marginal" else ""}) → activating")
+                    Log.i(TAG, "[WAKE] 'Hey Tɛkyerɛma' detected (peak=${"%.4f".format(gate.lastFirePeak)}" +
+                        "${if (gate.lastFirePeak < WakeSignal.marginalBelow()) " marginal" else ""}) → activating")
                     // Addressedness: the turn this wake opens knows how clearly it was said (voice/Addressedness.kt WakeSignal).
                     WakeSignal.fired(gate.lastFirePeak)
                     release()                                        // hand the mic over before the turn opens it
@@ -414,7 +451,7 @@ class WakeWordService : Service() {
     private fun startForegroundSafe() {
         val n: Notification = NotificationCompat.Builder(this, CHANNEL)
             .setContentTitle("Nexus")
-            .setContentText("Listening for \"Hey Tɛkyerɛma\"")
+            .setContentText("Listening for \"${com.tekyerema.ui.Brand.WAKE}\"")
             .setSmallIcon(applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_btn_speak_now)
             .setOngoing(true).setCategory(NotificationCompat.CATEGORY_SERVICE).setPriority(NotificationCompat.PRIORITY_MIN)
             .build()

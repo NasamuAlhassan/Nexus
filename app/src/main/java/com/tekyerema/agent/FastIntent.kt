@@ -439,7 +439,7 @@ object FastIntentClassifier {
     }
 
     // ---- E-15 / H-09 digest. "read my messages" is the catch-up; "read my messages from Ama" (a person) is the agent's.
-    private val RE_DIGEST_LAST = Regex("^(?:(?:so |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:what did i miss|what have i missed|" +
+    private val RE_DIGEST_LAST = Regex("^(?:(?:so |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:what did i miss|what have i missed|" +
         "did i miss anything|have i missed anything|anything i missed|catch me up|fill me in|" +
         "(?:do i have|have i got|did i get|are there|is there) (?:any )?(?:new )?(?:messages|notifications|anything new)|" +
         "any (?:new )?(?:messages|notifications)|anything new|did anyone message me|has anyone messaged me|" +

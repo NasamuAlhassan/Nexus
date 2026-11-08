@@ -79,6 +79,9 @@
   "_doc": "Far-field head 2026-09-30 (phase2/wakeword/ACCURACY_farfield_2026-09-30.md): 84% wake vs 68%, 0 false wakes in 3.37 h; owner far/reverb 23/24 vs 9/24. bar tuned for THAT head; marginalBelow keeps ~22% of its real wakes out of the 'marginal' bucket.",
   "bar": 0.8,
   "marginalBelow": 0.96,
-  "minRms": 0.0035
+  "minRms": 0.0035,
+  "_engine_doc": "8 Nov 2026 (owner): the wake word is 'Nexus' ('Hey Nexus', 'Nexus', anything that mentions Nexus). engine 'kws' = sherpa-onnx keyword spotter (voice/NexusSpotter, assets/wakeword/kws, no training); 'oww' = the trained 'Hey Tɛkyerɛma' head above (bar/marginalBelow are for it). Setting 'oww' needs ui/Brand.kt WAKE back to 'Hey Tɛkyerɛma' too. kws threshold/boost: 2 Nov spike kws_v2 at 0.05/2.0 → 87% clean, 80% at 20 dB, 73% at 10 dB, 0 false accepts in 2.31 h of Ghanaian speech; lower threshold or higher boost = wakes more easily.",
+  "engine": "kws",
+  "kws": { "threshold": 0.05, "boost": 2.0 }
  }
 }

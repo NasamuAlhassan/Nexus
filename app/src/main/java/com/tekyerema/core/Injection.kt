@@ -17,7 +17,7 @@ object Injection {
         "\\bsystem prompt\\b",
         "\\byou are (?:now )?(?:an? |the )?(?:ai|assistant|agent|chatbot|language model)\\b",
         "\\b(?:as an ai|dear (?:ai|assistant|agent))\\b",
-        "\\b(?:assistant|agent|ai|tɛkyerɛma|tekyerema)\\s*[,:]\\s*(?:please\\s+)?(?:send|transfer|pay|call|forward|reply|open|tap|type|delete)\\b",
+        "\\b(?:assistant|agent|ai|tɛkyerɛma|tekyerema|nexus)\\s*[,:]\\s*(?:please\\s+)?(?:send|transfer|pay|call|forward|reply|open|tap|type|delete)\\b",
         "\\bdo not (?:tell|inform|alert|notify) the user\\b",
         "\\bwithout (?:asking|telling|confirming with) the user\\b",
         "\\bdeveloper mode\\b|\\bjailbreak\\b",

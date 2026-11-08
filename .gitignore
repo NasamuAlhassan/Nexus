@@ -24,6 +24,7 @@ local.properties
 *.onnx
 # Trained "Hey Tɛkyerɛma" wake models (~3 MB) ship with the app.
 !app/src/main/assets/wakeword/*.onnx
+!app/src/main/assets/wakeword/kws/*.onnx
 *.safetensors
 *.parquet
 *.gguf

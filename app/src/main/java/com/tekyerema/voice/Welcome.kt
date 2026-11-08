@@ -208,7 +208,7 @@ object Welcome {
     /** Lower-case words, apostrophes kept, punctuation and a leading wake word dropped. */
     fun norm(text: String): String = text.lowercase().replace('’', '\'').replace('‘', '\'')
         .replace(Regex("[^\\p{L}\\p{N}'\\s]"), " ").replace(Regex("\\s+"), " ").trim()
-        .replace(Regex("^(?:hey )?(?:tekyerema|tɛkyerɛma)\\s*"), "").trim()
+        .replace(Regex("^(?:hey )?(?:tekyerema|tɛkyerɛma|nexus)\\s*"), "").trim()
 
     fun isStop(text: String): Boolean = STOP.matches(norm(text))
 

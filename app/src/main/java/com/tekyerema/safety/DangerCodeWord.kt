@@ -13,7 +13,10 @@ object DangerCodeWord {
 
     /** Everyday phrases that must never be the code word: they are said in jokes, films and ordinary talk. */
     private val COMMON = setOf("help me", "help help", "call police", "call the police", "i need help", "emergency", "call for help",
-        "hey tekyerema", "hello there", "good morning", "thank you", "open the door", "what time")
+        "hey tekyerema", "hey nexus", "okay nexus", "hello there", "good morning", "thank you", "open the door", "what time")
+
+    /** The wake word (8 Nov 2026): a code word with it inside would wake the assistant every time it is said. */
+    private val WAKE_WORDS = setOf("nexus", "tekyerema", "tɛkyerɛma")
 
     fun words(text: String): List<String> =
         text.lowercase().map { if (it.isLetterOrDigit()) it else ' ' }.joinToString("").split(' ').filter { it.isNotEmpty() }
@@ -25,6 +28,7 @@ object DangerCodeWord {
             w.size < MIN_WORDS -> "Choose a phrase of at least two words, so it is not said by accident."
             w.sumOf { it.length } < MIN_LETTERS -> "That phrase is too short. Choose a longer one."
             w.joinToString(" ") in COMMON -> "That is too common a phrase. Choose something only you would say."
+            w.any { it in WAKE_WORDS } -> "That phrase has my name in it, so it would wake me. Choose one without Nexus."
             else -> null
         }
     }

@@ -36,7 +36,7 @@ object VoicePlan {
 
     fun explain(route: VoiceRoute): String = when (route) {
         VoiceRoute.OFF_IN_THIS_FIELD -> "Voice typing is off in password and PIN boxes. Type it with the keys."
-        VoiceRoute.UNAVAILABLE -> "Voice typing isn't available on this phone. In Tɛkyerɛma, allow the microphone, then try again."
+        VoiceRoute.UNAVAILABLE -> "Voice typing isn't available on this phone. In Nexus, allow the microphone, then try again."
         VoiceRoute.OWN_ASR, VoiceRoute.IN_KEYBOARD, VoiceRoute.VOICE_KEYBOARD -> ""
     }
 
@@ -50,7 +50,7 @@ object VoicePlan {
     /** What to tell the user for a SpeechRecognizer error code (the codes are stable platform constants). */
     fun errorMessage(code: Int): String = when (code) {
         SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "I didn't catch that. Tap the microphone and try again."
-        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Voice typing needs the microphone. Allow it in Tɛkyerɛma's settings."
+        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "Voice typing needs the microphone. Allow it in Nexus's settings."
         SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT, SpeechRecognizer.ERROR_SERVER,
         11 /* ERROR_SERVER_DISCONNECTED */ -> "Voice typing needs your phone's speech service, and it couldn't be reached. Try again, or type."
         SpeechRecognizer.ERROR_RECOGNIZER_BUSY, 10 /* ERROR_TOO_MANY_REQUESTS */ -> "Voice typing is busy. Try again in a moment."

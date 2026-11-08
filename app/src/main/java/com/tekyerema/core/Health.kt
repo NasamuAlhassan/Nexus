@@ -58,7 +58,7 @@ object Health {
         screenControlNotice(SystemChecks.accessibilityEnabled(ctx), lastExitCode(ctx))?.let { out.add(Issue("screen_control", it)) }
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
         if (Build.VERSION.SDK_INT >= 28 && am?.isBackgroundRestricted == true)
-            out.add(Issue("background", "Heads up: Android is restricting me in the background, so “Hey Tɛkyerɛma” may stop working. " +
+            out.add(Issue("background", "Heads up: Android is restricting me in the background, so “${com.tekyerema.ui.Brand.WAKE}” may stop working. " +
                 "You can allow it in Settings, under Battery."))
         return out
     }

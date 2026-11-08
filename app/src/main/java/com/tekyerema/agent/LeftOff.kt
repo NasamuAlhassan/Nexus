@@ -12,7 +12,7 @@ import com.tekyerema.history.Outcome
  * stopped at a confirmation must be asked for (and confirmed) again. Pure, unit-tested.
  */
 object LeftOff {
-    private val PHRASES = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma)[, ]+)?(?:" +
+    private val PHRASES = Regex("^(?:(?:hey |okay |ok )?(?:tekyerema|tɛkyerɛma|nexus)[, ]+)?(?:" +
         "where (?:did|do) (?:i|we) leave off|where (?:was i|were we)|what was i doing|what were we doing|" +
         "where did we stop|where did i stop|what did i ask (?:you )?last|what was my last request|" +
         "(?:pick up|carry on|continue) (?:from )?where (?:i|we) (?:left off|stopped)" +

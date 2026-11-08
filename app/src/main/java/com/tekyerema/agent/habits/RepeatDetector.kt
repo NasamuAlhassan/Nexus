@@ -93,7 +93,7 @@ object RepeatDetector {
         return g
     }
 
-    private val LEAD = Regex("^(?:please|kindly|hey|hi|ok|okay|so|tekyerema|tɛkyerɛma|can you|could you|would you|will you)\\b\\s*")
+    private val LEAD = Regex("^(?:please|kindly|hey|hi|ok|okay|so|tekyerema|tɛkyerɛma|nexus|can you|could you|would you|will you)\\b\\s*")
     private val TAIL = Regex("\\s*\\b(?:please|for me|right now|now)$")
 
     /** Read-only fast intents (LocalFastRouter) by name. */

@@ -468,8 +468,8 @@ class VoiceController(
                 if (attempt == 0 && speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mante. San ka bio." else "I didn't catch that. Please say it again.", lang) }
                     catch (c: CancellationException) { throw c } catch (_: Exception) {}
             }
-            if (speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mɛtwɛn. Sɛ woawie a, ka 'Hey Tɛkyerɛma'."
-                else "I'll wait. Say \"Hey Tɛkyerɛma\" or tap Answer when you're ready.", lang) }
+            if (speakAloud()) try { tts.speak(if (lang == Lang.TWI) "Mɛtwɛn. Sɛ woawie a, ka '${com.tekyerema.ui.Brand.WAKE}'."
+                else "I'll wait. Say \"${com.tekyerema.ui.Brand.WAKE}\" or tap Answer when you're ready.", lang) }
                 catch (c: CancellationException) { throw c } catch (_: Exception) {}
         } finally {
             _state.update { it.copy(speechDetected = false) }
