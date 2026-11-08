@@ -345,15 +345,35 @@ class LocalBrain : AgentBrain {
     private fun defer(detail: String) = AgentDecision.CannotDo(DEFER, detail)
     private fun network(goal: String) = AgentDecision.CannotDo(NETWORK, "\"$goal\" needs the internet.")
 
+    /** The app the user said [contact] is ONLY reachable on (a told memory note "X is only on Telegram"), lowercased, or null. Pure
+     *  over the in-memory state; nothing when memory is empty (tests, a fresh phone). */
+    internal fun onlyOnApp(contact: String): String? {
+        val name = contact.trim().lowercase()
+        if (name.isEmpty()) return null
+        val rx = Regex("(?i)^${Regex.escape(name)} (?:is|are) (?:only (?:on|reachable on|available on) (whatsapp|telegram|signal|messenger|sms|text)|" +
+            "(?:on|reachable on|available on) (whatsapp|telegram|signal|messenger|sms|text) only)$")
+        return try {
+            com.tekyerema.memory.UserMemory.snapshot().entries.asSequence()
+                .filter { it.kind == com.tekyerema.memory.MemKind.FACT }
+                .mapNotNull { e -> rx.matchEntire(e.value.trim().trimEnd('.'))?.let { m -> (m.groupValues[1].ifEmpty { m.groupValues[2] }).lowercase() } }
+                .firstOrNull()
+        } catch (_: Throwable) { null }
+    }
+
     /** N-09 — "text Ama saying I'm on my way", "send a message to 0244123456 that I'm late" → send_sms, or null. */
     private fun smsDecision(raw: String): AgentDecision? {
         val p = parseSms(raw) ?: return null
         // "text Ama saying I'm late then call Kofi": the message would swallow the second request (and a long read-back
         // is easy to approve). A later clause that starts with a command → a compound request for the plan/planner.
         if (hasFollowOnCommand(p.message)) return null
+        // What the user told Nexus about where this person is reached (memory: "Richmond is only on Telegram") decides the route:
+        // an app this tool can't send through goes to the planner, which sees that memory line (A20e 8 Nov 2026: "Tell Richmond…"
+        // became send_sms → "I couldn't find Richmond in your contacts", twice).
+        val onlyOn = if (p.number == null && p.contact != null) onlyOnApp(p.contact) else null
+        if (onlyOn != null && onlyOn != "whatsapp" && onlyOn != "sms" && onlyOn != "text") return null
         val args = JSONObject().put("message", p.message)
         if (p.number != null) args.put("number", p.number) else args.put("contact", p.contact)
-        if (p.whatsApp) args.put("via", "whatsapp")
+        if (p.whatsApp || onlyOn == "whatsapp") args.put("via", "whatsapp")
         pendingResultSpeak = true   // speak send_sms's own checked outcome ("Sent to Ama."), never a premature "Sent"
         return call("send_sms", args, "send a text")
     }

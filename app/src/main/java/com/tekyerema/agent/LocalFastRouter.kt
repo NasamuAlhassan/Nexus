@@ -211,13 +211,15 @@ class LocalFastRouter(
         }
         // Brain first (agent/BrainFirst, owner 3 Nov 2026): with a brain reachable, a sentence that carries more than a command goes to it
         // whole — the quick layer had matched "where I am" inside "how can I move from where I am to the Great Hall".
-        if (com.tekyerema.core.config.AppConfig.bool("fast.brainFirst.enabled", true) &&
+        // A standing order is long by nature and parsed whole (FastIntent.ownsWholeSentence): it never leaves the quick layer.
+        val whole = FastIntent.ownsWholeSentence(intent)
+        if (!whole && com.tekyerema.core.config.AppConfig.bool("fast.brainFirst.enabled", true) &&
             BrainFirst.deferToBrain(text, brainReachable(), com.tekyerema.core.config.AppConfig.int("fast.brainFirst.maxWords", 6))) {
             Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} deferred → brain (more than a command)")
             return null
         }
         // Said again right after a quick answer that missed (agent/Rephrase): a brain reads it this time, not the same rule.
-        if (brainReachable() && Rephrase.isRedo(text)) {
+        if (!whole && brainReachable() && Rephrase.isRedo(text)) {
             Log.i(TAG, "[LOCAL_FAST_PATH] intent=${intent.name} said again after the last try → brain")
             return null
         }
@@ -459,6 +461,9 @@ class LocalFastRouter(
         FastIntent.ListSchedules -> listSchedules()
         FastIntent.ClearSchedules -> clearSchedules()
         is FastIntent.WatchSender -> watchSender(intent)
+        is FastIntent.SetStandingOrder -> setStandingOrder(intent)
+        is FastIntent.StopStandingOrder -> stopStandingOrder(intent)
+        FastIntent.ListStandingOrders -> listStandingOrders()
         is FastIntent.Sources -> sources(intent)
         FastIntent.Undo -> undo()
         is FastIntent.WhatDidYouDo -> whatDidYouDo(intent)
@@ -542,6 +547,9 @@ class LocalFastRouter(
         is FastIntent.EmergencyLine -> "put the ${intent.service} number on the dial pad"
         is FastIntent.CreateSchedule -> "saved a schedule"
         FastIntent.ClearSchedules -> "cancelled your schedules"
+        is FastIntent.SetStandingOrder -> "remembered a standing order about ${intent.order.who}"
+        is FastIntent.StopStandingOrder -> "cancelled a standing order about ${intent.who}"
+        FastIntent.ListStandingOrders -> "read your standing orders"
         is FastIntent.WatchSender -> if (intent.on) "started watching for ${intent.who}'s messages" else "stopped watching for ${intent.who}'s messages"
         FastIntent.ClearHistory -> "cleared your history"
         is FastIntent.SetRelation -> "remembered who your ${intent.said} is"
@@ -598,6 +606,8 @@ class LocalFastRouter(
         if (schedules > 0) parts.add("$schedules schedule${if (schedules == 1) "" else "s"}")
         val rules = com.tekyerema.agent.triggers.NotificationTriggers.rules(appContext)
         if (rules.isNotEmpty()) parts.add("to tell you when " + com.tekyerema.audit.AuditLog.joinAnd(rules.map { it.appOrSender }.take(3)) + " sends something")
+        val orders = com.tekyerema.agent.triggers.StandingOrders.list(appContext).size
+        if (orders > 0) parts.add("$orders standing order${if (orders == 1) "" else "s"}")
         val msgs = com.tekyerema.notifications.MessageIndex.size()
         if (msgs > 0) {
             val who = com.tekyerema.notifications.MessageIndex.people()
@@ -715,6 +725,28 @@ class LocalFastRouter(
             val ok = com.tekyerema.agent.triggers.NotificationTriggers.removeRule(appContext, id)
             action(intent.name, if (ok) "Okay. I'll stop telling you about ${intent.who}." else "I wasn't watching for ${intent.who}.")
         }
+    }
+
+    private fun setStandingOrder(intent: FastIntent.SetStandingOrder): FastOutcome {
+        val o = intent.order.copy(createdAt = System.currentTimeMillis())
+        val ok = com.tekyerema.agent.triggers.StandingOrders.add(appContext, o)
+        val what = com.tekyerema.agent.triggers.StandingOrderWords.spokenKind(o.kind)
+        return action(intent.name, if (!ok) "I couldn't remember that." else "Okay. From now on, " +
+            com.tekyerema.agent.triggers.StandingOrderWords.describe(o) + ". Say stop forwarding ${o.who}'s ${what}s to cancel.", acted = true)
+    }
+
+    private fun stopStandingOrder(intent: FastIntent.StopStandingOrder): FastOutcome? {
+        val n = com.tekyerema.agent.triggers.StandingOrders.remove(appContext, intent.who, intent.kind)
+        val what = com.tekyerema.agent.triggers.StandingOrderWords.spokenKind(intent.kind)
+        // No such order: said plainly here — the brain must never improvise a forwarding change.
+        if (n == 0) return handled(intent, "You don't have a standing order for ${intent.who}'s ${what}s.")
+        return action(intent.name, "Okay. I've stopped that for ${intent.who}'s ${what}s.")
+    }
+
+    private fun listStandingOrders(): FastOutcome {
+        val all = com.tekyerema.agent.triggers.StandingOrders.list(appContext)
+        return handled(FastIntent.ListStandingOrders, if (all.isEmpty()) "You haven't given me any standing orders." else
+            all.joinToString(" ") { com.tekyerema.agent.triggers.StandingOrderWords.describe(it).replaceFirstChar { c -> c.uppercase() } + "." })
     }
 
     /** I-07: where the last web answer came from. */

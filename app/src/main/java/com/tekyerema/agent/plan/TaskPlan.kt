@@ -253,7 +253,16 @@ class PlanTracker(
         val jd = justDone
         when {
             why != null -> { sb.append("\nREPLAN: ").append(why).append(". Send a revised `plan` with your next action (a different route for what's left)."); replanWhy = null }
-            jd != null && act != null -> { sb.append("\nSubgoal ").append(jd.id).append(" done. Now ").append(act.id).append(" — if the plan no longer fits, resend `plan`."); justDone = null }
+            jd != null && act != null -> {
+                // A20e 8 Nov 2026: after the Telegram leg the brain looked for "Prince" inside Telegram — the next part may need
+                // another app or its own tool; say what is left and that the app on screen is not where it has to happen.
+                sb.append("\nSubgoal ").append(jd.id).append(" done. Still to do: ")
+                    .append(items.filter { it.open }.joinToString("; ") { "${it.id}. ${it.text}" })
+                    .append(". The next part may need a different app or tool than the one on screen — leave this app (open_app, or the " +
+                        "part's own tool: 'text X' with no app named is send_sms, a reminder is set_alarm) rather than looking for it here. " +
+                        "If the plan no longer fits, resend `plan`.")
+                justDone = null
+            }
             jd != null && act == null -> { sb.append("\nEvery subgoal is done — check the goal is met, then reply."); justDone = null }
         }
         return sb.toString()

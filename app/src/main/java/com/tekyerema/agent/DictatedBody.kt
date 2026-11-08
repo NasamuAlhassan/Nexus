@@ -9,7 +9,8 @@ package com.tekyerema.agent
 object DictatedBody {
     private val LEAD = Regex("(?i)^\\s*(?:please |can you |could you |kindly )?(?:text|sms|message|whatsapp|tell|send|reply(?: to)?|write(?: to)?|dm)\\b")
     /** Where the dictation starts: a colon, or "saying" / "that says" / "say" / "that" after the recipient. */
-    private val CUT = Regex("(?i)\\s*(?::|\\bsaying\\b|\\bthat says\\b|\\bto say\\b|\\bsay\\b|\\bthat\\b)")
+    private val CUT = Regex("(?i)\\s*(?::|\\bsaying\\b|\\bthat says\\b|\\bto say\\b|\\bsay\\b|" +
+        "(?<!\\b(?:of|about|on|for|with|from|in|to|like|read|forward|summarise|summarize)\\s)\\bthat\\b(?!\\s*(?:[,.;!?]|$)))")
 
     /** The instruction part of a dictating request ("text Prince"); the whole request when it dictates nothing. */
     fun head(goal: String): String {

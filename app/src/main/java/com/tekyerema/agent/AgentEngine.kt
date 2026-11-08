@@ -109,7 +109,7 @@ object AgentEngine {
     /** Tools that place a call, dial a code or send a text: with two SIMs the user says which one (phone/SimChoice). */
     private val SIM_TOOLS = setOf("send_sms", "make_call", "run_ussd", "mobile_money", "momo_send",
         com.tekyerema.money.ussd.UssdNavigatorTool.NAME, com.tekyerema.money.TelcoUssdTool.NAME, com.tekyerema.money.BankUssdTool.NAME)
-    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
+    private val CONTACT_ASK_TOOLS = setOf("send_sms", "make_call", "read_chat", com.tekyerema.money.ussd.UssdNavigatorTool.NAME,
         com.tekyerema.money.TelcoUssdTool.NAME) + SIM_TOOLS
     private const val TAG = "Tekyerema"
     /** Said before a money read-back within the call window (moneyCallLine). Short: the read-back question follows it. */
@@ -279,7 +279,7 @@ object AgentEngine {
      *  @param origin null = the phone's user; "remote:<client>" = a paired computer over MCP (Workstream D): the same run,
      *  read-only unless the user allowed remote actions, every change confirmed on the phone ([com.tekyerema.mcp.RemoteGate]). */
     @Synchronized
-    fun submitGoal(goal: String, unattended: Boolean = false, origin: String? = null) {
+    fun submitGoal(goal: String, unattended: Boolean = false, origin: String? = null, grant: com.tekyerema.agent.triggers.StandingGrant? = null) {
         if (!initialized) return
         // A PIN / password / one-time code said inside the request never enters the run: not the log, the trace, the
         // conversation memory or a model prompt (audit SEC02). The voice layer masks it too; this covers every other door.
@@ -325,7 +325,7 @@ object AgentEngine {
         // and then stopped the task (found in review, 2026-09-29).
         val words = goal.trim()
         _state.update { it.copy(status = AgentStatus.THINKING, goal = g, request = words.takeIf { w -> w != g }, origin = origin, runSeq = it.runSeq + 1, steps = emptyList()) }
-        currentJob = scope.launch { runTask(g, unattended = unattended, origin = origin) }
+        currentJob = scope.launch { runTask(g, unattended = unattended, origin = origin, grant = grant?.takeIf { unattended }) }
     }
 
     /** WS-A: the paused/interrupted task [text] would resume ("carry on"), or null. A pending screen reading keeps a bare
@@ -569,7 +569,7 @@ object AgentEngine {
      *  @param origin D: null = the phone's user; "remote:<client>" = a paired computer ([com.tekyerema.mcp.RemoteGate]). */
     private suspend fun runTask(goal: String, forcedBrain: AgentBrain? = null, forcedLabel: String? = null, unattended: Boolean = false,
                                 resume: com.tekyerema.agent.journal.TaskRecord? = null, request: String? = null, journal: Boolean? = null,
-                                origin: String? = null) {
+                                origin: String? = null, grant: com.tekyerema.agent.triggers.StandingGrant? = null) {
         val ctxApp = appContext ?: return
         val set = settings ?: return
         clearLog()
@@ -1043,6 +1043,9 @@ object AgentEngine {
                             journalCheckpoint()
                             continue
                         }
+                        // A multi-part request is not done at its first part's answer (agent/LegCheck; A20e 8 Nov 2026) — told once.
+                        val legNote = legGate(runCtx, decision.summary, history)
+                        if (legNote != null) { history.add(legNote); continue }
                         // Claim check (A20e 2026-09-29: "I opened Chrome and searched…" after only opening Chrome): a reply may
                         // only claim what a step did — refused once with what's missing, then ended honestly (agent/ClaimCheck).
                         val unsupported = ClaimCheck.check(runCtx.goal, decision.summary, history,
@@ -1102,10 +1105,7 @@ object AgentEngine {
                         val detailUnseen = if (isQuestion || !screenTask) null else MoneyGround.unseenDetail(decision.summary,
                             before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" }, history, runCtx.goal)
                         if (detailUnseen != null && MoneyGround.unseen(decision.summary, "", emptyList(), "") == null) {
-                            log(LogEntry.Kind.INFO, "completion gate: the answer names details nothing in this task showed — not said")
-                            log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
-                            pushConvo("Nexus:${MoneyGround.NOT_SEEN}")
-                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
+                            endNotSeen(runCtx, history, before, stats, "the answer names details nothing in this task showed", decision.summary); return
                         }
                         val moneyUnseen = if (isQuestion) null else MoneyGround.unseen(decision.summary,
                             before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" }, history, runCtx.goal)
@@ -1137,10 +1137,7 @@ object AgentEngine {
                         // hallucinations") — never a made-up detail followed by "but I could not confirm it".
                         MoneyGround.unseenDetail(decision.summary, before.summarize() + " " + before.elements.joinToString(" ") { it.label ?: "" },
                             history, runCtx.goal)?.let {
-                            log(LogEntry.Kind.INFO, "completion gate: an unconfirmed answer names details nothing showed — not said")
-                            log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
-                            pushConvo("Nexus:${MoneyGround.NOT_SEEN}")
-                            finish(AgentStatus.CANNOT_DO, stats, run = runCtx); return
+                            endNotSeen(runCtx, history, before, stats, "an unconfirmed answer names details nothing showed", decision.summary); return
                         }
                         log(LogEntry.Kind.RESULT, spokenSummary)
                         pushConvo("Nexus:${decision.summary}")
@@ -1301,7 +1298,7 @@ object AgentEngine {
                         usedTools += decision.name
                         // D-08: an unattended (trigger) task may only use tools that allow that caller.
                         val caller = if (unattended) com.tekyerema.tools.ToolManifest.CALLER_TRIGGER else com.tekyerema.tools.ToolManifest.CALLER_PLANNER
-                        if (!com.tekyerema.tools.ToolManifest.mayCall(tool, caller)) {
+                        if (!com.tekyerema.tools.ToolManifest.mayCall(tool, caller) && !grantAllows(grant, decision.name, decision.args)) {
                             stats = stats.copy(blocked = stats.blocked + 1)
                             log(LogEntry.Kind.POLICY, "Blocked: ${decision.name} is not allowed in an unattended task")
                             com.tekyerema.audit.AuditHooks.refused(source, runCtx.auditTask, step, tool, decision.args, decision.rationale,
@@ -1422,8 +1419,7 @@ object AgentEngine {
                                         finish(AgentStatus.STOPPED, stats, run = runCtx); return
                                     }
                                     ans = a
-                                    val idx = (com.tekyerema.agent.research.OptionAnswer.parse(a, choices) as?
-                                        com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index
+                                    val idx = pickedIndex(a, choices, pre.data)
                                     if (idx != null && com.tekyerema.tools.ContactChoice.apply(args2, pre.data, choices[idx])) { chosen = true; break }
                                     val other = SOMEONE_ELSE.find(a.trim())
                                     if (other != null) newName = other.groupValues[1].trim().trim(',', '.', ' ').takeIf { it.isNotEmpty() }
@@ -1571,8 +1567,13 @@ object AgentEngine {
                               val carried = if (effectLine == null && effectSpec != null && decision.name == "tap")
                                   effects.approvedButNotDone(effectSpec)?.takeIf { it.tool == "type" && System.currentTimeMillis() - it.at < 120_000L }
                                   else null
+                              // A standing order the user set earlier ("when Lydia sends a voice note, forward it to my Saved Messages")
+                              // answers only its own taps, in its own apps (StandingGrant). Any other question falls through to the
+                              // confirmation below, and the order's runner stops the task there: nothing else is approved.
                               // (WS-A: a step the ledger has on record is always asked — the Mobile-Money pass never skips it.)
-                              if (carried != null) {
+                              if (standingCovers(grant, decision.name, resolved?.element?.label ?: requestedLabel, before, stepAudit)) {
+                                // handled inside standingCovers: the approval is logged and audited there.
+                              } else if (carried != null) {
                                 log(LogEntry.Kind.POLICY, "Already approved in this task and it had not sent — pressing Send without asking again.")
                                 stepAudit?.approved(null, "same message approved earlier in this task; it had not sent")   // WS-C
                               } else if (effectLine == null && moneyOpApproved && isDialerNavigation(before) &&
@@ -1640,6 +1641,7 @@ object AgentEngine {
                                 }
                                 // Prefer the action-describing sentence (§19); the policy's default is
                                 // just tool.confirmationPrompt(args), so semantic never hides a safety note.
+                                suspend fun buildConfirmLines(semantic: String?, pd: com.tekyerema.policy.PolicyDecision, tool: com.tekyerema.tools.Tool, decision: AgentDecision.CallTool, resolved: com.tekyerema.tools.ResolvedTarget?, requestedLabel: String?, before: UiSnapshot, readBackScreen: UiSnapshot, effectLine: String?, origin: String?, goal: String, saidNumbers: String, tags: Map<String, com.tekyerema.core.Tagged<String>>, ctxApp: Context): ConfirmLines {
                                 val basePrompt = semantic ?: pd.confirmationPrompt ?: tool.confirmationPrompt(decision.args)
                                 // §1.12 — a blind user must hear WHO and WHICH NUMBER a call will go to
                                 // before it happens; resolve the contact now and name the concrete target +
@@ -1692,7 +1694,7 @@ object AgentEngine {
                                     ?.takeIf { prompt == plainPrompt || (onlyDisclosed && twiDisclosed.none { d -> d == null }) }
                                     ?.let { t -> twiDisclosed.filterNotNull().joinToString("") { "$it " } + t }
                                     ?: com.tekyerema.voice.VoiceEngine.twiLine(prompt)
-                                stats = stats.copy(confirmations = stats.confirmations + 1)
+                                // (confirmation count is incremented after buildConfirmLines() returns)
                                 // Risk tiers (policy/ConfirmTiers): a plain call to a saved contact is announced, with a short
                                 // window to say stop, instead of asked; any warning or a Twi conversation keeps the question.
                                 val callingLine = if (decision.name == "make_call" && effectLine == null && origin == null &&
@@ -1701,11 +1703,19 @@ object AgentEngine {
                                     com.tekyerema.core.config.AppConfig.bool("confirm.callImplicit", true))
                                     com.tekyerema.policy.ConfirmTiers.callingLine(prompt) else null
                                 val asked = callingLine ?: prompt
+                                return ConfirmLines(asked, prompt, promptTwi, callingLine)
+                                }
+                                val clv = buildConfirmLines(semantic, pd, tool, decision, resolved, requestedLabel, before, readBackScreen, effectLine, origin, goal, saidNumbers, tags, ctxApp)
+                                stats = stats.copy(confirmations = stats.confirmations + 1)
+                                val asked = clv.asked
+                                val prompt = clv.prompt
+                                val promptTwi = clv.promptTwi
+                                val callingLine = clv.callingLine
                                 moneyReadBack(decision.name)   // money/MoneyMoment: the earcon + gold edge start here
                                 log(LogEntry.Kind.CONFIRM, asked)
                                 // the Twi wording the user is asked in (debug builds only — the read-back names people and amounts)
                                 if (promptTwi != null && com.tekyerema.BuildConfig.DEV_HOOKS) android.util.Log.i("Tekyerema", "[CONFIRM-TWI] $promptTwi")
-                                pushConvo("Tɛkyerɛma proposed: $prompt")   // so a follow-up correction can reference it
+                                pushConvo("Nexus proposed: $prompt")   // so a follow-up correction can reference it
                                 drain(confirmChannel)   // only a reply to THIS prompt counts
                                 val seq = ++confirmSeq   // J-02: every surface's yes must name this number
                                 _state.update { it.copy(status = AgentStatus.WAITING_CONFIRMATION, pendingConfirmation = asked,
@@ -1777,12 +1787,7 @@ object AgentEngine {
                                             planned.addFirst(decision.copy(args = revised.args, rationale = "the user corrected ${revised.what}"))
                                             setStatus(AgentStatus.THINKING); continue
                                         }
-                                        history.add(
-                                            "You proposed: \"$prompt\". The user did NOT approve it — they said: \"${reply.text}\". " +
-                                            "Treat that as a correction or replacement of that pending action: change the recipient, app, " +
-                                            "message wording, or number as they asked (or drop it if they no longer want it), then take the " +
-                                            "next step toward the corrected action. Do NOT re-propose the identical action."
-                                        )
+                                        history.add(pendingNote(prompt, decision, reply.text))
                                         // The proposed action never ran (the user redirected before execution), so it is
                                         // NOT counted as an unverified mutation — that would wrongly taint a later Done.
                                         setStatus(AgentStatus.THINKING)   // lets the confirmation observer re-arm for the next proposal
@@ -2441,7 +2446,7 @@ object AgentEngine {
         val spoken = if (com.tekyerema.notifications.MessageReading.plain())
             spokenIn.replace(Regex("\\s*\\([^)]*\\)"), "").trim().ifEmpty { spokenIn } else spokenIn
         log(LogEntry.Kind.CONFIRM, "Asking: $spoken")
-        pushConvo("Tɛkyerɛma asked: $question")
+        pushConvo("Nexus asked: $question")
         drain(answerChannel)
         // In a Twi conversation the question is shown — and read — in Twi too (VoiceEngine.twiLine: names kept as tags,
         // amounts and numbers in English). The ASKING state is set FIRST, with the English: a translation can take seconds,
@@ -2471,6 +2476,62 @@ object AgentEngine {
     private fun <T> drain(ch: Channel<T>) { while (ch.tryReceive().isSuccess) { /* stale */ } }
 
     /** W8: what [finish] needs to know about the run in flight. */
+    /** The plain outcome of this task's send when ground truth confirms it (SendTruth): the phone's sent box, or the chat's own
+     *  sent marker on a fresh look at the screen — so a successful send is never ended with "I couldn't see the result". */
+    private suspend fun sentForSure(run: RunCtx, history: List<String>, before: UiSnapshot): String? {
+        val typed = com.tekyerema.policy.ActionSemantics.lastTyped(history)
+        val sent = run.sends.all.lastOrNull()
+        if (sent == null && typed == null) return null
+        val app = appContext ?: return null
+        val fresh = try { controller?.takeIf { it.ready }?.buildSnapshot() } catch (_: Throwable) { null } ?: before
+        return try { SendTruth.confirm(app, sent, typed, fresh) } catch (_: Throwable) { null }
+    }
+
+    /** A confirmed send ends the task with its plain outcome (runTask is at the JVM's 64 KB method limit: helpers, not inline code). */
+    private fun finishSent(line: String, stats: RunStats, run: RunCtx) {
+        log(LogEntry.Kind.RESULT, line); pushConvo("Nexus:$line"); finish(AgentStatus.COMPLETED, stats, run = run)
+    }
+
+    /** An answer naming details nothing showed: when ground truth says the send went, say that (owner, 8 Nov 2026); otherwise the
+     *  honest "I couldn't see the result" and CANNOT_DO. */
+    private suspend fun endNotSeen(run: RunCtx, history: List<String>, before: UiSnapshot, stats: RunStats, why: String, summary: String = "") {
+        sentForSure(run, history, before)?.let { finishSent(it, stats, run); return }
+        log(LogEntry.Kind.INFO, "completion gate: $why — not said (the answer was: ${summary.take(160)})")
+        log(LogEntry.Kind.RESULT, MoneyGround.NOT_SEEN)
+        pushConvo("Nexus:${MoneyGround.NOT_SEEN}")
+        finish(AgentStatus.CANNOT_DO, stats, run = run)
+    }
+
+    /** LegCheck at a reply: the note for the brain when acting parts of the request have no step yet — once per task. */
+    private fun legGate(run: RunCtx, summary: String, history: List<String>): String? {
+        if (summary.trim().endsWith("?")) return null
+        val note = LegCheck.missing(run.goal, history) ?: return null
+        if (run.legRefusals++ != 0) return null
+        log(LogEntry.Kind.INFO, "completion gate: acting parts of the request have no step yet — not done yet")
+        return note
+    }
+
+    /** The history note when the user answers a read-back with an instruction the rules couldn't apply themselves: the pending
+     *  action is named so the brain edits it (A20e 8 Nov 2026: it re-planned the send from scratch in another app). */
+    private fun pendingNote(prompt: String, decision: AgentDecision.CallTool, said: String): String =
+        "You proposed: \"$prompt\" (pending: ${decision.name}(${decision.args.toString().take(200)})). The user did NOT approve it — " +
+        "they said: \"$said\". Treat that as a correction of THAT pending action: keep the same tool and app, change only the recipient, " +
+        "message wording, or number as they asked (or drop it if they no longer want it), and propose the corrected action next. " +
+        "Do NOT re-propose the identical action and do NOT start over in another app."
+
+    /** The option the user picked among contact choices: by the number's ending first ("the one ending 6720" — A20e 8 Nov
+     *  2026: twins named alike could only be told apart by their numbers), then by name or ordinal (OptionAnswer). */
+    private fun pickedIndex(answer: String, choices: List<String>, data: JSONObject?): Int? {
+        ContactEnding.digits(answer)?.let { d ->
+            val list = data?.optJSONArray("choices")
+            if (list != null) {
+                val hits = (0 until list.length()).filter { list.optJSONObject(it)?.optString("number")?.filter(Char::isDigit)?.endsWith(d) == true }
+                if (hits.size == 1) return hits[0]
+            }
+        }
+        return (com.tekyerema.agent.research.OptionAnswer.parse(answer, choices) as? com.tekyerema.agent.research.OptionAnswer.Pick.Chosen)?.index
+    }
+
     private class RunCtx(
         val goal: String, val source: String, val direct: Boolean, val brain: AgentBrain,
         val usedTools: Set<String>, val auditTask: Long,
@@ -2484,6 +2545,8 @@ object AgentEngine {
         val sends = SendReport.Tracker()
         /** [ClaimCheck]: how often a done-reply claimed something no step did. */
         var claimRefusals = 0
+        /** LegCheck: a reply refused once because acting parts of the request had no step yet. */
+        var legRefusals = 0
         /** [DoneCheck] (P1-14): how often a done-reply came with the request's page not on the screen. */
         var doneRefusals = 0
         /** The state's runSeq when this run started — only the run that still owns the status may write it (audit half 1 #5). */
@@ -2842,6 +2905,30 @@ object AgentEngine {
     private fun moneyReadBack(tool: String) {
         if (com.tekyerema.money.MoneyMoment.isMoneyTool(tool)) com.tekyerema.money.MoneyMoment.hold(com.tekyerema.money.MoneyMoment.TASK)
     }
+
+    /** Whether a standing order's grant permits this tool call in an unattended run (used beside ToolManifest.mayCall).
+     *  Kept out of runTask so that method stays under the JVM's 64 KB bytecode limit. */
+    private fun grantAllows(grant: com.tekyerema.agent.triggers.StandingGrant?, toolName: String, args: JSONObject): Boolean =
+        grant?.mayCall(toolName, args) == true
+
+    /** A standing order's grant may auto-approve just its own forwarding taps (StandingOrders / StandingGrant): the tap on
+     *  Forward / Send / the destination, in an allowed app. Returns true and records the approval when it covers this tap;
+     *  any other question falls through to the normal confirmation. Extracted from runTask for the 64 KB method limit. */
+    private fun standingCovers(
+        grant: com.tekyerema.agent.triggers.StandingGrant?, toolName: String, label: String?, snap: UiSnapshot,
+        stepAudit: com.tekyerema.audit.AuditHooks.Step?
+    ): Boolean {
+        if (grant == null) return false
+        val screenWords = snap.elements.joinToString(" ") { it.label.orEmpty() }
+        if (!grant.approves(toolName, label, snap.appPackage, screenWords)) return false
+        log(LogEntry.Kind.POLICY, "Covered by the standing order the user set — not asking again.")
+        stepAudit?.approved(null, "covered by the user's standing order")
+        return true
+    }
+
+    /** The confirmation read-back lines runTask asks the user with — built inside a local buildConfirmLines() so that
+     *  computation lives in its own method and runTask stays under the JVM's 64 KB bytecode limit. */
+    private class ConfirmLines(val asked: String, val prompt: String, val promptTwi: String?, val callingLine: String?)
 
     private fun noteAppSwitch(snap: UiSnapshot?) {
         val pkg = snap?.appPackage ?: return

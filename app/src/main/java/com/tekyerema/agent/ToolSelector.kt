@@ -64,6 +64,10 @@ object ToolSelector {
             Regex("(?i)\\b(setting|settings|wi-?fi|bluetooth|mobile data|airplane|flight mode|location|where am i|brightness|" +
                 "dark mode|dark theme|theme|font|text size|battery saver|do not disturb|dnd|hotspot|nfc|rotation|auto-?rotate)\\b")
         ),
+        "standing" to Group(
+            listOf("set_standing_order"),
+            Regex("(?i)\\b(?:when|whenever|every time|each time|anytime|if|once)\\b.{1,60}\\b(?:sends?|shares?|drops?|forwards?)\\b")
+        ),
         "alarm" to Group(
             listOf("set_alarm", "cancel_alarm", "set_timer", "show_alarms"),
             Regex("(?i)\\b(alarm|alarms|timer|timers|wake me|remind|reminder|countdown|stopwatch)\\b")

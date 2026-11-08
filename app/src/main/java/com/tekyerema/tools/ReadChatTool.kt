@@ -31,6 +31,19 @@ object ReadChatTool : Tool {
 
     private val WHATSAPP_PKGS = listOf("com.whatsapp", "com.whatsapp.w4b")
 
+    /** Several saved people fit the name → the engine asks which (number endings tell twins apart), like send_sms / make_call.
+     *  A20e 8 Nov 2026: "Which Prince Alhassan: Prince Alhassan or Prince Alhassan or Prince Alhassan?" ended the task instead. */
+    override suspend fun preflight(args: JSONObject, ctx: ToolContext): ToolResult? {
+        val said = args.optString("contact").trim()
+        if (said.isEmpty() || said.count(Char::isDigit) >= 9 || args.optString("number").count(Char::isDigit) >= 9) return null
+        val hits = try { ContactChoice.resolve(ctx.appContext, said) } catch (_: Throwable) { emptyList() }
+        return when {
+            hits.isEmpty() -> ToolResult(false, "I couldn't find “$said” in your contacts.", recoverable = false)
+            hits.size == 1 -> null
+            else -> ContactChoice.result(ctx.appContext, said, hits)
+        }
+    }
+
     override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
         val said = args.optString("contact").trim()
         if (said.isEmpty()) return ToolResult(false, "Whose chat should I read?", recoverable = false)
@@ -40,13 +53,14 @@ object ReadChatTool : Tool {
         launchRefusal(pkg, "WhatsApp", ctx.emergency)?.let { return ToolResult(false, it, recoverable = false) }
 
         val digits = said.filter { it.isDigit() }
-        val (who, number) = if (digits.length >= 9) said to digits else {
+        val picked = args.optString("number").filter { it.isDigit() }      // set by ContactChoice.apply after the engine's question
+        val (who, number) = if (picked.length >= 9) said to picked else if (digits.length >= 9) said to digits else {
             val hits = try { ContactResolver.resolve(ctx.appContext, said) } catch (_: Throwable) { emptyList() }
                 .distinctBy { it.number.filter { c -> c.isDigit() }.takeLast(9) }
             when (hits.size) {
                 0 -> return ToolResult(false, "I couldn't find “$said” in your contacts.", recoverable = false)
                 1 -> hits[0].name to hits[0].number
-                else -> return ToolResult(false, "Which ${said}: ${hits.take(4).joinToString(" or ") { it.name }}?", recoverable = false)
+                else -> return ContactChoice.result(ctx.appContext, said, hits)   // asks, never a dead end
             }
         }
         val url = "https://api.whatsapp.com/send?phone=${IntentTemplates.ghanaIntl(number)}"

@@ -50,7 +50,7 @@ object ContactChoice {
         val shown = ranked.take(MAX_OPTIONS)
         val options = shown.map { c ->
             val twins = all.count { it.name.trim().equals(c.name.trim(), ignoreCase = true) } > 1
-            Option(if (twins) "${c.name.trim()} ending ${tail(c.number, 3)}" else c.name.trim(), c.name.trim(), c.number)
+            Option(if (twins) "${c.name.trim()} ending ${tail(c.number, 4)}" else c.name.trim(), c.name.trim(), c.number)
         }
         val more = all.size - shown.size
         val labels = options.map { it.label }

@@ -76,7 +76,9 @@ object FinalActionGuard {
         // (a contact's name in a search box) is not touched.
         if (proposed.name == "type") {
             val own = proposed.args.optString("text").takeIf { it.isNotBlank() } ?: return proposed
-            val d = MessageFidelity.dictated(goal) ?: return proposed
+            // Several dictated messages in one request (one per person): the typed words are left as the planner wrote them —
+            // never swapped for another recipient's words (A20e 8 Nov 2026).
+            val d = MessageFidelity.dictatedFor(goal, null) ?: return proposed
             // The planner typed the words as heard: they go out tidied (sentences, capitals, a full stop). A polished version
             // of the same message (MessageFidelity.faithful) is kept as written. Anything else typed in this task — a name in
             // a search box — shares no words with the message and is left alone.
@@ -93,7 +95,8 @@ object FinalActionGuard {
         if (proposed.name !in MessageFidelity.TEXT_TOOLS) return proposed
         val key = if (proposed.args.has("message")) "message" else if (proposed.args.has("text")) "text" else return proposed
         val own = proposed.args.optString(key).takeIf { it.isNotBlank() } ?: return proposed
-        val kept = MessageFidelity.enforced(proposed.name, own, goal) ?: return proposed
+        val to = listOf("contact", "sender", "number").firstNotNullOfOrNull { k -> proposed.args.optString(k).trim().takeIf { it.isNotEmpty() && it != "null" } }
+        val kept = MessageFidelity.enforced(proposed.name, own, goal, to) ?: return proposed
         if (kept == own) return proposed
         android.util.Log.i("Tekyerema", "[GUARD] ${proposed.name}: the planner's message was not the user's words — sending the words as dictated")
         val args = JSONObject(proposed.args.toString()).put(key, kept)

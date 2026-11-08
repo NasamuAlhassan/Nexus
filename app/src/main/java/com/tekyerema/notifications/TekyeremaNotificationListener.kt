@@ -38,6 +38,9 @@ class TekyeremaNotificationListener : NotificationListenerService() {
             try { com.tekyerema.notifications.MessageIndex.add(rec) } catch (_: Throwable) {}
         // A-12: the user's own "tell me when Ama messages" rules — live posts only, never the reconnect backfill.
         try { com.tekyerema.agent.triggers.NotificationTriggers.onPosted(applicationContext, rec) } catch (_: Throwable) {}
+        // Standing orders ("when Lydia sends a voice note, forward it…"): live posts only, and not the bundle's summary line.
+        if ((sbn?.notification?.flags ?: 0) and Notification.FLAG_GROUP_SUMMARY == 0)
+            try { com.tekyerema.agent.triggers.StandingOrders.onPosted(applicationContext, rec) } catch (_: Throwable) {}
         // Phone care: money-received / missed-call alerts the user switched on — live posts only, on its own thread.
         try { com.tekyerema.phonecare.PhoneAlerts.onPosted(applicationContext, rec, sbn?.notification) } catch (_: Throwable) {}
         // #37: a one-time code while a code box waits — offered, typed only on "enter the code" (OtpRelay). The raw text is

@@ -133,14 +133,23 @@ data class UiSnapshot(
             tree.filter { !it.interactive && !it.label.isNullOrBlank() } +
             vision
         val arr = JSONArray()
+        // In a chat, each bubble is prefixed with who said it ("You: …" / "<chat>: …") BEFORE the label is cut, so the planner can
+        // tell the user's own messages from the other side's (ChatBubbles; A20e 8 Nov 2026).
+        val chat = ChatBubbles.isChatScreen(this)
+        val other = if (chat) try { com.tekyerema.agent.journal.EffectKeys.chatTitle(this) } catch (_: Throwable) { null } else null
         for (e in ordered.take(maxElements)) {
             val o = JSONObject()
             o.put("id", e.id)
             o.put("role", e.role)
             // J-10: a one-time code / PIN in a label (an SMS preview, a banner) never reaches the model; the element stays.
             // Hidden text (far more words than the box can show — Perceivability) is withheld: nobody can read it on screen.
-            if (!e.label.isNullOrBlank() && e.unseen != Perceivability.CRAMMED)
-                o.put("label", (com.tekyerema.core.Redact.secrets(e.label) ?: e.label).take(labelMax))
+            if (!e.label.isNullOrBlank() && e.unseen != Perceivability.CRAMMED) {
+                val bubble = if (chat) ChatBubbles.promptLabel(e, this, other) else null
+                val shown = com.tekyerema.core.Redact.secrets(bubble ?: e.label) ?: (bubble ?: e.label)
+                // A chat's run-together bubbles are the content the user asked about: keep their NEWEST part (the end), up to 320
+                // characters, instead of the first 64 — which showed one old message and cut the rest (A20e 8 Nov 2026).
+                o.put("label", if (bubble != null && shown.length > labelMax) "…" + shown.takeLast(maxOf(labelMax, 320)) else shown.take(labelMax))
+            }
             e.pkg?.let { o.put("from_app", it) }
             // Mark only vision elements (they need x,y grounding); "tree" is the default, so omit it — this
             // JSON is sent for up to 45 elements on every step, so per-element bytes dominate the request.

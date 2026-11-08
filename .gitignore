@@ -110,3 +110,5 @@ app/src/main/assets/whatis/
 # three-brain evaluation: raw evidence (logs/screens) stays local; records and reports are committed
 evaluations/evidence/
 evaluations/DRYRUN/
+
+demo-package/sao-fund-demo/recordings/

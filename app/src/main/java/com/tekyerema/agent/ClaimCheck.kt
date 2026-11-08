@@ -29,7 +29,10 @@ object ClaimCheck {
         Family("typing", Regex("\\b(?:type|write)\\b", I), "typed|wrote",
             setOf("type", "set_text")),
         Family("alarm", Regex("\\b(?:alarm|timer|remind)", I), "set (?:an? |the |your )?(?:alarm|timer|reminder)",
-            setOf("set_alarm", "set_timer", "create_schedule"))
+            setOf("set_alarm", "set_timer", "create_schedule")),
+        // A20e 8 Nov 2026: "I've noted that your meeting is…" with nothing stored — the fact was gone at the next request.
+        Family("memory", Regex("\\b(?:remember|keep (?:this |it |that )?in mind|bear in mind|note (?:that|this|down)|make a note|don'?t forget)\\b", I),
+            "noted|remembered|saved|kept|made a note|'ll remember|will remember|'ll keep|got it", setOf("remember"))
     )
     /** A step that "succeeded" only at typing or opening a draft — its own check says the words did not go — is no evidence of
      *  a send (A20e 2026-10-01, Telegram: the text sat in the box and the reply was "I sent the Telegram message"). */

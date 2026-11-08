@@ -39,9 +39,12 @@ object ScreenReadout {
         val vision = snap.elements.filter { it.source == ElementSource.VISION }
             .sortedWith(compareBy({ it.bounds.top }, { it.bounds.left }))
         val out = ArrayList<String>()
+        val chat = com.tekyerema.accessibility.ChatBubbles.isChatScreen(snap)
+        val other = if (chat) try { com.tekyerema.agent.journal.EffectKeys.chatTitle(snap) } catch (_: Throwable) { null } else null
         for (e in tree + vision) {
             if (e.password) continue
-            val label = clean(e.label)
+            // A chat read aloud says who said each bubble ("You: …", "Richmond: …") — A20e 8 Nov 2026.
+            val label = clean((if (chat) com.tekyerema.accessibility.ChatBubbles.promptLabel(e, snap, other) else null) ?: e.label)
             if (label.isEmpty() || isChrome(label)) continue
             val prev = out.lastOrNull()
             if (out.any { it.equals(label, ignoreCase = true) }) continue

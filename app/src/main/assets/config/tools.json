@@ -457,7 +457,13 @@
      "tools": [
       "read_chat"
      ],
-     "keywords": "\b(whats ?app|chat|chats|conversation)\b"
+     "keywords": "\\b(whats ?app|telegram|chat|chats|conversation|last message|messages? from)\\b"
+    },
+    "memory": {
+     "tools": [
+      "remember"
+     ],
+     "keywords": "\\b(remember|keep (?:this |it |that )?in mind|bear in mind|note (?:that|this|down)|make a note|don'?t forget|only on (?:whatsapp|telegram|signal|sms))\\b"
     }
    }
   },
@@ -491,6 +497,16 @@
    ],
    "idempotent": true,
    "untrusted_output": true
+  },
+  "remember": {
+   "feature": "A-19",
+   "callers": ["planner", "local"],
+   "idempotent": true
+  },
+  "set_standing_order": {
+   "feature": "A-12",
+   "callers": ["planner"],
+   "idempotent": true
   },
   "read_chat": {
    "feature": "E-29b",

@@ -47,7 +47,7 @@ class PromptBudgetTest {
         // hands it to a chat app; loads per step only in the "apps" group) measured 31,369. Cap = measured + ~100.
         // Owner, 29 Oct 2026 (a judge's "read the recent message from X on WhatsApp" read the notifications): + read_chat (opens the
         // chat, reads their latest bubbles; loads per step only in the "chat" group) measured 31,808. Cap = measured + ~100.
-        assertTrue("compiled tool schema grew to $tools chars", tools <= 32_000)   // 32.0k (3 Nov 2026): calendar repeat + until (weekly classes)
+        assertTrue("compiled tool schema grew to $tools chars", tools <= 33_700)   // 33.7k (8 Nov 2026): + set_standing_order (5 Nov) + remember (8 Nov); measured 33,593
         // Owner, 21 Oct 2026 ("the brain should understand"): one line telling the brain it has eyes (look_with_camera, now a
         // core tool) — measured 5,935. Cap = measured + ~60.
         // Owner, 26 Oct 2026 (Uber: the brain picked UberX without reading out the options): one sentence — a priced choice is
@@ -57,7 +57,7 @@ class PromptBudgetTest {
         // Owner, 26 Oct 2026 (the agent searched for a person who was already on screen): one sentence — a target already listed
         // or open is acted on, never searched for again — plus field_focused in the claim grammar, less the search-then-type
         // tap_sequence example — measured 6,277. Cap = measured + ~60.
-        assertTrue("system prompt grew to $system chars", system <= 6_560)
+        assertTrue("system prompt grew to $system chars", system <= 6_660)   // 8 Nov 2026: PLAN rule — each part may need another app; never stop at the first part. Cap = measured + ~60.
     }
 
     /** D-02: a typical request carries a fraction of the schema; money/comms tools load only when asked for. */

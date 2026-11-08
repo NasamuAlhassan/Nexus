@@ -115,8 +115,15 @@ object OutcomeVerifier {
 
     private fun elementsContaining(snap: UiSnapshot?, text: String): List<com.tekyerema.accessibility.UiElement> {
         val t = norm(text)
-        return snap?.elements?.filter { e -> e.label?.let { norm(it).contains(t) } == true }.orEmpty()
+        val hits = snap?.elements?.filter { e -> e.label?.let { norm(it).contains(t) } == true }.orEmpty()
+        if (hits.isNotEmpty()) return hits
+        // The planner reads chat bubbles as "You: …" / "<name>: …" (ChatBubbles) and copies that into its claim; the raw labels
+        // carry no such prefix, so the words after the speaker are what to look for (A20e 8 Nov 2026).
+        val m = SPEAKER_PREFIX.find(text) ?: return hits
+        val rest = norm(m.groupValues[1])
+        return if (rest.length < 2) hits else snap?.elements?.filter { e -> e.label?.let { norm(it).contains(rest) } == true }.orEmpty()
     }
+    private val SPEAKER_PREFIX = Regex("^\\s*[\\p{L}' .-]{1,40}:\\s+(.+)$")
 
     private fun labelsContaining(snap: UiSnapshot?, text: String): List<String> =
         elementsContaining(snap, text).mapNotNull { it.label }

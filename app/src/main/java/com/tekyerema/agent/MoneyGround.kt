@@ -42,10 +42,15 @@ object MoneyGround {
         val evidence = (listOf(screenText, goal) + toolResults).joinToString(" ")
         val seenNums = ANY_NUM.findAll(evidence).map { norm(it.value) }.toSet()
         ANY_NUM.findAll(answer).map { norm(it.value) }.firstOrNull { it !in seenNums }?.let { return it }
-        val ev = evidence.lowercase()
+        // Quoted words: compared with curly quotes, apostrophes, the ellipsis and spacing made plain on both sides — a bubble
+        // "Heyy... when are we meeting" quoted back as "Heyy… when are we meeting" was "unseen" (A20e 8 Nov 2026).
+        val ev = plain(evidence)
         return Regex("[\"“”]([^\"“”]{2,60})[\"“”]").findAll(answer).map { it.groupValues[1].trim() }
-            .firstOrNull { it.isNotBlank() && it.lowercase() !in ev }
+            .firstOrNull { it.isNotBlank() && plain(it) !in ev }
     }
+
+    private fun plain(s: String): String = s.lowercase().replace('…', ' ').replace(Regex("[’‘']"), "'").replace(Regex("[.,;:!?]+"), " ")
+        .replace(Regex("\\s+"), " ").trim()
 
     const val NOT_SEEN = "I couldn't see the result on the screen, so I won't guess."
 

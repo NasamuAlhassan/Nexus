@@ -190,7 +190,7 @@ class PlanTrackerTest {
         val block = t.promptBlock()
         assertTrue(block, block.contains("[x] 1. Open WhatsApp"))
         assertTrue(block, block.contains("[>] 2. Open Ama's chat — check: element_present: Ama Mensah"))
-        assertTrue(block, block.contains("Subgoal 1 done. Now 2"))
+        assertTrue(block, block.contains("Subgoal 1 done. Still to do: 2."))
     }
 
     @Test fun a_replan_keeps_what_is_done_and_notes_what_it_dropped() {

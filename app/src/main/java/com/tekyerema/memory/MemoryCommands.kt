@@ -61,7 +61,19 @@ object MemoryCommands {
             is MemCmd.Correct -> correct(ctx, cmd, mono)
             is MemCmd.Switch -> switch(ctx, cmd)
             MemCmd.More -> moreLines(mono)
+            is MemCmd.Note -> note(ctx, cmd.text, mono)
         }
+    }
+
+    /** A fact kept in the user's own words, under a key made of its words (so saying it again updates, not duplicates). */
+    private fun note(ctx: Context, text: String, mono: Long): FastOutcome {
+        val fact = text.trim().trimEnd('.', '!')
+        val key = MemoryCore.noteKey(fact)
+        if (!MemoryCore.check(MemKind.FACT, key, fact))
+            return say("MEMORY_SET", "I can't keep that — I don't store numbers, codes, amounts or passwords.")
+        UserMemory.update(ctx) { MemoryCore.upsert(it, MemKind.FACT, key, fact, true, System.currentTimeMillis()) }
+        touched = MemKind.FACT to key; touchedAt = mono
+        return say("MEMORY_SET", "Noted: $fact. Say “that's wrong” if I have it wrong.")
     }
 
     /** Speak the first page of [lines]; the rest wait behind "more" for a minute. */

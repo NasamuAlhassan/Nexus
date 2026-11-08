@@ -20,8 +20,12 @@ object MessageBody {
         "ask(?!\\s+(?:me|us|for)\\b)|inform|let\\s+\\S+(?:\\s+\\S+)?\\s+know)\\b|" +
         "\\bsend\\s+(?:\\S+\\s+){0,3}?(?:a|an)\\s+(?:message|text|sms|whatsapp|note|e-?mail)\\b")
     /** The first word of the message itself. "that" — but not "that number/person/one" (a recipient). */
+    //  "that" only when words follow it and it is not the object of a preposition or of summarise/read/forward ("a summary OF
+    //  that, and then remind me…" — A20e 8 Nov 2026: the trailing clause became the message).
     private val MARKER = Regex("(?i)\\b(?:saying|that says|which says|and say|and tell (?:him|her|them)|telling (?:him|her|them)|" +
-        "with the message|the message is|message is|that(?!\\s+(?:number|person|contact|one|guy|man|woman|lady)\\b))\\b|[:\"“]")
+        "with the message|the message is|message is|" +
+        "(?<!\\b(?:of|about|on|for|with|from|in|to|like|read|forward|summarise|summarize)\\s)that(?!\\s*(?:[,.;!?]|$))" +
+        "(?!\\s+(?:number|person|contact|one|guy|man|woman|lady)\\b))\\b|[:\"“]")
 
     /** No marker word at all — "tell Ama I'm on my way", "text Kofi we are leaving", "message Ama please call me": the body
      *  is the first-person (or politeness) clause after the name (B-03). Tried only when no explicit marker exists. */

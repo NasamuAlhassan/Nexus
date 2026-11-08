@@ -15,6 +15,8 @@ sealed class MemCmd {
     /** [kind] null = every category. */
     data class Switch(val kind: MemKind?, val on: Boolean) : MemCmd()
     object More : MemCmd()
+    /** A fact kept in the user's own words ("the meeting with Richmond is in N Block, room 3", "Richmond is only on Telegram"). */
+    data class Note(val text: String) : MemCmd()
 }
 
 /** Whole-utterance patterns only: a longer or compound request never matches and still reaches the agent. */
@@ -40,6 +42,13 @@ object MemoryParse {
     private val CORRECT_SHORT = Regex("""(?i)^no,? it(?:'s| is) (.{1,60})$""")
     private val MORE = Regex("""(?i)^(?:more|continue|go on|keep going|carry on|next|the rest|yes(?: please)?|read more|tell me more)$""")
     private val REMEMBER = Regex("""(?i)^(?:remember|note|know) (?:that )?(.+)$""")
+    /** "No calendar. Just keep this in mind: …" — the lead that refuses an event before the note (A20e 8 Nov 2026). */
+    private val LEAD_NO = Regex("""(?i)^(?:no[,.]?\s+)?(?:no |not (?:in )?(?:the |a |my )?|don'?t (?:put|add|save|make) (?:it|this|that|an?) (?:in|to|as) (?:the |my |an? )?)(?:calendar|reminder|event|alarm)s?[.,!]?\s+""")
+    /** A fact to keep as said: "remember (that) …", "keep (this) in mind: …", "note (that) …", "don't forget (that) …" — never
+     *  "remember TO …" (that is a reminder) and never a relationship ("Ama is my mother", the contact-checked path). */
+    private val NOTE = Regex("""(?i)^(?:just\s+|please\s+)*(?:remember|note|keep (?:this |it |that )?in mind|bear in mind|make a note|note down|don'?t forget|keep in mind)(?: that| this|:)?[,:]?\s+(?!to\b)(.{4,120})$""")
+    /** "Richmond is only on Telegram" / "Ama is on WhatsApp only": where a person can be reached. */
+    private val ONLY_ON = Regex("""(?i)^([\p{L}' .-]{2,40}?) (?:is|are) (?:only (?:on|reachable on|available on) (whatsapp|telegram|signal|messenger|sms|text)|(?:on|reachable on|available on) (whatsapp|telegram|signal|messenger|sms|text) only)$""")
 
     private val RATE = Regex("""(?i)^i (?:prefer|like|want|need) (?:you to )?(?:(?:speak|talk|read|go|speech|voice|reading)(?: speed)? )?(slow|slowly|slower|fast|faster|quick|quickly|normal)(?: speech| speed| voice| pace| reading)?$""")
     private val LANG = Regex("""(?i)^i (?:prefer|like|want) (?:you to (?:speak|talk|reply|answer)(?: in| to me in)? |to (?:hear|talk|speak) (?:in )?)?(twi|english)(?: for (messages|calls|money|reading|news|replies))?$""")
@@ -110,14 +119,27 @@ object MemoryParse {
         CORRECT.matchEntire(g)?.let { return MemCmd.Correct(it.groupValues[1].trim(), needsRecent = false) }
         CORRECT_SHORT.matchEntire(g)?.let { return MemCmd.Correct(it.groupValues[1].trim(), needsRecent = true) }
         if (MORE.matches(g)) return MemCmd.More
-        REMEMBER.matchEntire(g)?.let { m ->
+        val gn = g.replace(LEAD_NO, "").trim()
+        REMEMBER.matchEntire(gn)?.let { m ->
             // "remember that Ama is my mother" / "my boss is Kofi" are relationships: the contact-checked path owns them.
             if (com.tekyerema.android.Relations.parseSet(raw) != null) return null
             val body = m.groupValues[1].trim()
             parsePref(body)?.let { return MemCmd.SetPref(it.key, it.value) }
             parseFact(body)?.let { return MemCmd.SetFact(it.subject, it.value) }
+            // A fuller statement said to be remembered is kept as said ("the meeting with Richmond is in N Block, room 3, at half
+            // past ten" — A20e 8 Nov 2026: it went to the brain, which made a wrong calendar event). "Remember to …" is a reminder,
+            // and a short "remember that the meeting is at nine" may be one too: those stay with the agent (the brain has `remember`).
+            if (!body.startsWith("to ", ignoreCase = true) && body.length in 4..120 && body.split(' ').size >= 6) return MemCmd.Note(body)
             return null
         }
+        NOTE.matchEntire(gn)?.let { m ->
+            if (com.tekyerema.android.Relations.parseSet(raw) != null) return null
+            val body = m.groupValues[1].trim()
+            parsePref(body)?.let { return MemCmd.SetPref(it.key, it.value) }
+            parseFact(body)?.let { return MemCmd.SetFact(it.subject, it.value) }
+            return MemCmd.Note(body)
+        }
+        ONLY_ON.matchEntire(gn)?.let { return MemCmd.Note(gn) }
         FORGET_ABOUT.matchEntire(g)?.let { return MemCmd.ForgetAbout(it.groupValues[1].trim().removeSuffix("'s messages").removeSuffix(" messages").trim()) }
         return null
     }

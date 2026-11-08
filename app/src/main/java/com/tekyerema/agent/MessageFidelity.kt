@@ -66,16 +66,39 @@ object MessageFidelity {
     private val TELL_FORM = Regex("(?i)\\btell(?:ing)?\\s+(?:him|her|them)\\b|^\\s*(?:please\\s+|kindly\\s+)?tell\\s")
     private val TRAILING_QUOTE = Regex("[\"”']+$")
 
-    /** The words the request dictates for the message, or null when it dictates none. */
+    /** A second instruction after the body ("…, and then remind me about the meeting"): never part of the message. */
+    private val SECOND_INSTRUCTION = Regex("(?i)[,;]?\\s*\\b(?:and\\s+then|then|and\\s+also|also|after\\s+that|and)\\s+" +
+        "(?:remind|set|call|ring|text|message|open|tell\\s+me|send|play|check|read|wake|schedule|turn|go|put|cancel)\\b")
+    /** A body that starts with punctuation or a conjunction is a fragment of the instruction, not a dictated message. */
+    private val BAD_START = Regex("(?i)^(?:[\\p{P}\\s]|(?:and|then|but|also|or|so|the one|a one)\\b)")
+
+    /** The words the request dictates for the message, or null when it dictates none. The dictation ends where a second
+     *  instruction starts, and a fragment ("…, and then remind me…" — A20e 8 Nov 2026) dictates nothing. */
     fun dictated(goal: String): Dictated? {
         val g = goal.trim()
         if (!MessageBody.isMessaging(g)) return null
         val (head, body) = MessageBody.split(g)
         if (body.isBlank()) return null
-        val words = LEADING_MARKER.replace(body.trim(), "").trim().replace(TRAILING_QUOTE, "").trim().trimEnd('.', '!')
+        var words = LEADING_MARKER.replace(body.trim(), "").trim().replace(TRAILING_QUOTE, "").trim().trimEnd('.', '!')
             .trim().takeIf { it.isNotEmpty() } ?: return null
+        SECOND_INSTRUCTION.find(words)?.let { words = words.substring(0, it.range.first).trim().trimEnd(',', ';', '.') }
+        if (words.isEmpty() || BAD_START.containsMatchIn(words)) return null
         val tellForm = TELL_FORM.containsMatchIn(head) || TELL_FORM.containsMatchIn(body.substring(0, body.length - words.length))
         return Dictated(words, if (tellForm) LocalBrain.adaptForRecipient(words) else words)
+    }
+
+    /**
+     * The words dictated for THIS recipient when the request dictates several messages ("tell Richmond … that I'll be there at half
+     * past ten, and text Prince to please start without me" — A20e 8 Nov 2026: Prince's text was replaced by Richmond's words).
+     * One dictated body → as [dictated]; several → the clause that names [recipient]; several and no recipient match → null
+     * (the planner's own text stands rather than the wrong person's words).
+     */
+    fun dictatedFor(goal: String, recipient: String?): Dictated? {
+        val parts = LegCheck.clauses(goal) ?: return dictated(goal)
+        val cands = parts.mapNotNull { c -> dictated(c)?.let { c to it } }
+        if (cands.size <= 1) return cands.firstOrNull()?.second ?: dictated(goal)
+        val who = recipient?.trim()?.split(Regex("\\s+"))?.firstOrNull()?.lowercase()?.filter { it.isLetterOrDigit() }?.takeIf { it.length >= 2 } ?: return null
+        return cands.firstOrNull { it.first.lowercase().contains(who) }?.second
     }
 
     /** The same words, ignoring case, punctuation, quotes and spacing. */
@@ -119,9 +142,9 @@ object MessageFidelity {
 
     /** The text a planner's messaging tool call should carry: the planner's own when it is the dictated words, written
      *  properly ([faithful]); the user's words, tidied, when it says something else. */
-    fun enforced(toolName: String, text: String?, goal: String): String? {
+    fun enforced(toolName: String, text: String?, goal: String, recipient: String? = null): String? {
         if (toolName !in TEXT_TOOLS) return text
-        val d = dictated(goal) ?: return text
+        val d = dictatedFor(goal, recipient) ?: return text
         return when {
             d.matches(text) -> tidy(text!!)
             faithful(text, d) -> text
@@ -132,7 +155,7 @@ object MessageFidelity {
     /** The disclosure for a Send tap whose composer holds a DIFFERENT message from the one dictated (not the same words
      *  polished — [faithful]); null when they agree. */
     fun composerNotice(composer: String?, goal: String): String? {
-        val d = dictated(goal) ?: return null
+        val d = dictatedFor(goal, null) ?: return null   // several dictated messages: no notice — the composer may hold another person's
         if (composer.isNullOrBlank() || faithful(composer, d)) return null
         return "The message in the box says “${composer.trim().take(120)}” — you said “${d.adapted.take(120)}”."
     }

@@ -153,6 +153,7 @@ object PlannerMemory {
         val s = subject.trim().lowercase()
         val v = value.trim()
         return when {
+            s.startsWith("note:") -> "the user said: $v"
             s.startsWith("my ") -> "the user's ${s.removePrefix("my ")} is $v"
             s.startsWith("i am") -> "the user is ${s.removePrefix("i am").trim()} $v".replace("  ", " ")
             s.startsWith("i ") -> "the user says: I ${s.removePrefix("i ")} $v"

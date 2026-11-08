@@ -55,6 +55,17 @@ object ReviseTurn {
         Regex("(?i)^$LEAD(?:call|ring|phone|text|message)\\s+(.+?)\\s+instead[.!]?$"),
         Regex("(?i)^(?:(?:no|nope|nah|sorry|wait|actually|not (?:him|her|them))[,.!\\s]+)+(?:i meant|i mean|i said)?\\s*(.+)$")
     )
+    /** A time-or-count word the message may contain once: "five", "6", "7:30", "ten o'clock". */
+    private const val NUMBERISH = "(?:\\d{1,2}(?::\\d{2})?(?:\\s*(?:am|pm|a\\.m\\.|p\\.m\\.))?|one|two|three|four|five|six|seven|eight|nine|ten|" +
+        "eleven|twelve|noon|midnight)(?:\\s+o'?clock)?"
+    /** "Sorry, make it six" at a read-back whose message holds exactly one such word: that word changes, nothing else
+     *  (A20e 8 Nov 2026: the correction re-planned the whole send in the Messages app instead). */
+    private val MAKE_IT = Regex("(?i)^$LEAD(?:make|change)\\s+(?:it|that)\\s+(?:to\\s+)?($NUMBERISH)(?:\\s+instead)?[.!]?$")
+    /** "change five to six", "replace five with six", "six, not five", "not five, six". */
+    private val SWAP = Regex("(?i)^$LEAD(?:change|replace)\\s+([\\p{L}\\p{N}:']+)\\s+(?:to|with)\\s+([\\p{L}\\p{N}:']+)(?:\\s+instead)?[.!]?$")
+    private val NOT_X_Y = Regex("(?i)^$LEAD(?:not\\s+([\\p{L}\\p{N}:']+)[,\\s]+([\\p{L}\\p{N}:']+)|([\\p{L}\\p{N}:']+)[,\\s]+not\\s+([\\p{L}\\p{N}:']+))[.!]?$")
+    private val NUM_IN_MSG = Regex("(?i)(?<![\\p{L}\\p{N}'])$NUMBERISH(?![\\p{L}\\p{N}'])")
+
     private val MESSAGE = listOf(
         Regex("(?i)^$LEAD(?:change|make)\\s+(?:that|it|the message|the text|the words?)\\s+(?:to(?: say)?|say)\\s+(.+)$"),
         Regex("(?i)^$LEAD(?:the message|it) should (?:be|say|read)\\s+(.+)$"),
@@ -123,9 +134,26 @@ object ReviseTurn {
             }
         }
 
-        // --- the words (tools with a message) ---
+        // --- one word of the message ("make it six", "change five to six", "six, not five") ---
         var messageSet = false
-        if (args.has("message")) for (rx in MESSAGE) {
+        if (args.has("message") && amountKey == null && rest.isNotBlank()) {
+            val msg = args.optString("message")
+            fun edit(range: IntRange, new: String) {
+                out.put("message", msg.replaceRange(range, new)); changes.add("the message"); messageSet = true; rest = ""
+            }
+            MAKE_IT.find(rest)?.let { m ->
+                val hits = NUM_IN_MSG.findAll(msg).toList()
+                if (hits.size != 1) return null            // no number, or several: which one? — the planner
+                edit(hits[0].range, m.groupValues[1])
+            }
+            if (!messageSet) (SWAP.find(rest)?.let { it.groupValues[1] to it.groupValues[2] }
+                ?: NOT_X_Y.find(rest)?.let { m -> if (m.groupValues[1].isNotEmpty()) m.groupValues[1] to m.groupValues[2] else m.groupValues[4] to m.groupValues[3] })
+                ?.let { (old, new) ->
+                    val at = Regex("(?i)(?<![\\p{L}\\p{N}'])${Regex.escape(old)}(?![\\p{L}\\p{N}'])").findAll(msg).toList()
+                    if (at.size == 1) edit(at[0].range, new)
+                }
+        }
+        if (!messageSet && args.has("message")) for (rx in MESSAGE) {
             val m = rx.find(rest) ?: continue
             val words = m.groupValues[1].trim().replace(Regex("(?i)\\s+instead[.!]?$"), "").trim().trim('"', '“', '”')
             if (words.isEmpty()) return null

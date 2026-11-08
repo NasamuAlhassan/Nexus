@@ -67,14 +67,25 @@ object Rephrase {
         if (now - l.at > WINDOW_MS || g.isEmpty() || g.equals(l.goal, ignoreCase = true) && words(g).size <= 4) return null
         if (!CUE.containsMatchIn(g) && similarity(g, l.goal) < 0.5) return null
         if (l.actions.isEmpty() && l.reply.isNullOrBlank()) return null
+        // "No, that's not a summary. Text Prince: Richmond is asking when we are meeting." — a request restated WITH its own new
+        // words is a new explicit request, not a redo of the same thing (A20e 8 Nov 2026: it was blocked and re-planned elsewhere).
+        val nb = dictatedBody(g)
+        if (nb != null && !MessageFidelity.sameWords(nb, dictatedBody(l.goal).orEmpty())) return null
         return l
     }
+
+    /** The message the request dictates, from the first sentence that is itself a messaging request (after any cue). */
+    internal fun dictatedBody(goal: String): String? = goal.split(Regex("(?<=[.!?])\\s+"))
+        .firstOrNull { com.tekyerema.voice.understand.MessageBody.isMessaging(it) }?.let { MessageFidelity.dictated(it)?.raw }
 
     /** [name]/[args] would repeat what the last try did, in a redo of it. */
     @Synchronized
     fun repeats(goal: String, name: String, args: JSONObject): Boolean {
         val r = redo ?: return false
         if (!r.first.equals(goal.trim(), ignoreCase = true) || name in OBSERVATION) return false
+        // The same tool with different words is a different action ("text Prince: <new body>").
+        val msg = args.optString("message", args.optString("text")).trim()
+        if (msg.isNotEmpty() && r.second.none { it.contains(msg.take(40)) }) return false
         val sig = "$name(${args.toString().take(160)})"
         return r.second.any { it == sig || it.startsWith(sig) || sig.startsWith(it) }
     }

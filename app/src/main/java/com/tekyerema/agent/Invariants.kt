@@ -29,7 +29,14 @@ object Invariants {
     private val CONTROL_WORDS = setOf("chats", "calls", "status", "updates", "communities", "community", "search", "new chat",
         "contacts", "settings", "archived", "back", "more options", "send", "attach", "camera", "emoji", "voice message", "menu",
         "navigate up", "new message", "start chat", "messages", "inbox", "all", "unread", "favourites", "favorites", "groups",
-        "cancel", "ok", "done", "close", "clear", "edit", "call", "video call", "info", "mute", "delete", "share", "forward", "reply")
+        "cancel", "ok", "done", "close", "clear", "edit", "call", "video call", "info", "mute", "delete", "share", "forward", "reply",
+        // A20e 6–8 Nov 2026: Telegram's and Messages' own controls were asked about as people ("I found “Go back”. Is that who you mean?")
+        "go back", "profile", "search chats", "global search", "pending", "new group", "saved messages", "open camera", "add",
+        "attach file", "voice note", "sticker", "gif", "emoji, stickers, and gifs", "message", "type a message")
+    /** The element's kind as the tree names it: a control, a field, a tab or an image is never a person's row. */
+    private val NOT_A_PERSON_ROLE = Regex("(?i)(Button|ImageButton|ImageView|EditText|AutoCompleteTextView|SearchView|Switch|CheckBox|RadioButton|Tab\\w*|ActionMenuItemView|Toolbar|SeekBar|ProgressBar)$")
+    /** TalkBack-style role suffixes inside a label: "Send, Button", "Chats, tab, selected", "Back, double tap to activate". */
+    private val ROLE_SUFFIX = Regex("(?i),\\s*(button|tab|selected|not selected|double tap\\b.*|heading|image|edit box|switch|checkbox)\\s*$")
 
     /** [grounding] = false for the engine's own steps (a read-back the user corrected, a chain): they stand on what the user
      *  just approved or said, which the task's facts don't hold yet; the other rules still apply. */
@@ -81,20 +88,24 @@ object Invariants {
         val label = targetLabel(c.args, screen)?.trim()?.takeIf { it.isNotEmpty() } ?: return guarded
         // What the user said and what this task's look-ups returned — NOT the screen: the tapped name is always on it.
         val facts = TaskFacts(goal, history, "")
-        val name = label.lines().first().trim().take(60)
+        // "Send, Button" is the Send control, not a person called Send: the name is the label up to its first separator (SeenTarget).
+        val name = SeenTarget.nameOf(label).take(60)
+        val element = targetElement(c.args, screen)
 
         // 2. a channel / group / bot the user didn't ask for
         if (looksGroupish(label) && !GROUPISH_REQUEST.containsMatchIn(facts.said)) {
             return askOnce(history, guarded, "“$name” is a channel or a group, not a person. Is that what you want to open?",
                 "a channel or group the user didn't ask for")
         }
-        // 3. a person the user didn't name, while the request is to reach someone
-        if (reachesSomeone(goal) && looksLikeName(name) && !facts.personGrounded(name)) {
+        // 3. a person the user didn't name, while the request is to reach someone — only when what is tapped can BE a person
+        //    (a chat/contact row), never the app's controls, fields or tabs, nor the words the agent itself just typed
+        //    (A20e 8 Nov 2026: "I found “Go back” / “Send, Button”. Is that who you mean?" after the message had gone).
+        if (reachesSomeone(goal) && personRow(element, label, history) && looksLikeName(name) && !facts.personGrounded(name)) {
             return askOnce(history, guarded, "I found “$name”. Is that who you mean?", "a person the user didn't name")
         }
         // 3b. reading what a NAMED person sent, but the tapped chat is someone (or something) else — A20e 6 Nov 2026: asked for
         //     Richmond's last Telegram message, the brain opened "Learn Python Coding" and reported its post as his.
-        if (!reachesSomeone(goal) && readsFromSomeone(goal)) {
+        if (!reachesSomeone(goal) && readsFromSomeone(goal) && personRow(element, label, history)) {
             val chat = SeenTarget.nameOf(label)
             if (looksLikeName(chat) && !facts.personGrounded(chat))
                 return askOnce(history, guarded, "I found “$chat”. Is that whose messages you mean?", "a chat that isn't the person named")
@@ -153,6 +164,38 @@ object Invariants {
             }
         }
         return args.optString("label").takeIf { it.isNotBlank() && it != "null" }
+    }
+
+    /** The screen element a tap touches, by element_id (null for a label-only tap or an unknown id). */
+    internal fun targetElement(args: JSONObject, screen: JSONObject?): JSONObject? {
+        val id = if (args.has("element_id")) args.optInt("element_id", -1) else -1
+        if (id < 0) return null
+        val els = screen?.optJSONArray("elements") ?: return null
+        for (i in 0 until els.length()) {
+            val e = els.optJSONObject(i) ?: continue
+            if (e.optInt("id", -2) == id) return e
+        }
+        return null
+    }
+
+    /**
+     * Whether the tapped thing can be a person at all: a chat or contact row. False for the app's own controls (Button,
+     * ImageButton, Switch…), fields, tabs and selected items, for TalkBack-style role suffixes in the label ("Send, Button"),
+     * for anything inside a list that isn't a row, and for the words the agent itself typed a moment ago. Unknown kinds
+     * (a bare ViewGroup with a name) still count — the question is cheap, a wrong chat is not.
+     */
+    internal fun personRow(element: JSONObject?, label: String, history: List<String>): Boolean {
+        if (ROLE_SUFFIX.containsMatchIn(label.lines().first())) return false
+        val typed = com.tekyerema.policy.ActionSemantics.lastTyped(history)
+        if (typed != null && typed.length >= 4 && label.contains(typed.take(24), ignoreCase = true)) return false
+        if (element == null) return true
+        if (NOT_A_PERSON_ROLE.containsMatchIn(element.optString("role"))) return false
+        val acts = element.optJSONArray("actions")
+        if (acts != null && (0 until acts.length()).any { acts.optString(it) == "type" }) return false
+        val flags = element.optJSONArray("flags")
+        if (flags != null && (0 until flags.length()).any { flags.optString(it) in setOf("selected", "checkable", "heading") }) return false
+        val structure = element.optString("structure")
+        return structure.isEmpty() || structure.startsWith("row ")
     }
 
     /** A chat-list row whose preview is the chat's own name doing something ("Learn Python Coding pinned a photo"): a group or

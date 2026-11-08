@@ -27,6 +27,8 @@ fun defaultTools(): List<Tool> = listOf(
     CannotDoTool,
     // D-02 tool search (intercepted by the engine): loads tools the current step's subset left out
     FindTool,
+    StandingOrderTool,    // 5 Nov 2026: remember "when X sends a voice note, forward it to my Saved Messages"
+    RememberTool,         // 8 Nov 2026: keep a fact in the user's words ("Richmond is only on Telegram") — no calendar, no "noted" without storing
     // C-13 ask the user and wait inside the task (intercepted by the engine)
     AskUserTool,
     // Native accelerators (justified case-by-case in the plan's §14 table)

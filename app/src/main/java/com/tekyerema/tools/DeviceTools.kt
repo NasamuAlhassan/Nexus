@@ -133,25 +133,74 @@ object CancelAlarmTool : Tool {
         try { ctx.appContext.startActivity(intent) } catch (t: Throwable) { return ToolResult(false, "Couldn't cancel the alarm: ${t.message}") }
         // Samsung Clock answers the request by opening its alarm list with the alarm still ON (A20e, 3 October 2026): the
         // row's own switch is then flipped here — one tap on the element the list exposes, no model, nothing else touched.
-        kotlinx.coroutines.delay(1_200L)
+        // The list takes a moment to draw and the alarm may sit below the fold (A20e 8 Nov 2026: one look at 1.2 s saw nothing,
+        // "Asked the Clock…" was reported, and the 10:25 alarm stayed on; the brain then long-pressed rows for a Delete that
+        // isn't there). So: wait for the list, scroll to the row if needed, tap its switch, and re-check that it went off.
         val ctrl = ctx.controller
-        val s = try { ctrl?.takeIf { it.ready }?.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null }
         val data = JSONObject().put("hour", hour).put("minute", minute)
+        suspend fun snap(): UiSnapshot? = try { ctrl?.takeIf { it.ready }?.buildSnapshot() } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { null }
+        var s: UiSnapshot? = null
+        for (i in 0 until 8) {
+            kotlinx.coroutines.delay(if (i == 0) 1_200L else 400L)
+            s = snap()
+            if (s != null && CLOCK_APP.containsMatchIn(s.appPackage.orEmpty()) && listShowing(s)) break
+        }
         if (ctrl != null && s != null && CLOCK_APP.containsMatchIn(s.appPackage.orEmpty()) && listShowing(s)) {
+            var shown: UiSnapshot = s
+            // The alarm's row may sit below the fold, and the list's HEADER names the next alarm's time too ("Alarm in 23 hours…
+            // Sun, 9 Nov, 10:45") without a switch — so look for a row WITH a switch, scrolling down until one shows.
+            var on = switchesFor(shown, hour, minute).filter { it.checked }.ifEmpty { switchesByRow(shown, hour, minute) }
+            for (i in 0 until 5) {
+                if (on.isNotEmpty()) break
+                val list = shown.elements.firstOrNull { it.scrollable } ?: break
+                try { ctrl.scrollElement(list.id, "down") } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) { break }
+                kotlinx.coroutines.delay(700L)
+                shown = snap() ?: break
+                on = switchesFor(shown, hour, minute).filter { it.checked }.ifEmpty { switchesByRow(shown, hour, minute) }
+            }
             // Every switch at that time that is ON (two "6 am" alarms are both "the 6 am alarm" to the user) — one tap each,
-            // on the switch itself: tapping the row opens the editor (A20e, 3 October 2026, QA-39).
-            val on = switchesFor(s, hour, minute).filter { it.checked }
+            // on the switch itself: tapping the row opens the editor (A20e, 3 October 2026, QA-39). A switch that doesn't move
+            // on ACTION_CLICK gets one real tap at its centre.
             if (on.isNotEmpty()) {
+                var switched = 0
                 for (sw in on) {
                     try { ctrl.clickElement(sw.id) } catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) {}
                     kotlinx.coroutines.delay(700L)
+                    val again = snap()
+                    val still = again?.elements?.firstOrNull { it.id == sw.id || (it.checkable && it.bounds == sw.bounds) }
+                    if (still != null && still.checked) {
+                        try { ctrl.tap((sw.bounds.left + sw.bounds.right) / 2, (sw.bounds.top + sw.bounds.bottom) / 2) }
+                        catch (c: kotlinx.coroutines.CancellationException) { throw c } catch (_: Throwable) {}
+                        kotlinx.coroutines.delay(700L)
+                    }
+                    switched++
                 }
-                val said = if (on.size == 1) "Switched off the %02d:%02d alarm in the Clock.".format(hour, minute)
-                    else "Switched off both %02d:%02d alarms in the Clock.".format(hour, minute).let { if (on.size > 2) it.replace("both", "all ${on.size}") else it }
-                return ToolResult(true, said, data.put("switched", on.size), channel = "node")
+                val after = snap()
+                if (after != null && listShowing(after) && alarmState(after, hour, minute) == AlarmState.ON)
+                    return ToolResult(false, "The %02d:%02d alarm is still on in the Clock's list — tap the switch in its row (not the row itself).".format(hour, minute),
+                        data, recoverable = true, channel = "node")
+                val said = if (switched == 1) "Switched off the %02d:%02d alarm in the Clock.".format(hour, minute)
+                    else "Switched off both %02d:%02d alarms in the Clock.".format(hour, minute).let { if (switched > 2) it.replace("both", "all $switched") else it }
+                return ToolResult(true, said, data.put("switched", switched), channel = "node")
             }
+            if (alarmState(shown, hour, minute) == AlarmState.ON)
+                return ToolResult(false, "The %02d:%02d alarm is still on in the Clock's list — tap the switch in its row (not the row itself).".format(hour, minute),
+                    data, recoverable = true, channel = "node")
         }
         return ToolResult(true, "Asked the Clock to cancel the alarm for %02d:%02d.".format(hour, minute), data, channel = "intent")
+    }
+
+    /** When the switch itself carries no time (some One UI builds): the checkable element whose centre lies within the bounds of a
+     *  row that shows the time. Pure. */
+    internal fun switchesByRow(s: UiSnapshot, hour: Int, minute: Int): List<UiElement> {
+        val rows = s.elements.filter { e -> !e.checkable && e.label?.let { SetAlarmTool.showsTime(it, hour, minute) } == true }
+        if (rows.isEmpty()) return emptyList()
+        return s.elements.filter { sw ->
+            sw.checkable && sw.checked && rows.any { r ->
+                val cy = (sw.bounds.top + sw.bounds.bottom) / 2
+                cy >= r.bounds.top && cy <= r.bounds.bottom
+            }
+        }
     }
 
     internal enum class AlarmState { ON, OFF, GONE }

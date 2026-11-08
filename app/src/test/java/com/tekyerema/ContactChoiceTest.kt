@@ -33,8 +33,8 @@ class ContactChoiceTest {
     @Test fun at_most_three_options_recent_people_first_twins_told_apart() {
         val last = mapOf("559916720" to 900L, "552093690" to 500L)
         val c = ContactChoice.build("Prince", princes) { last[tail(it)] ?: 0L }
-        assertEquals(listOf("Prince Alhassan ending 720", "Prince Melanin", "Prince Alhassan ending 690"), c.options.map { it.label })
-        assertEquals("Which Prince: Prince Alhassan ending 720, Prince Melanin, or Prince Alhassan ending 690? Or someone else?", c.question)
+        assertEquals(listOf("Prince Alhassan ending 6720", "Prince Melanin", "Prince Alhassan ending 3690"), c.options.map { it.label })
+        assertEquals("Which Prince: Prince Alhassan ending 6720, Prince Melanin, or Prince Alhassan ending 3690? Or someone else?", c.question)
         assertEquals("one saved twice is one person: 7 people, 3 read out", 4, c.more)
         assertTrue("a listener can hold it", c.question.length < 130)
         // The planner-facing line keeps the shape the engine already reads its options from.
@@ -65,7 +65,7 @@ class ContactChoiceTest {
     }
 
     @Test fun an_offered_option_resolves_back_to_its_one_entry() {
-        assertEquals("Prince Alhassan" to "720", ContactChoice.narrow("Prince Alhassan ending 720"))
+        assertEquals("Prince Alhassan" to "6720", ContactChoice.narrow("Prince Alhassan ending 6720"))
         assertEquals("Prince Alhassan" to "0559916720", ContactChoice.narrow("Prince Alhassan on 055 991 6720"))
         assertEquals("Ama" to null, ContactChoice.narrow("Ama"))
         assertEquals("Auntie on 5" to null, ContactChoice.narrow("Auntie on 5"))
@@ -83,7 +83,7 @@ class ContactChoiceTest {
             .put("options", org.json.JSONArray(c.options.map { it.label }))
         assertEquals(c.options.map { it.label }, ContactChoice.optionsOf(data))
         val args = JSONObject().put("contact", "Prince")
-        assertTrue(ContactChoice.apply(args, data, "prince alhassan ending 720"))
+        assertTrue(ContactChoice.apply(args, data, "prince alhassan ending 6720"))
         assertEquals("Prince Alhassan", args.getString("contact")); assertEquals("055 991 6720", args.getString("number"))
         assertFalse(ContactChoice.apply(JSONObject(), data, "Kofi"))
         assertTrue(ContactChoice.optionsOf(null).isEmpty())

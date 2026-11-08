@@ -130,7 +130,7 @@ class PromptCacheTest {
         // this messaging step. Cap = measured + ~70.
         // 2026-11-04: + the SEEN line (agent/SeenTarget: Kofi's row is on this chat list, so the brain is told to tap it
         // instead of searching — owner) measured 2,972; it is only there when the named thing is on screen. Cap = measured + ~80.
-        assertTrue("chat list step grew to ${chats.length}", chats.length <= 3_050)
+        assertTrue("chat list step grew to ${chats.length}", chats.length <= 3_150)   // 8 Nov 2026: COMMS_RULES "You:" bubbles + "every part done" wording
         assertTrue("quick settings step grew to ${qs.length}", qs.length <= 1_950)
         assertTrue("article step grew to ${article.length}", article.length <= 5_000)
     }

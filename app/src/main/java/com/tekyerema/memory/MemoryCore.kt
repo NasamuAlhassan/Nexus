@@ -181,7 +181,11 @@ object MemoryCore {
         MemKind.PREF -> spokenPref(e.key, e.value)
     }
 
+    /** The key of a fact kept as said: "note:" + its first words, lowercased (same words → same note). */
+    fun noteKey(text: String): String = "note:" + text.lowercase().replace(Regex("[^\\p{L}\\p{N} ]+"), " ").replace(Regex("\\s+"), " ").trim().take(60)
+
     fun spokenFact(subject: String, value: String): String = when {
+        subject.startsWith("note:") -> value
         subject.startsWith("my ") -> "your ${subject.removePrefix("my ")} is $value"
         subject.startsWith("i am") -> "you are${subject.removePrefix("i am")} $value"
         subject.startsWith("i ") -> "you ${subject.removePrefix("i ")} $value"

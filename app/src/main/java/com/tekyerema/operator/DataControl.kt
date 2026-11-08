@@ -31,7 +31,7 @@ object DataControl {
                 com.tekyerema.learning.FailureStore.ensureLoaded(app); com.tekyerema.learning.FailureStore.count() }, null, "notes"),
             Item("Your routines", safe { com.tekyerema.agent.Routines.names().size }, null, "routines"),
             Item("Your schedules", safe { com.tekyerema.agent.triggers.ScheduledTasks.list(app).count { !it.id.startsWith("cfg:") } }, null, "schedules"),
-            Item("Message alerts", safe { com.tekyerema.agent.triggers.NotificationTriggers.userRules(app).size }, null, "alerts"),
+            Item("Message alerts", safe { com.tekyerema.agent.triggers.NotificationTriggers.userRules(app).size + com.tekyerema.agent.triggers.StandingOrders.list(app).size }, null, "alerts"),
             Item("Words the Twi keyboard learned", safe { com.tekyerema.ime.LearnedWordStore.count(app) }, null, "words"),
             // Money safety round 2: scrambled (salted hashes), never the numbers — only "have I paid this number before?".
             Item("Numbers you've sent Mobile Money to, kept scrambled", safe { com.tekyerema.money.KnownRecipients.count() }, null, "numbers"),
@@ -92,6 +92,7 @@ object DataControl {
         step("alerts") {
             com.tekyerema.agent.triggers.NotificationTriggers.userRules(app)
                 .forEach { com.tekyerema.agent.triggers.NotificationTriggers.removeRule(app, it.id) }
+            com.tekyerema.agent.triggers.StandingOrders.clear(app)
         }
         step("keyboard") { com.tekyerema.ime.LearnedWordStore.clear(app) }
         step("payment outcomes") { com.tekyerema.money.TxLedger.clear() }   // finance audit: the ledger of hand-offs and their outcomes
