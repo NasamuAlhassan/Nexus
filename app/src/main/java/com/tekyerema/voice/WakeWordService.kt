@@ -191,6 +191,7 @@ class WakeWordService : Service() {
         var rec: AudioRecord? = null
         fun release() { rec?.let { try { it.stop() } catch (_: Throwable) {}; try { it.release() } catch (_: Throwable) {} }; rec = null; liveRec = null; micOpen = false }
         var hb = 0L; var top = 0f
+        var levelPeak = 0f; var levelSum = 0f; var levelN = 0   // mic level per heartbeat (kws: the only proof audio arrives)
         var busySince = 0L; var zeroFrames = 0; var dangerRun = 0
         // #40 noisy-place profile: the same frame loudness, watched for a background that stays loud (voice/NoisyPlace).
         val noisy = if (NoisyPlace.enabled()) NoisyPlace.Detector() else null
@@ -207,9 +208,10 @@ class WakeWordService : Service() {
                             "frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} full=${st[3]} incremental=${scorer.incremental} ${scorer.takeReasons()}")
                     } else if (spotter != null) {
                         val st = spotter.takeStats()
-                        if (hb != 0L) Log.i(TAG, "[WAKE] hb kws mic=${rec != null} why='$why' frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]}")
+                        if (hb != 0L) Log.i(TAG, "[WAKE] hb kws mic=${rec != null} why='$why' frames=${st[0]} ms(avg/max)=${st[1]}/${st[2]} " +
+                            "level(avg/peak)=${"%.4f".format(if (levelN == 0) 0f else levelSum / levelN)}/${"%.4f".format(levelPeak)} floor=${WakeGate.minRms}")
                     }
-                    hb = now; top = 0f
+                    hb = now; top = 0f; levelPeak = 0f; levelSum = 0f; levelN = 0
                 }
                 // A turn owns the mic — except while a task is working with the mic free, when the wake word keeps
                 // listening so the user can interject ("Hey Tɛkyerɛma… pause / what are you doing / send it to Kofi").
@@ -247,6 +249,7 @@ class WakeWordService : Service() {
                 var e = 0f
                 for (j in 0 until got) e += frame[j] * frame[j]
                 val rms = sqrt(e / got)
+                if (rms > levelPeak) levelPeak = rms; levelSum += rms; levelN++
                 noisy?.feed(rms, android.os.SystemClock.elapsedRealtime())?.let { NoisyPlace.switchTo(it, applicationContext) }
                 // Exact digital silence for 20 s: the system silenced this capture (a call, another app) and may never give
                 // it back — close and reopen it instead of listening to nothing.
