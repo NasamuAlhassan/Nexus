@@ -238,6 +238,32 @@ class AndroidTts(context: Context) : TtsProvider {
 
     private val utterances = Utterances()
 
+    /**
+     * The same voice, rate and respelling as [speak], written to [out] as a WAV by the engine's own synthesizeToFile — for
+     * evidence, and to dub a screen recording that had no audio track (the demo of 8 Nov 2026 was captured over ADB, video
+     * only). One utterance, so the paced pauses between pieces are not reproduced. Debug hook `tts_render`.
+     */
+    suspend fun renderWav(text: String, language: String, out: java.io.File): Boolean {
+        if (text.isBlank() || !ready.await() || !supports(language)) return false
+        applyBestVoice()
+        @Suppress("NAME_SHADOWING") val text = respell(Verbalize.apply(text))
+        try {
+            val base = com.tekyerema.core.config.AppConfig.double("speech.tts.rate", 1.0)
+            val factor = if (FIGURES.containsMatchIn(text)) com.tekyerema.core.config.AppConfig.double("speech.tts.figuresRate", 0.9) else 1.0
+            engine.setSpeechRate((base * factor).toFloat().coerceIn(0.5f, 1.5f))
+            engine.setPitch(com.tekyerema.core.config.AppConfig.double("speech.tts.pitch", 1.0).toFloat().coerceIn(0.7f, 1.3f))
+        } catch (_: Throwable) {}
+        val id = "render-" + System.nanoTime()
+        return suspendCancellableCoroutine { cont ->
+            val call = Utterances.Call(listOf(id)) { ok -> if (cont.isActive) cont.resume(ok) }
+            utterances.begin(call)
+            engine.setOnUtteranceProgressListener(utterances.listener)
+            val rc = try { engine.synthesizeToFile(text, android.os.Bundle(), out, id) } catch (_: Throwable) { TextToSpeech.ERROR }
+            if (rc != TextToSpeech.SUCCESS) utterances.finish(call, false)
+            cont.invokeOnCancellation { utterances.finish(call, false) }
+        }
+    }
+
     // A call rings → the reply stops — except the line that ANNOUNCES that call (phone/IncomingCall, demo step 1), which is
     // spoken while it rings: the ringtone's focus stopped it after half a second on the emulator (14 Oct 2026).
     private val focus = AudioFocus(context, onLost = { if (!com.tekyerema.phone.IncomingCall.isRinging) stop() })

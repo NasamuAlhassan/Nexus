@@ -324,6 +324,11 @@ class RunGoalReceiver : BroadcastReceiver() {
             return
         }
         intent.getStringExtra("tts_ab")?.let { TtsAbDebug.run(context.applicationContext); return }
+        // The system voice to a WAV file, nothing spoken:  --es tts_render "<line>" --es tts_name "<id>"  → files/tts_render_<id>.wav
+        intent.getStringExtra("tts_render")?.let { text ->
+            com.tekyerema.voice.VoiceDebug.ttsRender(context.applicationContext, text, intent.getStringExtra("tts_name") ?: "line")
+            return
+        }
         intent.getStringExtra("tts_test")?.let { text ->
             com.tekyerema.voice.VoiceDebug.ttsTest(context.applicationContext, text, intent.getStringExtra("lang"),
                 save = intent.getStringExtra("tts_save") == "1")

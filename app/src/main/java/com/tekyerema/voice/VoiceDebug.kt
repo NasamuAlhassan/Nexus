@@ -239,6 +239,18 @@ object VoiceDebug {
         }
     }
 
+    /** `--es tts_render "<text>" --es tts_name "<id>"` — the system English voice, as a reply would say it, written to
+     *  files/tts_render_<id>.wav (dubbing a screen recording that had no audio, 8 Nov 2026). Nothing is spoken aloud. */
+    fun ttsRender(ctx: Context, text: String, name: String) {
+        val tts = AndroidTts(ctx)
+        scope.launch {
+            val out = File(ctx.getExternalFilesDir(null), "tts_render_$name.wav")
+            val ok = try { tts.renderWav(text, Lang.GH_EN, out) } catch (e: Exception) { Log.w("Tekyerema", "[VOICE-DEBUG] tts_render error: ${e.message}"); false }
+            Log.i("Tekyerema", "[VOICE-DEBUG] tts_render name=$name saved=$ok bytes=${if (out.exists()) out.length() else 0}")
+            tts.shutdown()
+        }
+    }
+
     /** `--es mic_test 1` — opens the real mic, runs VAD, logs the CaptureResult. Proves MIC+VAD on hardware. */
     fun micTest(ctx: Context) {
         if (!hasMic(ctx)) { Log.w("Tekyerema", "[VOICE-DEBUG] RECORD_AUDIO not granted"); return }
