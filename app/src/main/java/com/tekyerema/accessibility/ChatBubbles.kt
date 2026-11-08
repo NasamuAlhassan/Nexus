@@ -18,9 +18,21 @@ object ChatBubbles {
     private val THEIRS = Regex("(?i)[\\s,]*\\breceived at \\d{1,2}:\\d{2}(?:\\s?[ap]m)?\\s*\\.?\\s*;?\\s*$")
     private val CHROME = Regex("(?i)^(?:message|type a message|send|back|go back|more options|attach|emoji|camera|voice message|search|call|video call)$")
 
-    /** A messaging app with its message box in front: where bubbles are. */
-    fun isChatScreen(s: UiSnapshot): Boolean =
-        CHAT_PKG.containsMatchIn(s.appPackage.orEmpty()) && s.elements.any { it.editable && it.source == ElementSource.TREE }
+    /** The hint of a chat's message box ("Message", "Type a message", "Enter message"), or its view id. */
+    private val COMPOSER_HINT = Regex("(?i)^(?:message|type a message|enter message|text message|write a message|send a message|message…|message\\.\\.\\.)$")
+    private val COMPOSER_ID = Regex("(?i)(?:^|:id/|/)(?:entry|message_input|chat_text_edit|chat_input|embedded_text_editor|message_edit_text|input_message)$")
+    private val SEND_CONTROL = Regex("(?i)^send(?: message)?$")
+
+    /** A messaging app with a CONVERSATION open: its message box (by hint or id) or its Send control is on screen. A chat LIST has a
+     *  search box but no composer — its rows must never be read as bubbles (A20e 8 Nov 2026: "Them: Richmond" in a which-chat question,
+     *  and the person guard asking whether "You" was a person). */
+    fun isChatScreen(s: UiSnapshot): Boolean {
+        if (!CHAT_PKG.containsMatchIn(s.appPackage.orEmpty())) return false
+        val tree = s.elements.filter { it.source == ElementSource.TREE }
+        val composer = tree.any { e -> e.editable && (COMPOSER_HINT.matches(e.label?.trim().orEmpty()) || COMPOSER_ID.containsMatchIn(e.viewId.orEmpty())) }
+        val send = tree.any { e -> !e.editable && SEND_CONTROL.matches(e.label?.trim().orEmpty()) }
+        return composer || (send && tree.any { it.editable })
+    }
 
     /** Whose bubble [e] is, or null when it is not a bubble (a control, the box, a full-width header or system line). */
     fun who(e: UiElement, screenWidth: Int): Who? {

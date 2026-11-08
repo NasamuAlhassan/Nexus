@@ -170,6 +170,21 @@ class DemoFixes8NovTest {
         assertNull(com.tekyerema.agent.MoneyGround.unseenDetail("Richmond's last message was “Heyy… when are we meeting”.", label, emptyList(), "read it"))
     }
 
+    @Test fun `a chat list with a search box is not a chat screen and You is never a person`() {
+        val search = com.tekyerema.accessibility.UiElement(1, "android.widget.EditText", "Search Chats", com.tekyerema.accessibility.Box(0, 100, 720, 180), editable = true)
+        val row = com.tekyerema.accessibility.UiElement(2, "android.view.ViewGroup", "Richmond Apenensu, Heyy... when are we meeting, 07:43", com.tekyerema.accessibility.Box(0, 300, 720, 420))
+        val list = com.tekyerema.accessibility.UiSnapshot("org.telegram.messenger", "Telegram", listOf(search, row), 0L)
+        assertFalse(com.tekyerema.accessibility.ChatBubbles.isChatScreen(list))
+        assertNull(com.tekyerema.accessibility.ChatBubbles.promptLabel(row, list, null))
+        // the person guard: "You: …" / "You" (the planner's own bubble prefix) is never asked about as a person
+        val goal = "Read me the last message Richmond sent on Telegram, then text Prince a one-line summary of it"
+        val s = screen("org.telegram.messenger", el(5, "You: I'm in the lift, two minutes.", role = "android.view.ViewGroup", structure = "row 4"), el(6, "You"))
+        assertNull(question(Invariants.apply(tap(5), goal, emptyList(), s)))
+        assertNull(question(Invariants.apply(tap(6), goal, emptyList(), s)))
+        assertFalse(Invariants.looksLikeName("You"))
+        assertFalse(Invariants.looksLikeName("Them"))
+    }
+
     // ---- 8. "I couldn't see the result on the screen, so I won't guess." after a real send ----
 
     @Test fun `a bubble with the app's sent marker confirms the send`() {

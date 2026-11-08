@@ -32,7 +32,9 @@ object Invariants {
         "cancel", "ok", "done", "close", "clear", "edit", "call", "video call", "info", "mute", "delete", "share", "forward", "reply",
         // A20e 6–8 Nov 2026: Telegram's and Messages' own controls were asked about as people ("I found “Go back”. Is that who you mean?")
         "go back", "profile", "search chats", "global search", "pending", "new group", "saved messages", "open camera", "add",
-        "attach file", "voice note", "sticker", "gif", "emoji, stickers, and gifs", "message", "type a message")
+        "attach file", "voice note", "sticker", "gif", "emoji, stickers, and gifs", "message", "type a message",
+        // the speaker prefixes of chat bubbles as the planner reads them (ChatBubbles: "You: …" / "Them: …") are not people
+        "you", "them", "me", "myself")
     /** The element's kind as the tree names it: a control, a field, a tab or an image is never a person's row. */
     private val NOT_A_PERSON_ROLE = Regex("(?i)(Button|ImageButton|ImageView|EditText|AutoCompleteTextView|SearchView|Switch|CheckBox|RadioButton|Tab\\w*|ActionMenuItemView|Toolbar|SeekBar|ProgressBar)$")
     /** TalkBack-style role suffixes inside a label: "Send, Button", "Chats, tab, selected", "Back, double tap to activate". */
