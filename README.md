@@ -34,6 +34,11 @@ Nexus in October 2026. The code still carries the original package name.
 This repository holds the app code only. Recordings, evaluation data, training notebooks and the project notes live
 in the private working repository.
 
+## Links
+
+- Demo videos and project material: [Google Drive folder](https://drive.google.com/drive/folders/1uWW_7YI9a2t2MqFuEmpVtRde-Ns-HC-6)
+- Author: Prince Nasamu Alhassan, [prince-alhassan.vercel.app](https://prince-alhassan.vercel.app/)
+
 ## Building
 
 Android Studio or the Gradle wrapper. API keys are read from a gitignored `local.properties` at the project root
